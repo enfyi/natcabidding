@@ -24,6 +24,61 @@
     box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
   }
 
+  .side-rail {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 64px;
+    max-width: min(320px, 84vw);
+    overflow: hidden;
+    transition: width 180ms ease;
+  }
+
+  .side-rail:hover,
+  .side-rail:focus-within {
+    width: min(320px, 84vw);
+  }
+
+  .side-rail .brand-block {
+    min-width: 220px;
+  }
+
+  .side-rail .brand-block span,
+  .side-rail .nav-item,
+  .side-rail .ghost-link {
+    transition: opacity 160ms ease;
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .brand-block span,
+  .side-rail:not(:hover):not(:focus-within) .nav-item {
+    width: 42px;
+    padding-right: 0;
+    overflow: hidden;
+    color: transparent;
+    gap: 0;
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .nav-icon {
+    color: var(--muted);
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .nav-item.active .nav-icon {
+    color: var(--deep);
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .nav-badge {
+    position: absolute;
+    right: 5px;
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .side-footer {
+    display: none;
+  }
+
+  .app-main {
+    margin-left: 64px;
+  }
+
   .public-rail::before,
   .side-rail::before {
     top: auto;
@@ -54,6 +109,12 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .side-rail .app-nav {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
   .public-area,
   .public-nav-item,
   .nav-item,
@@ -70,7 +131,7 @@
   }
 
   .app-nav p,
-  .side-footer {
+  .side-rail:not(:hover):not(:focus-within) .app-nav p {
     display: none;
   }
 
