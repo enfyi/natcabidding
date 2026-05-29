@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="NATCA ZLA annual RDO and leave bidding prototype for Los Angeles Center controllers."
+    />
+    <title>NATCA ZLA Bidding</title>
+    <link rel="icon" href="assets/logo-5v2a.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="bidding.css?v=peach-holiday-ring" />
+  </head>
+  <body>
+    <section class="login-screen public-shell" aria-label="Public bidding website">
+      <aside class="public-rail" aria-label="Public bidding navigation">
+        <a class="brand-block" href="index.html" aria-label="NATCA ZLA home">
+          <img src="assets/logo-5v2a.png" alt="NATCA ZLA" />
+          <span>
+            <strong>ZLA</strong>
+            <small>Los Angeles Center</small>
+          </span>
+        </a>
+        <nav class="public-nav">
+          <button class="public-nav-item" type="button" data-public-area="FAQ">FAQ</button>
+          <details class="public-area" open>
+            <summary>Area A</summary>
+            <button type="button" data-public-area="Area A" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area A" data-public-section="Bid Time">Bid Time</button>
+            <button class="active" type="button" data-public-area="Area A" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>Area B</summary>
+            <button type="button" data-public-area="Area B" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area B" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="Area B" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>Area C</summary>
+            <button type="button" data-public-area="Area C" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area C" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="Area C" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>Area D</summary>
+            <button type="button" data-public-area="Area D" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area D" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="Area D" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>Area E</summary>
+            <button type="button" data-public-area="Area E" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area E" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="Area E" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>Area F</summary>
+            <button type="button" data-public-area="Area F" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="Area F" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="Area F" data-public-section="Calendar">Calendar</button>
+          </details>
+          <details class="public-area">
+            <summary>TMU</summary>
+            <button type="button" data-public-area="TMU" data-public-section="RDO">RDO</button>
+            <button type="button" data-public-area="TMU" data-public-section="Bid Time">Bid Time</button>
+            <button type="button" data-public-area="TMU" data-public-section="Calendar">Calendar</button>
+          </details>
+          <button class="public-nav-item" type="button" data-public-area="Previous Years">Previous Years</button>
+        </nav>
+      </aside>
+
+      <main class="public-main">
+        <header class="public-topbar">
+          <div>
+            <p class="eyebrow">NATCA ZLA Bidding</p>
+            <h1 data-public-heading>Area A Annual Leave Calendar</h1>
+          </div>
+          <div class="public-login">
+            <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
+            <div class="login-card" hidden data-public-login-menu>
+              <p class="eyebrow">Test Access</p>
+              <h2>Choose Login</h2>
+              <div class="login-options">
+                <button type="button" data-login="bue">
+                  <span>BUE + Admin Tester</span>
+                  <strong>Michael Schoelen · OC</strong>
+                  <small>Test: oc / demo · Area A member view with active intake rights</small>
+                </button>
+                <button type="button" data-login="admin">
+                  <span>Temporary Intake Rights</span>
+                  <strong>Sarah Harris · SH</strong>
+                  <small>Test: sh / demo · Active all-area intake grant</small>
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div class="public-tabs">
+          <button type="button" data-public-tab="RDO" data-public-area="Area A" data-public-section="RDO">RDO</button>
+          <button type="button" data-public-tab="Bid Time" data-public-area="Area A" data-public-section="Bid Time">Bid Time</button>
+          <button class="active" type="button" data-public-tab="Calendar" data-public-area="Area A" data-public-section="Calendar">Calendar</button>
+        </div>
+
+        <section class="panel calendar-panel public-calendar-panel">
+          <div class="panel-header">
+            <div>
+              <h2 data-public-sheet-title>Bid Calendar</h2>
+              <p data-public-sheet-code>Holidays, filled leave slots, and bid windows.</p>
+            </div>
+            <div class="segmented" aria-label="Public calendar view">
+              <button class="active" type="button" data-calendar-view="year">Year</button>
+              <button type="button" data-calendar-view="month">Month</button>
+              <button type="button" data-calendar-view="week">Week</button>
+            </div>
+          </div>
+          <div class="public-info-message" hidden data-public-info></div>
+          <div data-public-calendar-content>
+            <div class="calendar-toolbar">
+              <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
+              <strong data-calendar-year-label>2027</strong>
+              <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
+              <button type="button" data-calendar-year-action="today">Today</button>
+            </div>
+            <div class="year-calendar" id="public-calendar"></div>
+            <div class="legend">
+              <span><i class="holiday"></i> Holiday</span>
+              <span><i class="closed"></i> Leave Slots Full</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+
+    <div class="app-shell" hidden>
+      <aside class="side-rail" aria-label="Bidding navigation">
+        <a class="brand-block" href="index.html" aria-label="NATCA ZLA home">
+          <img src="assets/logo-5v2a.png" alt="NATCA ZLA" />
+          <span>
+            <strong>ZLA</strong>
+            <small>Los Angeles Center</small>
+          </span>
+        </a>
+
+        <nav class="app-nav" aria-label="Bidding pages">
+          <button class="nav-item active" type="button" data-page="dashboard">
+            <span class="nav-icon">⌂</span>
+            Dashboard
+          </button>
+          <p>Bidding</p>
+          <button class="nav-item" type="button" data-page="seniority">
+            <span class="nav-icon">#</span>
+            Seniority
+          </button>
+          <button class="nav-item" type="button" data-page="rdos">
+            <span class="nav-icon">▦</span>
+            RDOs
+          </button>
+          <button class="nav-item" type="button" data-page="leave">
+            <span class="nav-icon">▣</span>
+            Leave
+          </button>
+          <button class="nav-item" type="button" data-page="calendar">
+            <span class="nav-icon">□</span>
+            Calendar
+          </button>
+          <button class="nav-item" type="button" data-page="intake" data-admin-only hidden>
+            <span class="nav-icon">!</span>
+            Intake
+            <span class="nav-badge" data-intake-count>0</span>
+          </button>
+          <button class="nav-item" type="button" data-page="intake-schedule" data-intake-rep-only hidden>
+            <span class="nav-icon">◫</span>
+            Intake Schedule
+          </button>
+          <button class="nav-item" type="button" data-page="admin" data-system-admin-only hidden>
+            <span class="nav-icon">⚙</span>
+            Admin
+          </button>
+          <button class="nav-item" type="button" data-page="history">
+            <span class="nav-icon">◷</span>
+            History
+          </button>
+        </nav>
+
+        <div class="side-footer">
+          <button class="ghost-link" type="button" data-help-toggle>Help</button>
+          <button class="ghost-link" type="button" data-log-out>Log Out</button>
+        </div>
+      </aside>
+
+      <main class="app-main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="bid-year-label">2027 Annual Bidding</p>
+            <h1 id="page-title">Dashboard</h1>
+          </div>
+          <div class="topbar-user-context" data-user-context>Michael Schoelen · Area A</div>
+          <div class="topbar-controls">
+            <label>
+              <span>Bid Year</span>
+              <select aria-label="Bid year" data-bid-year-select>
+                <option>2027</option>
+                <option>2026</option>
+              </select>
+            </label>
+            <div class="status-chip" id="bid-window-status">
+              <span class="live-dot"></span>
+              <span class="status-chip-copy">
+                <small>Round 1</small>
+                <b>Checking</b>
+              </span>
+            </div>
+            <div class="clock-card" id="bid-window-clock">
+              <span>Bid Window</span>
+              <strong>--:--:--</strong>
+            </div>
+            <button class="seniority-pill" type="button" data-page="seniority" aria-label="View seniority list">
+              <span>Seniority</span>
+              <strong data-user-seniority>#5 / 45</strong>
+            </button>
+            <button class="alert-pill" type="button" aria-label="Open alerts" aria-expanded="false" data-alert-toggle>
+              <strong>!</strong>
+              <span data-alert-count>2</span>
+            </button>
+            <button class="account-pill" type="button" aria-label="Open account settings" aria-expanded="false" data-account-toggle>
+              <strong data-user-initials>OC</strong>
+            </button>
+          </div>
+        </header>
+        <section class="alerts-menu" aria-label="Alerts" hidden data-alert-menu>
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>Alerts</h2>
+                <p>Website notifications for bids, intake review, and approvals.</p>
+              </div>
+              <button class="secondary-action small" type="button" data-alert-close>Close</button>
+            </div>
+            <div class="alert-list" data-alert-list></div>
+          </div>
+        </section>
+        <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>Help Messages</h2>
+                <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
+              </div>
+              <button class="secondary-action small" type="button" data-help-close>Close</button>
+            </div>
+            <div class="help-layout">
+              <div class="help-thread-list" data-help-thread-list></div>
+              <div class="help-conversation">
+                <div class="help-message-list" data-help-message-list></div>
+                <label class="help-composer">
+                  Message
+                  <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
+                </label>
+                <div class="button-row">
+                  <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
+                  <button class="primary-action" type="button" data-help-send>Send Message</button>
+                </div>
+                <p class="help-status" data-help-status aria-live="polite"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="account-menu" aria-label="Account settings" hidden data-account-menu>
+          <div class="panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>Account Settings</h2>
+                <p>Signed in as <span data-user-initials>OC</span>.</p>
+              </div>
+              <button class="secondary-action small" type="button" data-account-close>Close</button>
+            </div>
+            <dl class="rule-list">
+              <div><dt>Name</dt><dd data-user-name>Michael Schoelen</dd></div>
+              <div><dt>Area</dt><dd data-user-area>Area A</dd></div>
+              <div><dt>Access</dt><dd data-user-role>Controller</dd></div>
+              <div><dt>Seniority</dt><dd data-user-seniority-long>#5 of 45</dd></div>
+              <div><dt>Notifications</dt><dd>Enabled</dd></div>
+            </dl>
+            <div class="button-row">
+              <button class="secondary-action" type="button" data-page="profile">Profile</button>
+              <button class="primary-action" type="button">Save Settings</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="page active" id="dashboard-page" data-page-panel="dashboard">
+          <div class="metric-grid">
+            <article class="metric-card priority">
+              <span>Your Bid Priority</span>
+              <strong data-user-rank-metric>#5</strong>
+              <small data-user-priority-summary>4 ahead · 40 behind</small>
+            </article>
+            <article class="metric-card">
+              <span>Current Round</span>
+              <strong data-current-round>Round 1</strong>
+              <small data-current-bidder>Checking bid window</small>
+            </article>
+            <article class="metric-card selected">
+              <span>RDO Line</span>
+              <strong>Line 15</strong>
+              <small>Group C · Flex Yes · AWS No · Mid No</small>
+            </article>
+            <article class="metric-card">
+              <span>Leave Left to Bid</span>
+              <strong>18</strong>
+              <small>Total allowance: 36 days</small>
+            </article>
+            <article class="metric-card green">
+              <span>Leave Already Bid</span>
+              <strong>12</strong>
+              <small data-leave-already-detail>Approved: 8 days · Pending: 4 days</small>
+            </article>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel calendar-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Bid Calendar</h2>
+                  <p>RDO line pattern, leave bids, holidays, and bid windows.</p>
+                </div>
+                <div class="segmented" aria-label="Calendar view">
+                  <button class="active" type="button" data-calendar-view="year">Year</button>
+                  <button type="button" data-calendar-view="month">Month</button>
+                  <button type="button" data-calendar-view="week">Week</button>
+                </div>
+              </div>
+              <div class="calendar-toolbar">
+                <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
+                <strong id="dashboard-calendar-year" data-calendar-year-label>2027</strong>
+                <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
+                <button type="button" data-calendar-year-action="today">Today</button>
+              </div>
+              <div class="year-calendar" id="dashboard-calendar"></div>
+              <div class="legend">
+                <span><i class="rdo"></i> RDO Line Pattern</span>
+                <span><i class="draft"></i> Preview Batch</span>
+                <span><i class="pending-leave"></i> Pending Leave</span>
+                <span><i class="leave"></i> Approved Leave</span>
+                <span><i class="holiday"></i> Holiday</span>
+                <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
+                <span><i class="closed"></i> Leave Slots Full</span>
+              </div>
+            </section>
+
+            <aside class="right-stack">
+              <div class="leave-bucket-cards">
+                <article class="leave-bucket-card cpc">
+                  <span>CPC Leave Remaining</span>
+                  <strong data-cpc-leave-remaining>--</strong>
+                  <small data-cpc-leave-detail>Area CPC bucket</small>
+                </article>
+                <article class="leave-bucket-card dev">
+                  <span>Dev Leave Remaining</span>
+                  <strong data-dev-leave-remaining>--</strong>
+                  <small data-dev-leave-detail>Developmental bucket</small>
+                </article>
+              </div>
+              <section class="panel selected-line-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Selected RDO Line</h2>
+                    <p>This line applies for the entire year.</p>
+                  </div>
+                  <span class="pill open" data-selected-status>Open</span>
+                </div>
+                <div class="line-title">
+                  <strong data-selected-initials>OC</strong>
+                  <span data-selected-line>Line 15</span>
+                </div>
+                <div class="week-preview" id="selected-week"></div>
+                <div class="attribute-grid" data-selected-attributes>
+                  <span>Group <b class="group c">C</b></span>
+                  <span>Mid <b>No</b></span>
+                  <span>AWS <b>No</b></span>
+                  <span>4-10 <b>No</b></span>
+                  <span>Flex <b>Yes</b></span>
+                </div>
+                <div class="button-row">
+                  <button class="primary-action window-action" type="button" data-page="rdos" data-bid-entry-action>Bid</button>
+                  <button class="secondary-action" type="button" data-page="rdos">View RDO Lines</button>
+                </div>
+              </section>
+
+              <section class="panel">
+                <h3>Fatigue Group Info</h3>
+                <div class="group-choice">
+                  <button type="button">A <small>8 open</small></button>
+                  <button type="button">B <small>22 open</small></button>
+                  <button class="active" type="button">C <small>15 open</small></button>
+                </div>
+              </section>
+            </aside>
+          </div>
+
+          <div class="bottom-grid">
+            <section class="panel leave-table-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Leave Bids</h2>
+                  <p>Drag to reorder leave priority before submitting.</p>
+                </div>
+                <button class="primary-action small" type="button" data-page="leave">Add Leave</button>
+              </div>
+              <div class="tabs">
+                <button class="active" type="button">My Leave Queue</button>
+                <button type="button">Approved</button>
+                <button type="button">Pending</button>
+                <button type="button">Declined</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Priority</th>
+                      <th>Date Range</th>
+                      <th>Days</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashboard-leave-rows"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <div class="summary-stack">
+              <section class="panel allowance-card">
+                <h2>Leave Allowance Summary</h2>
+                <dl>
+                  <div><dt>Total Allowance</dt><dd>36 days</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd>12 days</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd>18 days</dd></div>
+                  <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
+                </dl>
+              </section>
+
+              <section class="panel allowance-card">
+                <h2>Round Rules</h2>
+                <dl>
+                  <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
+                  <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
+                  <div><dt>Round 3 Maximum</dt><dd>10 days</dd></div>
+                  <div><dt>Round 4 Maximum</dt><dd>5 days</dd></div>
+                  <div><dt>Round 5 Maximum</dt><dd>5 days</dd></div>
+                  <div><dt>Round 6 Maximum</dt><dd>5 days</dd></div>
+                </dl>
+              </section>
+            </div>
+
+            <section class="panel submit-card">
+              <h2>Bid Window</h2>
+              <strong data-bid-window-range>Loading bid window</strong>
+              <span class="pill open" data-bid-window-pill>Checking</span>
+              <ul>
+                <li>Selected line open</li>
+                <li>Fatigue group selected</li>
+                <li>Preferences complete</li>
+                <li>Leave within allowance</li>
+              </ul>
+              <button class="primary-action submit" type="button">Submit Bid</button>
+              <button class="secondary-action" type="button">Save Draft</button>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" id="seniority-page" data-page-panel="seniority">
+          <div class="workspace-grid seniority-workspace">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Seniority List</h2>
+                  <p data-seniority-summary>Current bidding order for Area A. Your position is highlighted.</p>
+                </div>
+                <div class="status-chip">
+                  <span class="live-dot"></span>
+                  <span data-bidder-count>45 bidders</span>
+                </div>
+              </div>
+              <div class="seniority-board" id="seniority-page-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" id="rdos-page" data-page-panel="rdos">
+          <div class="workspace-grid">
+            <section class="panel rdo-table-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>RDO Bid Lines - Area A</h2>
+                  <p>Select an open negotiated line. Flex, AWS, fatigue group, and most Mid preferences are chosen by the employee.</p>
+                </div>
+                <span class="pill open">42 open lines</span>
+              </div>
+              <div class="filter-bar">
+                <input type="search" placeholder="Search line or CPC..." aria-label="Search RDO lines" />
+                <label><input type="checkbox" checked /> Open Only</label>
+                <select><option>Mid: All</option><option>Bid</option><option>No</option></select>
+                <select><option>AWS: All</option><option>Yes</option><option>No</option></select>
+                <select><option>4-10: All</option><option>Yes</option><option>No</option></select>
+                <select><option>Flex: All</option><option>Yes</option><option>No</option></select>
+              </div>
+              <div class="table-wrap tall">
+                <table class="line-table">
+                  <thead>
+                    <tr>
+                      <th>Line #</th>
+                      <th>CPC</th>
+                      <th>Sun</th>
+                      <th>Mon</th>
+                      <th>Tue</th>
+                      <th>Wed</th>
+                      <th>Thu</th>
+                      <th>Fri</th>
+                      <th>Sat</th>
+                      <th>Group</th>
+                      <th>Flex</th>
+                      <th>AWS</th>
+                      <th>Mid</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rdo-line-rows"></tbody>
+                </table>
+              </div>
+            </section>
+            <aside class="right-stack">
+              <section class="panel selected-line-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Selected Line</h2>
+                    <p data-selected-helper>Line 15 is currently selected.</p>
+                  </div>
+                  <span class="pill open" data-selected-status>Open</span>
+                </div>
+                <div class="line-title">
+                  <strong data-selected-initials>OC</strong>
+                  <span data-selected-line>Line 15</span>
+                </div>
+                <div class="week-preview" id="rdo-week"></div>
+                <div class="attribute-grid" data-selected-attributes>
+                  <span>Group <b class="group c">C</b></span>
+                  <span>Mid <b>No</b></span>
+                  <span>AWS <b>No</b></span>
+                  <span>4-10 <b>No</b></span>
+                  <span>Flex <b>Yes</b></span>
+                  <span>Status <b>Open</b></span>
+                </div>
+                <button class="primary-action submit window-action" type="button" data-select-line data-bid-entry-action>Bid</button>
+              </section>
+              <section class="panel">
+                <h3>Fatigue Group Info</h3>
+                <p>Choose a group after selecting your line. Capacity must balance by area and by RDO crew.</p>
+                <div class="capacity-grid" data-fatigue-capacity></div>
+              </section>
+              <section class="panel">
+                <h3>Quick Rules</h3>
+                <ul class="plain-list">
+                  <li>Lines apply for the entire year.</li>
+                  <li>RDOs and shifts are defined by the line.</li>
+                  <li>Fatigue group is balanced by area total and RDO crew.</li>
+                  <li>You can change your line until you submit.</li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="leave-page" data-page-panel="leave">
+          <div class="workspace-grid">
+            <section class="panel calendar-panel full">
+              <div class="panel-header">
+                <div>
+                  <h2>Leave Calendar</h2>
+                  <p>Review RDO pattern, requested leave, holidays, and filled leave slots before adjusting leave bids.</p>
+                </div>
+                <div class="segmented" aria-label="Leave calendar view">
+                  <button class="active" type="button" data-calendar-view="year">Year</button>
+                  <button type="button" data-calendar-view="month">Month</button>
+                  <button type="button" data-calendar-view="week">Week</button>
+                </div>
+              </div>
+              <div class="calendar-toolbar">
+                <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
+                <strong data-calendar-year-label>2027</strong>
+                <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
+                <button type="button" data-calendar-year-action="today">Today</button>
+              </div>
+              <div class="year-calendar large" id="leave-calendar"></div>
+              <div class="legend">
+                <span><i class="rdo"></i> RDO Line Pattern</span>
+                <span><i class="draft"></i> Preview Batch</span>
+                <span><i class="pending-leave"></i> Pending Leave</span>
+                <span><i class="leave"></i> Approved Leave</span>
+                <span><i class="holiday"></i> Holiday</span>
+                <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
+                <span><i class="closed"></i> Leave Slots Filled</span>
+              </div>
+              <section class="leave-slot-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Leave Slot Detail</h2>
+                    <p>CPC slots, developmental pool, holidays, and unavailable days.</p>
+                  </div>
+                </div>
+                <div class="slot-legend">
+                  <span><i class="cpc-slot"></i> CPC Slot</span>
+                  <span><i class="dev-slot"></i> Developmental</span>
+                  <span><i class="holiday-slot"></i> Holiday</span>
+                  <span><i class="holiday-in-lieu-slot"></i> Holiday In-Lieu</span>
+                  <span><i class="unavailable-slot"></i> Unavailable</span>
+                </div>
+                <div class="leave-slot-board" id="leave-slot-board"></div>
+              </section>
+            </section>
+            <aside class="right-stack">
+              <section class="panel allowance-card">
+                <h2>Leave Allowance Summary</h2>
+                <dl>
+                  <div><dt>Total Allowance</dt><dd>36 days</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd>12 days</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd>18 days</dd></div>
+                  <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
+                </dl>
+              </section>
+              <section class="panel leave-table-panel">
+                <div class="panel-header">
+                <div>
+                  <h2>Leave Bids</h2>
+                  <p>Build and prioritize annual leave requests for the current bidding round.</p>
+                </div>
+                  <button class="primary-action small" type="button" data-add-leave-request>Add to Batch</button>
+                </div>
+                <div class="leave-builder compact">
+                  <label class="date-range-picker">Date Range
+                    <input type="text" value="Apr 8 - Apr 9, 2027" data-leave-range-input readonly aria-haspopup="dialog" aria-expanded="false" />
+                    <div class="leave-date-picker" data-leave-date-picker hidden></div>
+                  </label>
+                  <label>Days <input type="number" value="2" min="1" data-leave-days-input readonly /></label>
+                  <label>Type <select data-leave-type-input><option>Annual Leave</option><option>Spot Leave</option></select></label>
+                  <button class="secondary-action" type="button" data-preview-leave-request>Preview</button>
+                  <p class="leave-builder-status" data-leave-builder-status aria-live="polite"></p>
+                </div>
+                <div class="leave-draft-panel" data-leave-draft-panel>
+                  <div class="leave-draft-head">
+                    <div>
+                      <h3>Preview Batch</h3>
+                      <p>These dates are not sent until you submit the batch.</p>
+                    </div>
+                    <strong data-leave-draft-total>0 / 10 days</strong>
+                  </div>
+                  <div class="leave-draft-list" data-leave-draft-list></div>
+                  <button class="primary-action" type="button" data-submit-leave-batch disabled>Submit Leave Batch</button>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>Priority</th><th>Date Range</th><th>Days</th><th>Status</th></tr>
+                    </thead>
+                    <tbody id="leave-page-rows"></tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="panel allowance-card">
+                <h2>Round Rules</h2>
+                <dl>
+                  <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
+                  <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
+                  <div><dt>Round 3 Maximum</dt><dd>10 days</dd></div>
+                  <div><dt>Round 4 Maximum</dt><dd>5 days</dd></div>
+                  <div><dt>Round 5 Maximum</dt><dd>5 days</dd></div>
+                  <div><dt>Round 6 Maximum</dt><dd>5 days</dd></div>
+                </dl>
+              </section>
+              <section class="panel">
+                <h3>Round Validation</h3>
+                <ul class="plain-list success-list">
+                  <li>Current request is within Round 1 rules.</li>
+                  <li>Leave total does not exceed allowance.</li>
+                  <li>Bid window is open.</li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="calendar-page" data-page-panel="calendar">
+          <section class="panel calendar-panel full">
+            <div class="panel-header">
+              <div>
+                <h2>Annual Calendar</h2>
+                <p>Review selected RDO line, leave bids, holidays, and protected weeks.</p>
+              </div>
+              <div class="segmented">
+                <button class="active" type="button" data-calendar-view="year">Year</button>
+                <button type="button" data-calendar-view="month">Month</button>
+                <button type="button" data-calendar-view="week">Week</button>
+              </div>
+            </div>
+            <div class="calendar-toolbar">
+              <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
+              <strong data-calendar-year-label>2027</strong>
+              <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
+              <button type="button" data-calendar-year-action="today">Today</button>
+            </div>
+            <div class="year-calendar large" id="full-calendar"></div>
+            <div class="legend">
+              <span><i class="rdo"></i> RDO Line Pattern</span>
+              <span><i class="draft"></i> Preview Batch</span>
+              <span><i class="pending-leave"></i> Pending Leave</span>
+              <span><i class="leave"></i> Approved Leave</span>
+              <span><i class="holiday"></i> Holiday</span>
+              <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
+              <span><i class="closed"></i> Leave Slots Filled</span>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" id="intake-page" data-page-panel="intake">
+          <div class="workspace-grid intake-workspace">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Intake Queue</h2>
+                  <p>Review submitted bids before they are applied to bid lines or leave slots.</p>
+                </div>
+                <span class="pill open"><b data-intake-count>0</b> pending</span>
+              </div>
+              <div class="intake-queue" id="intake-queue"></div>
+            </section>
+            <aside class="right-stack">
+              <section class="panel" id="override-panel" hidden>
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Admin Override / Edit</h2>
+                    <p>Changes are logged under the signed-in intake account.</p>
+                  </div>
+                </div>
+                <div class="override-editor" data-override-editor></div>
+              </section>
+              <section class="panel" id="denial-panel" hidden>
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Deny Request</h2>
+                    <p>Tell the BUE what needs to change before resubmitting.</p>
+                  </div>
+                </div>
+                <div class="denial-editor" data-denial-editor></div>
+              </section>
+              <section class="panel help-summary-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Help Messages</h3>
+                    <p>Saved BUE conversations for intake follow-up.</p>
+                  </div>
+                  <span class="pill open"><b data-help-thread-count>0</b> open</span>
+                </div>
+                <div class="help-thread-summary" data-help-thread-summary></div>
+              </section>
+              <section class="panel">
+                <h3>Approval Rules</h3>
+                <ul class="plain-list success-list">
+                  <li>Approve applies the BUE initials automatically.</li>
+                  <li>Filled leave days require an explicit override before approval.</li>
+                  <li>Overrides require an intake user and are logged.</li>
+                  <li>GL bidders do not populate public floor templates.</li>
+                  <li>Developmentals bid against developmental slots.</li>
+                </ul>
+              </section>
+              <section class="panel">
+                <h3>Intake Scope</h3>
+                <dl class="rule-list">
+                  <div><dt>User</dt><dd data-user-name>Michael Schoelen</dd></div>
+                  <div><dt>Scope</dt><dd data-admin-grant-scope>All Areas</dd></div>
+                  <div><dt>Rights Window</dt><dd data-admin-grant-status>Active</dd></div>
+                </dl>
+              </section>
+              <section class="panel">
+                <h3>Data Export</h3>
+                <p>Download prototype bidding data for reconciliation.</p>
+                <div class="export-actions">
+                  <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
+                  <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="intake-schedule-page" data-page-panel="intake-schedule">
+          <div class="workspace-grid intake-schedule-workspace">
+            <section class="panel calendar-panel full">
+              <div class="panel-header">
+                <div>
+                  <h2>Intake Schedule</h2>
+                  <p>Review scheduled intake coverage. Your scheduled dates are highlighted.</p>
+                </div>
+              </div>
+              <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
+              <div class="intake-schedule-list" data-intake-schedule-list></div>
+            </section>
+            <aside class="right-stack">
+              <section class="panel">
+                <h3>Access Rule</h3>
+                <p>Intake permissions start 15 minutes before each assigned shift.</p>
+              </section>
+              <section class="panel" data-admin-schedule-card>
+                <h3>Admin Scheduling</h3>
+                <p>Assign temporary intake access. Access begins 15 minutes before the scheduled shift.</p>
+                <div class="schedule-form">
+                  <label>
+                    Rep Initials
+                    <input type="text" value="OC" data-schedule-initials maxlength="4" />
+                  </label>
+                  <label>
+                    Rep Name
+                    <input type="text" value="Michael Schoelen" data-schedule-name />
+                  </label>
+                  <label>
+                    Scope
+                    <select data-schedule-area>
+                      <option>All Areas</option>
+                      <option selected>Area A</option>
+                      <option>Area B</option>
+                      <option>Area C</option>
+                      <option>Area D</option>
+                      <option>Area E</option>
+                      <option>Area F</option>
+                      <option>TMU</option>
+                    </select>
+                  </label>
+                  <label>
+                    Starts
+                    <input type="datetime-local" data-schedule-start />
+                  </label>
+                  <label>
+                    Ends
+                    <input type="datetime-local" data-schedule-end />
+                  </label>
+                  <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
+                  <p class="form-status" data-schedule-status></p>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="admin-page" data-page-panel="admin">
+          <div class="workspace-grid admin-workspace">
+            <section class="panel admin-console-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Admin Console</h2>
+                  <p>Assign intake rights, reset accounts, and export bidding records.</p>
+                </div>
+                <span class="pill open">System Admin</span>
+              </div>
+              <div class="admin-user-list" data-admin-user-list></div>
+            </section>
+            <aside class="right-stack">
+              <section class="panel">
+                <h3>Schedule Intake Rep</h3>
+                <p>Access opens 15 minutes before the shift starts.</p>
+                <div class="schedule-form">
+                  <label>
+                    Rep Initials
+                    <input type="text" value="OC" data-admin-schedule-initials maxlength="4" />
+                  </label>
+                  <label>
+                    Rep Name
+                    <input type="text" value="Michael Schoelen" data-admin-schedule-name />
+                  </label>
+                  <label>
+                    Scope
+                    <select data-admin-schedule-area>
+                      <option>All Areas</option>
+                      <option selected>Area A</option>
+                      <option>Area B</option>
+                      <option>Area C</option>
+                      <option>Area D</option>
+                      <option>Area E</option>
+                      <option>Area F</option>
+                      <option>TMU</option>
+                    </select>
+                  </label>
+                  <label>
+                    Starts
+                    <input type="datetime-local" data-admin-schedule-start />
+                  </label>
+                  <label>
+                    Ends
+                    <input type="datetime-local" data-admin-schedule-end />
+                  </label>
+                  <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
+                  <p class="form-status" data-admin-schedule-status></p>
+                </div>
+              </section>
+              <section class="panel">
+                <h3>Database Export</h3>
+                <p>Download everything captured in this prototype.</p>
+                <div class="export-actions">
+                  <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
+                  <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
+                </div>
+              </section>
+              <section class="panel">
+                <h3>Email Log</h3>
+                <div class="email-log" data-email-log></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="history-page" data-page-panel="history">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2 data-history-heading>Bid History</h2>
+                <p data-history-summary>Area scoped submission timeline, saved drafts, changes, and verification events.</p>
+              </div>
+              <div class="history-actions">
+                <span class="scope-pill"><b data-history-area>Area A</b><small data-history-access>Area Scoped</small></span>
+                <button class="secondary-action" type="button">Export History</button>
+              </div>
+            </div>
+            <div class="admin-note">
+              <strong>Bidding Intake Access</strong>
+              <span>Controller accounts only see their assigned area. Temporary intake rights can be assigned to named users for a defined window, and every intake action is logged to that person.</span>
+            </div>
+            <div class="timeline" id="history-timeline"></div>
+          </section>
+        </section>
+
+        <section class="page" id="profile-page" data-page-panel="profile">
+          <div class="workspace-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2>My Profile</h2>
+                  <p>Review and update your account details while signed in.</p>
+                </div>
+                <span class="pill open" data-user-role>Controller</span>
+              </div>
+              <form class="profile-form">
+                <label>Name <input type="text" value="Michael Schoelen" data-profile-name /></label>
+                <label>Area <select data-profile-area><option>Area A</option><option>Area B</option><option>Area C</option><option>Area D</option><option>Area E</option><option>TMU</option><option>All Areas</option></select></label>
+                <label>Initials <input type="text" value="OC" maxlength="3" data-profile-initials /></label>
+                <label>Phone Number <input type="tel" value="(555) 555-0147" data-profile-phone /></label>
+                <label>Email <input type="email" value="oc@natcazla.com" data-profile-email /></label>
+                <div class="form-actions">
+                  <button class="secondary-action" type="button">Cancel</button>
+                  <button class="primary-action" type="button">Save Profile</button>
+                </div>
+              </form>
+            </section>
+            <aside class="right-stack">
+              <section class="panel">
+                <h3>Account Summary</h3>
+                <dl class="rule-list">
+                  <div><dt>Seniority</dt><dd data-user-seniority-long>#5 of 45</dd></div>
+                  <div><dt>Bid Year</dt><dd>2027</dd></div>
+                  <div><dt>Bid Window</dt><dd data-bid-window-text>Checking</dd></div>
+                  <div><dt>Time Remaining</dt><dd data-bid-window-countdown>--:--:--</dd></div>
+                </dl>
+              </section>
+              <section class="panel">
+                <h3>Bidding Intake Rights</h3>
+                <dl class="rule-list">
+                  <div><dt>Status</dt><dd data-admin-grant-status>Not Assigned</dd></div>
+                  <div><dt>Scope</dt><dd data-admin-grant-scope>None</dd></div>
+                  <div><dt>Window</dt><dd data-admin-grant-window>Not assigned</dd></div>
+                  <div><dt>Granted By</dt><dd data-admin-grant-granted-by>None</dd></div>
+                </dl>
+              </section>
+              <section class="panel">
+                <h3>Profile Notes</h3>
+                <ul class="plain-list">
+                  <li>Contact details can be updated while logged in.</li>
+                  <li>Seniority and bid position are managed by the bidding data.</li>
+                  <li>Area changes should be verified before bidding opens.</li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="bidding.js?v=peach-holiday-ring"></script>
+  </body>
+</html>

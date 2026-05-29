@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="NATCA ZLA admin panel for local content updates." />
+    <title>NATCA ZLA Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="index.html#zla-home" aria-label="NATCA ZLA home">
+        <img src="assets/natca-zla-logo-dark.png" alt="NATCA Los Angeles Center" />
+        <span>
+          <strong>ZLA</strong>
+          <small>Los Angeles Center</small>
+        </span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+        <a href="index.html#zla-home">ZLA Home</a>
+        <a href="index.html#events">Events</a>
+        <a href="index.html#reps">Reps</a>
+        <a href="training.html">Training</a>
+        <a class="active" href="admin.html">Admin</a>
+      </nav>
+
+      <a class="header-action" href="index.html#contact">Contact</a>
+    </header>
+
+    <main class="page-main admin-main">
+      <section class="section page-hero">
+        <div class="section-heading">
+          <p>Admin // Local Updates</p>
+          <h1>Site Admin</h1>
+        </div>
+        <p>
+          Add and update events, training resources, MOU references, and social links from one
+          place. This static version saves changes in this browser and updates the public pages
+          when you refresh them.
+        </p>
+      </section>
+
+      <section class="section admin-login" data-admin-login>
+        <form class="contact-form admin-login-form">
+          <div class="section-heading">
+            <p>Login</p>
+            <h2>Admin Access</h2>
+          </div>
+          <p class="admin-note">
+            Temporary static-site login. Default password: <strong>zla-admin</strong>.
+          </p>
+          <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required />
+          </label>
+          <button class="button primary" type="submit">Login</button>
+          <p class="form-note" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="section admin-dashboard" data-admin-dashboard hidden>
+        <div class="admin-toolbar">
+          <div class="section-heading">
+            <p>Dashboard</p>
+            <h2>Update Content</h2>
+          </div>
+          <div class="admin-actions">
+            <a class="button secondary" href="index.html#events">View Site</a>
+            <button class="button secondary" type="button" data-admin-reset>Reset Content</button>
+            <button class="button secondary" type="button" data-admin-logout>Logout</button>
+          </div>
+        </div>
+        <p class="admin-status" data-admin-status aria-live="polite">
+          Changes save to this browser. Refresh the public site to see updates.
+        </p>
+
+        <div class="admin-grid">
+          <form class="contact-form admin-card" data-event-form>
+            <h3>Add Event</h3>
+            <label>
+              Event Name
+              <input name="title" required />
+            </label>
+            <label>
+              Date
+              <input type="date" name="date" required />
+            </label>
+            <label>
+              Time
+              <input name="time" placeholder="1330" />
+            </label>
+            <label>
+              Location
+              <input name="location" placeholder="A120" />
+            </label>
+            <label>
+              Details
+              <textarea name="details" rows="3"></textarea>
+            </label>
+            <label>
+              Link
+              <input name="href" placeholder="#contact or https://..." />
+            </label>
+            <button class="button primary" type="submit">Add Event</button>
+            <p class="form-note" aria-live="polite"></p>
+          </form>
+
+          <form class="contact-form admin-card" data-resource-form>
+            <h3>Add Training / MOU</h3>
+            <label>
+              Category
+              <input name="category" placeholder="MOUs" />
+            </label>
+            <label>
+              Title
+              <input name="title" required />
+            </label>
+            <label>
+              Description
+              <textarea name="description" rows="3"></textarea>
+            </label>
+            <label>
+              Link
+              <input name="href" placeholder="training.html or https://..." />
+            </label>
+            <button class="button primary" type="submit">Add Resource</button>
+            <p class="form-note" aria-live="polite"></p>
+          </form>
+
+          <form class="contact-form admin-card" data-social-form>
+            <h3>Social Links</h3>
+            <label>
+              Facebook URL
+              <input type="url" name="facebook" placeholder="https://facebook.com/..." />
+            </label>
+            <label>
+              Instagram URL
+              <input type="url" name="instagram" placeholder="https://instagram.com/..." />
+            </label>
+            <button class="button primary" type="submit">Save Social Links</button>
+            <p class="form-note" aria-live="polite"></p>
+          </form>
+        </div>
+
+        <div class="admin-lists">
+          <article class="admin-list-card">
+            <h3>Events</h3>
+            <div data-admin-events></div>
+          </article>
+          <article class="admin-list-card">
+            <h3>Training / MOUs</h3>
+            <div data-admin-resources></div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="events.js"></script>
+    <script src="content.js"></script>
+    <script src="script.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>
