@@ -29,7 +29,7 @@ const testAccounts = {
     roleLabel: "BUE Controller",
     systemAdmin: true,
     phone: "(555) 555-0147",
-    email: "oc@natcazla.com",
+    email: "m.schoelen@yahoo.com",
     adminGrant: {
       type: "Bidding Intake",
       scope: "All Areas",
@@ -45,9 +45,9 @@ const testAccounts = {
     seniorityRank: 11,
     bidderCount: 45,
     area: "Area A",
-    role: "controller",
-    roleLabel: "BUE Controller",
-    systemAdmin: true,
+    role: "bidding-intake",
+    roleLabel: "Bidding Intake",
+    systemAdmin: false,
     phone: "(555) 555-0111",
     email: "sh@natcazla.com",
     adminGrant: {
@@ -58,9 +58,23 @@ const testAccounts = {
       grantedBy: "NATCA ZLA Bidding Chair",
     },
   },
+  "regular-bue": {
+    firstName: "Martin",
+    lastName: "Ramirez",
+    initials: "EZ",
+    seniorityRank: 17,
+    bidderCount: 45,
+    area: "Area D",
+    role: "controller",
+    roleLabel: "BUE Controller",
+    systemAdmin: false,
+    phone: "(555) 555-0127",
+    email: "ez@natcazla.com",
+  },
 };
 
 let currentUser = { ...testAccounts.bue };
+let selectedViewArea = null;
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let leaveDraftQueue = [];
@@ -105,6 +119,16 @@ const userBidWindow = {
   start: new Date(Date.now() - 30 * 60 * 1000),
   end: new Date(Date.now() + 90 * 60 * 1000),
 };
+
+function isBidWindowOpen(date = new Date()) {
+  return date >= userBidWindow.start && date <= userBidWindow.end;
+}
+
+function activeBidderRank() {
+  return isBidWindowOpen() && Number.isFinite(currentUser.seniorityRank)
+    ? currentUser.seniorityRank
+    : null;
+}
 
 const holidayOverrides = new Set();
 
@@ -162,19 +186,95 @@ const rdoLines = [
   { pattern: "T/F", line: "23", cpc: "AG", week: ["1300", "700", "S530", "2230", "RDO", "RDO", "N1330"], group: "A", mid: "BID", aws: "Yes", fourTen: "No", flex: "Yes", status: "Open" },
   { pattern: "T/F", line: "24", cpc: "CZ", week: ["1330", "730", "630", "600", "RDO", "RDO", "1500"], group: "B", mid: "No", aws: "No", fourTen: "No", flex: "No", status: "Open" },
   { pattern: "F/S", line: "27", cpc: "HH", week: ["N1330", "1300", "700", "S530", "2230", "RDO", "RDO"], group: "C", mid: "BID", aws: "Yes", fourTen: "No", flex: "Yes", status: "Open" },
+  { area: "Area D", pattern: "S/S", line: "1", cpc: "EL", week: ["RDO", "M1100", "M700", "RDO", "M2130", "M2130", "RDO"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/S", line: "2", cpc: "HS", week: ["RDO", "1500", "1330", "730", "630", "600", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/S", line: "3", cpc: "EX", week: ["RDO", "1330", "730", "630", "630", "630", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/S", line: "4", cpc: "MR", week: ["RDO", "730", "730", "730", "730", "730", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/S", line: "5", cpc: "IM", week: ["RDO", "M1100", "M1100", "M1100", "M1100", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/M", line: "7", cpc: "MW", week: ["RDO", "RDO", "M1100", "M700", "RDO", "M2130", "M2130"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/M", line: "8", cpc: "BB", week: ["RDO", "RDO", "1500", "1330", "730", "630", "600"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/M", line: "9", cpc: "TA", week: ["RDO", "RDO", "1500", "1330", "730", "630", "600"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "S/M", line: "10", cpc: "TS", week: ["RDO", "RDO", "1330", "1330", "730", "630", "630"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "M/T", line: "11", cpc: "SA", week: ["M2130", "RDO", "RDO", "M1100", "M700", "RDO", "M2130"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "M/T", line: "12", cpc: "JI", week: ["600", "RDO", "RDO", "1500", "1330", "730", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "M/T", line: "13", cpc: "WT", week: ["600", "RDO", "RDO", "1500", "1330", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "M/T", line: "14", cpc: "JM", week: ["630", "RDO", "RDO", "1500", "1330", "730", "630"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "15", cpc: "AH", week: ["M2130", "M2130", "RDO", "RDO", "M1100", "M700", "RDO"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "16", cpc: "VM", week: ["730", "600", "RDO", "RDO", "1330", "730", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "17", cpc: "OT", week: ["630", "600", "RDO", "RDO", "1500", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "18", cpc: "NX", week: ["1330", "730", "RDO", "RDO", "1500", "1330", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "19", cpc: "IE", week: ["630", "630", "RDO", "RDO", "1500", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/W", line: "20", cpc: "MS", week: ["630", "630", "RDO", "RDO", "1330", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "W/T", line: "21", cpc: "TB", week: ["RDO", "M2130", "M2130", "RDO", "RDO", "M1100", "M700"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "W/T", line: "22", cpc: "CH", week: ["730", "630", "600", "RDO", "RDO", "1500", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "W/T", line: "23", cpc: "NK", week: ["730", "630", "600", "RDO", "RDO", "1330", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "W/T", line: "24", cpc: "EC", week: ["1500", "1330", "730", "RDO", "RDO", "1500", "1500"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "W/T", line: "25", cpc: "EA", week: ["1500", "1500", "1500", "RDO", "RDO", "1500", "1500"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/F", line: "26", cpc: "BG", week: ["M700", "RDO", "M2130", "M2130", "RDO", "RDO", "M1100"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/F", line: "27", cpc: "SP", week: ["1330", "730", "630", "600", "RDO", "RDO", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/F", line: "28", cpc: "EN", week: ["1330", "730", "630", "600", "RDO", "RDO", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "T/F", line: "29", cpc: "WP", week: ["1330", "730", "730", "730", "RDO", "RDO", "1500"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "F/S", line: "30", cpc: "MZ", week: ["M1100", "M700", "RDO", "M2130", "M2130", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "F/S", line: "31", cpc: "ZB", week: ["1330", "1330", "730", "630", "600", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "F/S", line: "32", cpc: "NL", week: ["1500", "1330", "1330", "730", "600", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "F/S", line: "33", cpc: "GO", week: ["M1300", "M1100", "M1100", "M1100", "RDO", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "F/S", line: "34", cpc: "DA", week: ["730", "730", "630", "630", "630", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "35", lineType: "DEV", cpc: "VP", week: ["RDO", "1500", "1330", "730", "630", "600", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "36", lineType: "DEV", cpc: "MO", week: ["RDO", "RDO", "1500", "1330", "730", "630", "600"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "37", lineType: "DEV", cpc: "HG", week: ["600", "RDO", "RDO", "1500", "1330", "730", "630"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "38", lineType: "DEV", cpc: "ZO", week: ["730", "630", "600", "RDO", "RDO", "1500", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "39", lineType: "DEV", cpc: "AZ", week: ["1330", "730", "630", "600", "RDO", "RDO", "1500"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "R-DEV", line: "40", lineType: "DEV", cpc: "SG", week: ["1500", "1330", "730", "630", "600", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "41", lineType: "DEV", cpc: "KN", week: ["RDO", "1330", "1330", "730", "630", "630", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "42", lineType: "DEV", cpc: "JC", week: ["RDO", "RDO", "1330", "1330", "730", "630", "630"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "43", lineType: "DEV", cpc: "AY", week: ["630", "RDO", "RDO", "1330", "1330", "730", "630"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "44", lineType: "DEV", cpc: "FF", week: ["630", "630", "RDO", "RDO", "1330", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "45", lineType: "DEV", cpc: "IN", week: ["1330", "730", "630", "630", "RDO", "RDO", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  { area: "Area D", pattern: "D-DEV", line: "46", lineType: "DEV", cpc: "PJ", week: ["1330", "1330", "730", "630", "630", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
 ];
 
 let selectedLineId = "15";
-let selectedFatigueGroup = "C";
-let selectedMidPreference = "No";
-let selectedAwsPreference = "No";
-let selectedFlexPreference = "Yes";
+let selectedFatigueGroup = "";
+let selectedMidPreference = "";
+let selectedAwsPreference = "";
+let selectedFlexPreference = "";
 let calendarView = "year";
 let displayedCalendarYear = BID_YEAR;
+const rdoFilters = {
+  search: "",
+  openOnly: true,
+  mid: "all",
+  fourTen: "all",
+};
 const publicState = {
   area: "Area A",
   section: "Calendar",
 };
+
+const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
+
+const supabaseState = {
+  enabled: false,
+  connected: false,
+  loading: false,
+  message: "Using built-in prototype data.",
+  loadedAt: null,
+};
+
+const AREA_NAME_BY_CODE = {
+  "area-a": "Area A",
+  "area-b": "Area B",
+  "area-c": "Area C",
+  "area-d": "Area D",
+  "area-e": "Area E",
+  "area-f": "Area F",
+  tmu: "TMU",
+};
+
+const AREA_CODE_BY_NAME = Object.entries(AREA_NAME_BY_CODE).reduce((lookup, [code, name]) => {
+  lookup[name] = code;
+  return lookup;
+}, {});
 
 const areaCpcCount = 36;
 const areaFatigueMax = Math.floor(areaCpcCount / 3);
@@ -190,17 +290,19 @@ const crewSizeByPattern = {
 };
 
 function fatigueCapacityForLine(line) {
-  const crewSize = crewSizeByPattern[line.pattern] || rdoLines.filter((item) => item.pattern === line.pattern).length;
+  const area = line.area || currentUser.area || "Area A";
+  const areaLines = rdoLinesForArea(area);
+  const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
   const crewMax = Math.max(1, Math.floor(crewSize / 3));
 
   return ["A", "B", "C"].map((group) => {
-    const areaUsed = rdoLines.filter((item) => {
+    const areaUsed = areaLines.filter((item) => {
       if (!isCpcLine(item)) return false;
       if (item.line === selectedLineId) return selectedFatigueGroup === group;
       return item.status === "Taken" && item.group === group;
     }).length;
 
-    const crewUsed = rdoLines.filter((item) => {
+    const crewUsed = areaLines.filter((item) => {
       if (!isCpcLine(item)) return false;
       if (item.pattern !== line.pattern) return false;
       if (item.line === selectedLineId) return selectedFatigueGroup === group;
@@ -234,7 +336,7 @@ function isForcedMid(line) {
 }
 
 function isMidLineByDesign(line) {
-  return line.mid === "BID" || line.week.some((value) => /^[MN]/.test(value));
+  return line.mid === "BID";
 }
 
 function lineFourTenValue(line) {
@@ -243,10 +345,10 @@ function lineFourTenValue(line) {
 }
 
 const leaveBids = [
-  { priority: 1, range: "Jun 9 - Jun 13, 2027", days: 5, type: "Annual Leave", status: "Approved", notes: "Family vacation" },
-  { priority: 2, range: "Jul 3 - Jul 7, 2027", days: 5, type: "Annual Leave", status: "Approved", notes: "Holiday week" },
-  { priority: 3, range: "Sep 2 - Sep 5, 2027", days: 4, type: "Annual Leave", status: "Pending", notes: "Round 1" },
-  { priority: 4, range: "Nov 24 - Nov 28, 2027", days: 5, type: "Annual Leave", status: "Pending", notes: "Thanksgiving week" },
+  { priority: 1, range: "Jun 9 - Jun 13, 2027", days: 5, status: "Approved", notes: "Family vacation" },
+  { priority: 2, range: "Jul 3 - Jul 7, 2027", days: 5, status: "Approved", notes: "Holiday week" },
+  { priority: 3, range: "Sep 2 - Sep 5, 2027", days: 4, status: "Pending", notes: "Round 1" },
+  { priority: 4, range: "Nov 24 - Nov 28, 2027", days: 5, status: "Pending", notes: "Thanksgiving week" },
 ];
 
 const leaveSlotWeeks = [
@@ -372,6 +474,22 @@ function bidWindowLabel(date, start) {
   return `${date} · ${start}-${String(endHour).padStart(2, "0")}59`;
 }
 
+function publicBidTimeLabel(roundLabel) {
+  const round = parseRoundWindow(roundLabel);
+  if (!round) return roundLabel;
+  const weekdayNames = {
+    Mon: "Monday",
+    Tue: "Tuesday",
+    Wed: "Wednesday",
+    Thu: "Thursday",
+    Fri: "Friday",
+    Sat: "Saturday",
+    Sun: "Sunday",
+  };
+
+  return `${weekdayNames[round.weekday] || round.weekday}, ${round.month}/${String(round.day).padStart(2, "0")} · ${round.start}`;
+}
+
 function escapeIcsText(value) {
   return String(value)
     .replace(/\\/g, "\\\\")
@@ -469,12 +587,13 @@ function fallbackInitials(firstName, lastName) {
 }
 
 function buildSeniority() {
+  const openRank = activeBidderRank();
   return senioritySource.map(([lastName, firstName, bidAs, initials], index) => {
     const rank = index + 1;
     const rowBlock = Math.floor(index / bidStartTimes.length);
     const start = bidStartTimes[index % bidStartTimes.length];
-    const hasSeniority = Number.isFinite(currentUser.seniorityRank);
-    const isCurrentUser = hasSeniority && rank === currentUser.seniorityRank;
+    const hasActiveBidder = Number.isFinite(openRank);
+    const isCurrentBidder = hasActiveBidder && rank === openRank;
 
     return {
       rank,
@@ -482,10 +601,10 @@ function buildSeniority() {
       lastName,
       bidAs,
       initials: initials || fallbackInitials(firstName, lastName),
-      status: !hasSeniority ? "waiting" : rank < currentUser.seniorityRank ? "done" : isCurrentUser ? "active" : "waiting",
+      status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: roundDateBlocks[rowBlock].map((date) => bidWindowLabel(date, start)),
-      completed: hasSeniority && rank < currentUser.seniorityRank ? [1] : [],
-      openRound: isCurrentUser ? 1 : undefined,
+      completed: hasActiveBidder && rank < openRank ? [1] : [],
+      openRound: isCurrentBidder ? 1 : undefined,
     };
   });
 }
@@ -533,7 +652,7 @@ let intakeQueue = [
     submittedAt: "May 26, 2026 10:44",
     range: "Sep 2 - Sep 5, 2027",
     days: 4,
-    summary: "Sep 2 - Sep 5, 2027 · 4 days · Annual Leave",
+    summary: "Sep 2 - Sep 5, 2027 · 4 days",
   },
 ];
 
@@ -598,8 +717,24 @@ function logHistory(area, title, detail) {
 }
 
 function addOrUpdateRdoSubmission() {
-  const line = rdoLines.find((item) => item.line === selectedLineId);
+  const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
   if (!line || line.status === "Taken") return;
+  if (!selectedFatigueGroup) {
+    alert("Choose a fatigue group before submitting this RDO bid.");
+    return;
+  }
+  if (!isForcedMid(line) && !selectedMidPreference) {
+    alert("Choose Yes or No for Mid before submitting this RDO bid.");
+    return;
+  }
+  if (!selectedAwsPreference) {
+    alert("Choose Yes or No for AWS before submitting this RDO bid.");
+    return;
+  }
+  if (!selectedFlexPreference) {
+    alert("Choose Yes or No for Flex before submitting this RDO bid.");
+    return;
+  }
 
   const existing = currentUserRdoRequest();
   const request = {
@@ -639,8 +774,7 @@ function setLeaveBuilderStatus(message, status = "info") {
 function leaveBuilderValues() {
   const range = document.querySelector("[data-leave-range-input]")?.value.trim() || "";
   const days = Number(document.querySelector("[data-leave-days-input]")?.value || 0);
-  const leaveType = document.querySelector("[data-leave-type-input]")?.value || "Annual Leave";
-  return { range, days, leaveType };
+  return { range, days };
 }
 
 function orderedLeaveRangeKeys() {
@@ -949,32 +1083,36 @@ function showInitialsInVisibleSlot(visible, bucket, initials) {
   visible[bucket] = values.slice(0, capacity);
 }
 
-function visibleLeaveSlotDetails(key) {
-  const details = leaveSlotsForDate(key);
+function visibleLeaveSlotDetails(key, area = currentUser.area) {
+  const details = leaveSlotsForDate(key, area);
   const visible = {
     ...details,
     cpc: [...(details.cpc || [])],
     dev: [...(details.dev || [])],
   };
+  const showCurrentUserOverlay = area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
-  if (previewItem && leaveDisplayDatesForItem(previewItem, currentUser.initials).includes(key)) {
+  if (showCurrentUserOverlay && previewItem && leaveDisplayDatesForItem(previewItem, currentUser.initials).includes(key)) {
     const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   }
 
   leaveBids.forEach((item) => {
+    if (!showCurrentUserOverlay) return;
     if (!["Pending", "Approved"].includes(item.status)) return;
     if (!leaveDisplayDatesForItem(item, currentUser.initials).includes(key)) return;
     showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   leaveDraftQueue.forEach((item) => {
+    if (!showCurrentUserOverlay) return;
     if (!leaveDisplayDatesForItem(item, currentUser.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   });
 
   intakeQueue.forEach((item) => {
+    if (item.area !== area) return;
     if (item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)) return;
     if (!leaveDisplayDatesForItem(item, item.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs);
@@ -1014,7 +1152,7 @@ function draftRangeExists(range) {
 }
 
 function addOrUpdateLeaveSubmission() {
-  const { range, days, leaveType } = leaveBuilderValues();
+  const { range, days } = leaveBuilderValues();
   const round = currentRoundNumber();
   const isRoundOne = round === 1;
   if (!range) {
@@ -1063,7 +1201,7 @@ function addOrUpdateLeaveSubmission() {
     }
   }
 
-  const projectedChargedDays = leaveProjectedChargedDays([{ range, days, round, leaveType, weekUnits, weekKeys }]);
+  const projectedChargedDays = leaveProjectedChargedDays([{ range, days, round, weekUnits, weekKeys }]);
   const allowanceLimit = leaveAllowanceLimitForRound(round);
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
@@ -1088,7 +1226,6 @@ function addOrUpdateLeaveSubmission() {
     id: `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     range,
     days,
-    leaveType,
     round,
     weekUnits,
     weekKeys,
@@ -1167,11 +1304,10 @@ function submitLeaveDraftBatch() {
     batchId,
     range: draft.range,
     days: draft.days,
-    leaveType: draft.leaveType,
     round: draft.round,
     weekUnits: draft.weekUnits || 0,
     weekKeys: draft.weekKeys || [],
-    summary: `${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""} · ${draft.leaveType}`,
+    summary: `${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
   newRequests.forEach((request) => {
@@ -1180,7 +1316,6 @@ function submitLeaveDraftBatch() {
       priority: nextLeavePriority(),
       range: request.range,
       days: request.days,
-      type: request.leaveType,
       status: "Pending",
       notes: request.weekUnits ? `Round ${request.round}: ${request.weekUnits} bid week, ${request.days} charged days` : "Pending intake review",
     });
@@ -1214,7 +1349,7 @@ function queueBidVerifiedEmail(item) {
   const recipient = Object.values(testAccounts).find((account) => account.initials === item.initials);
   const detail = item.type === "RDO Line"
     ? `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex ${item.flex}, AWS ${item.aws}, Mid ${item.mid}.`
-    : `${item.range}, ${item.days} ${item.days === 1 ? "day" : "days"}, ${item.leaveType}.`;
+    : `${item.range}, ${item.days} ${item.days === 1 ? "day" : "days"}.`;
   queuePrototypeEmail(
     recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`,
     subject,
@@ -1223,7 +1358,7 @@ function queueBidVerifiedEmail(item) {
 }
 
 function applyRdoApproval(item) {
-  const line = rdoLines.find((entry) => entry.line === item.line);
+  const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
   if (!line) return;
 
   syncApprovedRdoItem(item);
@@ -1243,7 +1378,7 @@ function applyRdoApproval(item) {
 }
 
 function syncApprovedRdoItem(item) {
-  const line = rdoLines.find((entry) => entry.line === item.line);
+  const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
   if (!line || item.bidAs === "GL") return;
 
   line.cpc = item.initials;
@@ -1391,7 +1526,7 @@ function captureIntakeOverrideFields(item) {
   item.range = editor.querySelector("[data-override-range]")?.value || item.range;
   item.days = Number(editor.querySelector("[data-override-days]")?.value || item.days);
   item.leaveCapacityOverride = Boolean(editor.querySelector("[data-override-capacity]")?.checked);
-  item.summary = `${item.range} · ${item.days} days · Annual Leave`;
+  item.summary = `${item.range} · ${item.days} days`;
 }
 
 function approveIntakeItem(id) {
@@ -1460,7 +1595,7 @@ function saveIntakeOverride(id) {
   if (item.status === "Approved") {
     if (item.type === "RDO Line") {
       if (item.bidAs !== "GL" && originalLine !== item.line) {
-        const oldLine = rdoLines.find((entry) => entry.line === originalLine);
+        const oldLine = rdoLines.find((entry) => entry.line === originalLine && lineForArea(entry, item.area));
         if (oldLine?.cpc === item.initials) {
           oldLine.cpc = "";
           oldLine.status = "Open";
@@ -1486,7 +1621,7 @@ function saveIntakeOverride(id) {
 }
 
 function selectedRdoWeekdays() {
-  const line = rdoLines.find((item) => item.line === selectedLineId) || rdoLines[0];
+  const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0] || rdoLines[0];
   return rdoWeekdaysForLine(line);
 }
 
@@ -1501,13 +1636,13 @@ function rdoLineForInitials(initials = currentUser.initials) {
     item.initials === initials &&
     ["Pending", "Approved"].includes(item.status)
   );
-  if (request?.line) return rdoLines.find((line) => line.line === request.line) || null;
+  if (request?.line) return rdoLines.find((line) => line.line === request.line && lineForArea(line, request.area || currentUser.area)) || null;
 
-  const populatedLine = rdoLines.find((line) => line.cpc === initials && line.status === "Taken");
+  const populatedLine = rdoLines.find((line) => line.cpc === initials && line.status === "Taken" && lineForArea(line, currentUser.area));
   if (populatedLine) return populatedLine;
 
   if (initials === currentUser.initials) {
-    return rdoLines.find((line) => line.line === selectedLineId) || null;
+    return rdoLinesForArea(currentUser.area).find((line) => line.line === selectedLineId) || null;
   }
 
   return null;
@@ -1528,8 +1663,9 @@ function calendarActiveDate() {
 function makeCalendar(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
-  const showRdo = targetId !== "public-calendar";
-  const showPersonalLeave = targetId !== "public-calendar";
+  const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
+  const showRdo = targetId !== "public-calendar" && area === currentUser.area;
+  const showPersonalLeave = targetId !== "public-calendar" && area === currentUser.area;
   const activeDate = calendarActiveDate();
   let monthIndexes = monthNames.map((_, index) => index);
 
@@ -1541,12 +1677,12 @@ function makeCalendar(targetId) {
   }
 
   if (calendarView === "week") {
-    target.innerHTML = renderWeekCalendar(activeDate, { showRdo, showPersonalLeave });
+    target.innerHTML = renderWeekCalendar(activeDate, { showRdo, showPersonalLeave, area });
     return;
   }
 
   target.innerHTML = monthIndexes
-    .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, { showRdo, showPersonalLeave }))
+    .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, { showRdo, showPersonalLeave, area }))
     .join("");
 }
 
@@ -1591,7 +1727,7 @@ function renderWeekCalendar(activeDate, options = {}) {
         ${weekDays.map((date) => `
           <div class="week-day-column">
             <span class="week-day-label">${dayNames[date.getDay()]}</span>
-            ${renderCalendarDay(date.getMonth(), date.getDate(), true, date.getFullYear(), { showRdo, showPersonalLeave })}
+            ${renderCalendarDay(date.getMonth(), date.getDate(), true, date.getFullYear(), { showRdo, showPersonalLeave, area: options.area })}
           </div>
         `).join("")}
       </div>
@@ -1610,10 +1746,10 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
   const isDraftLeave = showPersonalLeave && canShowLeaveState && (isDraftLeaveDate(key) || isLeavePreviewRangeDate(key));
   const holidayKind = calendarHolidayKind(key, options);
-  const isClosed = canShowLeaveState && isLeaveSlotsFull(key);
+  const isClosed = canShowLeaveState && isLeaveSlotsFull(key, options.area);
   const hasDetail = true;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
-  const slotTooltip = quickLeaveSlotTooltip(key, holidayKind);
+  const slotTooltip = quickLeaveSlotTooltip(key, holidayKind, options.area);
   const className = [
     holidayKind?.className || "",
     isDraftLeave ? "draft-leave-day" : "",
@@ -1661,11 +1797,12 @@ function renderCalendars() {
   makeCalendar("full-calendar");
 }
 
-function leaveSlotMap() {
+function leaveSlotMap(area = currentUser.area) {
   const entries = {};
 
   leaveSlotWeeks.forEach((week) => {
     week.days.forEach((day) => {
+      if (!slotMatchesArea(day, area)) return;
       entries[day.date] = {
         group: week.group,
         round: week.round,
@@ -1675,6 +1812,7 @@ function leaveSlotMap() {
   });
 
   Object.entries(extraLeaveSlotData).forEach(([date, day]) => {
+    if (!slotMatchesArea(day, area)) return;
     entries[date] = {
       date,
       label: formatCalendarDate(date),
@@ -1687,8 +1825,8 @@ function leaveSlotMap() {
   return entries;
 }
 
-function leaveSlotsForDate(key) {
-  const details = leaveSlotMap()[key] || {
+function leaveSlotsForDate(key, area = currentUser.area) {
+  const details = leaveSlotMap(area)[key] || {
     date: key,
     label: formatCalendarDate(key),
     cpc: [],
@@ -1707,13 +1845,13 @@ function leaveSlotsForDate(key) {
   };
 }
 
-function hasLeaveSlotDetails(key) {
-  return Boolean(leaveSlotMap()[key]) || isHolidayDate(key) || fullLeaveDates.has(key);
+function hasLeaveSlotDetails(key, area = currentUser.area) {
+  return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
-function isLeaveSlotsFull(key) {
-  const details = leaveSlotsForDate(key);
-  return details.cpc.length >= leaveSlotCapacity.cpc || fullLeaveDates.has(key);
+function isLeaveSlotsFull(key, area = currentUser.area) {
+  const details = leaveSlotsForDate(key, area);
+  return details.cpc.length >= leaveSlotCapacity.cpc || (area === "Area A" && fullLeaveDates.has(key));
 }
 
 function slotRows(type, initials, capacity) {
@@ -1728,8 +1866,8 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key)) {
-  const details = visibleLeaveSlotDetails(key);
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area) {
+  const details = visibleLeaveSlotDetails(key, area);
   const cpcSlots = Array.from({ length: leaveSlotCapacity.cpc }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: leaveSlotCapacity.dev }, (_, index) => details.dev[index] || "");
   const renderSlotRow = (prefix, value, index) => {
@@ -1762,7 +1900,7 @@ function renderLeaveSlotBoard() {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
-  const details = leaveSlotsForDate(selectedLeaveDateKey);
+  const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
   const cpcFull = details.cpc.length >= leaveSlotCapacity.cpc;
   const devFull = details.dev.length >= leaveSlotCapacity.dev;
   const statusText = cpcFull ? "CPC Full" : "CPC Open";
@@ -1940,6 +2078,301 @@ function formatCalendarDate(key) {
   }).format(new Date(year, month - 1, day));
 }
 
+function supabaseClient() {
+  const config = window.NATCA_SUPABASE_CONFIG;
+  if (!config?.url || !config?.publishableKey || !window.supabase?.createClient) return null;
+  if (!supabaseState.client) {
+    supabaseState.client = window.supabase.createClient(config.url, config.publishableKey);
+  }
+  return supabaseState.client;
+}
+
+function setAuthStatus(message, status = "info") {
+  const target = document.querySelector("[data-auth-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function profileFromSupabase(row) {
+  const fallbackInitials = [row.first_name?.[0], row.last_name?.[0]].filter(Boolean).join("").toUpperCase();
+  return {
+    firstName: row.first_name || "",
+    lastName: row.last_name || "",
+    initials: row.initials || fallbackInitials || "?",
+    initialsVerified: Boolean(row.initials_verified),
+    seniorityRank: row.seniority_rank,
+    bidderCount: Number(row.bidder_count || 0),
+    area: row.area_name || "Area A",
+    role: row.role || "controller",
+    roleLabel: row.role === "admin" ? "Bidding Admin" : "BUE Controller",
+    bidAs: row.bid_role || "CPC",
+    systemAdmin: row.role === "admin",
+    phone: row.phone || "",
+    email: row.email || "",
+    supabaseProfileId: row.profile_id,
+  };
+}
+
+async function claimSupabaseProfile() {
+  const client = supabaseClient();
+  if (!client) return null;
+  const { data, error } = await client.rpc("claim_current_bidder_profile");
+  if (error) throw error;
+  const profile = Array.isArray(data) ? data[0] : data;
+  return profile ? profileFromSupabase(profile) : null;
+}
+
+function showLoggedInApp(page = "dashboard") {
+  selectedViewArea = currentUser.area;
+  document.querySelector(".login-screen")?.setAttribute("hidden", "");
+  document.querySelector(".app-shell")?.removeAttribute("hidden");
+  document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
+  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
+  document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
+  document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
+  renderApp();
+  setPage(page);
+}
+
+async function initializeSupabaseAuth() {
+  const client = supabaseClient();
+  if (!client) return;
+  const { data } = await client.auth.getSession();
+  if (!data.session) return;
+
+  try {
+    const profile = await claimSupabaseProfile();
+    if (!profile) {
+      setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+      return;
+    }
+    currentUser = profile;
+    showLoggedInApp("dashboard");
+  } catch (error) {
+    setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+  }
+}
+
+async function sendSupabaseLoginLink(email) {
+  const client = supabaseClient();
+  if (!client) {
+    setAuthStatus("Supabase login is not configured yet.", "error");
+    return;
+  }
+
+  const { error } = await client.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.href.split("#")[0],
+    },
+  });
+
+  if (error) {
+    setAuthStatus(error.message, "error");
+    return;
+  }
+
+  setAuthStatus("Login link sent. Check that email inbox.", "success");
+}
+
+async function loginWithUsernamePassword(username, password) {
+  const client = supabaseClient();
+  if (!client) {
+    setAuthStatus("Supabase login is not configured yet.", "error");
+    return;
+  }
+
+  const { data, error } = await client.rpc("app_login_with_password", {
+    login_username: username,
+    login_password: password,
+  });
+
+  if (error) {
+    setAuthStatus(error.message || "Could not check that login.", "error");
+    return;
+  }
+
+  const profile = Array.isArray(data) ? data[0] : data;
+  if (!profile) {
+    setAuthStatus("That username or password did not match.", "error");
+    return;
+  }
+
+  currentUser = profileFromSupabase(profile);
+  setAuthStatus("Signed in.", "success");
+  showLoggedInApp(currentUser.systemAdmin ? "admin" : "dashboard");
+}
+
+async function saveSupabaseProfile() {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return false;
+  const initials = document.querySelector("[data-profile-initials]")?.value || "";
+  const phone = document.querySelector("[data-profile-phone]")?.value || "";
+  const { data, error } = await client.rpc("update_current_bidder_profile", {
+    profile_initials: initials,
+    profile_phone: phone,
+  });
+  if (error) {
+    alert(error.message);
+    return true;
+  }
+  const profile = Array.isArray(data) ? data[0] : data;
+  if (profile) currentUser = profileFromSupabase(profile);
+  renderApp();
+  return true;
+}
+
+function areaNameForRow(row, areaById = new Map()) {
+  return areaById.get(row.area_id) || AREA_NAME_BY_CODE[row.area_code] || row.area_name || "Area A";
+}
+
+function lineForArea(line, area = currentUser.area) {
+  return (line.area || "Area A") === area;
+}
+
+function currentViewArea() {
+  return selectedViewArea || currentUser.area;
+}
+
+function isViewingHomeArea() {
+  return currentViewArea() === currentUser.area;
+}
+
+function rdoLinesForArea(area = currentUser.area) {
+  return rdoLines.filter((line) => lineForArea(line, area));
+}
+
+function slotMatchesArea(details, area = currentUser.area) {
+  return (details.area || "Area A") === area;
+}
+
+function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
+  rows.forEach((row) => {
+    const days = lineDays
+      .filter((day) => day.rdo_line_id === row.id)
+      .sort((a, b) => a.weekday - b.weekday)
+      .map((day) => day.shift_code);
+    const area = areaNameForRow(row, areaById);
+    const nextLine = {
+      area,
+      pattern: row.pattern,
+      line: row.line_code,
+      lineType: row.line_type,
+      cpc: "",
+      week: days.length === 7 ? days : ["RDO", "RDO", "600", "700", "1300", "1430", "1500"],
+      group: row.fatigue_group || "C",
+      mid: row.mid || "No",
+      aws: row.aws ? "Yes" : "No",
+      fourTen: row.four_ten ? "Yes" : "No",
+      flex: row.flex ? "Yes" : "No",
+      status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
+    };
+    const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
+    if (existingIndex >= 0) {
+      rdoLines[existingIndex] = { ...rdoLines[existingIndex], ...nextLine };
+    } else {
+      rdoLines.push(nextLine);
+    }
+  });
+}
+
+function upsertLeaveSlotsFromDatabase(rows, areaById) {
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const area = areaNameForRow(row, areaById);
+    const key = `${area}:${row.slot_date}`;
+    const details = grouped.get(key) || {
+      area,
+      date: row.slot_date,
+      label: formatCalendarDate(row.slot_date),
+      cpc: [],
+      dev: [],
+      unavailable: false,
+    };
+    const bucket = row.slot_group === "dev" ? "dev" : "cpc";
+    const value = row.slot_initials || "";
+
+    if (row.status === "unavailable") details.unavailable = true;
+    if (["approved", "pending", "held"].includes(row.status) && value) {
+      details[bucket].push({ code: row.slot_code, initials: value });
+    }
+
+    grouped.set(key, details);
+  });
+
+  grouped.forEach((details) => {
+    const sortSlots = (items) => items
+      .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
+      .map((item) => item.initials);
+    const existing = extraLeaveSlotData[details.date] || {};
+    extraLeaveSlotData[details.date] = {
+      ...existing,
+      ...details,
+      cpc: sortSlots(details.cpc),
+      dev: sortSlots(details.dev),
+    };
+  });
+}
+
+async function loadSupabaseReferenceData() {
+  const client = supabaseClient();
+  if (!client || supabaseState.loading) return;
+
+  supabaseState.enabled = true;
+  supabaseState.loading = true;
+  supabaseState.message = "Loading bidding data from Supabase...";
+
+  try {
+    const { data: bidYear, error: bidYearError } = await client
+      .from("bid_years")
+      .select("id,bid_year,annual_leave_allowance_days")
+      .eq("bid_year", BID_YEAR)
+      .single();
+    if (bidYearError) throw bidYearError;
+
+    const [
+      areasResult,
+      holidaysResult,
+      rdoLinesResult,
+      rdoLineDaysResult,
+      leaveSlotsResult,
+    ] = await Promise.all([
+      client.from("areas").select("id,code,name,display_order").order("display_order"),
+      client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
+      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
+      client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
+      client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
+    ]);
+
+    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult].find((result) => result.error)?.error;
+    if (firstError) throw firstError;
+
+    const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
+
+    (holidaysResult.data || []).forEach((holiday) => {
+      if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
+    });
+
+    upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
+    upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+
+    supabaseState.connected = true;
+    supabaseState.loadedAt = new Date();
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, and ${(leaveSlotsResult.data || []).length} leave slots.`;
+  } catch (error) {
+    supabaseState.connected = false;
+    supabaseState.message = `Supabase data unavailable, using prototype fallback. ${error.message || error}`;
+    console.warn(supabaseState.message);
+  } finally {
+    supabaseState.loading = false;
+  }
+}
+
 function dateFromKey(key) {
   const [year, month, day] = key.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -2062,12 +2495,13 @@ function bidAsClass(bidAs) {
 }
 
 function renderPublicRdoTable(area) {
+  const lines = rdoLinesForArea(area);
   return `
-    <div class="public-table-heading">
+    <div class="public-table-heading flat">
       <strong>${area} RDO Bid Lines</strong>
-      <small>Area A test data is being used for this prototype.</small>
+      <small>${supabaseState.connected ? "Loaded from Supabase for this area." : "Prototype data is being used until Supabase is available."}</small>
     </div>
-    <div class="table-wrap public-table-wrap">
+    <div class="table-wrap public-table-wrap flat">
       <table class="line-table public-rdo-table">
         <thead>
           <tr>
@@ -2080,16 +2514,16 @@ function renderPublicRdoTable(area) {
           </tr>
         </thead>
         <tbody>
-          ${rdoLines.map((line) => `
+          ${lines.length ? lines.map((line) => `
             <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
               <td>${line.line}</td>
               <td>${lineOccupant(line)}</td>
               ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
-              <td>${line.flex}</td>
-              <td>${line.aws}</td>
-              <td>${userChoiceCell(line.mid || "No")}</td>
+              <td>${publicPreferenceCell(line.flex)}</td>
+              <td>${publicPreferenceCell(line.aws)}</td>
+              <td>${publicPreferenceCell(lineMidReferenceValue(line))}</td>
             </tr>
-          `).join("")}
+          `).join("") : `<tr><td colspan="12">No RDO lines have been loaded for ${area} yet.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -2098,11 +2532,10 @@ function renderPublicRdoTable(area) {
 
 function renderPublicBidTimeTable(area) {
   return `
-    <div class="public-table-heading">
-      <strong>${area} Bid Times</strong>
-      <small>Area A test data is being used for this prototype. Each window runs for two hours.</small>
+    <div class="public-table-heading flat">
+      <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <div class="table-wrap public-table-wrap">
+    <div class="table-wrap public-table-wrap flat">
       <table class="public-bid-time-table">
         <thead>
           <tr>
@@ -2123,7 +2556,7 @@ function renderPublicBidTimeTable(area) {
               <td>${person.firstName} ${person.lastName}</td>
               <td>${person.initials}</td>
               <td><span class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</span></td>
-              ${person.rounds.map((round) => `<td>${round}</td>`).join("")}
+              ${person.rounds.map((round) => `<td>${publicBidTimeLabel(round)}</td>`).join("")}
             </tr>
           `).join("")}
         </tbody>
@@ -2138,12 +2571,19 @@ function updatePublicView(area = publicState.area, section = publicState.section
 
   const isInfoView = area === "FAQ" || area === "Previous Years" || section !== "Calendar";
   const tabs = document.querySelector(".public-tabs");
+  const publicPanel = document.querySelector(".public-calendar-panel");
   const calendarContent = document.querySelector("[data-public-calendar-content]");
+  const calendarViewControls = document.querySelector(".public-calendar-panel .segmented");
   const infoMessage = document.querySelector("[data-public-info]");
+  const isTableView = area !== "FAQ" && area !== "Previous Years" && section !== "Calendar";
 
   setText("[data-public-heading]", publicHeading(area, publicState.section));
   setText("[data-public-sheet-code]", publicSheetCode(area, publicState.section));
   setText("[data-public-sheet-title]", isInfoView ? publicHeading(area, publicState.section) : "Bid Calendar");
+
+  if (publicPanel) {
+    publicPanel.classList.toggle("table-view", isTableView);
+  }
 
   if (tabs) {
     const showTabs = area !== "FAQ" && area !== "Previous Years";
@@ -2161,8 +2601,13 @@ function updatePublicView(area = publicState.area, section = publicState.section
     calendarContent.hidden = isInfoView;
   }
 
+  if (calendarViewControls) {
+    calendarViewControls.hidden = publicState.section !== "Calendar";
+  }
+
   if (infoMessage) {
     infoMessage.hidden = !isInfoView;
+    infoMessage.classList.toggle("table-view", isTableView);
     infoMessage.innerHTML = publicInfoText(area, publicState.section);
   }
 
@@ -2243,10 +2688,21 @@ function renderCurrentUser() {
   const bidAsClassName = `bid-as-${bidAsClass(bidAs)}`;
   const ahead = hasSeniority ? currentUser.seniorityRank - 1 : "—";
   const behind = hasSeniority ? currentUser.bidderCount - currentUser.seniorityRank : "—";
+  const viewArea = currentViewArea();
   setText("[data-user-initials]", currentUser.initials);
   setText("[data-user-name]", userFullName());
   setText("[data-user-area]", currentUser.area);
-  setText("[data-user-context]", `${userFullName()} · ${currentUser.area}`);
+  document.querySelectorAll("[data-user-context]").forEach((element) => {
+    element.innerHTML = `
+      <span class="user-context-main">${userFullName()} · ${currentUser.area}</span>
+      <label class="view-area-control">
+        <span>Change view area</span>
+        <select data-view-area-select aria-label="Change view area">
+          ${ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("")}
+        </select>
+      </label>
+    `;
+  });
   setText("[data-user-role]", accessLabel());
   setText("[data-user-seniority]", userSeniorityText());
   setText("[data-user-seniority-long]", userSeniorityLongText());
@@ -2258,7 +2714,7 @@ function renderCurrentUser() {
   setText("[data-bidder-count]", `${currentUser.bidderCount} bidders`);
   setText(
     "[data-seniority-summary]",
-    isAdmin ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${currentUser.area}. Your position is highlighted.`
+    isAdmin ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
   );
   setText("[data-admin-grant-status]", activeAdminGrant() ? "Active" : "Not Assigned");
   setText("[data-admin-grant-window]", adminGrantWindowText());
@@ -2281,6 +2737,11 @@ function renderCurrentUser() {
     button.disabled = !hasSeniority;
     button.title = hasSeniority ? "View seniority list" : "Admin accounts are not in the area seniority order.";
   });
+
+  const selectedHomeLine = rdoLinesForArea(currentUser.area).find((line) => line.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0];
+  const rdoRequest = currentUserRdoRequest();
+  setText("[data-dashboard-rdo-line]", selectedHomeLine ? `Line ${selectedHomeLine.line}` : "No line selected");
+  setText("[data-dashboard-rdo-summary]", rdoRequest?.summary || "Choose fatigue group, AWS, Flex, and Mid when you bid.");
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !isAdmin;
@@ -2345,13 +2806,18 @@ function updateBidWindow() {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    button.disabled = !isOpen;
-    button.classList.toggle("disabled", !isOpen);
+    const disabled = !isOpen || !isViewingHomeArea();
+    button.disabled = disabled;
+    button.classList.toggle("disabled", disabled);
   });
 
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
     if (!isOpen) {
       button.textContent = "Bid Closed";
+      return;
+    }
+    if (!isViewingHomeArea()) {
+      button.textContent = "Viewing Only";
       return;
     }
 
@@ -2399,7 +2865,18 @@ function selectedMidValue(line) {
 function userChoiceCell(value) {
   if (value === "BID") return '<span class="status open">BID</span>';
   if (value === "—") return "—";
+  if (value === "UNSELECTED") return "Unselected";
   return value;
+}
+
+function publicPreferenceCell(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized === "—" || normalized.toUpperCase() === "UNSELECTED") return "";
+  return userChoiceCell(normalized);
+}
+
+function lineMidReferenceValue(line) {
+  return isMidLineByDesign(line) ? "BID" : "UNSELECTED";
 }
 
 function selectedLineStatus(line) {
@@ -2413,15 +2890,71 @@ function selectedLineStatus(line) {
   return "Open";
 }
 
+function syncRdoFilterControls() {
+  const search = document.querySelector('[data-rdo-filter="search"]');
+  const open = document.querySelector('[data-rdo-filter="open"]');
+  const mid = document.querySelector('[data-rdo-filter="mid"]');
+  const fourTen = document.querySelector('[data-rdo-filter="fourTen"]');
+
+  if (search && search.value !== rdoFilters.search) search.value = rdoFilters.search;
+  if (open) open.checked = rdoFilters.openOnly;
+  if (mid) mid.value = rdoFilters.mid;
+  if (fourTen) fourTen.value = rdoFilters.fourTen;
+}
+
+function rdoLineMatchesFilters(line) {
+  if (rdoFilters.openOnly && line.status === "Taken") return false;
+
+  const search = rdoFilters.search.trim().toLowerCase();
+  if (search) {
+    const searchable = [
+      line.line,
+      line.cpc,
+      line.pattern,
+      line.group,
+      line.status,
+      ...line.week,
+    ].join(" ").toLowerCase();
+    if (!searchable.includes(search)) return false;
+  }
+
+  const midValue = lineMidReferenceValue(line);
+  if (rdoFilters.mid !== "all" && midValue !== rdoFilters.mid) return false;
+  if (rdoFilters.fourTen !== "all" && lineFourTenValue(line) !== rdoFilters.fourTen) return false;
+
+  return true;
+}
+
+function isRdoFilterActive() {
+  return Boolean(
+    rdoFilters.search.trim() ||
+      !rdoFilters.openOnly ||
+      rdoFilters.mid !== "all" ||
+      rdoFilters.fourTen !== "all"
+  );
+}
+
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
 
   let lastPattern = "";
   const rows = [];
-  rdoLines.forEach((line) => {
+  const viewArea = currentViewArea();
+  const areaLines = rdoLinesForArea(viewArea);
+  const filteredLines = areaLines.filter(rdoLineMatchesFilters);
+  const countTarget = document.querySelector("[data-rdo-filter-count]");
+
+  if (countTarget) {
+    const lineLabel = filteredLines.length === 1 ? "line" : "lines";
+    countTarget.textContent = isRdoFilterActive()
+      ? `${filteredLines.length} matching ${lineLabel}`
+      : `${areaLines.filter((line) => line.status !== "Taken").length} open ${lineLabel}`;
+  }
+
+  filteredLines.forEach((line) => {
     if (line.pattern !== lastPattern) {
-      rows.push(`<tr><th colspan="13">${line.pattern}</th></tr>`);
+      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
 
@@ -2429,28 +2962,27 @@ function renderRdoLines() {
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
     const groupValue = isSelected ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>` : "";
-    const flexValue = isSelected ? selectedFlexPreference : "—";
-    const awsValue = isSelected ? selectedAwsPreference : "—";
-    const midValue = isSelected ? selectedMidValue(line) : isMidLineByDesign(line) ? "BID" : "—";
+    const midValue = lineMidReferenceValue(line);
 
     rows.push(`
-      <tr class="${isSelected ? "selected-row" : ""} ${isOccupied ? "occupied-row" : "selectable-row"}" data-line-id="${line.line}">
+      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
-        <td>${flexValue}</td>
-        <td>${awsValue}</td>
         <td>${userChoiceCell(midValue)}</td>
       </tr>
     `);
   });
 
-  target.innerHTML = rows.join("");
+  target.innerHTML = rows.length
+    ? rows.join("")
+    : `<tr><td colspan="11">No RDO lines match those filters for ${viewArea}.</td></tr>`;
 }
 
 function updateSelectedLine() {
-  const line = rdoLines.find((item) => item.line === selectedLineId) || rdoLines[0];
+  const areaLines = rdoLinesForArea(currentViewArea());
+  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
   if (!line) return;
   const midIsLocked = isForcedMid(line);
   const midValue = selectedMidValue(line);
@@ -2466,7 +2998,9 @@ function updateSelectedLine() {
     const request = selectedLineRequest(line);
     const approvedRequest = currentUserRdoRequest();
     element.textContent =
-      request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
+      !isViewingHomeArea()
+        ? `Viewing ${currentViewArea()} for reference. Bidding actions stay limited to your home area.`
+        : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
     element.textContent = selectedLineStatus(line);
@@ -2532,7 +3066,8 @@ function updateSelectedLine() {
 }
 
 function renderFatigueCapacity() {
-  const line = rdoLines.find((item) => item.line === selectedLineId) || rdoLines[0];
+  const areaLines = rdoLinesForArea(currentViewArea());
+  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
   if (!line) return;
   const fatigueCapacity = fatigueCapacityForLine(line);
 
@@ -2554,7 +3089,7 @@ function renderFatigueCapacity() {
 function renderLeaveRows(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
-  const compact = targetId === "leave-page-rows";
+  const compact = false;
 
   target.innerHTML = leaveBids
     .map((bid) => compact
@@ -2571,7 +3106,6 @@ function renderLeaveRows(targetId) {
           <td><b>${bid.priority}</b></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
-          <td>${bid.type}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
           <td>${bid.notes}</td>
         </tr>
@@ -2600,7 +3134,7 @@ function renderLeaveDraftQueue() {
         <span>${index + 1}</span>
         <div>
           <strong>${escapeHtml(item.range)}</strong>
-          <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged · ${escapeHtml(item.leaveType)}</small>
+          <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged</small>
         </div>
         <button type="button" aria-label="Remove ${escapeHtml(item.range)}" data-remove-leave-draft="${item.id}">×</button>
       </article>
@@ -2615,6 +3149,9 @@ function renderLeaveAllowanceSummary() {
   const credits = leaveHolidayCreditsForRound(round);
 
   setText("[data-leave-already-detail]", `Approved: 8 days · Pending: 4 days · ${holidayText}`);
+  setText("[data-leave-left-days]", "18");
+  setText("[data-leave-bid-days]", "12");
+  setText("[data-leave-balance-summary]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} total · ${holidayText}`);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
 
@@ -2926,13 +3463,16 @@ function renderSeniority() {
   const compactTarget = document.getElementById("seniority-list");
   if (compactTarget) {
     compactTarget.innerHTML = seniority
-      .map((person) => `
-        <div class="seniority-row ${person.status === "active" ? "active" : ""}">
+      .map((person) => {
+        const isBiddingNow = Boolean(person.openRound);
+        return `
+        <div class="seniority-row ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
           <span>#${person.rank}</span>
           <b>${person.initials}${person.rank === currentUser.seniorityRank ? " · You" : ""}</b>
-          <i class="dot ${person.status}"></i>
+          <i class="dot ${isBiddingNow ? "active" : person.status}" title="${isBiddingNow ? `Round ${person.openRound} bid window open` : ""}"></i>
         </div>
-      `)
+      `;
+      })
       .join("");
   }
 
@@ -2940,14 +3480,19 @@ function renderSeniority() {
   if (!pageTarget) return;
 
   pageTarget.innerHTML = seniority
-    .map((person) => `
-      <article class="seniority-card ${person.status === "active" ? "active" : ""}">
+    .map((person) => {
+      const isBiddingNow = Boolean(person.openRound);
+      return `
+      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
         <div class="seniority-card-head">
           <span>#${person.rank}</span>
-          ${person.status === "active" ? '<i class="open-now" title="Bid window open"></i>' : ""}
+          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
         </div>
         <strong>${person.rank === currentUser.seniorityRank ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
-        <small class="bid-as ${person.bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${person.bidAs}</small>
+        <div class="seniority-card-meta">
+          <small class="bid-as ${person.bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${person.bidAs}</small>
+          ${person.rank === currentUser.seniorityRank ? '<button class="secondary-action calendar-download" type="button" data-download-bid-windows>Download .ics</button>' : ""}
+        </div>
         <div class="round-times">
           ${person.rounds.map((time, index) => {
             const round = index + 1;
@@ -2962,9 +3507,9 @@ function renderSeniority() {
             `;
           }).join("")}
         </div>
-        ${person.rank === currentUser.seniorityRank ? '<button class="secondary-action calendar-download" type="button" data-download-bid-windows>Download .ics</button>' : ""}
       </article>
-    `)
+    `;
+    })
     .join("");
 }
 
@@ -3489,7 +4034,7 @@ function biddingExportRows() {
       currentUser.initials,
       currentUserBidAs(),
       bid.status,
-      `Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"} · ${bid.type} · ${bid.notes || ""}`,
+      `Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
       "",
       "",
     ]);
@@ -3790,6 +4335,7 @@ function renderApp() {
   renderCurrentUser();
   renderCalendars();
   syncLeaveBuilderInputs();
+  syncRdoFilterControls();
   renderRdoLines();
   updateSelectedLine();
   renderLeaveRows("dashboard-leave-rows");
@@ -3813,20 +4359,12 @@ function renderApp() {
 function loginAs(accountKey) {
   const account = testAccounts[accountKey] || testAccounts.bue;
   currentUser = { ...account };
-  document.querySelector(".login-screen")?.setAttribute("hidden", "");
-  document.querySelector(".app-shell")?.removeAttribute("hidden");
-  document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
-  renderApp();
-  setPage(accountKey === "admin" ? "intake" : "dashboard");
+  showLoggedInApp(accountKey === "admin" ? "intake" : "dashboard");
 }
 
 function logOut() {
+  supabaseClient()?.auth.signOut();
+  selectedViewArea = null;
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   document.querySelector(".login-screen")?.removeAttribute("hidden");
@@ -4006,6 +4544,13 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-save-profile]")) {
+    saveSupabaseProfile().then((handled) => {
+      if (!handled) renderApp();
+    });
+    return;
+  }
+
   if (event.target.closest("[data-preview-leave-request]")) {
     previewLeaveSubmission();
     return;
@@ -4134,7 +4679,7 @@ document.addEventListener("click", (event) => {
 
   const selectLineButton = event.target.closest("[data-select-line]");
   if (selectLineButton && !selectLineButton.hidden) {
-    const line = rdoLines.find((item) => item.line === selectedLineId);
+    const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
       addOrUpdateRdoSubmission();
     }
@@ -4196,6 +4741,58 @@ document.querySelector("[data-bid-year-select]")?.addEventListener("change", (ev
   updateSelectedBidYear(event.target.value);
 });
 
+document.querySelector("[data-email-login-form]")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const email = document.querySelector("[data-email-login-input]")?.value.trim();
+  if (!email) {
+    setAuthStatus("Enter your email address first.", "error");
+    return;
+  }
+  setAuthStatus("Sending login link...");
+  sendSupabaseLoginLink(email);
+});
+
+document.querySelector("[data-admin-login-form]")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const username = document.querySelector("[data-admin-username-input]")?.value.trim();
+  const password = document.querySelector("[data-admin-password-input]")?.value || "";
+  if (!username || !password) {
+    setAuthStatus("Enter the admin username and password.", "error");
+    return;
+  }
+  setAuthStatus("Checking admin login...");
+  loginWithUsernamePassword(username, password);
+});
+
+document.addEventListener("input", (event) => {
+  const filter = event.target.closest("[data-rdo-filter]");
+  if (!filter || filter.dataset.rdoFilter !== "search") return;
+  rdoFilters.search = filter.value;
+  renderRdoLines();
+});
+
+document.addEventListener("change", (event) => {
+  const rdoFilter = event.target.closest("[data-rdo-filter]");
+  if (rdoFilter) {
+    const filterName = rdoFilter.dataset.rdoFilter;
+    if (filterName === "open") rdoFilters.openOnly = rdoFilter.checked;
+    if (filterName === "mid") rdoFilters.mid = rdoFilter.value;
+    if (filterName === "fourTen") rdoFilters.fourTen = rdoFilter.value;
+    renderRdoLines();
+    return;
+  }
+
+  const viewAreaSelect = event.target.closest("[data-view-area-select]");
+  if (!viewAreaSelect) return;
+  selectedViewArea = viewAreaSelect.value || currentUser.area;
+  renderApp();
+});
+
 updatePublicView();
 renderApp();
+loadSupabaseReferenceData().then(() => {
+  updatePublicView();
+  renderApp();
+  initializeSupabaseAuth();
+});
 setInterval(updateBidWindow, 1000);

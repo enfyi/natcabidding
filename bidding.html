@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=peach-holiday-ring" />
+    <link rel="stylesheet" href="bidding.css?v=public-rdo-preferences" />
   </head>
   <body>
     <section class="login-screen public-shell" aria-label="Public bidding website">
@@ -84,8 +84,28 @@
           <div class="public-login">
             <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
             <div class="login-card" hidden data-public-login-menu>
+              <p class="eyebrow">Member Access</p>
+              <h2>Email Login</h2>
+              <form class="email-login-form" data-email-login-form>
+                <label>
+                  Email
+                  <input type="email" autocomplete="email" placeholder="name@example.com" data-email-login-input />
+                </label>
+                <button class="primary-action small" type="submit">Send Login Link</button>
+                <p class="auth-status" data-auth-status aria-live="polite"></p>
+              </form>
+              <form class="credential-login-form" data-admin-login-form>
+                <label>
+                  Username
+                  <input type="text" autocomplete="username" data-admin-username-input />
+                </label>
+                <label>
+                  Password
+                  <input type="password" autocomplete="current-password" data-admin-password-input />
+                </label>
+                <button class="primary-action small" type="submit">Admin Login</button>
+              </form>
               <p class="eyebrow">Test Access</p>
-              <h2>Choose Login</h2>
               <div class="login-options">
                 <button type="button" data-login="bue">
                   <span>BUE + Admin Tester</span>
@@ -93,9 +113,14 @@
                   <small>Test: oc / demo · Area A member view with active intake rights</small>
                 </button>
                 <button type="button" data-login="admin">
-                  <span>Temporary Intake Rights</span>
+                  <span>Intake Login</span>
                   <strong>Sarah Harris · SH</strong>
-                  <small>Test: sh / demo · Active all-area intake grant</small>
+                  <small>Test: sh / demo · Intake access with all-area review, no system admin rights</small>
+                </button>
+                <button type="button" data-login="regular-bue">
+                  <span>Basic BUE Access</span>
+                  <strong>Martin Ramirez · EZ</strong>
+                  <small>Test: ez / demo · Area D member view without admin or intake rights</small>
                 </button>
               </div>
             </div>
@@ -166,10 +191,6 @@
             <span class="nav-icon">▣</span>
             Leave
           </button>
-          <button class="nav-item" type="button" data-page="calendar">
-            <span class="nav-icon">□</span>
-            Calendar
-          </button>
           <button class="nav-item" type="button" data-page="intake" data-admin-only hidden>
             <span class="nav-icon">!</span>
             Intake
@@ -226,7 +247,12 @@
               <strong data-user-seniority>#5 / 45</strong>
             </button>
             <button class="alert-pill" type="button" aria-label="Open alerts" aria-expanded="false" data-alert-toggle>
-              <strong>!</strong>
+              <strong aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                  <path d="M10 21h4" />
+                </svg>
+              </strong>
               <span data-alert-count>2</span>
             </button>
             <button class="account-pill" type="button" aria-label="Open account settings" aria-expanded="false" data-account-toggle>
@@ -302,26 +328,27 @@
               <strong data-user-rank-metric>#5</strong>
               <small data-user-priority-summary>4 ahead · 40 behind</small>
             </article>
-            <article class="metric-card">
-              <span>Current Round</span>
-              <strong data-current-round>Round 1</strong>
-              <small data-current-bidder>Checking bid window</small>
-            </article>
+            <article class="metric-card empty-slot" aria-hidden="true"></article>
             <article class="metric-card selected">
               <span>RDO Line</span>
-              <strong>Line 15</strong>
-              <small>Group C · Flex Yes · AWS No · Mid No</small>
+              <strong data-dashboard-rdo-line>Line 15</strong>
+              <small data-dashboard-rdo-summary>Choose fatigue group, AWS, Flex, and Mid when you bid.</small>
             </article>
-            <article class="metric-card">
-              <span>Leave Left to Bid</span>
-              <strong>18</strong>
-              <small>Total allowance: 36 days</small>
+            <article class="metric-card leave-balance">
+              <span>Leave Balance</span>
+              <div class="balance-split">
+                <div>
+                  <strong data-leave-left-days>18</strong>
+                  <small>Left to bid</small>
+                </div>
+                <div>
+                  <strong data-leave-bid-days>12</strong>
+                  <small>Already bid</small>
+                </div>
+              </div>
+              <small data-leave-balance-summary>36 total · 2 holidays bid</small>
             </article>
-            <article class="metric-card green">
-              <span>Leave Already Bid</span>
-              <strong>12</strong>
-              <small data-leave-already-detail>Approved: 8 days · Pending: 4 days</small>
-            </article>
+            <article class="metric-card empty-slot" aria-hidden="true"></article>
           </div>
 
           <div class="dashboard-grid">
@@ -410,7 +437,8 @@
               <div class="panel-header">
                 <div>
                   <h2>Leave Bids</h2>
-                  <p>Drag to reorder leave priority before submitting.</p>
+                  <p>Drag to reorder annual leave priority before submitting.</p>
+                  <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                 </div>
                 <button class="primary-action small" type="button" data-page="leave">Add Leave</button>
               </div>
@@ -427,9 +455,8 @@
                       <th>Priority</th>
                       <th>Date Range</th>
                       <th>Days</th>
-                      <th>Type</th>
                       <th>Status</th>
-                      <th>Notes</th>
+                      <th>Private Notes</th>
                     </tr>
                   </thead>
                   <tbody id="dashboard-leave-rows"></tbody>
@@ -503,15 +530,21 @@
                   <h2>RDO Bid Lines - Area A</h2>
                   <p>Select an open negotiated line. Flex, AWS, fatigue group, and most Mid preferences are chosen by the employee.</p>
                 </div>
-                <span class="pill open">42 open lines</span>
+                <span class="pill open" data-rdo-filter-count>42 open lines</span>
               </div>
               <div class="filter-bar">
-                <input type="search" placeholder="Search line or CPC..." aria-label="Search RDO lines" />
-                <label><input type="checkbox" checked /> Open Only</label>
-                <select><option>Mid: All</option><option>Bid</option><option>No</option></select>
-                <select><option>AWS: All</option><option>Yes</option><option>No</option></select>
-                <select><option>4-10: All</option><option>Yes</option><option>No</option></select>
-                <select><option>Flex: All</option><option>Yes</option><option>No</option></select>
+                <input type="search" placeholder="Search line or CPC..." aria-label="Search RDO lines" data-rdo-filter="search" />
+                <label><input type="checkbox" checked data-rdo-filter="open" /> Open Only</label>
+                <select data-rdo-filter="mid" aria-label="Filter by mid preference">
+                  <option value="all">Mid: All</option>
+                  <option value="BID">Mid: Bid</option>
+                  <option value="UNSELECTED">Mid: Unselected</option>
+                </select>
+                <select data-rdo-filter="fourTen" aria-label="Filter by 4-10">
+                  <option value="all">4-10: All</option>
+                  <option value="Yes">4-10: Yes</option>
+                  <option value="No">4-10: No</option>
+                </select>
               </div>
               <div class="table-wrap tall">
                 <table class="line-table">
@@ -527,8 +560,6 @@
                       <th>Fri</th>
                       <th>Sat</th>
                       <th>Group</th>
-                      <th>Flex</th>
-                      <th>AWS</th>
                       <th>Mid</th>
                     </tr>
                   </thead>
@@ -608,21 +639,34 @@
                 <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
                 <span><i class="closed"></i> Leave Slots Filled</span>
               </div>
-              <section class="leave-slot-panel">
+              <section class="leave-bids-detail-panel">
                 <div class="panel-header compact">
                   <div>
-                    <h2>Leave Slot Detail</h2>
-                    <p>CPC slots, developmental pool, holidays, and unavailable days.</p>
+                    <h2>Leave Bids</h2>
+                    <p>Review and prioritize annual leave before submitting.</p>
+                    <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                   </div>
                 </div>
-                <div class="slot-legend">
-                  <span><i class="cpc-slot"></i> CPC Slot</span>
-                  <span><i class="dev-slot"></i> Developmental</span>
-                  <span><i class="holiday-slot"></i> Holiday</span>
-                  <span><i class="holiday-in-lieu-slot"></i> Holiday In-Lieu</span>
-                  <span><i class="unavailable-slot"></i> Unavailable</span>
+                <div class="tabs">
+                  <button class="active" type="button">My Leave Queue</button>
+                  <button type="button">Approved</button>
+                  <button type="button">Pending</button>
+                  <button type="button">Declined</button>
                 </div>
-                <div class="leave-slot-board" id="leave-slot-board"></div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Priority</th>
+                        <th>Date Range</th>
+                        <th>Days</th>
+                        <th>Status</th>
+                        <th>Private Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="leave-page-rows"></tbody>
+                  </table>
+                </div>
               </section>
             </section>
             <aside class="right-stack">
@@ -638,8 +682,9 @@
               <section class="panel leave-table-panel">
                 <div class="panel-header">
                 <div>
-                  <h2>Leave Bids</h2>
-                  <p>Build and prioritize annual leave requests for the current bidding round.</p>
+                  <h2>Build Request</h2>
+                  <p>Select dates, preview them, and add them to your batch.</p>
+                  <p class="privacy-note">Private notes stay in your view only and are not visible to admins or intake reps.</p>
                 </div>
                   <button class="primary-action small" type="button" data-add-leave-request>Add to Batch</button>
                 </div>
@@ -649,7 +694,6 @@
                     <div class="leave-date-picker" data-leave-date-picker hidden></div>
                   </label>
                   <label>Days <input type="number" value="2" min="1" data-leave-days-input readonly /></label>
-                  <label>Type <select data-leave-type-input><option>Annual Leave</option><option>Spot Leave</option></select></label>
                   <button class="secondary-action" type="button" data-preview-leave-request>Preview</button>
                   <p class="leave-builder-status" data-leave-builder-status aria-live="polite"></p>
                 </div>
@@ -664,14 +708,22 @@
                   <div class="leave-draft-list" data-leave-draft-list></div>
                   <button class="primary-action" type="button" data-submit-leave-batch disabled>Submit Leave Batch</button>
                 </div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr><th>Priority</th><th>Date Range</th><th>Days</th><th>Status</th></tr>
-                    </thead>
-                    <tbody id="leave-page-rows"></tbody>
-                  </table>
+              </section>
+              <section class="panel leave-slot-panel compact-slot-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Leave Slot Detail</h2>
+                    <p>Selected date detail. Full daily availability is also shown on calendar hover.</p>
+                  </div>
                 </div>
+                <div class="slot-legend">
+                  <span><i class="cpc-slot"></i> CPC</span>
+                  <span><i class="dev-slot"></i> Dev</span>
+                  <span><i class="holiday-slot"></i> Holiday</span>
+                  <span><i class="holiday-in-lieu-slot"></i> In-Lieu</span>
+                  <span><i class="unavailable-slot"></i> Unavailable</span>
+                </div>
+                <div class="leave-slot-board" id="leave-slot-board"></div>
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
@@ -956,12 +1008,12 @@
               <form class="profile-form">
                 <label>Name <input type="text" value="Michael Schoelen" data-profile-name /></label>
                 <label>Area <select data-profile-area><option>Area A</option><option>Area B</option><option>Area C</option><option>Area D</option><option>Area E</option><option>TMU</option><option>All Areas</option></select></label>
-                <label>Initials <input type="text" value="OC" maxlength="3" data-profile-initials /></label>
+                <label>Initials <input type="text" value="OC" maxlength="4" data-profile-initials /></label>
                 <label>Phone Number <input type="tel" value="(555) 555-0147" data-profile-phone /></label>
-                <label>Email <input type="email" value="oc@natcazla.com" data-profile-email /></label>
+                <label>Email <input type="email" value="m.schoelen@yahoo.com" data-profile-email /></label>
                 <div class="form-actions">
                   <button class="secondary-action" type="button">Cancel</button>
-                  <button class="primary-action" type="button">Save Profile</button>
+                  <button class="primary-action" type="button" data-save-profile>Save Profile</button>
                 </div>
               </form>
             </section>
@@ -998,6 +1050,8 @@
       </main>
     </div>
 
-    <script src="bidding.js?v=peach-holiday-ring"></script>
+    <script src="supabase-config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="bidding.js?v=public-rdo-preferences"></script>
   </body>
 </html>
