@@ -2094,6 +2094,16 @@ function setAuthStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
+function supabaseAuthRedirectUrl() {
+  const configuredUrl = window.NATCA_SUPABASE_CONFIG?.authRedirectUrl;
+  if (configuredUrl) return configuredUrl;
+
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.search = "";
+  return url.toString();
+}
+
 function profileFromSupabase(row) {
   const fallbackInitials = [row.first_name?.[0], row.last_name?.[0]].filter(Boolean).join("").toUpperCase();
   return {
@@ -2167,7 +2177,7 @@ async function sendSupabaseLoginLink(email) {
   const { error } = await client.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: window.location.href.split("#")[0],
+      emailRedirectTo: supabaseAuthRedirectUrl(),
     },
   });
 
