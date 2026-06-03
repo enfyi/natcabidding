@@ -70,7 +70,8 @@ grant execute on function public.claim_current_bidder_profile() to authenticated
 
 create or replace function public.update_current_bidder_profile(
   profile_initials text default null,
-  profile_phone text default null
+  profile_phone text default null,
+  profile_email text default null
 )
 returns table (
   profile_id uuid,
@@ -101,6 +102,7 @@ begin
       initials_verified = false,
       initials_updated_at = now(),
       phone = nullif(trim(profile_phone), ''),
+      email = coalesce(nullif(lower(trim(profile_email)), ''), b.email),
       updated_at = now()
   where b.auth_user_id = auth.uid()
     and b.active;
@@ -111,7 +113,7 @@ begin
 end;
 $$;
 
-grant execute on function public.update_current_bidder_profile(text, text) to authenticated;
+grant execute on function public.update_current_bidder_profile(text, text, text) to authenticated;
 
 create table if not exists app_login_accounts (
   id uuid primary key default gen_random_uuid(),

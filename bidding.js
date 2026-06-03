@@ -86,13 +86,14 @@ let leavePickerOpen = false;
 let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
 const prototypeEmails = [];
+const INTAKE_SCHEDULE_AREA = "All Areas";
 
 const intakeSchedules = [
   {
     id: "sched-oc-1",
     initials: "OC",
     name: "Michael Schoelen",
-    area: "Area A",
+    area: INTAKE_SCHEDULE_AREA,
     start: new Date(Date.now() + 24 * 60 * 60 * 1000),
     end: new Date(Date.now() + 26 * 60 * 60 * 1000),
   },
@@ -100,7 +101,7 @@ const intakeSchedules = [
     id: "sched-oc-2",
     initials: "OC",
     name: "Michael Schoelen",
-    area: "Area A",
+    area: INTAKE_SCHEDULE_AREA,
     start: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000),
     end: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000),
   },
@@ -108,7 +109,7 @@ const intakeSchedules = [
     id: "sched-sh-1",
     initials: "SH",
     name: "Sarah Harris",
-    area: "All Areas",
+    area: INTAKE_SCHEDULE_AREA,
     start: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
     end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000),
   },
@@ -2965,13 +2966,18 @@ function renderCurrentUser() {
   setText("[data-user-area]", currentUser.area);
   document.querySelectorAll("[data-user-context]").forEach((element) => {
     element.innerHTML = `
-      <span class="user-context-main">${userFullName()} · ${currentUser.area}</span>
-      <label class="view-area-control">
-        <span>Change view area</span>
-        <select data-view-area-select aria-label="Change view area">
-          ${ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("")}
-        </select>
-      </label>
+      <span class="user-context-main">
+        <span class="user-context-name">${userFullName()}</span>
+        <span class="user-context-area-group">
+          <span class="user-context-area">· ${currentUser.area}</span>
+          <label class="view-area-control">
+            <span>Change view area</span>
+            <select data-view-area-select aria-label="Change view area">
+              ${ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("")}
+            </select>
+          </label>
+        </span>
+      </span>
     `;
   });
   setText("[data-user-role]", accessLabel());
@@ -3545,7 +3551,7 @@ function addAdminScheduleFromForm() {
 
   const initials = (document.querySelector("[data-admin-schedule-initials]")?.value || "").trim().toUpperCase();
   const nameInput = (document.querySelector("[data-admin-schedule-name]")?.value || "").trim();
-  const area = document.querySelector("[data-admin-schedule-area]")?.value || "All Areas";
+  const area = INTAKE_SCHEDULE_AREA;
   const startRaw = document.querySelector("[data-admin-schedule-start]")?.value || "";
   const endRaw = document.querySelector("[data-admin-schedule-end]")?.value || "";
   const start = new Date(startRaw);
@@ -3574,7 +3580,7 @@ function addAdminScheduleFromForm() {
     end,
   });
 
-  logHistory(area === "All Areas" ? currentUser.area : area, "Intake shift scheduled", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
+  logHistory(area, "Intake shift scheduled", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
   renderApp();
   setAdminScheduleStatus(`${name} is scheduled. Intake access will open 15 minutes before the shift.`, "success");
 }
@@ -3696,7 +3702,7 @@ function addIntakeScheduleFromForm() {
 
   const initials = (document.querySelector("[data-schedule-initials]")?.value || "").trim().toUpperCase();
   const nameInput = (document.querySelector("[data-schedule-name]")?.value || "").trim();
-  const area = document.querySelector("[data-schedule-area]")?.value || "All Areas";
+  const area = INTAKE_SCHEDULE_AREA;
   const startRaw = document.querySelector("[data-schedule-start]")?.value || "";
   const endRaw = document.querySelector("[data-schedule-end]")?.value || "";
   const start = new Date(startRaw);
@@ -3725,7 +3731,7 @@ function addIntakeScheduleFromForm() {
     end,
   });
 
-  logHistory(area === "All Areas" ? currentUser.area : area, "Intake shift assigned", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
+  logHistory(area, "Intake shift assigned", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
   renderApp();
   setPage("intake-schedule");
   setScheduleFormStatus(`${name} is scheduled for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");

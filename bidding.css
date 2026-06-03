@@ -1029,18 +1029,33 @@ h3 {
   font-weight: 900;
   line-height: 1.15;
   text-align: left;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
 }
 
 .user-context-main {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 10px;
 }
 
-.view-area-control {
+.user-context-area-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.topbar .view-area-control {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  height: 36px;
   width: fit-content;
-  margin-top: 6px;
+  margin-top: 0;
   color: var(--muted);
   font-family: "Open Sans", Arial, sans-serif;
   font-size: 0.68rem;
@@ -4209,6 +4224,20 @@ tr.occupied-row .rdo-tag {
 
   .submit-card {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1560px) and (min-width: 721px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .topbar-user-context {
+    flex: 1 1 640px;
+  }
+
+  .topbar-controls {
+    flex: 1 1 100%;
   }
 }
 
