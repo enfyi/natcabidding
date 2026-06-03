@@ -91,7 +91,14 @@
                   Email
                   <input type="email" autocomplete="email" placeholder="name@example.com" data-email-login-input />
                 </label>
-                <button class="primary-action small" type="submit">Send Login Link</button>
+                <label>
+                  Password
+                  <input type="password" autocomplete="current-password" placeholder="Optional" data-email-password-input />
+                </label>
+                <div class="login-button-row">
+                  <button class="secondary-action small" type="button" data-send-login-link>Send Login Link</button>
+                  <button class="primary-action small" type="submit">Sign In</button>
+                </div>
                 <p class="auth-status" data-auth-status aria-live="polite"></p>
               </form>
               <form class="credential-login-form" data-admin-login-form>
@@ -1007,15 +1014,33 @@
               </div>
               <form class="profile-form">
                 <label>Name <input type="text" value="Michael Schoelen" data-profile-name /></label>
-                <label>Area <select data-profile-area><option>Area A</option><option>Area B</option><option>Area C</option><option>Area D</option><option>Area E</option><option>TMU</option><option>All Areas</option></select></label>
+                <label class="assigned-area-field">Area <span class="assigned-area-value" data-profile-area>Area A</span><small>If this area is incorrect, please contact your rep.</small></label>
                 <label>Initials <input type="text" value="OC" maxlength="4" data-profile-initials /></label>
                 <label>Phone Number <input type="tel" value="(555) 555-0147" data-profile-phone /></label>
-                <label>Email <input type="email" value="m.schoelen@yahoo.com" data-profile-email /></label>
+                <label>Contact Email <input type="email" value="m.schoelen@yahoo.com" data-profile-email /></label>
+                <p class="profile-form-status" data-profile-form-status role="status" aria-live="polite"></p>
                 <div class="form-actions">
-                  <button class="secondary-action" type="button">Cancel</button>
+                  <button class="secondary-action" type="button" data-cancel-profile>Cancel</button>
                   <button class="primary-action" type="button" data-save-profile>Save Profile</button>
                 </div>
               </form>
+              <section class="account-security">
+                <div>
+                  <h3>Account Security</h3>
+                  <p data-account-session-note>Login email and password changes are available after signing in with Supabase.</p>
+                </div>
+                <form class="account-form" data-account-email-form>
+                  <label>Current Login Email <span class="assigned-area-value" data-account-current-email>Not connected</span></label>
+                  <label>New Login Email <input type="email" autocomplete="email" data-account-email /></label>
+                  <button class="secondary-action" type="submit" data-update-account-email>Change Login Email</button>
+                </form>
+                <form class="account-form" data-account-password-form>
+                  <label>New Password <input type="password" autocomplete="new-password" minlength="8" data-account-password /></label>
+                  <label>Confirm Password <input type="password" autocomplete="new-password" minlength="8" data-account-password-confirm /></label>
+                  <button class="primary-action" type="submit" data-update-account-password>Set Password</button>
+                </form>
+                <p class="profile-form-status" data-account-form-status role="status" aria-live="polite"></p>
+              </section>
             </section>
             <aside class="right-stack">
               <section class="panel">
@@ -1041,7 +1066,7 @@
                 <ul class="plain-list">
                   <li>Contact details can be updated while logged in.</li>
                   <li>Seniority and bid position are managed by the bidding data.</li>
-                  <li>Area changes should be verified before bidding opens.</li>
+                  <li>If your assigned area is incorrect, please contact your rep.</li>
                 </ul>
               </section>
             </aside>

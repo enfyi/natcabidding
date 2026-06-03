@@ -257,8 +257,13 @@ const supabaseState = {
   enabled: false,
   connected: false,
   loading: false,
+  authInitialized: false,
+  authRestorePromise: null,
   message: "Using built-in prototype data.",
   loadedAt: null,
+  authEmail: "",
+  authUserId: "",
+  pendingAuthEmail: "",
 };
 
 const AREA_NAME_BY_CODE = {
@@ -2082,7 +2087,13 @@ function supabaseClient() {
   const config = window.NATCA_SUPABASE_CONFIG;
   if (!config?.url || !config?.publishableKey || !window.supabase?.createClient) return null;
   if (!supabaseState.client) {
-    supabaseState.client = window.supabase.createClient(config.url, config.publishableKey);
+    supabaseState.client = window.supabase.createClient(config.url, config.publishableKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    });
   }
   return supabaseState.client;
 }
@@ -2102,6 +2113,87 @@ function supabaseAuthRedirectUrl() {
   url.hash = "";
   url.search = "";
   return url.toString();
+}
+
+function clearSupabaseAccountState() {
+  supabaseState.authEmail = "";
+  supabaseState.authUserId = "";
+  supabaseState.pendingAuthEmail = "";
+  syncAccountFields();
+}
+
+function syncAccountFields() {
+  const hasSession = Boolean(supabaseState.authUserId);
+  const currentEmail = supabaseState.authEmail || "Not connected";
+  setText("[data-account-current-email]", currentEmail);
+  setText(
+    "[data-account-session-note]",
+    hasSession
+      ? supabaseState.pendingAuthEmail
+        ? `Email change pending confirmation for ${supabaseState.pendingAuthEmail}.`
+        : "You can set a password for future email/password sign-in or request a login email change."
+      : "Login email and password changes are available after signing in with Supabase."
+  );
+
+  document.querySelectorAll("[data-account-email]").forEach((input) => {
+    input.disabled = !hasSession;
+    input.placeholder = hasSession ? "new.email@example.com" : "";
+  });
+  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+    input.disabled = !hasSession;
+  });
+  document.querySelectorAll("[data-update-account-email], [data-update-account-password]").forEach((button) => {
+    button.disabled = !hasSession;
+  });
+  document.querySelectorAll("[data-account-email-form], [data-account-password-form]").forEach((form) => {
+    form.setAttribute("aria-disabled", String(!hasSession));
+  });
+}
+
+async function refreshSupabaseAccountState() {
+  const client = supabaseClient();
+  if (!client) {
+    clearSupabaseAccountState();
+    return null;
+  }
+
+  const { data, error } = await client.auth.getSession();
+  if (error || !data.session) {
+    clearSupabaseAccountState();
+    return null;
+  }
+
+  supabaseState.authEmail = data.session.user?.email || "";
+  supabaseState.authUserId = data.session.user?.id || "";
+  supabaseState.pendingAuthEmail = data.session.user?.new_email || "";
+  syncAccountFields();
+  return data.session;
+}
+
+function setAccountFormStatus(message, status = "info") {
+  const target = document.querySelector("[data-account-form-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function accountEmailInputValue() {
+  return (document.querySelector("[data-account-email]")?.value || "").trim().toLowerCase();
+}
+
+function clearAccountPasswordInputs() {
+  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+    input.value = "";
+  });
+}
+
+async function requireSupabaseAccountSession() {
+  const session = await refreshSupabaseAccountState();
+  if (!session) {
+    setAccountFormStatus("Sign in with the Supabase email link or email/password login first.", "error");
+    return null;
+  }
+  return session;
 }
 
 function profileFromSupabase(row) {
@@ -2150,21 +2242,45 @@ function showLoggedInApp(page = "dashboard") {
 
 async function initializeSupabaseAuth() {
   const client = supabaseClient();
-  if (!client) return;
-  const { data } = await client.auth.getSession();
-  if (!data.session) return;
+  if (!client || supabaseState.authInitialized) return;
 
-  try {
-    const profile = await claimSupabaseProfile();
-    if (!profile) {
-      setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
-      return;
+  supabaseState.authInitialized = true;
+  client.auth.onAuthStateChange((event, session) => {
+    if (session && ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"].includes(event)) {
+      restoreSupabaseSession();
     }
-    currentUser = profile;
-    showLoggedInApp("dashboard");
-  } catch (error) {
-    setAuthStatus(error.message || "Could not load your BUE profile.", "error");
-  }
+    if (event === "SIGNED_OUT") clearSupabaseAccountState();
+  });
+
+  await restoreSupabaseSession();
+}
+
+async function restoreSupabaseSession(page = "dashboard") {
+  if (supabaseState.authRestorePromise) return supabaseState.authRestorePromise;
+
+  supabaseState.authRestorePromise = (async () => {
+    const session = await refreshSupabaseAccountState();
+    if (!session) return false;
+
+    try {
+      const profile = await claimSupabaseProfile();
+      if (!profile) {
+        setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+        return false;
+      }
+      currentUser = profile;
+      setAuthStatus("Signed in.", "success");
+      showLoggedInApp(currentUser.systemAdmin ? "admin" : page);
+      return true;
+    } catch (error) {
+      setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+      return false;
+    } finally {
+      supabaseState.authRestorePromise = null;
+    }
+  })();
+
+  return supabaseState.authRestorePromise;
 }
 
 async function sendSupabaseLoginLink(email) {
@@ -2187,6 +2303,34 @@ async function sendSupabaseLoginLink(email) {
   }
 
   setAuthStatus("Login link sent. Check that email inbox.", "success");
+}
+
+async function loginWithSupabasePassword(email, password) {
+  const client = supabaseClient();
+  if (!client) {
+    setAuthStatus("Supabase login is not configured yet.", "error");
+    return;
+  }
+
+  const { error } = await client.auth.signInWithPassword({ email, password });
+  if (error) {
+    setAuthStatus(error.message || "That email or password did not work.", "error");
+    return;
+  }
+
+  await refreshSupabaseAccountState();
+  try {
+    const profile = await claimSupabaseProfile();
+    if (!profile) {
+      setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+      return;
+    }
+    currentUser = profile;
+    setAuthStatus("Signed in.", "success");
+    showLoggedInApp(currentUser.systemAdmin ? "admin" : "dashboard");
+  } catch (error) {
+    setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+  }
 }
 
 async function loginWithUsernamePassword(username, password) {
@@ -2213,27 +2357,144 @@ async function loginWithUsernamePassword(username, password) {
   }
 
   currentUser = profileFromSupabase(profile);
+  clearSupabaseAccountState();
   setAuthStatus("Signed in.", "success");
   showLoggedInApp(currentUser.systemAdmin ? "admin" : "dashboard");
 }
 
-async function saveSupabaseProfile() {
+function setProfileFormStatus(message, status = "info") {
+  const target = document.querySelector("[data-profile-form-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function profileFormValues() {
+  const fullName = document.querySelector("[data-profile-name]")?.value.trim() || userFullName();
+  const nameParts = fullName.split(/\s+/).filter(Boolean);
+  return {
+    firstName: nameParts[0] || currentUser.firstName,
+    lastName: nameParts.slice(1).join(" ") || currentUser.lastName,
+    initials: (document.querySelector("[data-profile-initials]")?.value || "").trim().toUpperCase(),
+    phone: (document.querySelector("[data-profile-phone]")?.value || "").trim(),
+    email: (document.querySelector("[data-profile-email]")?.value || "").trim(),
+  };
+}
+
+function applyProfileValues(values) {
+  currentUser = {
+    ...currentUser,
+    ...values,
+    area: currentUser.area,
+  };
+}
+
+async function saveSupabaseProfile(values) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
-  const initials = document.querySelector("[data-profile-initials]")?.value || "";
-  const phone = document.querySelector("[data-profile-phone]")?.value || "";
-  const { data, error } = await client.rpc("update_current_bidder_profile", {
-    profile_initials: initials,
-    profile_phone: phone,
+  let { data, error } = await client.rpc("update_current_bidder_profile", {
+    profile_initials: values.initials,
+    profile_phone: values.phone,
+    profile_email: values.email,
   });
+  if (error && /profile_email|function .*update_current_bidder_profile|Could not find/i.test(error.message || "")) {
+    const fallback = await client.rpc("update_current_bidder_profile", {
+      profile_initials: values.initials,
+      profile_phone: values.phone,
+    });
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (error) {
-    alert(error.message);
+    setProfileFormStatus(error.message || "Profile could not be saved.", "error");
     return true;
   }
   const profile = Array.isArray(data) ? data[0] : data;
   if (profile) currentUser = profileFromSupabase(profile);
   renderApp();
+  setProfileFormStatus("Profile saved.", "success");
   return true;
+}
+
+async function saveProfile() {
+  const values = profileFormValues();
+  if (!values.initials) {
+    setProfileFormStatus("Enter your initials before saving.", "error");
+    return;
+  }
+
+  setProfileFormStatus("Saving profile...");
+  const savedToSupabase = await saveSupabaseProfile(values);
+  if (savedToSupabase) return;
+
+  applyProfileValues(values);
+  renderApp();
+  setProfileFormStatus("Profile saved.", "success");
+}
+
+async function updateSupabaseAccountEmail() {
+  const session = await requireSupabaseAccountSession();
+  if (!session) return;
+
+  const email = accountEmailInputValue();
+  if (!email) {
+    setAccountFormStatus("Enter the new login email address.", "error");
+    return;
+  }
+  if (email === (session.user?.email || "").toLowerCase()) {
+    setAccountFormStatus("That is already your login email.", "error");
+    return;
+  }
+
+  setAccountFormStatus("Requesting email change...");
+  const { data, error } = await supabaseClient().auth.updateUser(
+    { email },
+    { emailRedirectTo: supabaseAuthRedirectUrl() }
+  );
+
+  if (error) {
+    setAccountFormStatus(error.message || "Login email could not be changed.", "error");
+    return;
+  }
+
+  supabaseState.pendingAuthEmail = data.user?.new_email || email;
+  document.querySelectorAll("[data-account-email]").forEach((input) => { input.value = ""; });
+  syncAccountFields();
+  setAccountFormStatus("Check your email to confirm the login email change.", "success");
+}
+
+async function updateSupabaseAccountPassword() {
+  const session = await requireSupabaseAccountSession();
+  if (!session) return;
+
+  const password = document.querySelector("[data-account-password]")?.value || "";
+  const confirmPassword = document.querySelector("[data-account-password-confirm]")?.value || "";
+
+  if (password.length < 8) {
+    setAccountFormStatus("Use at least 8 characters for the new password.", "error");
+    return;
+  }
+  if (password !== confirmPassword) {
+    setAccountFormStatus("The password confirmation does not match.", "error");
+    return;
+  }
+
+  setAccountFormStatus("Updating password...");
+  const { error } = await supabaseClient().auth.updateUser({ password });
+  if (error) {
+    setAccountFormStatus(error.message || "Password could not be updated.", "error");
+    return;
+  }
+
+  clearAccountPasswordInputs();
+  await refreshSupabaseAccountState();
+  setAccountFormStatus("Password saved. You can use email/password login next time.", "success");
+}
+
+function resetProfileForm() {
+  renderCurrentUser();
+  setProfileFormStatus("Changes canceled.");
+  setAccountFormStatus("Changes canceled.");
 }
 
 function areaNameForRow(row, areaById = new Map()) {
@@ -2738,10 +2999,11 @@ function renderCurrentUser() {
   });
 
   document.querySelectorAll("[data-profile-name]").forEach((input) => { input.value = userFullName(); });
-  document.querySelectorAll("[data-profile-area]").forEach((select) => { select.value = currentUser.area; });
+  document.querySelectorAll("[data-profile-area]").forEach((element) => { element.textContent = currentUser.area; });
   document.querySelectorAll("[data-profile-initials]").forEach((input) => { input.value = currentUser.initials; });
   document.querySelectorAll("[data-profile-phone]").forEach((input) => { input.value = currentUser.phone; });
   document.querySelectorAll("[data-profile-email]").forEach((input) => { input.value = currentUser.email; });
+  syncAccountFields();
 
   document.querySelectorAll(".seniority-pill").forEach((button) => {
     button.disabled = !hasSeniority;
@@ -4368,12 +4630,15 @@ function renderApp() {
 
 function loginAs(accountKey) {
   const account = testAccounts[accountKey] || testAccounts.bue;
+  void supabaseClient()?.auth.signOut();
+  clearSupabaseAccountState();
   currentUser = { ...account };
   showLoggedInApp(accountKey === "admin" ? "intake" : "dashboard");
 }
 
 function logOut() {
   supabaseClient()?.auth.signOut();
+  clearSupabaseAccountState();
   selectedViewArea = null;
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
@@ -4396,6 +4661,18 @@ document.addEventListener("click", (event) => {
   const loginButton = event.target.closest("[data-login]");
   if (loginButton) {
     loginAs(loginButton.dataset.login);
+    return;
+  }
+
+  const saveProfileButton = event.target.closest("[data-save-profile]");
+  if (saveProfileButton) {
+    void saveProfile();
+    return;
+  }
+
+  const cancelProfileButton = event.target.closest("[data-cancel-profile]");
+  if (cancelProfileButton) {
+    resetProfileForm();
     return;
   }
 
@@ -4551,13 +4828,6 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-add-leave-request]")) {
     addOrUpdateLeaveSubmission();
-    return;
-  }
-
-  if (event.target.closest("[data-save-profile]")) {
-    saveSupabaseProfile().then((handled) => {
-      if (!handled) renderApp();
-    });
     return;
   }
 
@@ -4754,6 +5024,22 @@ document.querySelector("[data-bid-year-select]")?.addEventListener("change", (ev
 document.querySelector("[data-email-login-form]")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const email = document.querySelector("[data-email-login-input]")?.value.trim();
+  const password = document.querySelector("[data-email-password-input]")?.value || "";
+  if (!email) {
+    setAuthStatus("Enter your email address first.", "error");
+    return;
+  }
+  if (!password) {
+    setAuthStatus("Sending login link...");
+    sendSupabaseLoginLink(email);
+    return;
+  }
+  setAuthStatus("Signing in...");
+  loginWithSupabasePassword(email, password);
+});
+
+document.querySelector("[data-send-login-link]")?.addEventListener("click", () => {
+  const email = document.querySelector("[data-email-login-input]")?.value.trim();
   if (!email) {
     setAuthStatus("Enter your email address first.", "error");
     return;
@@ -4772,6 +5058,16 @@ document.querySelector("[data-admin-login-form]")?.addEventListener("submit", (e
   }
   setAuthStatus("Checking admin login...");
   loginWithUsernamePassword(username, password);
+});
+
+document.querySelector("[data-account-email-form]")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  updateSupabaseAccountEmail();
+});
+
+document.querySelector("[data-account-password-form]")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  updateSupabaseAccountPassword();
 });
 
 document.addEventListener("input", (event) => {
@@ -4800,9 +5096,9 @@ document.addEventListener("change", (event) => {
 
 updatePublicView();
 renderApp();
+initializeSupabaseAuth();
 loadSupabaseReferenceData().then(() => {
   updatePublicView();
   renderApp();
-  initializeSupabaseAuth();
 });
 setInterval(updateBidWindow, 1000);

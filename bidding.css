@@ -227,6 +227,12 @@ button.seniority-pill {
   grid-column: 1 / -1;
 }
 
+.login-button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .email-login-form label,
 .credential-login-form label {
   display: grid;
@@ -3518,6 +3524,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .profile-form label:first-child,
+.profile-form-status,
 .profile-form .form-actions {
   grid-column: 1 / -1;
 }
@@ -3525,6 +3532,88 @@ tr.occupied-row .rdo-tag {
 .profile-form input,
 .profile-form select {
   width: 100%;
+}
+
+.assigned-area-field small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.assigned-area-value {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: var(--ink);
+  display: flex;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.profile-form-status {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin: 0;
+  min-height: 18px;
+}
+
+.profile-form-status[data-status="success"] {
+  color: #047857;
+}
+
+.profile-form-status[data-status="error"] {
+  color: #b91c1c;
+}
+
+.account-security {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 18px;
+}
+
+.account-security h3 {
+  margin: 0 0 5px;
+}
+
+.account-security p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.account-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.account-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.account-form input {
+  width: 100%;
+}
+
+.account-form button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.account-form[aria-disabled="true"] {
+  opacity: 0.62;
 }
 
 .form-actions {
@@ -4649,6 +4738,22 @@ body {
   background: #dbe7ff;
 }
 
+.app-main .selected-line-card .day-cell b {
+  padding: 0;
+  color: #172033;
+  background: transparent;
+}
+
+.app-main .selected-line-card .day-cell.rdo {
+  border-color: #c8d8ff;
+  background: #dbe7ff;
+}
+
+.app-main .selected-line-card .day-cell.rdo b {
+  color: #14335f;
+  background: transparent;
+}
+
 .app-main .shift.special {
   color: #073d41;
   background: #cfeff1;
@@ -5468,6 +5573,7 @@ body {
   .help-layout,
   .rule-list,
   .profile-form,
+  .account-form,
   .button-row {
     grid-template-columns: 1fr;
   }
