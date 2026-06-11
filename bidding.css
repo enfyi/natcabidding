@@ -15,6 +15,15 @@
   --green: #5bd48a;
   --blue: #5d8cff;
   --red: #ff6262;
+  --fatigue-a: #2b9aa0;
+  --fatigue-a-soft: rgba(43, 154, 160, 0.17);
+  --fatigue-a-line: rgba(43, 154, 160, 0.52);
+  --fatigue-b: #c9962f;
+  --fatigue-b-soft: rgba(201, 150, 47, 0.19);
+  --fatigue-b-line: rgba(201, 150, 47, 0.58);
+  --fatigue-c: #b84c83;
+  --fatigue-c-soft: rgba(184, 76, 131, 0.17);
+  --fatigue-c-line: rgba(184, 76, 131, 0.52);
   --text: rgba(255, 255, 255, 0.92);
   --muted: #c0b8d4;
   --soft: #8f84ac;
@@ -729,15 +738,19 @@ button.seniority-pill {
   display: grid;
   grid-template-columns: 34px repeat(7, minmax(100px, 1fr));
   margin-top: 24px;
-  border: 3px solid #1f49ff;
+  border: 3px solid var(--fatigue-c);
 }
 
 .public-week-row.group-a {
-  border-color: #ef233c;
+  border-color: var(--fatigue-a);
 }
 
 .public-week-row.group-b {
-  border-color: #1cd51c;
+  border-color: var(--fatigue-b);
+}
+
+.public-week-row.group-c {
+  border-color: var(--fatigue-c);
 }
 
 .public-week-row > div,
@@ -753,13 +766,22 @@ button.seniority-pill {
   place-items: start center;
   border-left: 0;
   color: white;
-  background: #1f49ff;
+  background: var(--fatigue-c);
   font-size: 1.15rem;
   font-weight: 900;
 }
 
+.group-a .week-group {
+  background: var(--fatigue-a);
+}
+
 .group-b .week-group {
-  background: #1cd51c;
+  color: #111827;
+  background: var(--fatigue-b);
+}
+
+.group-c .week-group {
+  background: var(--fatigue-c);
 }
 
 .public-week-row strong {
@@ -825,8 +847,12 @@ button.seniority-pill {
   height: 100vh;
   padding: 22px 14px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 5, 17, 0.86);
-  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.25);
+  background:
+    radial-gradient(circle at 54px 48px, rgba(255, 215, 127, 0.13), transparent 92px),
+    radial-gradient(circle at 28px 36px, rgba(122, 189, 194, 0.11), transparent 76px),
+    linear-gradient(180deg, rgba(15, 8, 29, 0.98), rgba(9, 5, 17, 0.96)),
+    #0d0818;
+  box-shadow: 12px 0 34px rgba(15, 23, 42, 0.14);
 }
 
 .side-rail::before {
@@ -885,6 +911,22 @@ button.seniority-pill {
   font-size: 0.76rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.app-nav .nav-admin-divider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: rgba(192, 184, 212, 0.92);
+  font-size: 0.68rem;
+}
+
+.app-nav .nav-admin-divider::before {
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, rgba(122, 189, 194, 0.42), rgba(255, 215, 127, 0.18));
 }
 
 .nav-item,
@@ -1050,28 +1092,14 @@ h3 {
 }
 
 .topbar .view-area-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 36px;
-  width: fit-content;
-  margin-top: 0;
-  color: var(--muted);
-  font-family: "Open Sans", Arial, sans-serif;
-  font-size: 0.68rem;
-  font-weight: 800;
-  line-height: 1;
-  text-transform: uppercase;
+  height: 56px;
+  width: auto;
+  min-width: 196px;
 }
 
 .view-area-control select {
-  min-height: 26px;
-  border-radius: 6px;
-  padding: 0 22px 0 8px;
-  color: inherit;
   font-size: 0.72rem;
   font-weight: 800;
-  background: transparent;
 }
 
 .topbar label {
@@ -1558,6 +1586,11 @@ input {
   align-content: start;
 }
 
+.metric-card.leave-remaining {
+  display: grid;
+  align-content: start;
+}
+
 .balance-split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1565,18 +1598,39 @@ input {
   margin: 8px 0 4px;
 }
 
-.balance-split > div + div {
-  border-left: 1px solid rgba(122, 189, 194, 0.32);
-  padding-left: 14px;
+.remaining-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
 }
 
-.balance-split strong {
+.balance-split > div + div,
+.remaining-split > div + div {
+  border-left: 1px solid rgba(122, 189, 194, 0.32);
+  padding-left: 12px;
+}
+
+.balance-split strong,
+.remaining-split strong {
   margin: 0 0 2px;
   font-size: 1.65rem;
 }
 
-.balance-split small {
+.balance-split small,
+.remaining-split small {
   display: block;
+}
+
+.balance-note {
+  margin-top: 4px;
+}
+
+.remaining-split small:first-child {
+  color: var(--teal);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .metric-card.selected {
@@ -1640,6 +1694,10 @@ input {
   color: var(--muted);
   background: transparent;
   font-weight: 800;
+}
+
+.segmented button[data-calendar-mode] {
+  min-width: 94px;
 }
 
 .segmented button.active {
@@ -1850,6 +1908,78 @@ input {
     repeating-linear-gradient(135deg, rgba(254, 202, 202, 0.95) 0 3px, rgba(248, 113, 113, 0.28) 3px 6px),
     #fee2e2;
   box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.2);
+}
+
+.month-grid .previous-leave-year-day {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
+}
+
+.month-grid .previous-leave-year-day .date-number {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(51, 65, 85, 0.68);
+}
+
+.month-grid .fatigue-week {
+  --fatigue-current: rgba(100, 116, 139, 0.6);
+}
+
+.month-grid .fatigue-a {
+  --fatigue-current: var(--fatigue-a);
+}
+
+.month-grid .fatigue-b {
+  --fatigue-current: var(--fatigue-b);
+}
+
+.month-grid .fatigue-c {
+  --fatigue-current: var(--fatigue-c);
+}
+
+.month-grid .fatigue-to-a {
+  --fatigue-next: var(--fatigue-a);
+}
+
+.month-grid .fatigue-to-b {
+  --fatigue-next: var(--fatigue-b);
+}
+
+.month-grid .fatigue-to-c {
+  --fatigue-next: var(--fatigue-c);
+}
+
+.month-grid .fatigue-week::after {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  left: 4px;
+  height: 3px;
+  border-radius: 999px;
+  content: "";
+  background: var(--fatigue-current);
+  opacity: 0.76;
+}
+
+.month-grid .fatigue-split::after {
+  background: linear-gradient(90deg, var(--fatigue-current) 0 50%, var(--fatigue-next) 50% 100%);
+}
+
+.month-grid .fatigue-week-dot {
+  position: absolute;
+  top: 50%;
+  left: -6px;
+  width: 6px;
+  height: 18px;
+  border-radius: 999px;
+  content: "";
+  background: var(--fatigue-current);
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 2px #ffffff;
 }
 
 .month-grid .selected-date {
@@ -2180,6 +2310,25 @@ input {
   background: var(--coral);
 }
 
+.legend .previous-leave-year {
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
+}
+
+.legend .fatigue-a {
+  background: var(--fatigue-a);
+}
+
+.legend .fatigue-b {
+  background: var(--fatigue-b);
+}
+
+.legend .fatigue-c {
+  background: var(--fatigue-c);
+}
+
 .right-stack {
   display: grid;
   align-content: start;
@@ -2237,6 +2386,36 @@ input {
   pointer-events: none;
   content: "";
   box-shadow: inset 0 0 0 1px rgba(255, 215, 127, 0.08);
+}
+
+.selected-status-card {
+  display: grid;
+  gap: 4px;
+  min-width: 88px;
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px;
+  color: var(--soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.selected-status-card em {
+  color: var(--soft);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.selected-status-card b {
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.selected-status-card.closed b {
+  color: var(--red);
 }
 
 .leave-bucket-cards {
@@ -2381,9 +2560,25 @@ input {
   font-weight: 800;
 }
 
+.aws-picker small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.aws-picker .aws-choice-options {
+  margin-top: auto;
+}
+
+.mid-picker .mid-options {
+  margin-top: auto;
+}
+
 .fatigue-options,
 .mid-options,
-.choice-options {
+.choice-options,
+.line-mode-options {
   display: grid;
   gap: 6px;
 }
@@ -2399,7 +2594,8 @@ input {
 
 .fatigue-option,
 .mid-option,
-.choice-option {
+.choice-option,
+.line-mode-option {
   min-height: 34px;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
@@ -2422,19 +2618,67 @@ input {
 
 .fatigue-option.active,
 .mid-option.active,
-.choice-option.active {
+.choice-option.active,
+.line-mode-option.active {
   border-color: var(--teal);
   background: rgba(122, 189, 194, 0.2);
 }
 
+.fatigue-option.a,
+.capacity-grid button.a,
+.group-choice button.a {
+  border-color: var(--fatigue-a-line);
+  background: var(--fatigue-a-soft);
+}
+
+.fatigue-option.b,
+.capacity-grid button.b,
+.group-choice button.b {
+  border-color: var(--fatigue-b-line);
+  background: var(--fatigue-b-soft);
+}
+
+.fatigue-option.c,
+.capacity-grid button.c,
+.group-choice button.c {
+  border-color: var(--fatigue-c-line);
+  background: var(--fatigue-c-soft);
+}
+
+.fatigue-option.a.active,
+.capacity-grid button.a.active,
+.group-choice button.a.active {
+  border-color: var(--fatigue-a);
+  background: linear-gradient(90deg, rgba(43, 154, 160, 0.26), var(--fatigue-a-soft));
+  box-shadow: inset 4px 0 0 var(--fatigue-a);
+}
+
+.fatigue-option.b.active,
+.capacity-grid button.b.active,
+.group-choice button.b.active {
+  border-color: var(--fatigue-b);
+  background: linear-gradient(90deg, rgba(201, 150, 47, 0.28), var(--fatigue-b-soft));
+  box-shadow: inset 4px 0 0 var(--fatigue-b);
+}
+
+.fatigue-option.c.active,
+.capacity-grid button.c.active,
+.group-choice button.c.active {
+  border-color: var(--fatigue-c);
+  background: linear-gradient(90deg, rgba(184, 76, 131, 0.27), var(--fatigue-c-soft));
+  box-shadow: inset 4px 0 0 var(--fatigue-c);
+}
+
 .fatigue-option:disabled,
 .mid-option:disabled,
-.choice-option:disabled {
+.choice-option:disabled,
+.line-mode-option:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.mid-option.locked {
+.mid-option.locked,
+.line-mode-option.locked {
   grid-column: 1 / -1;
   opacity: 1;
 }
@@ -2454,15 +2698,18 @@ input {
 }
 
 .group.a {
-  background: #c8192e;
+  color: #ffffff;
+  background: var(--fatigue-a);
 }
 
 .group.b {
-  background: #26b338;
+  color: #111827;
+  background: var(--fatigue-b);
 }
 
 .group.c {
-  background: #1456d9;
+  color: #ffffff;
+  background: var(--fatigue-c);
 }
 
 .button-row {
@@ -3293,9 +3540,19 @@ tr.occupied-row .rdo-tag {
 }
 
 .leave-builder.compact label,
-.leave-builder.compact input {
+.leave-builder.compact input,
+.leave-builder.compact textarea {
   min-width: 0;
   width: 100%;
+}
+
+.leave-builder.compact .leave-notes-field {
+  grid-column: 1 / -1;
+}
+
+.leave-builder textarea {
+  min-height: 92px;
+  resize: vertical;
 }
 
 .leave-builder-status {
@@ -3504,6 +3761,16 @@ tr.occupied-row .rdo-tag {
   display: block;
   color: #111827;
   font-size: 0.8rem;
+}
+
+.leave-draft-item em {
+  display: block;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .leave-draft-item button {
@@ -3827,6 +4094,24 @@ tr.occupied-row .rdo-tag {
 
 .schedule-form .form-status[data-status="error"] {
   color: #b91c1c;
+}
+
+.manual-bid-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.manual-bid-fields[hidden] {
+  display: none;
+}
+
+.manual-bid-fields label.wide {
+  grid-column: 1 / -1;
+}
+
+.manual-bid-card .primary-action {
+  width: 100%;
 }
 
 .admin-workspace {
@@ -4755,6 +5040,24 @@ body {
     0 0 0 2px rgba(252, 188, 127, 0.88);
 }
 
+.month-grid .previous-leave-year-day,
+.month-grid .previous-leave-year-day.rdo-day,
+.month-grid .previous-leave-year-day.holiday-day,
+.month-grid .previous-leave-year-day.holiday-in-lieu-day,
+.month-grid .previous-leave-year-day.closed-day,
+.app-main .month-grid .previous-leave-year-day,
+.app-main .month-grid .previous-leave-year-day.rdo-day,
+.app-main .month-grid .previous-leave-year-day.holiday-day,
+.app-main .month-grid .previous-leave-year-day.holiday-in-lieu-day,
+.app-main .month-grid .previous-leave-year-day.closed-day {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
+}
+
 .app-main .day-cell b,
 .app-main .shift {
   color: #172033;
@@ -4898,6 +5201,27 @@ body {
   color: #64748b;
 }
 
+.app-main .capacity-grid button.a,
+.app-main .fatigue-option.a,
+.app-main .group-choice button.a {
+  border-color: var(--fatigue-a-line);
+  background: var(--fatigue-a-soft);
+}
+
+.app-main .capacity-grid button.b,
+.app-main .fatigue-option.b,
+.app-main .group-choice button.b {
+  border-color: var(--fatigue-b-line);
+  background: var(--fatigue-b-soft);
+}
+
+.app-main .capacity-grid button.c,
+.app-main .fatigue-option.c,
+.app-main .group-choice button.c {
+  border-color: var(--fatigue-c-line);
+  background: var(--fatigue-c-soft);
+}
+
 .app-main .fatigue-picker em,
 .app-main .mid-picker em,
 .app-main .aws-picker em,
@@ -4913,9 +5237,47 @@ body {
 .app-main .capacity-grid button.active,
 .app-main .fatigue-option.active,
 .app-main .mid-option.active,
-.app-main .choice-option.active {
+.app-main .choice-option.active,
+.app-main .line-mode-option.active {
+  color: #0f172a;
   border-color: rgba(43, 127, 134, 0.48);
   background: rgba(122, 189, 194, 0.16);
+}
+
+.app-main .line-mode-option {
+  color: #111827;
+}
+
+.app-main .aws-picker .line-mode-option,
+.app-main .aws-picker .line-mode-option.active,
+.app-main .aws-picker .line-mode-option.locked,
+.app-main .line-mode-option:disabled {
+  color: #111827;
+  opacity: 1;
+}
+
+.app-main .capacity-grid button.a.active,
+.app-main .fatigue-option.a.active,
+.app-main .group-choice button.a.active {
+  border-color: var(--fatigue-a);
+  background: linear-gradient(90deg, rgba(43, 154, 160, 0.24), rgba(43, 154, 160, 0.1));
+  box-shadow: inset 4px 0 0 var(--fatigue-a);
+}
+
+.app-main .capacity-grid button.b.active,
+.app-main .fatigue-option.b.active,
+.app-main .group-choice button.b.active {
+  border-color: var(--fatigue-b);
+  background: linear-gradient(90deg, rgba(201, 150, 47, 0.28), rgba(201, 150, 47, 0.11));
+  box-shadow: inset 4px 0 0 var(--fatigue-b);
+}
+
+.app-main .capacity-grid button.c.active,
+.app-main .fatigue-option.c.active,
+.app-main .group-choice button.c.active {
+  border-color: var(--fatigue-c);
+  background: linear-gradient(90deg, rgba(184, 76, 131, 0.24), rgba(184, 76, 131, 0.1));
+  box-shadow: inset 4px 0 0 var(--fatigue-c);
 }
 
 .app-main .empty-group {

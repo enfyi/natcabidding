@@ -16,6 +16,10 @@ const monthNames = [
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BID_YEAR = 2027;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
+const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
+const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
+const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
+const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -239,7 +243,7 @@ let selectedFatigueGroup = "";
 let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "";
-let calendarView = "year";
+let calendarMode = "combined";
 let displayedCalendarYear = BID_YEAR;
 const rdoFilters = {
   search: "",
@@ -346,8 +350,13 @@ function isMidLineByDesign(line) {
 }
 
 function lineFourTenValue(line) {
+  if (line.fourTen === "Yes" || line.fourTen === "No") return line.fourTen;
   const workedDays = line.week.filter((value) => value !== "RDO").length;
   return workedDays === 4 ? "Yes" : "No";
+}
+
+function lineScheduleLabel(line) {
+  return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
 }
 
 const leaveBids = [
@@ -770,6 +779,264 @@ function addOrUpdateRdoSubmission() {
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is required before the line is populated.`);
 }
 
+function controllerName(person) {
+  return `${person.firstName} ${person.lastName}`;
+}
+
+function manualBidControllerOptions(selectedInitials) {
+  return seniority.map((person) => {
+    const selected = person.initials === selectedInitials ? " selected" : "";
+    return `<option value="${person.initials}"${selected}>#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}</option>`;
+  }).join("");
+}
+
+function manualBidAreaOptions(selectedArea) {
+  return Object.values(AREA_NAME_BY_CODE).map((area) => {
+    const selected = area === selectedArea ? " selected" : "";
+    return `<option value="${area}"${selected}>${area}</option>`;
+  }).join("");
+}
+
+function manualBidPerson(panel) {
+  const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+  return seniority.find((person) => person.initials === initials) || seniority[0] || {
+    rank: currentUser.seniorityRank,
+    firstName: currentUser.firstName,
+    lastName: currentUser.lastName,
+    initials: currentUser.initials,
+    bidAs: currentUserBidAs(),
+  };
+}
+
+function setManualBidStatus(panel, message, status = "info") {
+  const target = panel?.querySelector("[data-manual-bid-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function renderManualBidPanel(panel) {
+  const values = {
+    controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
+    type: panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line",
+    area: panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(),
+    line: panel.querySelector("[data-manual-rdo-line]")?.value || selectedLineId,
+    fatigueGroup: panel.querySelector("[data-manual-fatigue-group]")?.value || selectedFatigueGroup || "A",
+    flex: panel.querySelector("[data-manual-flex]")?.value || selectedFlexPreference || "Yes",
+    aws: panel.querySelector("[data-manual-aws]")?.value || selectedAwsPreference || "No",
+    mid: panel.querySelector("[data-manual-mid]")?.value || selectedMidPreference || "No",
+    range: panel.querySelector("[data-manual-leave-range]")?.value || "",
+    days: panel.querySelector("[data-manual-leave-days]")?.value || "",
+    round: panel.querySelector("[data-manual-leave-round]")?.value || String(currentRoundNumber()),
+    notes: panel.querySelector("[data-manual-leave-notes]")?.value || "",
+  };
+
+  const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
+  if (controllerSelect) {
+    controllerSelect.innerHTML = manualBidControllerOptions(values.controller);
+    controllerSelect.value = seniority.some((person) => person.initials === values.controller) ? values.controller : seniority[0]?.initials || "";
+  }
+
+  const typeSelect = panel.querySelector("[data-manual-bid-type]");
+  if (typeSelect) typeSelect.value = values.type;
+
+  const areaSelect = panel.querySelector("[data-manual-bid-area]");
+  if (areaSelect) {
+    areaSelect.innerHTML = manualBidAreaOptions(values.area);
+    areaSelect.value = Object.values(AREA_NAME_BY_CODE).includes(values.area) ? values.area : currentViewArea();
+  }
+
+  const rdoFields = panel.querySelector("[data-manual-rdo-fields]");
+  const leaveFields = panel.querySelector("[data-manual-leave-fields]");
+  const isLeave = values.type === "Leave";
+  if (rdoFields) rdoFields.hidden = isLeave;
+  if (leaveFields) leaveFields.hidden = !isLeave;
+
+  const lineSelect = panel.querySelector("[data-manual-rdo-line]");
+  const areaLines = rdoLinesForArea(areaSelect?.value || values.area);
+  if (lineSelect) {
+    lineSelect.innerHTML = areaLines.map((line) => {
+      const status = line.status === "Taken" ? ` · ${line.cpc || "Taken"}` : " · Open";
+      const selected = line.line === values.line ? " selected" : "";
+      return `<option value="${line.line}"${selected}>Line ${line.line} · ${line.pattern}${status}</option>`;
+    }).join("");
+    lineSelect.value = areaLines.some((line) => line.line === values.line) ? values.line : areaLines[0]?.line || "";
+  }
+
+  const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+  const midSelect = panel.querySelector("[data-manual-mid]");
+  if (midSelect) {
+    if (selectedLine && isMidLineByDesign(selectedLine)) {
+      midSelect.innerHTML = '<option value="BID">Bid Line</option>';
+      midSelect.value = "BID";
+      midSelect.disabled = true;
+    } else {
+      midSelect.innerHTML = `
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      `;
+      midSelect.value = values.mid === "Yes" ? "Yes" : "No";
+      midSelect.disabled = false;
+    }
+  }
+
+  const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
+  if (fatigueSelect) fatigueSelect.value = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
+  const flexSelect = panel.querySelector("[data-manual-flex]");
+  if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
+  const awsSelect = panel.querySelector("[data-manual-aws]");
+  if (awsSelect) awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+
+  const rangeInput = panel.querySelector("[data-manual-leave-range]");
+  if (rangeInput) rangeInput.value = values.range;
+  const daysInput = panel.querySelector("[data-manual-leave-days]");
+  if (daysInput) daysInput.value = values.days;
+  const roundSelect = panel.querySelector("[data-manual-leave-round]");
+  if (roundSelect) roundSelect.value = ["1", "2", "3", "4"].includes(values.round) ? values.round : String(currentRoundNumber());
+  const notesInput = panel.querySelector("[data-manual-leave-notes]");
+  if (notesInput) notesInput.value = values.notes;
+}
+
+function renderManualBidEntry() {
+  document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
+}
+
+function submitManualRdoBid(panel, person, area) {
+  const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
+  const line = rdoLinesForArea(area).find((item) => item.line === lineId);
+  if (!line) {
+    setManualBidStatus(panel, "Choose an RDO line before adding this bid.", "error");
+    return;
+  }
+
+  const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
+  const flex = panel.querySelector("[data-manual-flex]")?.value || "No";
+  const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
+  const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
+  const submittedAt = formatDateTime(new Date());
+  const existing = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === person.initials &&
+    item.status === "Pending"
+  );
+  const request = {
+    id: existing?.id || `manual-rdo-${person.initials.toLowerCase()}-${Date.now()}`,
+    type: "RDO Line",
+    area,
+    name: controllerName(person),
+    initials: person.initials,
+    bidAs: person.bidAs,
+    seniority: person.rank,
+    status: "Pending",
+    submittedAt,
+    manualEntry: true,
+    enteredBy: currentUser.initials,
+    line: line.line,
+    fatigueGroup,
+    flex,
+    aws,
+    mid,
+    summary: `Line ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+  };
+
+  if (existing) {
+    Object.assign(existing, request);
+  } else {
+    intakeQueue.unshift(request);
+  }
+
+  logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is required before the line is populated.`);
+  activeOverrideId = null;
+  activeDenialId = null;
+  renderApp();
+  setManualBidStatus(panel, `${person.initials}'s RDO bid was added to the intake queue.`, "success");
+}
+
+function submitManualLeaveBid(panel, person, area) {
+  const range = panel.querySelector("[data-manual-leave-range]")?.value.trim() || "";
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
+  const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
+  const dateKeys = datesInLeaveRange(range);
+  if (!dateKeys.length) {
+    setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
+    return;
+  }
+  if (dateKeys.some((key) => key < BID_LEAVE_YEAR_START_KEY)) {
+    setManualBidStatus(panel, "Leave bids must start on Jan 10, 2027 or later.", "error");
+    return;
+  }
+
+  const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
+  const enteredDays = Number(panel.querySelector("[data-manual-leave-days]")?.value || chargeableDates.length);
+  if (!Number.isFinite(enteredDays) || enteredDays < 1) {
+    setManualBidStatus(panel, "Enter the number of charged leave days.", "error");
+    return;
+  }
+  if (enteredDays !== chargeableDates.length) {
+    setManualBidStatus(panel, `That range charges ${chargeableDates.length} ${chargeableDates.length === 1 ? "day" : "days"} for ${person.initials}.`, "error");
+    return;
+  }
+
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const weekUnits = weekKeys.length;
+  const submittedAt = formatDateTime(new Date());
+  const request = {
+    id: `manual-leave-${person.initials.toLowerCase()}-${Date.now()}`,
+    type: "Leave",
+    area,
+    name: controllerName(person),
+    initials: person.initials,
+    bidAs: person.bidAs,
+    seniority: person.rank,
+    status: "Pending",
+    submittedAt,
+    manualEntry: true,
+    enteredBy: currentUser.initials,
+    range,
+    days: enteredDays,
+    round,
+    weekUnits,
+    weekKeys,
+    summary: `${range} · ${enteredDays} ${enteredDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+  };
+
+  intakeQueue.unshift(request);
+  leaveBids.push({
+    priority: nextLeavePriority(),
+    range: request.range,
+    days: request.days,
+    status: "Pending",
+    notes,
+    initials: person.initials,
+    area,
+    round,
+    weekUnits,
+    weekKeys,
+  });
+
+  logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
+  activeOverrideId = null;
+  activeDenialId = null;
+  renderApp();
+  setManualBidStatus(panel, `${person.initials}'s leave bid was added to the intake queue.`, "success");
+}
+
+function submitManualBidEntry(panel) {
+  if (!(hasIntakeAccess() || hasSystemAdminAccess())) {
+    setManualBidStatus(panel, "Manual bid entry requires intake or admin access.", "error");
+    return;
+  }
+
+  const person = manualBidPerson(panel);
+  const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+  const type = panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line";
+  if (type === "Leave") {
+    submitManualLeaveBid(panel, person, area);
+    return;
+  }
+  submitManualRdoBid(panel, person, area);
+}
+
 function setLeaveBuilderStatus(message, status = "info") {
   const target = document.querySelector("[data-leave-builder-status]");
   if (!target) return;
@@ -780,7 +1047,8 @@ function setLeaveBuilderStatus(message, status = "info") {
 function leaveBuilderValues() {
   const range = document.querySelector("[data-leave-range-input]")?.value.trim() || "";
   const days = Number(document.querySelector("[data-leave-days-input]")?.value || 0);
-  return { range, days };
+  const notes = document.querySelector("[data-leave-notes-input]")?.value.trim() || "";
+  return { range, days, notes };
 }
 
 function orderedLeaveRangeKeys() {
@@ -1158,7 +1426,7 @@ function draftRangeExists(range) {
 }
 
 function addOrUpdateLeaveSubmission() {
-  const { range, days } = leaveBuilderValues();
+  const { range, days, notes } = leaveBuilderValues();
   const round = currentRoundNumber();
   const isRoundOne = round === 1;
   if (!range) {
@@ -1232,10 +1500,13 @@ function addOrUpdateLeaveSubmission() {
     id: `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     range,
     days,
+    notes,
     round,
     weekUnits,
     weekKeys,
   });
+  const leaveNotesInput = document.querySelector("[data-leave-notes-input]");
+  if (leaveNotesInput) leaveNotesInput.value = "";
   leaveRangeSelectionComplete = true;
   leaveRangePreviewActive = false;
 
@@ -1317,13 +1588,19 @@ function submitLeaveDraftBatch() {
   }));
 
   newRequests.forEach((request) => {
+    const draft = leaveDraftQueue.find((item) => item.range === request.range);
     intakeQueue.unshift(request);
     leaveBids.push({
       priority: nextLeavePriority(),
       range: request.range,
       days: request.days,
       status: "Pending",
-      notes: request.weekUnits ? `Round ${request.round}: ${request.weekUnits} bid week, ${request.days} charged days` : "Pending intake review",
+      notes: draft?.notes || "",
+      initials: request.initials,
+      area: request.area,
+      round: request.round,
+      weekUnits: request.weekUnits,
+      weekKeys: request.weekKeys,
     });
   });
 
@@ -1363,6 +1640,13 @@ function queueBidVerifiedEmail(item) {
   );
 }
 
+function leaveBidForItem(item, range = item.range) {
+  return leaveBids.find((entry) =>
+    entry.range === range &&
+    (!entry.initials || !item.initials || entry.initials === item.initials)
+  ) || leaveBids.find((entry) => entry.range === range);
+}
+
 function applyRdoApproval(item) {
   const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
   if (!line) return;
@@ -1387,6 +1671,13 @@ function syncApprovedRdoItem(item) {
   const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
   if (!line || item.bidAs === "GL") return;
 
+  rdoLines.forEach((entry) => {
+    if (entry !== line && lineForArea(entry, item.area) && entry.cpc === item.initials) {
+      entry.cpc = "";
+      entry.status = "Open";
+    }
+  });
+
   line.cpc = item.initials;
   line.status = "Taken";
   line.group = item.fatigueGroup;
@@ -1410,7 +1701,7 @@ function applyLeaveApproval(item) {
     return false;
   }
 
-  const bid = leaveBids.find((entry) => entry.range === item.range);
+  const bid = leaveBidForItem(item);
   if (bid) bid.status = "Approved";
   syncApprovedLeaveItem(item);
   item.status = "Approved";
@@ -1466,7 +1757,7 @@ function removeInitialsFromLeaveRange(range, initials) {
 }
 
 function syncApprovedLeaveItem(item) {
-  const bid = leaveBids.find((entry) => entry.range === item.range);
+  const bid = leaveBidForItem(item);
   if (bid) bid.status = "Approved";
   const bucket = leaveSlotBucketForBidAs(item.bidAs);
   if (!bucket) return;
@@ -1575,7 +1866,7 @@ function denyIntakeItem(id) {
   delete item.denialDraftError;
 
   if (item.type === "Leave") {
-    const bid = leaveBids.find((entry) => entry.range === item.range);
+    const bid = leaveBidForItem(item);
     if (bid) {
       bid.status = "Declined";
       bid.notes = reason;
@@ -1672,20 +1963,9 @@ function makeCalendar(targetId) {
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = targetId !== "public-calendar" && area === currentUser.area;
   const showPersonalLeave = targetId !== "public-calendar" && area === currentUser.area;
-  const activeDate = calendarActiveDate();
-  let monthIndexes = monthNames.map((_, index) => index);
+  const monthIndexes = monthNames.map((_, index) => index);
 
-  target.classList.toggle("month-view", calendarView === "month");
-  target.classList.toggle("week-view", calendarView === "week");
-
-  if (calendarView === "month") {
-    monthIndexes = [activeDate.getMonth()];
-  }
-
-  if (calendarView === "week") {
-    target.innerHTML = renderWeekCalendar(activeDate, { showRdo, showPersonalLeave, area });
-    return;
-  }
+  target.classList.remove("month-view", "week-view");
 
   target.innerHTML = monthIndexes
     .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, { showRdo, showPersonalLeave, area }))
@@ -1743,35 +2023,58 @@ function renderWeekCalendar(activeDate, options = {}) {
 
 function renderCalendarDay(monthIndex, day, includeMonth = false, year = displayedCalendarYear, options = {}) {
   const { showRdo = true, showPersonalLeave = true } = options;
-  const weekday = new Date(year, monthIndex, day).getDay();
+  const mode = options.mode || calendarMode;
+  const showVacationLayer = mode === "vacation" || mode === "combined";
+  const showFatigueLayer = mode === "fatigue" || mode === "combined";
+  const date = new Date(year, monthIndex, day);
+  const weekday = date.getDay();
   const key = dateKey(year, monthIndex + 1, day);
-  const isRdo = showRdo && selectedRdoWeekdays().has(weekday);
-  const leaveStatus = showPersonalLeave && year === BID_YEAR ? personalLeaveDateStatus(key) : "";
-  const canShowLeaveState = !isRdo;
+  const isPreviousLeaveYear = key < BID_LEAVE_YEAR_START_KEY;
+  const fatigueGroup = isPreviousLeaveYear || !showFatigueLayer ? "" : fatigueGroupForDate(key);
+  const fatigueClass = groupClass(fatigueGroup);
+  const nextFatigueGroup = weekday === 6 ? nextFatigueGroupAfter(fatigueGroup) : "";
+  const nextFatigueClass = groupClass(nextFatigueGroup);
+  const isFatigueWeekStart = fatigueClass && (weekday === 0 || day === 1);
+  const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && selectedRdoWeekdays().has(weekday);
+  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR ? personalLeaveDateStatus(key) : "";
+  const canShowLeaveState = showVacationLayer && !isRdo && !isPreviousLeaveYear;
   const isApprovedLeave = leaveStatus === "approved" && canShowLeaveState;
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
-  const isDraftLeave = showPersonalLeave && canShowLeaveState && (isDraftLeaveDate(key) || isLeavePreviewRangeDate(key));
-  const holidayKind = calendarHolidayKind(key, options);
+  const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (isDraftLeaveDate(key) || isLeavePreviewRangeDate(key));
+  const holidayKind = isPreviousLeaveYear || !showVacationLayer ? null : calendarHolidayKind(key, options);
   const isClosed = canShowLeaveState && isLeaveSlotsFull(key, options.area);
-  const hasDetail = true;
+  const hasDetail = showVacationLayer && !isPreviousLeaveYear;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
-  const slotTooltip = quickLeaveSlotTooltip(key, holidayKind, options.area);
+  const slotTooltip = hasDetail ? quickLeaveSlotTooltip(key, holidayKind, options.area) : "";
   const className = [
     holidayKind?.className || "",
+    isPreviousLeaveYear ? "previous-leave-year-day" : "",
     isDraftLeave ? "draft-leave-day" : "",
     isPendingLeave ? "pending-leave-day" : "",
     isApprovedLeave ? "leave-day" : "",
     isRdo ? "rdo-day" : "",
     isClosed ? "closed-day" : "",
+    fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
+    nextFatigueClass ? `fatigue-split fatigue-to-${nextFatigueClass}` : "",
     hasDetail ? "has-slot-detail" : "",
     isSelected ? "selected-date" : "",
   ].filter(Boolean).join(" ");
-  const status = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
+  const fatigueStatus = nextFatigueGroup
+    ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
+    : `Group ${fatigueGroup} fatigue week`;
+  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
+  const status = isPreviousLeaveYear
+    ? "2026 leave year - leave bidding unavailable"
+    : showVacationLayer ? vacationStatus : fatigueStatus;
   const label = includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
   const leaveDateAttribute = canShowLeaveState ? `data-leave-date="${key}"` : 'aria-disabled="true"';
+  const fatigueAttribute = fatigueGroup ? `data-fatigue-week="${fatigueGroup}"` : "";
+  const nextFatigueAttribute = nextFatigueGroup ? `data-fatigue-next-week="${nextFatigueGroup}"` : "";
+  const ariaStatus = showVacationLayer && fatigueGroup ? `${status}; ${fatigueStatus}` : status;
 
   return `
-    <button class="${className}" type="button" ${leaveDateAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${status}">
+    <button class="${className}" type="button" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
+      ${isFatigueWeekStart ? `<i class="fatigue-week-dot" aria-hidden="true"></i>` : ""}
       <span class="date-number">${label}</span>
       ${slotTooltip}
     </button>
@@ -1789,8 +2092,8 @@ function updateCalendarYearLabels() {
 }
 
 function updateCalendarViewControls() {
-  document.querySelectorAll("[data-calendar-view]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.calendarView === calendarView);
+  document.querySelectorAll("[data-calendar-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.calendarMode === calendarMode);
   });
 }
 
@@ -2968,17 +3271,12 @@ function renderCurrentUser() {
     element.innerHTML = `
       <span class="user-context-main">
         <span class="user-context-name">${userFullName()}</span>
-        <span class="user-context-area-group">
-          <span class="user-context-area">· ${currentUser.area}</span>
-          <label class="view-area-control">
-            <span>Change view area</span>
-            <select data-view-area-select aria-label="Change view area">
-              ${ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("")}
-            </select>
-          </label>
-        </span>
+        <span class="user-context-area">· ${currentUser.area}</span>
       </span>
     `;
+  });
+  document.querySelectorAll("[data-view-area-select]").forEach((select) => {
+    select.innerHTML = ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("");
   });
   setText("[data-user-role]", accessLabel());
   setText("[data-user-seniority]", userSeniorityText());
@@ -3031,6 +3329,10 @@ function renderCurrentUser() {
 
   document.querySelectorAll("[data-system-admin-only]").forEach((element) => {
     element.hidden = !hasSystemAdminAccess();
+  });
+
+  document.querySelectorAll("[data-admin-tools]").forEach((element) => {
+    element.hidden = !(isAdmin || currentUserHasIntakeSchedule() || hasSystemAdminAccess());
   });
 }
 
@@ -3121,6 +3423,22 @@ function renderWeek(targetId, week = selectedWeek) {
 function groupClass(group) {
   const normalized = group[0]?.toLowerCase();
   return normalized === "a" || normalized === "b" || normalized === "c" ? normalized : "";
+}
+
+function fatigueGroupForDate(key) {
+  const date = dateFromKey(key);
+  const weekStart = new Date(date);
+  weekStart.setDate(date.getDate() - date.getDay());
+  const weekStartUtc = Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+  const diffWeeks = Math.floor((weekStartUtc - FATIGUE_WEEK_ANCHOR_UTC) / WEEK_IN_MILLISECONDS);
+  const rotationIndex = ((diffWeeks % FATIGUE_GROUP_ROTATION.length) + FATIGUE_GROUP_ROTATION.length) % FATIGUE_GROUP_ROTATION.length;
+  return FATIGUE_GROUP_ROTATION[rotationIndex];
+}
+
+function nextFatigueGroupAfter(group) {
+  const index = FATIGUE_GROUP_ROTATION.indexOf(group);
+  if (index === -1) return "";
+  return FATIGUE_GROUP_ROTATION[(index + 1) % FATIGUE_GROUP_ROTATION.length];
 }
 
 function shiftCell(value) {
@@ -3262,9 +3580,10 @@ function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
   const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
   if (!line) return;
-  const midIsLocked = isForcedMid(line);
-  const midValue = selectedMidValue(line);
+  const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
+  const canEditLineSchedule = hasSystemAdminAccess();
+  const lineSchedule = lineScheduleLabel(line);
 
   document.querySelectorAll("[data-selected-line]").forEach((element) => {
     element.textContent = `Line ${line.line}`;
@@ -3281,7 +3600,7 @@ function updateSelectedLine() {
         : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
-    element.textContent = selectedLineStatus(line);
+    element.innerHTML = `<em>Status</em><b>${selectedLineStatus(line)}</b>`;
     element.classList.toggle("closed", line.status === "Taken");
   });
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
@@ -3293,7 +3612,7 @@ function updateSelectedLine() {
             const isSelected = selectedFatigueGroup === item.group;
             const available = canChooseGroup(item, isSelected);
             return `
-              <button class="fatigue-option ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
                 <strong>${item.group}</strong>
                 <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
               </button>
@@ -3301,29 +3620,6 @@ function updateSelectedLine() {
           }).join("")}
         </span>
       </span>
-      <span class="mid-picker">
-        <em>Mid${midIsLocked ? " (Line Required)" : ""}</em>
-        <span class="mid-options">
-          ${midIsLocked
-            ? `<button class="mid-option active locked" type="button" disabled>${midValue}</button>`
-            : ["Yes", "No"].map((value) => `
-                <button class="mid-option ${selectedMidPreference === value ? "active" : ""}" type="button" data-mid-choice="${value}">
-                  ${value}
-                </button>
-              `).join("")}
-        </span>
-      </span>
-      <span class="aws-picker">
-        <em>AWS</em>
-        <span class="choice-options">
-          ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}">
-              ${value}
-            </button>
-          `).join("")}
-        </span>
-      </span>
-      <span>4-10 <b>${lineFourTenValue(line)}</b></span>
       <span class="flex-picker">
         <em>Flex</em>
         <span class="choice-options">
@@ -3334,13 +3630,74 @@ function updateSelectedLine() {
           `).join("")}
         </span>
       </span>
-      <span>Status <b>${selectedLineStatus(line)}</b></span>
+      <span class="aws-picker">
+        <em>AWS</em>
+        <small>Line schedule</small>
+        <span class="line-mode-options">
+          ${canEditLineSchedule
+            ? ["4-10", "5-8"].map((value) => `
+                <button class="line-mode-option ${lineSchedule === value ? "active" : ""}" type="button" data-four-ten-choice="${value === "4-10" ? "Yes" : "No"}">
+                  ${value}
+                </button>
+              `).join("")
+            : `<button class="line-mode-option active locked" type="button" disabled>${lineSchedule}</button>`}
+        </span>
+        <span class="choice-options aws-choice-options">
+          ${["Yes", "No"].map((value) => `
+            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}">
+              ${value}
+            </button>
+          `).join("")}
+        </span>
+      </span>
+      <span class="mid-picker">
+        <em>Mid</em>
+        <span class="line-mode-options mid-line-options">
+          <button class="line-mode-option mid-bid-line-option ${midIsBidLine ? "active locked" : ""}" type="button" disabled>
+            Bid Line
+          </button>
+        </span>
+        ${midIsBidLine
+          ? ""
+          : `<span class="mid-options">
+              ${["Yes", "No"].map((value) => `
+                <button class="mid-option ${selectedMidPreference === value ? "active" : ""}" type="button" data-mid-choice="${value}">
+                  ${value}
+                </button>
+              `).join("")}
+            </span>`}
+      </span>
     `;
   });
 
   renderWeek("selected-week", line.week);
   renderWeek("rdo-week", line.week);
   renderFatigueCapacity();
+}
+
+function updateLineFourTenStatus(value) {
+  if (!hasSystemAdminAccess()) {
+    alert("Only system admins can change whether this line is worked as 4-10s or 5-8s.");
+    return;
+  }
+
+  const areaLines = rdoLinesForArea(currentViewArea());
+  const line = areaLines.find((item) => item.line === selectedLineId) || null;
+  if (!line) return;
+
+  const currentValue = lineFourTenValue(line);
+  if (currentValue === value) return;
+
+  const warning = currentValue === "Yes" && value === "No"
+    ? "verify this line will be changed from 4-10s to 5-8s"
+    : `Verify this line will be changed from ${currentValue === "Yes" ? "4-10s" : "5-8s"} to ${value === "Yes" ? "4-10s" : "5-8s"}.`;
+
+  if (!window.confirm(warning)) return;
+
+  line.fourTen = value;
+  logHistory(currentViewArea(), "RDO line schedule changed", `${currentUser.initials} changed Line ${line.line} from ${currentValue === "Yes" ? "4-10s" : "5-8s"} to ${value === "Yes" ? "4-10s" : "5-8s"}.`);
+  renderRdoLines();
+  updateSelectedLine();
 }
 
 function renderFatigueCapacity() {
@@ -3354,7 +3711,7 @@ function renderFatigueCapacity() {
       const isSelected = selectedFatigueGroup === item.group;
       const available = canChooseGroup(item, isSelected);
       return `
-        <button class="${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
+        <button class="${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
           <strong>${item.group}</strong>
           <span>Area ${item.areaUsed}/${item.areaMax}</span>
           <span>Crew ${item.crewUsed}/${item.crewMax}</span>
@@ -3385,7 +3742,7 @@ function renderLeaveRows(targetId) {
           <td>${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
-          <td>${bid.notes}</td>
+          <td>${bid.notes ? escapeHtml(bid.notes) : "—"}</td>
         </tr>
       `)
     .join("");
@@ -3413,6 +3770,7 @@ function renderLeaveDraftQueue() {
         <div>
           <strong>${escapeHtml(item.range)}</strong>
           <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged</small>
+          ${item.notes ? `<em>${escapeHtml(item.notes)}</em>` : ""}
         </div>
         <button type="button" aria-label="Remove ${escapeHtml(item.range)}" data-remove-leave-draft="${item.id}">×</button>
       </article>
@@ -3427,9 +3785,11 @@ function renderLeaveAllowanceSummary() {
   const credits = leaveHolidayCreditsForRound(round);
 
   setText("[data-leave-already-detail]", `Approved: 8 days · Pending: 4 days · ${holidayText}`);
+  setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
   setText("[data-leave-left-days]", "18");
   setText("[data-leave-bid-days]", "12");
   setText("[data-leave-balance-summary]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} total · ${holidayText}`);
+  setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
 
@@ -4082,7 +4442,7 @@ function renderOverrideEditor(item) {
     return `
       <label>Line
         <select data-override-line>
-          ${rdoLines.map((line) => `<option value="${line.line}" ${line.line === item.line ? "selected" : ""}>Line ${line.line}</option>`).join("")}
+          ${rdoLinesForArea(item.area).map((line) => `<option value="${line.line}" ${line.line === item.line ? "selected" : ""}>Line ${line.line}</option>`).join("")}
         </select>
       </label>
       <label>Fatigue Group
@@ -4179,6 +4539,7 @@ function renderIntakeQueue() {
             <span>${item.area}</span>
             <span>Seniority #${item.seniority}</span>
             <span>Bid as ${item.bidAs}</span>
+            ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
             <span>Submitted ${item.submittedAt}</span>
           </div>
         </div>
@@ -4627,6 +4988,7 @@ function renderApp() {
   renderIntakeSchedule();
   renderHistory();
   renderIntakeQueue();
+  renderManualBidEntry();
   renderAdminConsole();
   renderHelpSummary();
   renderHelpPanel();
@@ -4873,6 +5235,13 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
+  if (manualBidSubmit) {
+    const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
+    if (panel) submitManualBidEntry(panel);
+    return;
+  }
+
   const adminLogin = event.target.closest("[data-admin-login-user]");
   if (adminLogin) {
     loginAs(adminLogin.dataset.adminLoginUser);
@@ -4955,6 +5324,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const fourTenButton = event.target.closest("[data-four-ten-choice]");
+  if (fourTenButton && !fourTenButton.disabled) {
+    updateLineFourTenStatus(fourTenButton.dataset.fourTenChoice);
+    return;
+  }
+
   const flexButton = event.target.closest("[data-flex-choice]");
   if (flexButton && !flexButton.disabled) {
     selectedFlexPreference = flexButton.dataset.flexChoice;
@@ -4999,9 +5374,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const calendarViewButton = event.target.closest("[data-calendar-view]");
-  if (calendarViewButton) {
-    calendarView = calendarViewButton.dataset.calendarView;
+  const calendarModeButton = event.target.closest("[data-calendar-mode]");
+  if (calendarModeButton) {
+    calendarMode = calendarModeButton.dataset.calendarMode;
     renderCalendars();
     return;
   }
@@ -5084,6 +5459,13 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  const manualPanel = event.target.closest("[data-manual-bid-panel]");
+  const manualReactiveField = event.target.closest("[data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line]");
+  if (manualPanel && manualReactiveField) {
+    renderManualBidPanel(manualPanel);
+    return;
+  }
+
   const rdoFilter = event.target.closest("[data-rdo-filter]");
   if (rdoFilter) {
     const filterName = rdoFilter.dataset.rdoFilter;
@@ -5108,3 +5490,4 @@ loadSupabaseReferenceData().then(() => {
   renderApp();
 });
 setInterval(updateBidWindow, 1000);
+window.NATCA_BIDDING_READY = true;
