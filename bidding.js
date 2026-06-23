@@ -20,6 +20,33 @@ const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
+const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
+const ROUND_RULES = {
+  1: {
+    label: "1 or 2 weeks",
+    detail: "Leave may include up to 2 bid weeks.",
+  },
+  2: {
+    label: "10 days",
+    detail: "Leave may include up to 10 charged days.",
+  },
+  3: {
+    label: "10 days",
+    detail: "Leave may include up to 10 charged days.",
+  },
+  4: {
+    label: "5 days",
+    detail: "Leave may include up to 5 charged days.",
+  },
+  5: {
+    label: "5 days",
+    detail: "Leave may include up to 5 charged days.",
+  },
+  6: {
+    label: "5 days",
+    detail: "Leave may include up to 5 charged days.",
+  },
+};
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -129,10 +156,15 @@ function isBidWindowOpen(date = new Date()) {
   return date >= userBidWindow.start && date <= userBidWindow.end;
 }
 
-function activeBidderRank() {
-  return isBidWindowOpen() && Number.isFinite(currentUser.seniorityRank)
-    ? currentUser.seniorityRank
-    : null;
+function activeBidderRank(date = new Date()) {
+  const roundState = areaBidRoundState(date);
+  if (roundState?.phase === "open") return roundState.activeRank;
+  if (roundState?.phase === "validation") return null;
+  if (!Number.isFinite(currentUser.seniorityRank)) return null;
+  if (isBidWindowOpen(date)) return currentUser.seniorityRank;
+  if (date < userBidWindow.start) return Math.max(1, currentUser.seniorityRank - 1);
+  const nextRank = currentUser.seniorityRank + 1;
+  return nextRank <= currentUser.bidderCount ? nextRank : null;
 }
 
 const holidayOverrides = new Set();
@@ -242,7 +274,7 @@ let selectedLineId = "15";
 let selectedFatigueGroup = "";
 let selectedMidPreference = "";
 let selectedAwsPreference = "";
-let selectedFlexPreference = "";
+let selectedFlexPreference = "Yes";
 let calendarMode = "combined";
 let displayedCalendarYear = BID_YEAR;
 const rdoFilters = {
@@ -357,6 +389,10 @@ function lineFourTenValue(line) {
 
 function lineScheduleLabel(line) {
   return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
+}
+
+function confirmFlexNo() {
+  return window.confirm("Are you sure you do not want to the ability to flex your shifts?");
 }
 
 const leaveBids = [
@@ -539,6 +575,65 @@ function parseRoundWindow(roundLabel) {
     start,
     end: addMinuteToTime(end),
   };
+}
+
+function roundWindowDate(parsedWindow, time) {
+  const hour = Number(time.slice(0, 2));
+  const minute = Number(time.slice(2, 4));
+  return new Date(BID_YEAR - 1, parsedWindow.month - 1, parsedWindow.day, hour, minute);
+}
+
+function bidWindowForRankRound(rank, roundNumber) {
+  const index = rank - 1;
+  const rowBlock = Math.floor(index / bidStartTimes.length);
+  const dateLabel = roundDateBlocks[rowBlock]?.[roundNumber - 1];
+  const startTime = bidStartTimes[index % bidStartTimes.length];
+  if (!dateLabel || !startTime) return null;
+
+  const parsedWindow = parseRoundWindow(bidWindowLabel(dateLabel, startTime));
+  if (!parsedWindow) return null;
+
+  return {
+    rank,
+    round: roundNumber,
+    start: roundWindowDate(parsedWindow, parsedWindow.start),
+    end: roundWindowDate(parsedWindow, parsedWindow.end),
+  };
+}
+
+function roundWindows(roundNumber) {
+  return senioritySource
+    .map((_, index) => bidWindowForRankRound(index + 1, roundNumber))
+    .filter(Boolean);
+}
+
+function areaBidRoundState(date = new Date()) {
+  const roundCount = roundDateBlocks[0]?.length || 0;
+  for (let round = 1; round <= roundCount; round += 1) {
+    const windows = roundWindows(round);
+    const activeWindow = windows.find((window) => date >= window.start && date < window.end);
+    if (activeWindow) {
+      return {
+        phase: "open",
+        round,
+        activeRank: activeWindow.rank,
+        startsAt: activeWindow.start,
+        endsAt: activeWindow.end,
+      };
+    }
+
+    const roundEnd = windows.reduce((latest, window) => (window.end > latest ? window.end : latest), new Date(0));
+    const validationEndsAt = new Date(roundEnd.getTime() + ROUND_VALIDATION_DURATION_MS);
+    if (date >= roundEnd && date < validationEndsAt) {
+      return {
+        phase: "validation",
+        round,
+        validationEndsAt,
+      };
+    }
+  }
+
+  return null;
 }
 
 function downloadBidWindowsIcs(rank = currentUser.seniorityRank) {
@@ -910,7 +1005,7 @@ function submitManualRdoBid(panel, person, area) {
   }
 
   const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
-  const flex = panel.querySelector("[data-manual-flex]")?.value || "No";
+  const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
   const submittedAt = formatDateTime(new Date());
@@ -1197,7 +1292,9 @@ function nextLeavePriority() {
 }
 
 function currentRoundLeaveLimit() {
-  return 10;
+  const round = currentRoundNumber();
+  if (round <= 1) return roundOneWeekLimit();
+  return round <= 3 ? 10 : 5;
 }
 
 function currentRoundNumber() {
@@ -1210,6 +1307,13 @@ function isRoundOneLeaveRound() {
 
 function roundOneWeekLimit() {
   return 2;
+}
+
+function roundRuleForRound(round = currentRoundNumber()) {
+  return ROUND_RULES[round] || {
+    label: "5 days",
+    detail: "Leave may include up to 5 charged days.",
+  };
 }
 
 function roundOneWeekUnitsForDateKeys(dateKeys) {
@@ -2251,6 +2355,21 @@ function renderLeaveSlotBoard() {
   `;
 }
 
+function openLeaveSlotModal() {
+  renderLeaveSlotBoard();
+  const modal = document.querySelector("[data-leave-slot-modal]");
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeLeaveSlotModal() {
+  const modal = document.querySelector("[data-leave-slot-modal]");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
 function dateKey(year, month, day) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -2989,7 +3108,10 @@ function formatDateRange(start, end) {
   return `${dateFormatter.format(start)} · ${timeFormatter.format(start)} - ${timeFormatter.format(end)}`;
 }
 
-function latestAreaRound() {
+function latestAreaRound(date = new Date()) {
+  const roundState = areaBidRoundState(date);
+  if (roundState) return roundState.round;
+
   const activePerson = seniority.find((person) => person.openRound);
   if (activePerson) return activePerson.openRound;
 
@@ -3342,24 +3464,46 @@ function hasSubmittedRdoBid() {
 
 function updateBidWindow() {
   const now = new Date();
+  const roundState = areaBidRoundState(now);
+  const isValidationPeriod = roundState?.phase === "validation";
+  const currentRound = latestAreaRound(now);
   const isBefore = now < userBidWindow.start;
   const isOpen = now >= userBidWindow.start && now <= userBidWindow.end;
   const isAdmin = hasIntakeAccess();
-  const activePerson = seniority.find((person) => person.openRound);
-  const statusText = isOpen ? "Open" : "Closed";
-  const clockLabel = isAdmin ? "Bid Window" : isOpen ? "Your Turn" : isBefore ? "Opens In" : "Window Closed";
-  const countdownText = isOpen
-    ? formatDuration(userBidWindow.end - now)
-    : isBefore
+  const activeRank = activeBidderRank(now);
+  const activePerson = seniority.find((person) => person.rank === activeRank);
+  const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
+  const statusText = areaRoundOpen ? "Open" : "Closed";
+  const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
+  const clockLabel = isAdmin
+    ? isValidationPeriod ? "Validation Period" : areaRoundOpen ? "Bidding Now" : "Bid Window"
+    : isValidationPeriod ? "Validation Period" : isOpen ? "Your Turn" : isBefore ? "Opens In" : showCurrentBidder ? "Bidding Now" : "Window Closed";
+  const countdownText = isValidationPeriod
+    ? formatDuration(roundState.validationEndsAt - now)
+    : isOpen
+      ? formatDuration(userBidWindow.end - now)
+      : isBefore
       ? formatDuration(userBidWindow.start - now)
-      : "Closed";
+      : showCurrentBidder
+        ? `#${activePerson.rank} / ${currentUser.bidderCount}`
+        : "Closed";
+  const countdownLabel = isValidationPeriod
+    ? "Validation Ends In"
+    : isOpen
+      ? "Window Closes In"
+      : isBefore
+      ? "Window Opens In"
+      : showCurrentBidder
+        ? "Currently Bidding"
+        : "Window Status";
+  const currentRoundRule = roundRuleForRound(currentRound);
 
   const status = document.getElementById("bid-window-status");
   if (status) {
-    status.classList.toggle("closed", !isOpen);
+    status.classList.toggle("closed", !areaRoundOpen);
     const copy = status.querySelector(".status-chip-copy");
     if (copy) {
-      copy.querySelector("small").textContent = `Round ${latestAreaRound()}`;
+      copy.querySelector("small").textContent = `Round ${currentRound}`;
       copy.querySelector("b").textContent = statusText;
     }
   }
@@ -3368,30 +3512,44 @@ function updateBidWindow() {
   if (clock) {
     clock.querySelector("span").textContent = clockLabel;
     clock.querySelector("strong").textContent = countdownText;
+    clock.title = showCurrentBidder && activePerson
+      ? `Currently bidding: Seniority #${activePerson.rank} (${activePerson.initials})`
+      : "";
   }
 
   setText("[data-bid-window-text]", statusText);
   setText("[data-bid-window-countdown]", countdownText);
+  setText("[data-bid-window-countdown-label]", countdownLabel);
   setText("[data-bid-window-close]", formatDateTime(userBidWindow.end));
   setText("[data-bid-window-range]", formatDateRange(userBidWindow.start, userBidWindow.end));
+  setText("[data-next-bid-window-round]", isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
+  setText("[data-next-bid-window-rule]", currentRoundRule.label);
+  setText("[data-next-bid-window-rule-detail]", currentRoundRule.detail);
   setText(
     "[data-current-bidder]",
-    isOpen && activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : "Closed"
+    isValidationPeriod
+      ? `Round ${currentRound} validation period`
+      : areaRoundOpen && activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : "Closed"
   );
-  setText("[data-current-round]", `Round ${latestAreaRound()}`);
+  setText("[data-current-round]", `Round ${currentRound}`);
+  renderRoundRuleSummary(now);
 
   document.querySelectorAll("[data-bid-window-pill]").forEach((pill) => {
     pill.textContent = statusText;
-    pill.classList.toggle("closed", !isOpen);
+    pill.classList.toggle("closed", !areaRoundOpen);
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = !isOpen || !isViewingHomeArea();
+    const disabled = isValidationPeriod || !isOpen || !isViewingHomeArea();
     button.disabled = disabled;
     button.classList.toggle("disabled", disabled);
   });
 
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
+    if (isValidationPeriod) {
+      button.textContent = "Round Closed";
+      return;
+    }
     if (!isOpen) {
       button.textContent = "Bid Closed";
       return;
@@ -3786,11 +3944,27 @@ function renderLeaveAllowanceSummary() {
 
   setText("[data-leave-already-detail]", `Approved: 8 days · Pending: 4 days · ${holidayText}`);
   setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
-  setText("[data-leave-left-days]", "18");
-  setText("[data-leave-bid-days]", "12");
+  setText("[data-leave-total-allowance]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} days`);
+  setText("[data-leave-left-days]", "18 days");
+  setText("[data-leave-bid-days]", "12 days");
   setText("[data-leave-balance-summary]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} total · ${holidayText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
+}
+
+function renderRoundRuleSummary(date = new Date()) {
+  const roundState = areaBidRoundState(date);
+  const round = latestAreaRound(date);
+  const rule = roundRuleForRound(round);
+  const phaseDetail = roundState?.phase === "validation"
+    ? "Validation period is active. No bids may be entered."
+    : roundState?.phase === "open"
+      ? `Currently bidding: seniority #${roundState.activeRank}.`
+      : "Bidding is closed until the next scheduled round window.";
+
+  setText("[data-round-rule-heading]", `Round ${round} Rules`);
+  setText("[data-round-rule-limit]", rule.label);
+  setText("[data-round-rule-detail]", `${rule.detail} ${phaseDetail}`);
 }
 
 function leaveBucketUsage(bucket) {
@@ -4981,6 +5155,7 @@ function renderApp() {
   renderLeaveRows("leave-page-rows");
   renderLeaveDraftQueue();
   renderLeaveAllowanceSummary();
+  renderRoundRuleSummary();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
   renderLeaveSlotBoard();
@@ -5041,6 +5216,11 @@ document.addEventListener("click", (event) => {
   const cancelProfileButton = event.target.closest("[data-cancel-profile]");
   if (cancelProfileButton) {
     resetProfileForm();
+    return;
+  }
+
+  if (event.target.closest("[data-leave-slot-close]") || event.target.matches("[data-leave-slot-modal]")) {
+    closeLeaveSlotModal();
     return;
   }
 
@@ -5332,6 +5512,10 @@ document.addEventListener("click", (event) => {
 
   const flexButton = event.target.closest("[data-flex-choice]");
   if (flexButton && !flexButton.disabled) {
+    if (flexButton.dataset.flexChoice === "No" && selectedFlexPreference !== "No" && !confirmFlexNo()) {
+      updateSelectedLine();
+      return;
+    }
     selectedFlexPreference = flexButton.dataset.flexChoice;
     renderRdoLines();
     updateSelectedLine();
@@ -5369,8 +5553,7 @@ document.addEventListener("click", (event) => {
     renderCalendars();
     syncLeaveBuilderInputs();
     if (!isAppCalendar) return;
-    renderLeaveSlotBoard();
-    setPage("leave");
+    openLeaveSlotModal();
     return;
   }
 
@@ -5396,6 +5579,12 @@ document.addEventListener("click", (event) => {
   const trigger = event.target.closest("[data-page]");
   if (!trigger) return;
   setPage(trigger.dataset.page);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeLeaveSlotModal();
+  }
 });
 
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
@@ -5460,6 +5649,12 @@ document.addEventListener("input", (event) => {
 
 document.addEventListener("change", (event) => {
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
+  const manualFlexField = event.target.closest("[data-manual-flex]");
+  if (manualPanel && manualFlexField && manualFlexField.value === "No" && !confirmFlexNo()) {
+    manualFlexField.value = "Yes";
+    return;
+  }
+
   const manualReactiveField = event.target.closest("[data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);

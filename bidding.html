@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal" />
   </head>
   <body>
     <section class="login-screen public-shell" aria-label="Public bidding website">
@@ -352,40 +352,10 @@
               <strong data-user-rank-metric>#5</strong>
               <small data-user-priority-summary>4 ahead · 40 behind</small>
             </article>
-            <article class="metric-card empty-slot" aria-hidden="true"></article>
             <article class="metric-card selected">
               <span>RDO Line</span>
               <strong data-dashboard-rdo-line>Line 15</strong>
               <small data-dashboard-rdo-summary>Choose fatigue group, AWS, Flex, and Mid when you bid.</small>
-            </article>
-            <article class="metric-card leave-balance">
-              <span data-leave-balance-heading>Leave Balance (Starting Balance 36 days)</span>
-              <div class="balance-split">
-                <div>
-                  <strong data-leave-bid-days>12</strong>
-                  <small>Already bid</small>
-                  <small class="balance-note" data-leave-balance-holidays>2 holidays bid</small>
-                </div>
-                <div>
-                  <strong data-leave-left-days>18</strong>
-                  <small>Left to bid</small>
-                </div>
-              </div>
-            </article>
-            <article class="metric-card leave-remaining">
-              <span>Area Leave Remaining</span>
-              <div class="remaining-split">
-                <div>
-                  <small>CPC</small>
-                  <strong data-cpc-leave-remaining>--</strong>
-                  <small data-cpc-leave-detail>Area CPC bucket</small>
-                </div>
-                <div>
-                  <small>Dev</small>
-                  <strong data-dev-leave-remaining>--</strong>
-                  <small data-dev-leave-detail>Developmental bucket</small>
-                </div>
-              </div>
             </article>
           </div>
 
@@ -425,6 +395,39 @@
             </section>
 
             <aside class="right-stack">
+              <section class="panel next-bid-window-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h2>Your Next Bid Window</h2>
+                    <p data-next-bid-window-round>Round 1</p>
+                  </div>
+                  <span class="pill open" data-bid-window-pill>Checking</span>
+                </div>
+                <strong data-bid-window-range>Loading bid window</strong>
+                <dl class="bid-window-detail-list">
+                  <div>
+                    <dt data-bid-window-countdown-label>Countdown</dt>
+                    <dd data-bid-window-countdown>--:--:--</dd>
+                  </div>
+                  <div>
+                    <dt>Round Rules</dt>
+                    <dd>
+                      <b data-next-bid-window-rule>1 or 2 weeks</b>
+                      <small data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</small>
+                    </dd>
+                  </div>
+                </dl>
+                <ul>
+                  <li>Selected line open</li>
+                  <li>Fatigue group selected</li>
+                  <li>Preferences complete</li>
+                  <li>Leave within allowance</li>
+                </ul>
+                <div class="button-row">
+                  <button class="primary-action window-action" type="button" data-page="rdos">Submit Bid</button>
+                  <button class="secondary-action" type="button">Save Draft</button>
+                </div>
+              </section>
               <section class="panel selected-line-card">
                 <div class="panel-header compact">
                   <div>
@@ -492,9 +495,9 @@
               <section class="panel allowance-card">
                 <h2>Leave Allowance Summary</h2>
                 <dl>
-                  <div><dt>Total Allowance</dt><dd>36 days</dd></div>
-                  <div><dt>Leave Already Bid</dt><dd>12 days</dd></div>
-                  <div><dt>Leave Left to Bid</dt><dd>18 days</dd></div>
+                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
                   <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
                 </dl>
               </section>
@@ -512,19 +515,6 @@
               </section>
             </div>
 
-            <section class="panel submit-card">
-              <h2>Bid Window</h2>
-              <strong data-bid-window-range>Loading bid window</strong>
-              <span class="pill open" data-bid-window-pill>Checking</span>
-              <ul>
-                <li>Selected line open</li>
-                <li>Fatigue group selected</li>
-                <li>Preferences complete</li>
-                <li>Leave within allowance</li>
-              </ul>
-              <button class="primary-action submit" type="button">Submit Bid</button>
-              <button class="secondary-action" type="button">Save Draft</button>
-            </section>
           </div>
         </section>
 
@@ -617,17 +607,12 @@
                 <button class="primary-action submit window-action" type="button" data-select-line data-bid-entry-action>Bid</button>
               </section>
               <section class="panel">
-                <h3>Fatigue Group Info</h3>
-                <p>Choose a group after selecting your line. Capacity must balance by area and by RDO crew.</p>
-                <div class="capacity-grid" data-fatigue-capacity></div>
-              </section>
-              <section class="panel">
                 <h3>Quick Rules</h3>
                 <ul class="plain-list">
                   <li>Lines apply for the entire year.</li>
                   <li>RDOs and shifts are defined by the line.</li>
                   <li>Fatigue group is balanced by area total and RDO crew.</li>
-                  <li>You can change your line until you submit.</li>
+                  <li>You can change your bid until your bidding window closes.<br />For changes after your window has closed, you must wait until the bidding change period.</li>
                 </ul>
               </section>
             </aside>
@@ -702,10 +687,19 @@
               <section class="panel allowance-card">
                 <h2>Leave Allowance Summary</h2>
                 <dl>
-                  <div><dt>Total Allowance</dt><dd>36 days</dd></div>
-                  <div><dt>Leave Already Bid</dt><dd>12 days</dd></div>
-                  <div><dt>Leave Left to Bid</dt><dd>18 days</dd></div>
+                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
                   <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
+                </dl>
+              </section>
+              <section class="panel allowance-card area-leave-card">
+                <h2>Area Leave Remaining</h2>
+                <dl>
+                  <div><dt>CPC</dt><dd data-cpc-leave-remaining>--</dd></div>
+                  <div><dt>CPC Used</dt><dd data-cpc-leave-detail>Area CPC bucket</dd></div>
+                  <div><dt>DEV</dt><dd data-dev-leave-remaining>--</dd></div>
+                  <div><dt>DEV Used</dt><dd data-dev-leave-detail>Developmental bucket</dd></div>
                 </dl>
               </section>
               <section class="panel leave-table-panel">
@@ -741,24 +735,13 @@
                   <button class="primary-action" type="button" data-submit-leave-batch disabled>Submit Leave Batch</button>
                 </div>
               </section>
-              <section class="panel leave-slot-panel compact-slot-panel">
-                <div class="panel-header compact">
-                  <div>
-                    <h2>Leave Slot Detail</h2>
-                    <p>Selected date detail. Full daily availability is also shown on calendar hover.</p>
-                  </div>
-                </div>
-                <div class="slot-legend">
-                  <span><i class="cpc-slot"></i> CPC</span>
-                  <span><i class="dev-slot"></i> Dev</span>
-                  <span><i class="holiday-slot"></i> Holiday</span>
-                  <span><i class="holiday-in-lieu-slot"></i> In-Lieu</span>
-                  <span><i class="unavailable-slot"></i> Unavailable</span>
-                </div>
-                <div class="leave-slot-board" id="leave-slot-board"></div>
-              </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
+                <div class="current-round-rule">
+                  <span data-round-rule-heading>Round 1 Rules</span>
+                  <strong data-round-rule-limit>1 or 2 weeks</strong>
+                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
+                </div>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
                   <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
@@ -1232,10 +1215,29 @@
         </section>
       </main>
     </div>
+    <div class="leave-slot-modal" data-leave-slot-modal hidden role="dialog" aria-modal="true" aria-labelledby="leave-slot-modal-title">
+      <div class="leave-slot-modal-panel">
+        <div class="panel-header compact">
+          <div>
+            <h2 id="leave-slot-modal-title">Leave Slot Detail</h2>
+            <p>Selected date detail. Full daily availability is also shown on calendar hover.</p>
+          </div>
+          <button class="secondary-action small" type="button" data-leave-slot-close>Close</button>
+        </div>
+        <div class="slot-legend">
+          <span><i class="cpc-slot"></i> CPC</span>
+          <span><i class="dev-slot"></i> Dev</span>
+          <span><i class="holiday-slot"></i> Holiday</span>
+          <span><i class="holiday-in-lieu-slot"></i> In-Lieu</span>
+          <span><i class="unavailable-slot"></i> Unavailable</span>
+        </div>
+        <div class="leave-slot-board" id="leave-slot-board"></div>
+      </div>
+    </div>
 
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids"></script>
+    <script src="bidding.js?v=login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
