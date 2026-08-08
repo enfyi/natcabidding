@@ -2528,50 +2528,17 @@ function setAuthStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
-function prototypeAccountForEmail(email) {
-  const normalizedEmail = String(email || "").trim().toLowerCase();
-  return Object.entries(testAccounts).find(([, account]) =>
-    String(account.email || "").toLowerCase() === normalizedEmail
-  ) || null;
-}
-
-function prototypeAccountForUsername(username) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  return Object.entries(testAccounts).find(([key, account]) =>
-    key.toLowerCase() === normalizedUsername ||
-    String(account.initials || "").toLowerCase() === normalizedUsername ||
-    String(account.email || "").toLowerCase() === normalizedUsername
-  ) || null;
-}
-
-function loginWithPrototypeAccount(accountEntry, password, fallbackReason = "") {
-  if (!accountEntry || password !== "demo") return false;
-
-  const [, account] = accountEntry;
-  void supabaseClient()?.auth.signOut().catch(() => {});
-  clearSupabaseAccountState();
-  currentUser = { ...account };
-  setAuthStatus(
-    fallbackReason
-      ? `Signed in with prototype access because ${fallbackReason}.`
-      : "Signed in with prototype access.",
-    "success"
-  );
-  showLoggedInApp("dashboard");
-  return true;
-}
-
 function friendlyAuthFailure(error) {
   const message = error?.message || String(error || "");
   if (/load failed|failed to fetch|network/i.test(message)) {
-    return "Supabase could not be reached. Use demo credentials for prototype access, or try again after the connection is available.";
+    return "Login could not reach Supabase. Check your connection and try again.";
   }
   return message || "That login did not work.";
 }
 
 function supabaseAuthRedirectUrl() {
   const configuredUrl = window.NATCA_SUPABASE_CONFIG?.authRedirectUrl;
-  if (configuredUrl) return configuredUrl;
+  if (configuredUrl && configuredUrl !== "auto") return configuredUrl;
 
   const url = new URL(window.location.href);
   url.hash = "";
@@ -2750,7 +2717,7 @@ async function restoreSupabaseSession(page = "dashboard") {
 async function sendSupabaseLoginLink(email) {
   const client = supabaseClient();
   if (!client) {
-    setAuthStatus("Supabase login is not configured yet.", "error");
+    setAuthStatus("Login is not configured yet.", "error");
     return;
   }
 
@@ -2769,11 +2736,29 @@ async function sendSupabaseLoginLink(email) {
   setAuthStatus("Login link sent. Check that email inbox.", "success");
 }
 
+async function sendSupabasePasswordReset(email) {
+  const client = supabaseClient();
+  if (!client) {
+    setAuthStatus("Login is not configured yet.", "error");
+    return;
+  }
+
+  const { error } = await client.auth.resetPasswordForEmail(email, {
+    redirectTo: supabaseAuthRedirectUrl(),
+  });
+
+  if (error) {
+    setAuthStatus(error.message || "Password reset email could not be sent.", "error");
+    return;
+  }
+
+  setAuthStatus("Password email sent. Use that link to choose a new password.", "success");
+}
+
 async function loginWithSupabasePassword(email, password) {
   const client = supabaseClient();
   if (!client) {
-    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase is not configured")) return;
-    setAuthStatus("Supabase login is not configured yet. Prototype access uses the password demo.", "error");
+    setAuthStatus("Login is not configured yet.", "error");
     return;
   }
 
@@ -2781,14 +2766,12 @@ async function loginWithSupabasePassword(email, password) {
   try {
     signInResult = await client.auth.signInWithPassword({ email, password });
   } catch (error) {
-    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase could not be reached")) return;
     setAuthStatus(friendlyAuthFailure(error), "error");
     return;
   }
 
   const { error } = signInResult;
   if (error) {
-    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase login failed to load")) return;
     setAuthStatus(friendlyAuthFailure(error), "error");
     return;
   }
@@ -2804,7 +2787,6 @@ async function loginWithSupabasePassword(email, password) {
     setAuthStatus("Signed in.", "success");
     showLoggedInApp("dashboard");
   } catch (error) {
-    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "the BUE profile could not be loaded")) return;
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
 }
@@ -2812,8 +2794,7 @@ async function loginWithSupabasePassword(email, password) {
 async function loginWithUsernamePassword(username, password) {
   const client = supabaseClient();
   if (!client) {
-    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase is not configured")) return;
-    setAuthStatus("Supabase login is not configured yet. Prototype access uses the password demo.", "error");
+    setAuthStatus("Login is not configured yet.", "error");
     return;
   }
 
@@ -2824,7 +2805,6 @@ async function loginWithUsernamePassword(username, password) {
       login_password: password,
     });
   } catch (error) {
-    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase could not be reached")) return;
     setAuthStatus(friendlyAuthFailure(error), "error");
     return;
   }
@@ -2832,14 +2812,12 @@ async function loginWithUsernamePassword(username, password) {
   const { data, error } = loginResult;
 
   if (error) {
-    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase login failed to load")) return;
     setAuthStatus(friendlyAuthFailure(error) || "Could not check that login.", "error");
     return;
   }
 
   const profile = Array.isArray(data) ? data[0] : data;
   if (!profile) {
-    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password)) return;
     setAuthStatus("That username or password did not match.", "error");
     return;
   }
@@ -5301,12 +5279,6 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const loginButton = event.target.closest("[data-login]");
-  if (loginButton) {
-    loginAs(loginButton.dataset.login);
-    return;
-  }
-
   const saveProfileButton = event.target.closest("[data-save-profile]");
   if (saveProfileButton) {
     void saveProfile();
@@ -5722,6 +5694,16 @@ document.querySelector("[data-send-login-link]")?.addEventListener("click", () =
   }
   setAuthStatus("Sending login link...");
   sendSupabaseLoginLink(email);
+});
+
+document.querySelector("[data-reset-login-password]")?.addEventListener("click", () => {
+  const email = document.querySelector("[data-email-login-input]")?.value.trim();
+  if (!email) {
+    setAuthStatus("Enter your email address first.", "error");
+    return;
+  }
+  setAuthStatus("Sending password email...");
+  sendSupabasePasswordReset(email);
 });
 
 document.querySelector("[data-admin-login-form]")?.addEventListener("submit", (event) => {

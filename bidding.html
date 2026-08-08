@@ -85,7 +85,7 @@
             <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
-              <h2>Email Login</h2>
+              <h2>Member Login</h2>
               <form class="email-login-form" data-email-login-form>
                 <label>
                   Email
@@ -93,12 +93,13 @@
                 </label>
                 <label>
                   Password
-                  <input type="password" autocomplete="current-password" placeholder="Optional" data-email-password-input />
+                  <input type="password" autocomplete="current-password" placeholder="Password" data-email-password-input />
                 </label>
                 <div class="login-button-row">
                   <button class="secondary-action small" type="button" data-send-login-link>Send Login Link</button>
                   <button class="primary-action small" type="submit">Sign In</button>
                 </div>
+                <button class="auth-link-action" type="button" data-reset-login-password>Set or reset password</button>
                 <p class="auth-status" data-auth-status aria-live="polite"></p>
               </form>
               <form class="credential-login-form" data-admin-login-form>
@@ -112,14 +113,6 @@
                 </label>
                 <button class="primary-action small" type="submit">Admin Login</button>
               </form>
-              <p class="eyebrow">Test Access</p>
-              <div class="login-options">
-                <button type="button" data-login="bue">
-                  <span>BUE + Admin Tester</span>
-                  <strong>Michael Schoelen · OC</strong>
-                  <small>Test: oc / demo · Area A member view with active intake rights</small>
-                </button>
-              </div>
             </div>
           </div>
         </header>
@@ -1281,6 +1274,16 @@
           true
         );
 
+        document.querySelector("[data-reset-login-password]")?.addEventListener(
+          "click",
+          (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showAuthFallback();
+          },
+          true
+        );
+
         document.querySelector("[data-admin-login-form]")?.addEventListener(
           "submit",
           (event) => {
@@ -1291,17 +1294,6 @@
           true
         );
 
-        document.querySelectorAll("[data-login]").forEach((button) => {
-          button.addEventListener(
-            "click",
-            (event) => {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              showAuthFallback();
-            },
-            true
-          );
-        });
       }, 0);
     </script>
   </body>
