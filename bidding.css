@@ -4376,51 +4376,73 @@ tr.occupied-row .rdo-tag {
 }
 
 .roster-table {
-  min-width: 980px;
+  min-width: 1220px;
+  border-collapse: collapse;
 }
 
-.roster-table td small {
-  display: block;
-  margin-top: 2px;
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.roster-table tr.inactive {
-  opacity: 0.62;
+.roster-table th,
+.roster-table td {
+  padding: 6px;
+  vertical-align: middle;
 }
 
 .roster-table input,
 .roster-table select {
   width: 100%;
-  border: 1px solid #cbd8e6;
-  border-radius: 7px;
-  padding: 7px 8px;
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 6px 8px;
   color: var(--ink);
-  background: #ffffff;
+  background: #f8fafc;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 800;
 }
 
+.roster-table input:focus,
+.roster-table select:focus {
+  border-color: #1287c6;
+  background: #ffffff;
+  outline: 2px solid rgba(18, 135, 198, 0.14);
+}
+
+.roster-table input[readonly] {
+  color: #475569;
+  background: #eef4f9;
+  cursor: default;
+}
+
 .roster-table .bulk-rank {
-  width: 58px;
+  width: 64px;
+  text-align: center;
 }
 
 .bulk-initials {
-  width: 70px;
+  min-width: 76px;
 }
 
-.bulk-name-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 6px;
+.roster-drag-handle {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #cbd8e6;
+  border-radius: 4px;
+  color: #64748b;
+  background: #ffffff;
+  cursor: grab;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1;
 }
 
-.bulk-name-grid + input {
-  margin-bottom: 6px;
+.roster-drag-handle:active {
+  cursor: grabbing;
+}
+
+.roster-table tr.dragging {
+  opacity: 0.48;
 }
 
 .roster-row-actions {

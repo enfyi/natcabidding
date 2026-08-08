@@ -1005,6 +1005,7 @@
                 <div class="roster-editor-grid">
                   <form class="roster-form" data-roster-form>
                     <input type="hidden" data-roster-edit-initials />
+                    <input type="hidden" data-roster-edit-index />
                     <label>First Name <input type="text" data-roster-first-name /></label>
                     <label>Last Name <input type="text" data-roster-last-name /></label>
                     <label>Initials <input type="text" maxlength="4" data-roster-initials /></label>
@@ -1030,12 +1031,6 @@
                         <option>D-DEV</option>
                       </select>
                     </label>
-                    <label>Status
-                      <select data-roster-active>
-                        <option value="true">Active</option>
-                        <option value="false">Inactive</option>
-                      </select>
-                    </label>
                     <div class="roster-form-actions">
                       <button class="secondary-action small" type="button" data-roster-new>New</button>
                       <button class="primary-action small" type="submit">Save BUE</button>
@@ -1053,12 +1048,15 @@
                     <table class="roster-table">
                       <thead>
                         <tr>
+                          <th></th>
                           <th>#</th>
-                          <th>Name</th>
+                          <th>First</th>
+                          <th>Last</th>
                           <th>Initials</th>
+                          <th>Email</th>
+                          <th>Phone</th>
                           <th>Area</th>
                           <th>Role</th>
-                          <th>Status</th>
                           <th></th>
                         </tr>
                       </thead>

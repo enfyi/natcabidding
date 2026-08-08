@@ -4204,12 +4204,13 @@ function rosterEntryInitials(entry) {
 
 function rosterEntriesForArea(area = selectedRosterArea()) {
   return senioritySource
-    .filter((entry) => seniorityEntryArea(entry) === area)
+    .filter((entry) => seniorityEntryArea(entry) === area && seniorityEntryActive(entry))
     .map((entry) => {
       const activeEntries = activeRosterEntries(area);
       const activeRank = activeEntries.findIndex((item) => item === entry) + 1;
       return {
         entry,
+        sourceIndex: senioritySource.indexOf(entry),
         person: rosterEntryToPerson(entry, activeRank > 0 ? activeRank : null),
       };
     });
@@ -4223,20 +4224,26 @@ function rosterBidAsOptions(selectedBidAs) {
   return ["CPC", "GL", "R-DEV", "D-DEV"].map((bidAs) => `<option value="${bidAs}" ${bidAs === selectedBidAs ? "selected" : ""}>${bidAs}</option>`).join("");
 }
 
-function rosterActiveOptions(isActive) {
-  return `
-    <option value="true" ${isActive ? "selected" : ""}>Active</option>
-    <option value="false" ${!isActive ? "selected" : ""}>Inactive</option>
-  `;
-}
-
 function findRosterEntryByInitials(initials) {
   const normalized = String(initials || "").trim().toUpperCase();
   return senioritySource.find((entry) => rosterEntryInitials(entry) === normalized) || null;
 }
 
+function findRosterEntryByIndex(index) {
+  const entryIndex = Number(index);
+  if (!Number.isInteger(entryIndex) || entryIndex < 0) return null;
+  return senioritySource[entryIndex] || null;
+}
+
+function findRosterEntryForEdit(index, initials) {
+  const entry = findRosterEntryByIndex(index);
+  if (entry && rosterEntryInitials(entry) === initials) return entry;
+  return findRosterEntryByInitials(initials);
+}
+
 function defaultRosterFormValues(area = selectedRosterArea()) {
   return {
+    editIndex: "",
     firstName: "",
     lastName: "",
     initials: "",
@@ -4245,7 +4252,6 @@ function defaultRosterFormValues(area = selectedRosterArea()) {
     area,
     rank: activeRosterEntries(area).length + 1,
     bidAs: "CPC",
-    active: true,
   };
 }
 
@@ -4255,6 +4261,7 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
     if (input) input.value = value ?? "";
   };
   setValue("[data-roster-edit-initials]", values.editInitials || "");
+  setValue("[data-roster-edit-index]", values.editIndex ?? "");
   setValue("[data-roster-first-name]", values.firstName);
   setValue("[data-roster-last-name]", values.lastName);
   setValue("[data-roster-initials]", values.initials);
@@ -4263,7 +4270,6 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
   setValue("[data-roster-area]", values.area);
   setValue("[data-roster-rank]", values.rank);
   setValue("[data-roster-bid-as]", values.bidAs);
-  setValue("[data-roster-active]", String(values.active !== false));
 }
 
 function resetRosterForm() {
@@ -4274,8 +4280,15 @@ function resetRosterForm() {
 function editRosterEntry(initials) {
   const entry = findRosterEntryByInitials(initials);
   if (!entry) return;
+  editRosterEntryByIndex(senioritySource.indexOf(entry));
+}
+
+function editRosterEntryByIndex(index) {
+  const entry = findRosterEntryByIndex(index);
+  if (!entry) return;
   const person = rosterEntryToPerson(entry);
   setRosterFormValues({
+    editIndex: senioritySource.indexOf(entry),
     editInitials: person.initials,
     firstName: person.firstName,
     lastName: person.lastName,
@@ -4285,7 +4298,6 @@ function editRosterEntry(initials) {
     area: person.area,
     rank: Number.isFinite(person.rank) ? person.rank : activeRosterEntries(person.area).length + 1,
     bidAs: person.bidAs,
-    active: person.active,
   });
   setRosterStatus(`Editing ${personDisplayName(person)}.`);
 }
@@ -4302,7 +4314,8 @@ function rosterFormValues() {
     area: value("[data-roster-area]") || selectedRosterArea(),
     rank: Number(value("[data-roster-rank]")),
     bidAs: value("[data-roster-bid-as]") || "CPC",
-    active: value("[data-roster-active]") !== "false",
+    editIndex: Number(value("[data-roster-edit-index]")),
+    active: true,
   };
 }
 
@@ -4366,7 +4379,7 @@ function saveRosterEntry(event) {
     return;
   }
 
-  const existingEntry = findRosterEntryByInitials(values.editInitials);
+  const existingEntry = findRosterEntryForEdit(values.editIndex, values.editInitials);
   const duplicateInitials = findRosterEntryByInitials(values.initials);
   if (duplicateInitials && duplicateInitials !== existingEntry) {
     setRosterStatus("Those initials are already assigned to another BUE.", "error");
@@ -4380,32 +4393,24 @@ function saveRosterEntry(event) {
   entry[3] = values.initials;
   entry[5] = values.email;
   entry[6] = values.phone;
-  entry[7] = values.active;
+  entry[7] = true;
   placeRosterEntry(entry, values.area, values.rank);
 
-  if (!values.active) intakeTeamInitials.delete(values.initials);
   syncCurrentUserFromRoster(values.editInitials || values.initials, values.initials);
   logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area} at seniority #${values.rank}.`);
   renderApp();
-  editRosterEntry(values.initials);
+  editRosterEntryByIndex(senioritySource.indexOf(entry));
   setRosterStatus(`${values.firstName} ${values.lastName} saved. Supabase sync is the next persistence step.`, "success");
 }
 
-function setRosterActive(initials, active) {
-  if (!hasSystemAdminAccess()) return;
+function deleteRosterEntry(initials) {
   const entry = findRosterEntryByInitials(initials);
-  if (!entry) return;
-  entry[7] = Boolean(active);
-  if (!active) intakeTeamInitials.delete(rosterEntryInitials(entry));
-  placeRosterEntry(entry, seniorityEntryArea(entry), active ? activeRosterEntries(seniorityEntryArea(entry)).length + 1 : Infinity);
-  logHistory("All Areas", active ? "BUE reactivated" : "BUE deactivated", `${currentUser.initials} ${active ? "reactivated" : "deactivated"} ${rosterEntryInitials(entry)}.`);
-  renderApp();
-  setRosterStatus(`${rosterEntryInitials(entry)} ${active ? "reactivated" : "deactivated"}.`, "success");
+  deleteRosterEntryByIndex(senioritySource.indexOf(entry));
 }
 
-function deleteRosterEntry(initials) {
+function deleteRosterEntryByIndex(index) {
   if (!hasSystemAdminAccess()) return;
-  const entry = findRosterEntryByInitials(initials);
+  const entry = findRosterEntryByIndex(index);
   if (!entry) return;
   const person = rosterEntryToPerson(entry);
   if (person.initials === currentUser.initials) {
@@ -4429,13 +4434,24 @@ function bulkRowValue(row, selector) {
   return row.querySelector(selector)?.value.trim() || "";
 }
 
+function rosterTableRows() {
+  return [...document.querySelectorAll("[data-roster-row]")];
+}
+
+function renumberBulkRosterRows() {
+  rosterTableRows().forEach((row, index) => {
+    const rankInput = row.querySelector("[data-bulk-rank]");
+    if (rankInput) rankInput.value = index + 1;
+  });
+}
+
 function bulkRosterRows() {
-  return [...document.querySelectorAll("[data-roster-table] tr")]
-    .filter((row) => row.querySelector("[data-original-initials]"))
+  return rosterTableRows()
     .map((row) => {
-      const originalInitials = row.querySelector("[data-original-initials]")?.dataset.originalInitials || "";
+      const originalInitials = row.dataset.originalInitials || "";
       return {
         originalInitials,
+        sourceIndex: Number(row.dataset.rosterEntryIndex),
         firstName: bulkRowValue(row, "[data-bulk-first-name]"),
         lastName: bulkRowValue(row, "[data-bulk-last-name]"),
         initials: bulkRowValue(row, "[data-bulk-initials]").toUpperCase(),
@@ -4444,48 +4460,120 @@ function bulkRosterRows() {
         area: bulkRowValue(row, "[data-bulk-area]"),
         rank: Number(bulkRowValue(row, "[data-bulk-rank]")),
         bidAs: bulkRowValue(row, "[data-bulk-bid-as]") || "CPC",
-        active: bulkRowValue(row, "[data-bulk-active]") !== "false",
+        active: true,
       };
     });
 }
 
 function validateBulkRosterRows(rows) {
   for (const row of rows) {
+    if (!Number.isInteger(row.sourceIndex) || !senioritySource[row.sourceIndex]) return `Could not match ${row.initials || "that row"} to the roster. Refresh and try again.`;
     if (!row.firstName || !row.lastName || !row.initials) return "Every edited BUE needs first name, last name, and initials.";
     if (!ZLA_AREAS.includes(row.area)) return `Choose a valid area for ${row.initials}.`;
     if (!Number.isFinite(row.rank) || row.rank < 1) return `Enter a valid seniority rank for ${row.initials}.`;
   }
 
-  const proposedInitials = new Map();
-  senioritySource.forEach((entry) => {
-    const initials = rosterEntryInitials(entry);
-    proposedInitials.set(initials, initials);
-  });
-  rows.forEach((row) => {
-    proposedInitials.delete(row.originalInitials);
-  });
+  const rowsByIndex = new Map(rows.map((row) => [row.sourceIndex, row]));
 
   for (const row of rows) {
-    if (proposedInitials.has(row.initials)) return `${row.initials} is already assigned outside this bulk edit.`;
-    proposedInitials.set(row.initials, row.initials);
+    if (row.initials === row.originalInitials) continue;
+    const conflictingEntry = senioritySource.some((entry, index) => {
+      if (index === row.sourceIndex) return false;
+      const matchingRow = rowsByIndex.get(index);
+      const proposedInitials = matchingRow ? matchingRow.initials : rosterEntryInitials(entry);
+      return proposedInitials === row.initials;
+    });
+    if (conflictingEntry) return `${row.initials} is already assigned to another BUE.`;
   }
-
-  const duplicateRank = rows.find((row, index) =>
-    row.active &&
-    rows.some((other, otherIndex) =>
-      otherIndex !== index &&
-      other.active &&
-      other.area === row.area &&
-      other.rank === row.rank
-    )
-  );
-  if (duplicateRank) return `Two active BUEs in ${duplicateRank.area} have seniority #${duplicateRank.rank}.`;
 
   return "";
 }
 
+function currentAreaRanksByEntry() {
+  const ranks = new Map();
+  ZLA_AREAS.forEach((area) => {
+    activeRosterEntries(area).forEach((entry, index) => {
+      ranks.set(entry, index + 1);
+    });
+  });
+  return ranks;
+}
+
+function rebuildRosterFromBulkRows(rows) {
+  const originalRanks = currentAreaRanksByEntry();
+  const originalOrder = new Map(senioritySource.map((entry, index) => [entry, index]));
+  const rowsByIndex = new Map(rows.map((row, index) => [row.sourceIndex, { ...row, bulkIndex: index }]));
+  const editedEntries = [];
+
+  senioritySource.forEach((entry, index) => {
+    const row = rowsByIndex.get(index);
+    if (!row) return;
+
+    row.originalArea = seniorityEntryArea(entry);
+    row.originalRank = originalRanks.get(entry);
+    row.positionChanged = row.active && (row.area !== row.originalArea || row.rank !== row.originalRank);
+
+    entry[0] = row.lastName;
+    entry[1] = row.firstName;
+    entry[2] = row.bidAs;
+    entry[3] = row.initials;
+    entry[4] = row.area;
+    entry[5] = row.email;
+    entry[6] = row.phone;
+    entry[7] = row.active;
+
+    if (!row.active) intakeTeamInitials.delete(row.initials);
+    editedEntries.push({ entry, row });
+  });
+
+  const editedByEntry = new Map(editedEntries.map((item) => [item.entry, item.row]));
+  const entriesByArea = new Map(ZLA_AREAS.map((area) => [area, []]));
+  const extraEntries = [];
+  senioritySource.forEach((entry) => {
+    const area = seniorityEntryArea(entry);
+    if (entriesByArea.has(area)) {
+      entriesByArea.get(area).push(entry);
+    } else {
+      extraEntries.push(entry);
+    }
+  });
+
+  const rankSortValue = (entry) => {
+    const row = editedByEntry.get(entry);
+    if (row?.active) return row.rank;
+    return originalRanks.get(entry) || originalOrder.get(entry) + 1;
+  };
+
+  const rebuilt = [];
+  ZLA_AREAS.forEach((area) => {
+    const areaEntries = entriesByArea.get(area);
+    const activeEntries = areaEntries
+      .filter(seniorityEntryActive)
+      .sort((a, b) => {
+        const rankDifference = rankSortValue(a) - rankSortValue(b);
+        if (rankDifference !== 0) return rankDifference;
+
+        const aRow = editedByEntry.get(a);
+        const bRow = editedByEntry.get(b);
+        if (Boolean(aRow?.positionChanged) !== Boolean(bRow?.positionChanged)) {
+          return aRow?.positionChanged ? -1 : 1;
+        }
+        if (aRow && bRow) return aRow.bulkIndex - bRow.bulkIndex;
+        return originalOrder.get(a) - originalOrder.get(b);
+      });
+    const inactiveEntries = areaEntries
+      .filter((entry) => !seniorityEntryActive(entry))
+      .sort((a, b) => originalOrder.get(a) - originalOrder.get(b));
+    rebuilt.push(...activeEntries, ...inactiveEntries);
+  });
+
+  senioritySource.splice(0, senioritySource.length, ...rebuilt, ...extraEntries);
+  return editedEntries;
+}
+
 function applyBulkRosterChanges() {
   if (!hasSystemAdminAccess()) return;
+  renumberBulkRosterRows();
   const rows = bulkRosterRows();
   if (!rows.length) {
     setRosterStatus("No visible roster rows to apply.", "error");
@@ -4498,33 +4586,14 @@ function applyBulkRosterChanges() {
     return;
   }
 
-  const editedEntries = rows.map((row) => {
-    const entry = findRosterEntryByInitials(row.originalInitials);
-    if (!entry) return null;
-    entry[0] = row.lastName;
-    entry[1] = row.firstName;
-    entry[2] = row.bidAs;
-    entry[3] = row.initials;
-    entry[5] = row.email;
-    entry[6] = row.phone;
-    entry[7] = row.active;
-    if (!row.active) intakeTeamInitials.delete(row.initials);
-    return { entry, row };
-  }).filter(Boolean);
+  const editedEntries = rebuildRosterFromBulkRows(rows);
+  editedEntries.forEach(({ row }) => {
+    syncCurrentUserFromRoster(row.originalInitials, row.initials);
+  });
 
-  editedEntries
-    .sort((a, b) => {
-      if (a.row.area !== b.row.area) return a.row.area.localeCompare(b.row.area);
-      return a.row.rank - b.row.rank;
-    })
-    .forEach(({ entry, row }) => {
-      placeRosterEntry(entry, row.area, row.rank);
-      syncCurrentUserFromRoster(row.originalInitials, row.initials);
-    });
-
-  logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} roster changes from the bulk editor.`);
+  logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} visible roster rows from the bulk editor.`);
   renderApp();
-  setRosterStatus(`${editedEntries.length} roster changes applied. Supabase sync is the next persistence step.`, "success");
+  setRosterStatus(`${editedEntries.length} visible roster rows applied. Supabase sync is the next persistence step.`, "success");
 }
 
 function renderRosterManager() {
@@ -4543,31 +4612,71 @@ function renderRosterManager() {
 
   const rows = rosterEntriesForArea(selectedArea);
   target.innerHTML = rows.length
-    ? rows.map(({ person }) => `
-      <tr class="${person.active ? "" : "inactive"}">
-        <td><input class="bulk-rank" type="number" min="1" step="1" value="${Number.isFinite(person.rank) ? person.rank : ""}" data-bulk-rank data-original-initials="${escapeHtml(person.initials)}" /></td>
-        <td>
-          <div class="bulk-name-grid">
-            <input type="text" value="${escapeHtml(person.firstName)}" data-bulk-first-name data-original-initials="${escapeHtml(person.initials)}" aria-label="First name for ${escapeHtml(person.initials)}" />
-            <input type="text" value="${escapeHtml(person.lastName)}" data-bulk-last-name data-original-initials="${escapeHtml(person.initials)}" aria-label="Last name for ${escapeHtml(person.initials)}" />
-          </div>
-          <input type="email" value="${escapeHtml(person.email)}" data-bulk-email data-original-initials="${escapeHtml(person.initials)}" aria-label="Email for ${escapeHtml(person.initials)}" />
-          <input type="tel" value="${escapeHtml(person.phone)}" data-bulk-phone data-original-initials="${escapeHtml(person.initials)}" aria-label="Phone for ${escapeHtml(person.initials)}" />
-        </td>
-        <td><input class="bulk-initials" type="text" maxlength="4" value="${escapeHtml(person.initials)}" data-bulk-initials data-original-initials="${escapeHtml(person.initials)}" /></td>
-        <td><select data-bulk-area data-original-initials="${escapeHtml(person.initials)}">${rosterAreaOptions(person.area)}</select></td>
-        <td><select data-bulk-bid-as data-original-initials="${escapeHtml(person.initials)}">${rosterBidAsOptions(person.bidAs)}</select></td>
-        <td><select data-bulk-active data-original-initials="${escapeHtml(person.initials)}">${rosterActiveOptions(person.active)}</select></td>
+    ? rows.map(({ person, sourceIndex }) => `
+      <tr data-roster-row data-roster-entry-index="${sourceIndex}" data-original-initials="${escapeHtml(person.initials)}">
+        <td><button class="roster-drag-handle" type="button" data-roster-drag-handle draggable="true" title="Drag to reorder seniority" aria-label="Drag ${escapeHtml(personDisplayName(person))} to reorder seniority">|||</button></td>
+        <td><input class="bulk-rank" type="number" min="1" step="1" value="${Number.isFinite(person.rank) ? person.rank : ""}" data-bulk-rank readonly aria-label="Seniority rank for ${escapeHtml(person.initials)}" /></td>
+        <td><input type="text" value="${escapeHtml(person.firstName)}" data-bulk-first-name aria-label="First name for ${escapeHtml(person.initials)}" /></td>
+        <td><input type="text" value="${escapeHtml(person.lastName)}" data-bulk-last-name aria-label="Last name for ${escapeHtml(person.initials)}" /></td>
+        <td><input class="bulk-initials" type="text" maxlength="4" value="${escapeHtml(person.initials)}" data-bulk-initials /></td>
+        <td><input type="email" value="${escapeHtml(person.email)}" data-bulk-email aria-label="Email for ${escapeHtml(person.initials)}" /></td>
+        <td><input type="tel" value="${escapeHtml(person.phone)}" data-bulk-phone aria-label="Phone for ${escapeHtml(person.initials)}" /></td>
+        <td><select data-bulk-area>${rosterAreaOptions(person.area)}</select></td>
+        <td><select data-bulk-bid-as>${rosterBidAsOptions(person.bidAs)}</select></td>
         <td>
           <div class="roster-row-actions">
-            <button class="secondary-action small" type="button" data-edit-roster-bue="${escapeHtml(person.initials)}">Edit</button>
-            <button class="secondary-action small" type="button" data-toggle-roster-bue="${escapeHtml(person.initials)}" data-roster-active-next="${person.active ? "false" : "true"}">${person.active ? "Deactivate" : "Reactivate"}</button>
-            <button class="secondary-action small danger" type="button" data-delete-roster-bue="${escapeHtml(person.initials)}">Delete</button>
+            <button class="secondary-action small" type="button" data-edit-roster-bue="${sourceIndex}">Edit</button>
+            <button class="secondary-action small danger" type="button" data-delete-roster-bue="${sourceIndex}">Delete</button>
           </div>
         </td>
       </tr>
     `).join("")
-    : '<tr><td colspan="7">No BUEs in this area yet.</td></tr>';
+    : '<tr><td colspan="10">No BUEs in this area yet.</td></tr>';
+}
+
+let draggedRosterRow = null;
+
+function rosterDragRow(event) {
+  return event.target.closest("[data-roster-row]");
+}
+
+function startRosterRowDrag(event) {
+  const row = rosterDragRow(event);
+  if (!row) return;
+  if (!event.target.closest("[data-roster-drag-handle]")) {
+    event.preventDefault();
+    return;
+  }
+
+  draggedRosterRow = row;
+  row.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", row.dataset.rosterEntryIndex || "");
+}
+
+function moveRosterRowDuringDrag(event) {
+  if (!draggedRosterRow) return;
+  const row = rosterDragRow(event);
+  if (!row || row === draggedRosterRow) return;
+
+  event.preventDefault();
+  const rowBounds = row.getBoundingClientRect();
+  const insertAfter = event.clientY > rowBounds.top + rowBounds.height / 2;
+  row.parentNode.insertBefore(draggedRosterRow, insertAfter ? row.nextSibling : row);
+  renumberBulkRosterRows();
+}
+
+function dropRosterRow(event) {
+  if (!draggedRosterRow) return;
+  event.preventDefault();
+  renumberBulkRosterRows();
+  setRosterStatus("Seniority order staged. Click Apply Bulk Changes to save it.", "info");
+}
+
+function finishRosterRowDrag() {
+  if (draggedRosterRow) draggedRosterRow.classList.remove("dragging");
+  draggedRosterRow = null;
+  renumberBulkRosterRows();
 }
 
 function renderEmailLog() {
@@ -5988,19 +6097,13 @@ document.addEventListener("click", (event) => {
 
   const editRosterButton = event.target.closest("[data-edit-roster-bue]");
   if (editRosterButton) {
-    editRosterEntry(editRosterButton.dataset.editRosterBue);
-    return;
-  }
-
-  const toggleRosterButton = event.target.closest("[data-toggle-roster-bue]");
-  if (toggleRosterButton) {
-    setRosterActive(toggleRosterButton.dataset.toggleRosterBue, toggleRosterButton.dataset.rosterActiveNext === "true");
+    editRosterEntryByIndex(editRosterButton.dataset.editRosterBue);
     return;
   }
 
   const deleteRosterButton = event.target.closest("[data-delete-roster-bue]");
   if (deleteRosterButton) {
-    deleteRosterEntry(deleteRosterButton.dataset.deleteRosterBue);
+    deleteRosterEntryByIndex(deleteRosterButton.dataset.deleteRosterBue);
     return;
   }
 
@@ -6228,6 +6331,11 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 });
 
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
+
+document.addEventListener("dragstart", startRosterRowDrag);
+document.addEventListener("dragover", moveRosterRowDuringDrag);
+document.addEventListener("drop", dropRosterRow);
+document.addEventListener("dragend", finishRosterRowDrag);
 
 document.addEventListener("input", (event) => {
   const filter = event.target.closest("[data-rdo-filter]");
