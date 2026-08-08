@@ -979,10 +979,87 @@
               <div class="panel-header">
                 <div>
                   <h2>Admin Console</h2>
-                  <p>Build the intake team and schedule temporary intake coverage.</p>
+                  <p>Maintain the BUE roster, build the intake team, and schedule temporary intake coverage.</p>
                 </div>
                 <span class="pill open">System Admin</span>
               </div>
+              <section class="roster-manager" aria-label="BUE roster manager">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>BUE Roster</h3>
+                    <p>Add, amend, move, deactivate, or delete BUE records.</p>
+                  </div>
+                  <label class="compact-filter">
+                    Area
+                    <select data-roster-area-filter>
+                      <option>Area A</option>
+                      <option>Area B</option>
+                      <option>Area C</option>
+                      <option>Area D</option>
+                      <option>Area E</option>
+                      <option>Area F</option>
+                      <option>TMU</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="roster-editor-grid">
+                  <form class="roster-form" data-roster-form>
+                    <input type="hidden" data-roster-edit-initials />
+                    <label>First Name <input type="text" data-roster-first-name /></label>
+                    <label>Last Name <input type="text" data-roster-last-name /></label>
+                    <label>Initials <input type="text" maxlength="4" data-roster-initials /></label>
+                    <label>Email <input type="email" data-roster-email /></label>
+                    <label>Phone <input type="tel" data-roster-phone /></label>
+                    <label>Area
+                      <select data-roster-area>
+                        <option>Area A</option>
+                        <option>Area B</option>
+                        <option>Area C</option>
+                        <option>Area D</option>
+                        <option>Area E</option>
+                        <option>Area F</option>
+                        <option>TMU</option>
+                      </select>
+                    </label>
+                    <label>Seniority Rank <input type="number" min="1" step="1" data-roster-rank /></label>
+                    <label>Bid Role
+                      <select data-roster-bid-as>
+                        <option>CPC</option>
+                        <option>GL</option>
+                        <option>R-DEV</option>
+                        <option>D-DEV</option>
+                      </select>
+                    </label>
+                    <label>Status
+                      <select data-roster-active>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                      </select>
+                    </label>
+                    <div class="roster-form-actions">
+                      <button class="secondary-action small" type="button" data-roster-new>New</button>
+                      <button class="primary-action small" type="submit">Save BUE</button>
+                    </div>
+                    <p class="form-status" data-roster-status></p>
+                  </form>
+                  <div class="roster-table-wrap">
+                    <table class="roster-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Name</th>
+                          <th>Initials</th>
+                          <th>Area</th>
+                          <th>Role</th>
+                          <th>Status</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody data-roster-table></tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
               <div class="admin-user-list" data-admin-user-list></div>
             </section>
             <aside class="right-stack">

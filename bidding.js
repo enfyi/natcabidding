@@ -561,7 +561,7 @@ function bidWindowForRankRound(rank, roundNumber) {
 }
 
 function roundWindows(roundNumber) {
-  return senioritySource
+  return activeRosterEntries(currentViewArea())
     .map((_, index) => bidWindowForRankRound(index + 1, roundNumber))
     .filter(Boolean);
 }
@@ -655,9 +655,49 @@ function fallbackInitials(firstName, lastName) {
   return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase();
 }
 
-function buildSeniority() {
+function seniorityEntryArea(entry) {
+  return entry[4] || "Area A";
+}
+
+function seniorityEntryEmail(entry) {
+  return entry[5] || "";
+}
+
+function seniorityEntryPhone(entry) {
+  return entry[6] || "";
+}
+
+function seniorityEntryActive(entry) {
+  return entry[7] !== false;
+}
+
+function activeRosterEntries(area = null) {
+  return senioritySource.filter((entry) =>
+    seniorityEntryActive(entry) &&
+    (!area || seniorityEntryArea(entry) === area)
+  );
+}
+
+function rosterEntryToPerson(entry, rank = null) {
+  const [lastName, firstName, bidAs, initials] = entry;
+  const resolvedRank = Number.isFinite(rank) ? rank : activeRosterEntries(seniorityEntryArea(entry)).findIndex((item) => item === entry) + 1;
+  return {
+    rank: resolvedRank,
+    firstName,
+    lastName,
+    bidAs,
+    initials: initials || fallbackInitials(firstName, lastName),
+    area: seniorityEntryArea(entry),
+    email: seniorityEntryEmail(entry),
+    phone: seniorityEntryPhone(entry),
+    active: seniorityEntryActive(entry),
+  };
+}
+
+function buildSeniority(area = currentViewArea()) {
   const openRank = activeBidderRank();
-  return senioritySource.map(([lastName, firstName, bidAs, initials], index) => {
+  return activeRosterEntries(area).map((entry, index) => {
+    const [lastName, firstName, bidAs, initials] = entry;
     const rank = index + 1;
     const rowBlock = Math.floor(index / bidStartTimes.length);
     const start = bidStartTimes[index % bidStartTimes.length];
@@ -670,6 +710,10 @@ function buildSeniority() {
       lastName,
       bidAs,
       initials: initials || fallbackInitials(firstName, lastName),
+      area,
+      email: seniorityEntryEmail(entry),
+      phone: seniorityEntryPhone(entry),
+      active: true,
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: roundDateBlocks[rowBlock].map((date) => bidWindowLabel(date, start)),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
@@ -836,7 +880,7 @@ function controllerName(person) {
 }
 
 function manualBidControllerOptions(selectedInitials) {
-  return seniority.map((person) => {
+  return bueRoster().map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
     return `<option value="${person.initials}"${selected}>#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}</option>`;
   }).join("");
@@ -851,11 +895,13 @@ function manualBidAreaOptions(selectedArea) {
 
 function manualBidPerson(panel) {
   const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
-  return seniority.find((person) => person.initials === initials) || seniority[0] || {
+  const roster = bueRoster();
+  return roster.find((person) => person.initials === initials) || roster[0] || {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
     lastName: currentUser.lastName,
     initials: currentUser.initials,
+    area: currentUser.area,
     bidAs: currentUserBidAs(),
   };
 }
@@ -885,8 +931,9 @@ function renderManualBidPanel(panel) {
 
   const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
   if (controllerSelect) {
+    const roster = bueRoster();
     controllerSelect.innerHTML = manualBidControllerOptions(values.controller);
-    controllerSelect.value = seniority.some((person) => person.initials === values.controller) ? values.controller : seniority[0]?.initials || "";
+    controllerSelect.value = roster.some((person) => person.initials === values.controller) ? values.controller : roster[0]?.initials || "";
   }
 
   const typeSelect = panel.querySelector("[data-manual-bid-type]");
@@ -4045,11 +4092,15 @@ function bueRoster() {
     lastName: currentUser.lastName,
     initials: currentUser.initials,
     area: currentUser.area,
+    email: currentUser.email,
+    phone: currentUser.phone,
     bidAs: currentUserBidAs(),
   };
   const byInitials = new Map();
 
-  seniority.forEach((person) => {
+  senioritySource.forEach((entry) => {
+    if (!seniorityEntryActive(entry)) return;
+    const person = rosterEntryToPerson(entry);
     byInitials.set(person.initials, {
       ...person,
       area: person.area || currentUser.area,
@@ -4136,6 +4187,268 @@ function removeBueFromIntakeTeam(initials) {
   setAdminScheduleStatus(`${personDisplayName(person)} was removed from future intake scheduling choices.`, "success");
 }
 
+function setRosterStatus(message, status = "info") {
+  const target = document.querySelector("[data-roster-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function selectedRosterArea() {
+  return document.querySelector("[data-roster-area-filter]")?.value || currentViewArea();
+}
+
+function rosterEntryInitials(entry) {
+  return entry[3] || fallbackInitials(entry[1], entry[0]);
+}
+
+function rosterEntriesForArea(area = selectedRosterArea()) {
+  return senioritySource
+    .filter((entry) => seniorityEntryArea(entry) === area)
+    .map((entry) => {
+      const activeEntries = activeRosterEntries(area);
+      const activeRank = activeEntries.findIndex((item) => item === entry) + 1;
+      return {
+        entry,
+        person: rosterEntryToPerson(entry, activeRank > 0 ? activeRank : null),
+      };
+    });
+}
+
+function findRosterEntryByInitials(initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  return senioritySource.find((entry) => rosterEntryInitials(entry) === normalized) || null;
+}
+
+function defaultRosterFormValues(area = selectedRosterArea()) {
+  return {
+    firstName: "",
+    lastName: "",
+    initials: "",
+    email: "",
+    phone: "",
+    area,
+    rank: activeRosterEntries(area).length + 1,
+    bidAs: "CPC",
+    active: true,
+  };
+}
+
+function setRosterFormValues(values = defaultRosterFormValues()) {
+  const setValue = (selector, value) => {
+    const input = document.querySelector(selector);
+    if (input) input.value = value ?? "";
+  };
+  setValue("[data-roster-edit-initials]", values.editInitials || "");
+  setValue("[data-roster-first-name]", values.firstName);
+  setValue("[data-roster-last-name]", values.lastName);
+  setValue("[data-roster-initials]", values.initials);
+  setValue("[data-roster-email]", values.email);
+  setValue("[data-roster-phone]", values.phone);
+  setValue("[data-roster-area]", values.area);
+  setValue("[data-roster-rank]", values.rank);
+  setValue("[data-roster-bid-as]", values.bidAs);
+  setValue("[data-roster-active]", String(values.active !== false));
+}
+
+function resetRosterForm() {
+  setRosterFormValues(defaultRosterFormValues());
+  setRosterStatus("Ready for a new BUE.");
+}
+
+function editRosterEntry(initials) {
+  const entry = findRosterEntryByInitials(initials);
+  if (!entry) return;
+  const person = rosterEntryToPerson(entry);
+  setRosterFormValues({
+    editInitials: person.initials,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    initials: person.initials,
+    email: person.email,
+    phone: person.phone,
+    area: person.area,
+    rank: Number.isFinite(person.rank) ? person.rank : activeRosterEntries(person.area).length + 1,
+    bidAs: person.bidAs,
+    active: person.active,
+  });
+  setRosterStatus(`Editing ${personDisplayName(person)}.`);
+}
+
+function rosterFormValues() {
+  const value = (selector) => document.querySelector(selector)?.value.trim() || "";
+  return {
+    editInitials: value("[data-roster-edit-initials]").toUpperCase(),
+    firstName: value("[data-roster-first-name]"),
+    lastName: value("[data-roster-last-name]"),
+    initials: value("[data-roster-initials]").toUpperCase(),
+    email: value("[data-roster-email]").toLowerCase(),
+    phone: value("[data-roster-phone]"),
+    area: value("[data-roster-area]") || selectedRosterArea(),
+    rank: Number(value("[data-roster-rank]")),
+    bidAs: value("[data-roster-bid-as]") || "CPC",
+    active: value("[data-roster-active]") !== "false",
+  };
+}
+
+function placeRosterEntry(entry, area, rank) {
+  const oldIndex = senioritySource.indexOf(entry);
+  if (oldIndex >= 0) senioritySource.splice(oldIndex, 1);
+  entry[4] = area;
+
+  if (!seniorityEntryActive(entry)) {
+    senioritySource.push(entry);
+    return;
+  }
+
+  const targetEntries = activeRosterEntries(area);
+  const nextRank = Math.max(1, Math.min(Number.isFinite(rank) ? rank : targetEntries.length + 1, targetEntries.length + 1));
+  const beforeEntry = targetEntries[nextRank - 1];
+  if (beforeEntry) {
+    senioritySource.splice(senioritySource.indexOf(beforeEntry), 0, entry);
+    return;
+  }
+
+  const lastEntry = targetEntries[targetEntries.length - 1];
+  const insertIndex = lastEntry ? senioritySource.indexOf(lastEntry) + 1 : senioritySource.length;
+  senioritySource.splice(insertIndex, 0, entry);
+}
+
+function syncCurrentUserFromRoster(previousInitials, nextInitials) {
+  if (![previousInitials, nextInitials].includes(currentUser.initials)) return;
+  const entry = findRosterEntryByInitials(nextInitials);
+  if (!entry || !seniorityEntryActive(entry)) return;
+  const person = rosterEntryToPerson(entry);
+  currentUser = {
+    ...currentUser,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    initials: person.initials,
+    seniorityRank: person.rank,
+    area: person.area,
+    bidAs: person.bidAs,
+    phone: person.phone,
+    email: person.email,
+  };
+  selectedViewArea = person.area;
+}
+
+function saveRosterEntry(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess()) return;
+
+  const values = rosterFormValues();
+  if (!values.firstName || !values.lastName || !values.initials) {
+    setRosterStatus("First name, last name, and initials are required.", "error");
+    return;
+  }
+  if (!ZLA_AREAS.includes(values.area)) {
+    setRosterStatus("Choose a valid area.", "error");
+    return;
+  }
+  if (!Number.isFinite(values.rank) || values.rank < 1) {
+    setRosterStatus("Enter a valid seniority rank.", "error");
+    return;
+  }
+
+  const existingEntry = findRosterEntryByInitials(values.editInitials);
+  const duplicateInitials = findRosterEntryByInitials(values.initials);
+  if (duplicateInitials && duplicateInitials !== existingEntry) {
+    setRosterStatus("Those initials are already assigned to another BUE.", "error");
+    return;
+  }
+
+  const entry = existingEntry || [];
+  entry[0] = values.lastName;
+  entry[1] = values.firstName;
+  entry[2] = values.bidAs;
+  entry[3] = values.initials;
+  entry[5] = values.email;
+  entry[6] = values.phone;
+  entry[7] = values.active;
+  placeRosterEntry(entry, values.area, values.rank);
+
+  if (!values.active) intakeTeamInitials.delete(values.initials);
+  syncCurrentUserFromRoster(values.editInitials || values.initials, values.initials);
+  logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area} at seniority #${values.rank}.`);
+  renderApp();
+  editRosterEntry(values.initials);
+  setRosterStatus(`${values.firstName} ${values.lastName} saved. Supabase sync is the next persistence step.`, "success");
+}
+
+function setRosterActive(initials, active) {
+  if (!hasSystemAdminAccess()) return;
+  const entry = findRosterEntryByInitials(initials);
+  if (!entry) return;
+  entry[7] = Boolean(active);
+  if (!active) intakeTeamInitials.delete(rosterEntryInitials(entry));
+  placeRosterEntry(entry, seniorityEntryArea(entry), active ? activeRosterEntries(seniorityEntryArea(entry)).length + 1 : Infinity);
+  logHistory("All Areas", active ? "BUE reactivated" : "BUE deactivated", `${currentUser.initials} ${active ? "reactivated" : "deactivated"} ${rosterEntryInitials(entry)}.`);
+  renderApp();
+  setRosterStatus(`${rosterEntryInitials(entry)} ${active ? "reactivated" : "deactivated"}.`, "success");
+}
+
+function deleteRosterEntry(initials) {
+  if (!hasSystemAdminAccess()) return;
+  const entry = findRosterEntryByInitials(initials);
+  if (!entry) return;
+  const person = rosterEntryToPerson(entry);
+  if (person.initials === currentUser.initials) {
+    setRosterStatus("You cannot delete the account you are currently using.", "error");
+    return;
+  }
+  if (!window.confirm(`Delete ${personDisplayName(person)} (${person.initials}) from the working roster?`)) return;
+
+  senioritySource.splice(senioritySource.indexOf(entry), 1);
+  intakeTeamInitials.delete(person.initials);
+  for (let index = intakeSchedules.length - 1; index >= 0; index -= 1) {
+    if (intakeSchedules[index].initials === person.initials) intakeSchedules.splice(index, 1);
+  }
+  logHistory("All Areas", "BUE deleted", `${currentUser.initials} deleted ${person.initials} from the working roster.`);
+  resetRosterForm();
+  renderApp();
+  setRosterStatus(`${personDisplayName(person)} was deleted from the working roster.`, "success");
+}
+
+function renderRosterManager() {
+  const filter = document.querySelector("[data-roster-area-filter]");
+  if (filter && !filter.value) filter.value = currentViewArea();
+  const selectedArea = selectedRosterArea();
+  if (filter) filter.value = selectedArea;
+
+  const areaInput = document.querySelector("[data-roster-area]");
+  if (areaInput && !areaInput.value) areaInput.value = selectedArea;
+  const rankInput = document.querySelector("[data-roster-rank]");
+  if (rankInput && !rankInput.value) rankInput.value = activeRosterEntries(selectedArea).length + 1;
+
+  const target = document.querySelector("[data-roster-table]");
+  if (!target) return;
+
+  const rows = rosterEntriesForArea(selectedArea);
+  target.innerHTML = rows.length
+    ? rows.map(({ person }) => `
+      <tr class="${person.active ? "" : "inactive"}">
+        <td>${Number.isFinite(person.rank) ? person.rank : "—"}</td>
+        <td>
+          <strong>${escapeHtml(personDisplayName(person))}</strong>
+          <small>${escapeHtml(person.email || "No login email")}</small>
+        </td>
+        <td>${escapeHtml(person.initials)}</td>
+        <td>${escapeHtml(person.area)}</td>
+        <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+        <td><span class="status ${person.active ? "approved" : "pending"}">${person.active ? "Active" : "Inactive"}</span></td>
+        <td>
+          <div class="roster-row-actions">
+            <button class="secondary-action small" type="button" data-edit-roster-bue="${escapeHtml(person.initials)}">Edit</button>
+            <button class="secondary-action small" type="button" data-toggle-roster-bue="${escapeHtml(person.initials)}" data-roster-active-next="${person.active ? "false" : "true"}">${person.active ? "Deactivate" : "Reactivate"}</button>
+            <button class="secondary-action small danger" type="button" data-delete-roster-bue="${escapeHtml(person.initials)}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="7">No BUEs in this area yet.</td></tr>';
+}
+
 function renderEmailLog() {
   const target = document.querySelector("[data-email-log]");
   if (!target) return;
@@ -4153,6 +4466,7 @@ function renderEmailLog() {
 function renderAdminConsole() {
   syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
+  renderRosterManager();
   renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
@@ -4204,8 +4518,7 @@ function addAdminScheduleFromForm() {
     return;
   }
 
-  const initials = (document.querySelector("[data-admin-schedule-initials]")?.value || "").trim().toUpperCase();
-  const nameInput = (document.querySelector("[data-admin-schedule-name]")?.value || "").trim();
+  const initials = (document.querySelector("[data-admin-schedule-rep]")?.value || "").trim().toUpperCase();
   const area = INTAKE_SCHEDULE_AREA;
   const startRaw = document.querySelector("[data-admin-schedule-start]")?.value || "";
   const endRaw = document.querySelector("[data-admin-schedule-end]")?.value || "";
@@ -4213,7 +4526,7 @@ function addAdminScheduleFromForm() {
   const end = new Date(endRaw);
 
   if (!initials) {
-    setAdminScheduleStatus("Enter the intake rep initials before adding a shift.", "error");
+    setAdminScheduleStatus("Add at least one BUE to the intake team before scheduling a shift.", "error");
     return;
   }
 
@@ -4222,8 +4535,13 @@ function addAdminScheduleFromForm() {
     return;
   }
 
-  const person = seniority.find((item) => item.initials === initials);
-  const name = nameInput || (person ? `${person.firstName} ${person.lastName}` : initials);
+  if (!intakeTeamInitials.has(initials)) {
+    setAdminScheduleStatus("Choose someone from the intake team before adding a shift.", "error");
+    return;
+  }
+
+  const person = bueByInitials(initials);
+  const name = personDisplayName(person) || initials;
 
   intakeSchedules.push({
     id: `sched-admin-${initials.toLowerCase()}-${Date.now()}`,
@@ -4291,6 +4609,7 @@ function renderIntakeSchedule() {
   const calendar = document.getElementById("intake-schedule-calendar");
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
+  syncIntakeTeamControls();
 
   if (calendar) {
     calendar.innerHTML = monthNames
@@ -4354,8 +4673,7 @@ function addIntakeScheduleFromForm() {
     return;
   }
 
-  const initials = (document.querySelector("[data-schedule-initials]")?.value || "").trim().toUpperCase();
-  const nameInput = (document.querySelector("[data-schedule-name]")?.value || "").trim();
+  const initials = (document.querySelector("[data-schedule-rep]")?.value || "").trim().toUpperCase();
   const area = INTAKE_SCHEDULE_AREA;
   const startRaw = document.querySelector("[data-schedule-start]")?.value || "";
   const endRaw = document.querySelector("[data-schedule-end]")?.value || "";
@@ -4363,7 +4681,7 @@ function addIntakeScheduleFromForm() {
   const end = new Date(endRaw);
 
   if (!initials) {
-    setScheduleFormStatus("Enter the rep initials before adding a shift.", "error");
+    setScheduleFormStatus("Add at least one BUE to the intake team before scheduling a shift.", "error");
     return;
   }
 
@@ -4372,8 +4690,13 @@ function addIntakeScheduleFromForm() {
     return;
   }
 
-  const person = seniority.find((item) => item.initials === initials);
-  const name = nameInput || (person ? `${person.firstName} ${person.lastName}` : initials);
+  if (!intakeTeamInitials.has(initials)) {
+    setScheduleFormStatus("Choose someone from the intake team before adding a shift.", "error");
+    return;
+  }
+
+  const person = bueByInitials(initials);
+  const name = personDisplayName(person) || initials;
 
   intakeSchedules.push({
     id: `sched-${initials.toLowerCase()}-${Date.now()}`,
@@ -5521,6 +5844,40 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-add-intake-team-member]")) {
+    addSelectedBueToIntakeTeam();
+    return;
+  }
+
+  const removeIntakeTeamMember = event.target.closest("[data-remove-intake-team-member]");
+  if (removeIntakeTeamMember) {
+    removeBueFromIntakeTeam(removeIntakeTeamMember.dataset.removeIntakeTeamMember);
+    return;
+  }
+
+  if (event.target.closest("[data-roster-new]")) {
+    resetRosterForm();
+    return;
+  }
+
+  const editRosterButton = event.target.closest("[data-edit-roster-bue]");
+  if (editRosterButton) {
+    editRosterEntry(editRosterButton.dataset.editRosterBue);
+    return;
+  }
+
+  const toggleRosterButton = event.target.closest("[data-toggle-roster-bue]");
+  if (toggleRosterButton) {
+    setRosterActive(toggleRosterButton.dataset.toggleRosterBue, toggleRosterButton.dataset.rosterActiveNext === "true");
+    return;
+  }
+
+  const deleteRosterButton = event.target.closest("[data-delete-roster-bue]");
+  if (deleteRosterButton) {
+    deleteRosterEntry(deleteRosterButton.dataset.deleteRosterBue);
+    return;
+  }
+
   const viewModeButton = event.target.closest("[data-view-mode]");
   if (viewModeButton) {
     setPage(pageForViewMode(viewModeButton.dataset.viewMode));
@@ -5744,6 +6101,8 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
   updateSupabaseAccountPassword();
 });
 
+document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
+
 document.addEventListener("input", (event) => {
   const filter = event.target.closest("[data-rdo-filter]");
   if (!filter || filter.dataset.rdoFilter !== "search") return;
@@ -5752,6 +6111,20 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  const rosterAreaFilter = event.target.closest("[data-roster-area-filter]");
+  if (rosterAreaFilter) {
+    resetRosterForm();
+    renderRosterManager();
+    return;
+  }
+
+  const rosterAreaInput = event.target.closest("[data-roster-area]");
+  if (rosterAreaInput && !document.querySelector("[data-roster-edit-initials]")?.value) {
+    const rankInput = document.querySelector("[data-roster-rank]");
+    if (rankInput) rankInput.value = activeRosterEntries(rosterAreaInput.value).length + 1;
+    return;
+  }
+
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualFlexField = event.target.closest("[data-manual-flex]");
   if (manualPanel && manualFlexField && manualFlexField.value === "No" && !confirmFlexNo()) {
