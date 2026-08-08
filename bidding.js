@@ -4632,12 +4632,83 @@ function renderRosterManager() {
       </tr>
     `).join("")
     : '<tr><td colspan="10">No BUEs in this area yet.</td></tr>';
+  applyRosterColumnWidths();
 }
 
 let draggedRosterRow = null;
+let resizingRosterColumn = null;
+const rosterColumnWidths = {
+  handle: 44,
+  rank: 72,
+  first: 150,
+  last: 150,
+  initials: 92,
+  email: 190,
+  phone: 165,
+  area: 110,
+  role: 96,
+  actions: 132,
+};
+const rosterColumnMinimumWidths = {
+  handle: 44,
+  rank: 58,
+  first: 100,
+  last: 100,
+  initials: 76,
+  email: 130,
+  phone: 120,
+  area: 92,
+  role: 82,
+  actions: 112,
+};
 
 function rosterDragRow(event) {
   return event.target.closest("[data-roster-row]");
+}
+
+function applyRosterColumnWidths() {
+  const table = document.querySelector("[data-roster-table-element]");
+  if (!table) return;
+
+  let tableWidth = 0;
+  Object.entries(rosterColumnWidths).forEach(([column, width]) => {
+    const nextWidth = Math.max(rosterColumnMinimumWidths[column] || 60, width);
+    const col = table.querySelector(`[data-roster-col="${column}"]`);
+    if (col) col.style.width = `${nextWidth}px`;
+    tableWidth += nextWidth;
+  });
+  table.style.minWidth = `${tableWidth}px`;
+}
+
+function startRosterColumnResize(event) {
+  const handle = event.target.closest("[data-roster-col-resizer]");
+  if (!handle) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const column = handle.dataset.rosterColResizer;
+  resizingRosterColumn = {
+    column,
+    startX: event.clientX,
+    startWidth: rosterColumnWidths[column],
+  };
+  document.body.classList.add("roster-column-resizing");
+}
+
+function resizeRosterColumn(event) {
+  if (!resizingRosterColumn) return;
+
+  event.preventDefault();
+  const { column, startX, startWidth } = resizingRosterColumn;
+  const minimumWidth = rosterColumnMinimumWidths[column] || 60;
+  rosterColumnWidths[column] = Math.max(minimumWidth, startWidth + event.clientX - startX);
+  applyRosterColumnWidths();
+}
+
+function finishRosterColumnResize() {
+  if (!resizingRosterColumn) return;
+  resizingRosterColumn = null;
+  document.body.classList.remove("roster-column-resizing");
 }
 
 function startRosterRowDrag(event) {
@@ -6336,6 +6407,9 @@ document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragover", moveRosterRowDuringDrag);
 document.addEventListener("drop", dropRosterRow);
 document.addEventListener("dragend", finishRosterRowDrag);
+document.addEventListener("mousedown", startRosterColumnResize);
+document.addEventListener("mousemove", resizeRosterColumn);
+document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
   const filter = event.target.closest("[data-rdo-filter]");

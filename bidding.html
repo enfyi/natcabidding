@@ -1045,23 +1045,37 @@
                       </div>
                       <button class="primary-action small" type="button" data-apply-bulk-roster>Apply Bulk Changes</button>
                     </div>
-                    <table class="roster-table">
-                      <thead>
-                        <tr>
-                          <th></th>
-                          <th>#</th>
-                          <th>First</th>
-                          <th>Last</th>
-                          <th>Initials</th>
-                          <th>Email</th>
-                          <th>Phone</th>
-                          <th>Area</th>
-                          <th>Role</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody data-roster-table></tbody>
-                    </table>
+                    <div class="roster-table-scroll">
+                      <table class="roster-table" data-roster-table-element>
+                        <colgroup>
+                          <col data-roster-col="handle" />
+                          <col data-roster-col="rank" />
+                          <col data-roster-col="first" />
+                          <col data-roster-col="last" />
+                          <col data-roster-col="initials" />
+                          <col data-roster-col="email" />
+                          <col data-roster-col="phone" />
+                          <col data-roster-col="area" />
+                          <col data-roster-col="role" />
+                          <col data-roster-col="actions" />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th></th>
+                            <th data-roster-resizable-col="rank"><span>#</span><i data-roster-col-resizer="rank"></i></th>
+                            <th data-roster-resizable-col="first"><span>First</span><i data-roster-col-resizer="first"></i></th>
+                            <th data-roster-resizable-col="last"><span>Last</span><i data-roster-col-resizer="last"></i></th>
+                            <th data-roster-resizable-col="initials"><span>Initials</span><i data-roster-col-resizer="initials"></i></th>
+                            <th data-roster-resizable-col="email"><span>Email</span><i data-roster-col-resizer="email"></i></th>
+                            <th data-roster-resizable-col="phone"><span>Phone</span><i data-roster-col-resizer="phone"></i></th>
+                            <th data-roster-resizable-col="area"><span>Area</span><i data-roster-col-resizer="area"></i></th>
+                            <th data-roster-resizable-col="role"><span>Role</span><i data-roster-col-resizer="role"></i></th>
+                            <th data-roster-resizable-col="actions"><span></span><i data-roster-col-resizer="actions"></i></th>
+                          </tr>
+                        </thead>
+                        <tbody data-roster-table></tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               </section>

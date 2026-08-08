@@ -4309,6 +4309,7 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 
 .roster-form {
@@ -4348,9 +4349,14 @@ tr.occupied-row .rdo-tag {
 }
 
 .roster-table-wrap {
-  overflow: auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  max-height: min(660px, calc(100vh - 210px));
+  overflow: hidden;
   border: 1px solid #d7e3ef;
   border-radius: 8px;
+  background: #ffffff;
 }
 
 .roster-bulk-toolbar {
@@ -4361,6 +4367,14 @@ tr.occupied-row .rdo-tag {
   border-bottom: 1px solid #d7e3ef;
   padding: 12px;
   background: #f8fafc;
+}
+
+.roster-table-scroll {
+  max-height: min(580px, calc(100vh - 292px));
+  min-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .roster-bulk-toolbar strong,
@@ -4378,6 +4392,52 @@ tr.occupied-row .rdo-tag {
 .roster-table {
   min-width: 1220px;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.roster-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #eef4fa;
+  box-shadow: 0 1px 0 #d7e3ef;
+}
+
+.roster-table th {
+  user-select: none;
+}
+
+.roster-table th span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-table th [data-roster-col-resizer] {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.roster-table th [data-roster-col-resizer]::after {
+  position: absolute;
+  top: 8px;
+  right: 3px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+}
+
+.roster-table th [data-roster-col-resizer]:hover::after,
+body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
+  background: #1287c6;
 }
 
 .roster-table th,
