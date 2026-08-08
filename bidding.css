@@ -1066,6 +1066,37 @@ h3 {
   gap: 14px;
 }
 
+.view-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 56px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.view-mode-switch button {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.view-mode-switch button:hover,
+.view-mode-switch button.active {
+  color: var(--deep);
+  border-color: rgba(122, 189, 194, 0.25);
+  background: var(--teal);
+}
+
 .topbar-user-context {
   flex: 1 1 auto;
   min-width: 180px;
@@ -4710,6 +4741,22 @@ body {
   color: #475569;
 }
 
+.app-main .view-mode-switch {
+  border-color: #d5e2f0;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.app-main .view-mode-switch button {
+  color: #64748b;
+}
+
+.app-main .view-mode-switch button:hover,
+.app-main .view-mode-switch button.active {
+  color: #172033;
+  border-color: rgba(122, 189, 194, 0.45);
+  background: #7abdc2;
+}
+
 .app-main h2,
 .app-main h3 {
   color: #111827;
@@ -6255,5 +6302,374 @@ body {
     width: min(184px, calc(100vw - 36px)) !important;
     min-width: min(184px, calc(100vw - 36px)) !important;
     max-width: min(184px, calc(100vw - 36px)) !important;
+  }
+}
+
+/* Mobile public-site polish for phone visitors. */
+img,
+svg,
+video {
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  body {
+    min-width: 0 !important;
+    overflow-x: hidden;
+  }
+
+  .login-screen.public-shell {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .public-rail {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    max-width: 100vw;
+    overflow: hidden;
+    padding: 12px;
+  }
+
+  .public-rail .brand-block {
+    min-width: 0;
+  }
+
+  .public-nav {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-top: 0;
+    padding: 0 0 4px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .public-area,
+  .public-nav-item {
+    flex: 0 0 auto;
+  }
+
+  .public-area {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .public-nav-item,
+  .public-area summary,
+  .public-area button {
+    width: auto;
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
+  .public-area button {
+    padding-left: 11px;
+  }
+
+  .public-main {
+    max-width: 100vw;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .public-topbar {
+    position: sticky;
+    top: 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    gap: 12px;
+    max-width: 100vw;
+    padding: 14px;
+  }
+
+  .public-topbar > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .public-topbar::after {
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .public-topbar h1 {
+    font-size: clamp(1.32rem, 6vw, 1.8rem);
+    line-height: 1.12;
+  }
+
+  .public-login {
+    justify-self: end;
+  }
+
+  .public-tabs {
+    justify-content: flex-start;
+    padding: 12px 14px 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .public-tabs button {
+    min-width: 118px;
+  }
+
+  .public-calendar-panel {
+    width: calc(100% - 24px) !important;
+    margin-top: 12px;
+  }
+
+  .public-main .panel {
+    padding: 14px;
+  }
+
+  .public-main .panel-header {
+    display: grid;
+    gap: 12px;
+  }
+
+  .public-main .segmented,
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .public-main .segmented button,
+  .segmented button[data-calendar-mode] {
+    min-width: 0;
+    min-height: 42px;
+    padding: 0 8px;
+  }
+
+  .public-main .calendar-toolbar,
+  .calendar-toolbar {
+    justify-content: flex-start;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .public-main .calendar-toolbar button,
+  .calendar-toolbar button {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    line-height: 1.35;
+  }
+
+  .public-table-wrap,
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    min-width: 640px;
+  }
+}
+
+@media (max-width: 640px) {
+  .public-rail {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  .brand-block {
+    gap: 10px;
+  }
+
+  .brand-block img {
+    width: 42px;
+    height: 42px;
+  }
+
+  .brand-block strong {
+    font-size: 1.42rem;
+  }
+
+  .public-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .public-login {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .public-login-button {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .login-card {
+    top: 116px;
+    right: 10px;
+    left: 10px;
+    z-index: 60;
+    padding: 14px;
+  }
+
+  .credential-login-form,
+  .login-button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .public-tabs button {
+    min-width: 108px;
+    min-height: 42px;
+  }
+
+  .public-calendar-panel {
+    width: calc(100% - 20px) !important;
+  }
+
+  .public-main .panel h2 {
+    font-size: 1.18rem;
+  }
+
+  .year-calendar,
+  .year-calendar.large,
+  .public-year-calendar,
+  .year-calendar.schedule-calendar {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+
+  .month-card {
+    padding: 10px;
+  }
+
+  .month-grid {
+    gap: 5px;
+  }
+
+  .public-main .month-grid span,
+  .public-main .month-grid button,
+  .month-grid span,
+  .month-grid button {
+    min-height: 34px;
+    font-size: 0.72rem;
+  }
+
+  .public-main .month-grid .dow,
+  .month-grid .dow {
+    min-height: 22px;
+    font-size: 0.58rem;
+  }
+
+  .app-main {
+    margin-left: 0;
+    padding: 0 10px 74px;
+  }
+
+  .side-rail {
+    right: 0;
+    width: auto;
+    max-width: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow-x: auto;
+  }
+
+  .side-rail:hover,
+  .side-rail:focus-within {
+    width: auto;
+  }
+
+  .side-rail .brand-block {
+    display: none;
+  }
+
+  .side-rail .app-nav {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .side-rail:not(:hover):not(:focus-within) .nav-item,
+  .side-rail .nav-item {
+    width: auto;
+    min-width: 44px;
+    color: var(--muted);
+  }
+}
+
+@media (max-width: 420px) {
+  .public-rail,
+  .public-topbar {
+    padding-inline: 10px;
+  }
+
+  .public-nav-item,
+  .public-area summary,
+  .public-area button {
+    min-height: 38px;
+    padding-inline: 10px;
+    font-size: 0.78rem;
+  }
+
+  .public-main .segmented button,
+  .segmented button[data-calendar-mode] {
+    font-size: 0.76rem;
+  }
+
+  .public-main .month-grid span,
+  .public-main .month-grid button,
+  .month-grid span,
+  .month-grid button {
+    min-height: 31px;
+    border-radius: 5px;
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .month-grid button .leave-date-tooltip,
+  .week-calendar-grid button .leave-date-tooltip,
+  .month-grid button .leave-date-tooltip.compact,
+  .week-calendar-grid button .leave-date-tooltip.compact,
+  .month-grid button .leave-date-tooltip.slot-summary,
+  .week-calendar-grid button .leave-date-tooltip.slot-summary {
+    display: none !important;
+    left: 50% !important;
+    right: auto !important;
+    width: min(184px, calc(100vw - 36px)) !important;
+    min-width: min(184px, calc(100vw - 36px)) !important;
+    max-width: min(184px, calc(100vw - 36px)) !important;
+    transform: translateX(-50%) translateY(4px) !important;
+  }
+
+  .month-grid button:hover .leave-date-tooltip,
+  .month-grid button:focus-visible .leave-date-tooltip,
+  .week-calendar-grid button:hover .leave-date-tooltip,
+  .week-calendar-grid button:focus-visible .leave-date-tooltip {
+    display: grid !important;
+    transform: translateX(-50%) translateY(0) !important;
+  }
+
+  .month-grid button:hover .leave-date-tooltip.compact,
+  .month-grid button:focus-visible .leave-date-tooltip.compact,
+  .week-calendar-grid button:hover .leave-date-tooltip.compact,
+  .week-calendar-grid button:focus-visible .leave-date-tooltip.compact,
+  .month-grid button:hover .leave-date-tooltip.slot-summary,
+  .month-grid button:focus-visible .leave-date-tooltip.slot-summary,
+  .week-calendar-grid button:hover .leave-date-tooltip.slot-summary,
+  .week-calendar-grid button:focus-visible .leave-date-tooltip.slot-summary {
+    display: flex !important;
   }
 }

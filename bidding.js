@@ -2528,6 +2528,47 @@ function setAuthStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
+function prototypeAccountForEmail(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return Object.entries(testAccounts).find(([, account]) =>
+    String(account.email || "").toLowerCase() === normalizedEmail
+  ) || null;
+}
+
+function prototypeAccountForUsername(username) {
+  const normalizedUsername = String(username || "").trim().toLowerCase();
+  return Object.entries(testAccounts).find(([key, account]) =>
+    key.toLowerCase() === normalizedUsername ||
+    String(account.initials || "").toLowerCase() === normalizedUsername ||
+    String(account.email || "").toLowerCase() === normalizedUsername
+  ) || null;
+}
+
+function loginWithPrototypeAccount(accountEntry, password, fallbackReason = "") {
+  if (!accountEntry || password !== "demo") return false;
+
+  const [, account] = accountEntry;
+  void supabaseClient()?.auth.signOut().catch(() => {});
+  clearSupabaseAccountState();
+  currentUser = { ...account };
+  setAuthStatus(
+    fallbackReason
+      ? `Signed in with prototype access because ${fallbackReason}.`
+      : "Signed in with prototype access.",
+    "success"
+  );
+  showLoggedInApp("dashboard");
+  return true;
+}
+
+function friendlyAuthFailure(error) {
+  const message = error?.message || String(error || "");
+  if (/load failed|failed to fetch|network/i.test(message)) {
+    return "Supabase could not be reached. Use demo credentials for prototype access, or try again after the connection is available.";
+  }
+  return message || "That login did not work.";
+}
+
 function supabaseAuthRedirectUrl() {
   const configuredUrl = window.NATCA_SUPABASE_CONFIG?.authRedirectUrl;
   if (configuredUrl) return configuredUrl;
@@ -2693,7 +2734,7 @@ async function restoreSupabaseSession(page = "dashboard") {
       }
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
-      showLoggedInApp(currentUser.systemAdmin ? "admin" : page);
+      showLoggedInApp(page);
       return true;
     } catch (error) {
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
@@ -2731,13 +2772,24 @@ async function sendSupabaseLoginLink(email) {
 async function loginWithSupabasePassword(email, password) {
   const client = supabaseClient();
   if (!client) {
-    setAuthStatus("Supabase login is not configured yet.", "error");
+    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase is not configured")) return;
+    setAuthStatus("Supabase login is not configured yet. Prototype access uses the password demo.", "error");
     return;
   }
 
-  const { error } = await client.auth.signInWithPassword({ email, password });
+  let signInResult;
+  try {
+    signInResult = await client.auth.signInWithPassword({ email, password });
+  } catch (error) {
+    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase could not be reached")) return;
+    setAuthStatus(friendlyAuthFailure(error), "error");
+    return;
+  }
+
+  const { error } = signInResult;
   if (error) {
-    setAuthStatus(error.message || "That email or password did not work.", "error");
+    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "Supabase login failed to load")) return;
+    setAuthStatus(friendlyAuthFailure(error), "error");
     return;
   }
 
@@ -2750,31 +2802,44 @@ async function loginWithSupabasePassword(email, password) {
     }
     currentUser = profile;
     setAuthStatus("Signed in.", "success");
-    showLoggedInApp(currentUser.systemAdmin ? "admin" : "dashboard");
+    showLoggedInApp("dashboard");
   } catch (error) {
-    setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+    if (loginWithPrototypeAccount(prototypeAccountForEmail(email), password, "the BUE profile could not be loaded")) return;
+    setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
 }
 
 async function loginWithUsernamePassword(username, password) {
   const client = supabaseClient();
   if (!client) {
-    setAuthStatus("Supabase login is not configured yet.", "error");
+    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase is not configured")) return;
+    setAuthStatus("Supabase login is not configured yet. Prototype access uses the password demo.", "error");
     return;
   }
 
-  const { data, error } = await client.rpc("app_login_with_password", {
-    login_username: username,
-    login_password: password,
-  });
+  let loginResult;
+  try {
+    loginResult = await client.rpc("app_login_with_password", {
+      login_username: username,
+      login_password: password,
+    });
+  } catch (error) {
+    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase could not be reached")) return;
+    setAuthStatus(friendlyAuthFailure(error), "error");
+    return;
+  }
+
+  const { data, error } = loginResult;
 
   if (error) {
-    setAuthStatus(error.message || "Could not check that login.", "error");
+    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password, "Supabase login failed to load")) return;
+    setAuthStatus(friendlyAuthFailure(error) || "Could not check that login.", "error");
     return;
   }
 
   const profile = Array.isArray(data) ? data[0] : data;
   if (!profile) {
+    if (loginWithPrototypeAccount(prototypeAccountForUsername(username), password)) return;
     setAuthStatus("That username or password did not match.", "error");
     return;
   }
@@ -2782,7 +2847,7 @@ async function loginWithUsernamePassword(username, password) {
   currentUser = profileFromSupabase(profile);
   clearSupabaseAccountState();
   setAuthStatus("Signed in.", "success");
-  showLoggedInApp(currentUser.systemAdmin ? "admin" : "dashboard");
+  showLoggedInApp("dashboard");
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -3353,6 +3418,38 @@ function hasSystemAdminAccess() {
   return Boolean(currentUser.systemAdmin);
 }
 
+function canUseIntakeView() {
+  return hasIntakeAccess() || currentUserHasIntakeSchedule() || hasSystemAdminAccess();
+}
+
+function pageForViewMode(mode) {
+  if (mode === "admin") return "admin";
+  if (mode === "intake") return "intake";
+  return "dashboard";
+}
+
+function viewModeForPage(pageName) {
+  if (pageName === "admin") return "admin";
+  if (pageName === "intake" || pageName === "intake-schedule") return "intake";
+  return "bue";
+}
+
+function syncViewModeSwitcher(pageName = "dashboard") {
+  const activeMode = viewModeForPage(pageName);
+
+  document.querySelectorAll("[data-intake-view-option]").forEach((element) => {
+    element.hidden = !canUseIntakeView();
+  });
+
+  document.querySelectorAll("[data-admin-view-option]").forEach((element) => {
+    element.hidden = !hasSystemAdminAccess();
+  });
+
+  document.querySelectorAll("[data-view-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.viewMode === activeMode);
+  });
+}
+
 function accessLabel() {
   const grant = activeAdminGrant();
   if (grant) return `${currentUser.roleLabel} + ${grant.type} · ${grant.scope}`;
@@ -3379,7 +3476,7 @@ function userSeniorityLongText() {
 }
 
 function renderCurrentUser() {
-  const isAdmin = hasIntakeAccess();
+  const canOpenIntake = canUseIntakeView();
   const hasSeniority = Number.isFinite(currentUser.seniorityRank);
   const bidAs = currentUserBidAs();
   const bidAsClassName = `bid-as-${bidAsClass(bidAs)}`;
@@ -3411,7 +3508,7 @@ function renderCurrentUser() {
   setText("[data-bidder-count]", `${currentUser.bidderCount} bidders`);
   setText(
     "[data-seniority-summary]",
-    isAdmin ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
+    canOpenIntake ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
   );
   setText("[data-admin-grant-status]", activeAdminGrant() ? "Active" : "Not Assigned");
   setText("[data-admin-grant-window]", adminGrantWindowText());
@@ -3442,11 +3539,11 @@ function renderCurrentUser() {
   setText("[data-dashboard-rdo-summary]", rdoRequest?.summary || "Choose fatigue group, AWS, Flex, and Mid when you bid.");
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
-    element.hidden = !isAdmin;
+    element.hidden = !canOpenIntake;
   });
 
   document.querySelectorAll("[data-intake-rep-only]").forEach((element) => {
-    element.hidden = !(isAdmin || currentUserHasIntakeSchedule());
+    element.hidden = !canOpenIntake;
   });
 
   document.querySelectorAll("[data-system-admin-only]").forEach((element) => {
@@ -3454,8 +3551,10 @@ function renderCurrentUser() {
   });
 
   document.querySelectorAll("[data-admin-tools]").forEach((element) => {
-    element.hidden = !(isAdmin || currentUserHasIntakeSchedule() || hasSystemAdminAccess());
+    element.hidden = !canOpenIntake;
   });
+
+  syncViewModeSwitcher();
 }
 
 function hasSubmittedRdoBid() {
@@ -4749,10 +4848,10 @@ function renderIntakeQueue() {
 }
 
 function setPage(pageName) {
-  if (pageName === "intake" && !hasIntakeAccess()) {
+  if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
   }
-  if (pageName === "intake-schedule" && !(hasIntakeAccess() || currentUserHasIntakeSchedule())) {
+  if (pageName === "intake-schedule" && !canUseIntakeView()) {
     pageName = "dashboard";
   }
   if (pageName === "admin" && !hasSystemAdminAccess()) {
@@ -4781,6 +4880,7 @@ function setPage(pageName) {
     profile: "My Profile",
   };
   title.textContent = titles[pageName] || "Dashboard";
+  syncViewModeSwitcher(pageName);
 }
 
 function updateSelectedBidYear(year) {
@@ -5176,7 +5276,7 @@ function loginAs(accountKey) {
   void supabaseClient()?.auth.signOut();
   clearSupabaseAccountState();
   currentUser = { ...account };
-  showLoggedInApp(accountKey === "admin" ? "intake" : "dashboard");
+  showLoggedInApp("dashboard");
 }
 
 function logOut() {
@@ -5412,6 +5512,12 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-add-intake-schedule]")) {
     addAdminScheduleFromForm();
+    return;
+  }
+
+  const viewModeButton = event.target.closest("[data-view-mode]");
+  if (viewModeButton) {
+    setPage(pageForViewMode(viewModeButton.dataset.viewMode));
     return;
   }
 

@@ -119,16 +119,6 @@
                   <strong>Michael Schoelen · OC</strong>
                   <small>Test: oc / demo · Area A member view with active intake rights</small>
                 </button>
-                <button type="button" data-login="admin">
-                  <span>Intake Login</span>
-                  <strong>Sarah Harris · SH</strong>
-                  <small>Test: sh / demo · Intake access with all-area review, no system admin rights</small>
-                </button>
-                <button type="button" data-login="regular-bue">
-                  <span>Basic BUE Access</span>
-                  <strong>Martin Ramirez · EZ</strong>
-                  <small>Test: ez / demo · Area D member view without admin or intake rights</small>
-                </button>
               </div>
             </div>
           </div>
@@ -236,6 +226,11 @@
           </div>
           <div class="topbar-user-context" data-user-context>Michael Schoelen · Area A</div>
           <div class="topbar-controls">
+            <div class="view-mode-switch" aria-label="Change app view" data-view-mode-switcher>
+              <button class="active" type="button" data-view-mode="bue">BUE View</button>
+              <button type="button" data-view-mode="intake" data-intake-view-option hidden>Intake View</button>
+              <button type="button" data-view-mode="admin" data-admin-view-option hidden>Admin View</button>
+            </div>
             <label class="view-area-control">
               <span>Change View Area</span>
               <select data-view-area-select aria-label="Change view area">
@@ -1237,7 +1232,7 @@
 
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
