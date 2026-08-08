@@ -287,6 +287,22 @@ button.seniority-pill {
   color: var(--coral);
 }
 
+.auth-link-action {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  color: var(--teal-dark);
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-link-action:hover {
+  color: #145f64;
+}
+
 .login-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

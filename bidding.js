@@ -69,39 +69,6 @@ const testAccounts = {
       grantedBy: "NATCA ZLA Bidding Chair",
     },
   },
-  admin: {
-    firstName: "Sarah",
-    lastName: "Harris",
-    initials: "SH",
-    seniorityRank: 11,
-    bidderCount: 45,
-    area: "Area A",
-    role: "bidding-intake",
-    roleLabel: "Bidding Intake",
-    systemAdmin: false,
-    phone: "(555) 555-0111",
-    email: "sh@natcazla.com",
-    adminGrant: {
-      type: "Bidding Intake",
-      scope: "All Areas",
-      start: new Date(now - 60 * 60 * 1000),
-      end: new Date(now + 4 * 60 * 60 * 1000),
-      grantedBy: "NATCA ZLA Bidding Chair",
-    },
-  },
-  "regular-bue": {
-    firstName: "Martin",
-    lastName: "Ramirez",
-    initials: "EZ",
-    seniorityRank: 17,
-    bidderCount: 45,
-    area: "Area D",
-    role: "controller",
-    roleLabel: "BUE Controller",
-    systemAdmin: false,
-    phone: "(555) 555-0127",
-    email: "ez@natcazla.com",
-  },
 };
 
 let currentUser = { ...testAccounts.bue };
@@ -118,6 +85,7 @@ let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
+const intakeTeamInitials = new Set(["OC"]);
 
 const intakeSchedules = [
   {
@@ -135,14 +103,6 @@ const intakeSchedules = [
     area: INTAKE_SCHEDULE_AREA,
     start: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000),
     end: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000),
-  },
-  {
-    id: "sched-sh-1",
-    initials: "SH",
-    name: "Sarah Harris",
-    area: INTAKE_SCHEDULE_AREA,
-    start: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
-    end: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000),
   },
 ];
 
@@ -469,7 +429,6 @@ const senioritySource = [
   ["Harold", "Kristina", "CPC"],
   ["Bickel", "Shane", "CPC"],
   ["Couche", "Rachel", "CPC"],
-  ["Harris", "Sarah", "CPC"],
   ["Robertson", "Rajanish", "CPC"],
   ["Alvarez", "Mark", "CPC"],
   ["Carpenter", "Jonathan", "CPC"],
@@ -726,8 +685,6 @@ const history = [
   { area: "Area A", time: "May 7, 2026 14:18", actor: "OC", title: "Leave queue reordered", detail: "Moved Thanksgiving week to priority 4." },
   { area: "Area A", time: "May 7, 2026 14:04", actor: "OC", title: "RDO line viewed", detail: "Compared Line 14 OP, Line 15 OC, and Line 18 GM." },
   { area: "Area A", time: "May 7, 2026 13:52", actor: "System", title: "Bid window opened", detail: "Your Area A seniority window started. You are on the clock." },
-  { area: "Area B", time: "May 7, 2026 13:40", actor: "SH", title: "Area B bid intake approved", detail: "Sarah Harris verified a submitted RDO bid while assigned temporary bidding intake rights." },
-  { area: "Area C", time: "May 7, 2026 13:25", actor: "SH", title: "Area C leave request reviewed", detail: "Sarah Harris reviewed leave slots under temporary bidding intake access." },
 ];
 
 let intakeQueue = [
@@ -741,7 +698,7 @@ let intakeQueue = [
     seniority: 5,
     status: "Approved",
     submittedAt: "May 26, 2026 10:42",
-    approvedBy: "SH",
+    approvedBy: "OC",
     approvedAt: "May 26, 2026 10:49",
     line: "15",
     fatigueGroup: "C",
@@ -786,7 +743,7 @@ let helpThreads = [
         body: "Can intake confirm my leave request before I submit?",
       },
       {
-        author: "SH",
+        author: "Intake",
         role: "Intake",
         time: "May 26, 2026 11:12",
         body: "We can review it. Send the exact dates and we will confirm the available slots.",
@@ -4081,6 +4038,104 @@ function setAdminScheduleStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
+function bueRoster() {
+  const currentEntry = {
+    rank: currentUser.seniorityRank,
+    firstName: currentUser.firstName,
+    lastName: currentUser.lastName,
+    initials: currentUser.initials,
+    area: currentUser.area,
+    bidAs: currentUserBidAs(),
+  };
+  const byInitials = new Map();
+
+  seniority.forEach((person) => {
+    byInitials.set(person.initials, {
+      ...person,
+      area: person.area || currentUser.area,
+      bidAs: person.bidAs || "CPC",
+    });
+  });
+  if (currentEntry.initials) byInitials.set(currentEntry.initials, currentEntry);
+
+  return [...byInitials.values()]
+    .filter((person) => person.initials)
+    .sort((a, b) => {
+      const rankA = Number.isFinite(a.rank) ? a.rank : a.seniorityRank;
+      const rankB = Number.isFinite(b.rank) ? b.rank : b.seniorityRank;
+      if (Number.isFinite(rankA) && Number.isFinite(rankB)) return rankA - rankB;
+      return `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`);
+    });
+}
+
+function bueByInitials(initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  return bueRoster().find((person) => person.initials === normalized) || null;
+}
+
+function personDisplayName(person) {
+  return [person?.firstName, person?.lastName].filter(Boolean).join(" ") || person?.initials || "";
+}
+
+function personScheduleLabel(person) {
+  if (!person) return "";
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const rankText = Number.isFinite(rank) ? `#${rank} ` : "";
+  return `${rankText}${personDisplayName(person)} · ${person.initials} · ${person.bidAs || "CPC"}`;
+}
+
+function intakeTeamMembers() {
+  return bueRoster().filter((person) => intakeTeamInitials.has(person.initials));
+}
+
+function renderRosterSelect(selector, people, selectedInitials = "") {
+  document.querySelectorAll(selector).forEach((select) => {
+    const currentValue = selectedInitials || select.value;
+    select.innerHTML = people.length
+      ? people.map((person) => `<option value="${escapeHtml(person.initials)}" ${person.initials === currentValue ? "selected" : ""}>${escapeHtml(personScheduleLabel(person))}</option>`).join("")
+      : '<option value="">No BUEs available</option>';
+    if (people.some((person) => person.initials === currentValue)) select.value = currentValue;
+  });
+}
+
+function syncIntakeTeamControls() {
+  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+  const teamPeople = intakeTeamMembers();
+  renderRosterSelect("[data-intake-team-candidate]", availablePeople);
+  renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
+  renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
+}
+
+function addSelectedBueToIntakeTeam() {
+  if (!hasSystemAdminAccess()) return;
+  const select = document.querySelector("[data-intake-team-candidate]");
+  const initials = select?.value || "";
+  const person = bueByInitials(initials);
+  if (!person) {
+    setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
+    return;
+  }
+
+  intakeTeamInitials.add(person.initials);
+  logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
+  renderApp();
+  setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling.`, "success");
+}
+
+function removeBueFromIntakeTeam(initials) {
+  if (!hasSystemAdminAccess()) return;
+  const person = bueByInitials(initials);
+  if (!person || person.initials === currentUser.initials) {
+    setAdminScheduleStatus("That intake team member cannot be removed here.", "error");
+    return;
+  }
+
+  intakeTeamInitials.delete(person.initials);
+  logHistory("All Areas", "Intake team updated", `${currentUser.initials} removed ${person.initials} from the intake team.`);
+  renderApp();
+  setAdminScheduleStatus(`${personDisplayName(person)} was removed from future intake scheduling choices.`, "success");
+}
+
 function renderEmailLog() {
   const target = document.querySelector("[data-email-log]");
   if (!target) return;
@@ -4097,61 +4152,50 @@ function renderEmailLog() {
 
 function renderAdminConsole() {
   syncAdminScheduleFormDefaults();
+  syncIntakeTeamControls();
   renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
 
-  target.innerHTML = Object.entries(testAccounts).map(([key, account]) => {
-    const grant = account.adminGrant;
-    const grantActive = grant && new Date() >= grant.start && new Date() <= grant.end;
-    return `
-      <article class="admin-user-card">
-        <div>
-          <small>${escapeHtml(account.roleLabel || "Controller")}</small>
-          <h3>${escapeHtml(account.firstName)} ${escapeHtml(account.lastName)} · ${escapeHtml(account.initials)}</h3>
-          <p>${escapeHtml(account.area)} · Seniority ${Number.isFinite(account.seniorityRank) ? `#${account.seniorityRank}` : "Admin"} · ${account.systemAdmin ? "System Admin" : "Standard User"}</p>
-          <span class="status ${grantActive ? "approved" : "pending"}">${grantActive ? "Intake access active" : "No active intake access"}</span>
-        </div>
-        <div class="admin-user-actions">
-          <button class="secondary-action small" type="button" data-admin-login-user="${key}">Log In As</button>
-          <button class="primary-action small" type="button" data-admin-grant-user="${key}">Grant Intake</button>
-          <button class="secondary-action small danger" type="button" data-admin-reset-user="${key}">Reset Access</button>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
+  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+  const teamPeople = intakeTeamMembers();
 
-function grantPrototypeIntakePermission(accountKey) {
-  if (!hasSystemAdminAccess()) return;
-  const account = testAccounts[accountKey];
-  if (!account) return;
-
-  const grant = {
-    type: "Bidding Intake",
-    scope: "All Areas",
-    start: new Date(Date.now() - 15 * 60 * 1000),
-    end: new Date(Date.now() + 4 * 60 * 60 * 1000),
-    grantedBy: `${userFullName()} (${currentUser.initials})`,
-  };
-  account.adminGrant = grant;
-  if (account.initials === currentUser.initials) currentUser.adminGrant = grant;
-
-  logHistory("All Areas", "Intake rights assigned", `${currentUser.initials} granted ${account.initials} intake access through ${formatDateTime(grant.end)}.`);
-  renderApp();
-}
-
-function resetPrototypeAccount(accountKey) {
-  if (!hasSystemAdminAccess()) return;
-  const account = testAccounts[accountKey];
-  if (!account) return;
-
-  delete account.adminGrant;
-  if (account.initials === currentUser.initials) delete currentUser.adminGrant;
-
-  logHistory("All Areas", "User access reset", `${currentUser.initials} reset intake rights for ${account.initials}.`);
-  renderApp();
+  target.innerHTML = `
+    <section class="intake-team-builder">
+      <div class="intake-team-add">
+        <label>
+          Add BUE to Intake Team
+          <select data-intake-team-candidate>
+            ${availablePeople.length
+              ? availablePeople.map((person) => `<option value="${escapeHtml(person.initials)}">${escapeHtml(personScheduleLabel(person))}</option>`).join("")
+              : '<option value="">All rostered BUEs are already on the intake team</option>'}
+          </select>
+        </label>
+        <button class="primary-action small" type="button" data-add-intake-team-member ${availablePeople.length ? "" : "disabled"}>Add to Team</button>
+      </div>
+      <div class="intake-team-list" data-intake-team-list>
+        ${teamPeople.map((person) => {
+          const scheduledCount = intakeSchedules.filter((schedule) => schedule.initials === person.initials).length;
+          const canRemove = person.initials !== currentUser.initials;
+          return `
+            <article class="admin-user-card">
+              <div>
+                <small>${escapeHtml(person.bidAs || "BUE Controller")}</small>
+                <h3>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</h3>
+                <p>${escapeHtml(person.area || currentUser.area)} · Seniority ${Number.isFinite(person.rank) ? `#${person.rank}` : "Unranked"} · ${scheduledCount} scheduled ${scheduledCount === 1 ? "shift" : "shifts"}</p>
+                <span class="status approved">Intake team</span>
+              </div>
+              <div class="admin-user-actions">
+                <button class="secondary-action small danger" type="button" data-remove-intake-team-member="${escapeHtml(person.initials)}" ${canRemove ? "" : "disabled"}>Remove</button>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+  syncIntakeTeamControls();
 }
 
 function addAdminScheduleFromForm() {
@@ -4178,9 +4222,8 @@ function addAdminScheduleFromForm() {
     return;
   }
 
-  const account = Object.values(testAccounts).find((item) => item.initials === initials);
   const person = seniority.find((item) => item.initials === initials);
-  const name = nameInput || (account ? `${account.firstName} ${account.lastName}` : "") || (person ? `${person.firstName} ${person.lastName}` : initials);
+  const name = nameInput || (person ? `${person.firstName} ${person.lastName}` : initials);
 
   intakeSchedules.push({
     id: `sched-admin-${initials.toLowerCase()}-${Date.now()}`,
@@ -4329,9 +4372,8 @@ function addIntakeScheduleFromForm() {
     return;
   }
 
-  const account = Object.values(testAccounts).find((item) => item.initials === initials);
   const person = seniority.find((item) => item.initials === initials);
-  const name = nameInput || (account ? `${account.firstName} ${account.lastName}` : "") || (person ? `${person.firstName} ${person.lastName}` : initials);
+  const name = nameInput || (person ? `${person.firstName} ${person.lastName}` : initials);
 
   intakeSchedules.push({
     id: `sched-${initials.toLowerCase()}-${Date.now()}`,
@@ -5249,14 +5291,6 @@ function renderApp() {
   updateBidWindow();
 }
 
-function loginAs(accountKey) {
-  const account = testAccounts[accountKey] || testAccounts.bue;
-  void supabaseClient()?.auth.signOut();
-  clearSupabaseAccountState();
-  currentUser = { ...account };
-  showLoggedInApp("dashboard");
-}
-
 function logOut() {
   supabaseClient()?.auth.signOut();
   clearSupabaseAccountState();
@@ -5497,24 +5531,6 @@ document.addEventListener("click", (event) => {
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
     if (panel) submitManualBidEntry(panel);
-    return;
-  }
-
-  const adminLogin = event.target.closest("[data-admin-login-user]");
-  if (adminLogin) {
-    loginAs(adminLogin.dataset.adminLoginUser);
-    return;
-  }
-
-  const adminGrant = event.target.closest("[data-admin-grant-user]");
-  if (adminGrant) {
-    grantPrototypeIntakePermission(adminGrant.dataset.adminGrantUser);
-    return;
-  }
-
-  const adminReset = event.target.closest("[data-admin-reset-user]");
-  if (adminReset) {
-    resetPrototypeAccount(adminReset.dataset.adminResetUser);
     return;
   }
 
