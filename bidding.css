@@ -4353,8 +4353,30 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
 }
 
+.roster-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #d7e3ef;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.roster-bulk-toolbar strong,
+.roster-bulk-toolbar small {
+  display: block;
+}
+
+.roster-bulk-toolbar small {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 .roster-table {
-  min-width: 760px;
+  min-width: 980px;
 }
 
 .roster-table td small {
@@ -4367,6 +4389,38 @@ tr.occupied-row .rdo-tag {
 
 .roster-table tr.inactive {
   opacity: 0.62;
+}
+
+.roster-table input,
+.roster-table select {
+  width: 100%;
+  border: 1px solid #cbd8e6;
+  border-radius: 7px;
+  padding: 7px 8px;
+  color: var(--ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.roster-table .bulk-rank {
+  width: 58px;
+}
+
+.bulk-initials {
+  width: 70px;
+}
+
+.bulk-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.bulk-name-grid + input {
+  margin-bottom: 6px;
 }
 
 .roster-row-actions {

@@ -4215,6 +4215,21 @@ function rosterEntriesForArea(area = selectedRosterArea()) {
     });
 }
 
+function rosterAreaOptions(selectedArea) {
+  return ZLA_AREAS.map((area) => `<option value="${area}" ${area === selectedArea ? "selected" : ""}>${area}</option>`).join("");
+}
+
+function rosterBidAsOptions(selectedBidAs) {
+  return ["CPC", "GL", "R-DEV", "D-DEV"].map((bidAs) => `<option value="${bidAs}" ${bidAs === selectedBidAs ? "selected" : ""}>${bidAs}</option>`).join("");
+}
+
+function rosterActiveOptions(isActive) {
+  return `
+    <option value="true" ${isActive ? "selected" : ""}>Active</option>
+    <option value="false" ${!isActive ? "selected" : ""}>Inactive</option>
+  `;
+}
+
 function findRosterEntryByInitials(initials) {
   const normalized = String(initials || "").trim().toUpperCase();
   return senioritySource.find((entry) => rosterEntryInitials(entry) === normalized) || null;
@@ -4410,6 +4425,108 @@ function deleteRosterEntry(initials) {
   setRosterStatus(`${personDisplayName(person)} was deleted from the working roster.`, "success");
 }
 
+function bulkRowValue(row, selector) {
+  return row.querySelector(selector)?.value.trim() || "";
+}
+
+function bulkRosterRows() {
+  return [...document.querySelectorAll("[data-roster-table] tr")]
+    .filter((row) => row.querySelector("[data-original-initials]"))
+    .map((row) => {
+      const originalInitials = row.querySelector("[data-original-initials]")?.dataset.originalInitials || "";
+      return {
+        originalInitials,
+        firstName: bulkRowValue(row, "[data-bulk-first-name]"),
+        lastName: bulkRowValue(row, "[data-bulk-last-name]"),
+        initials: bulkRowValue(row, "[data-bulk-initials]").toUpperCase(),
+        email: bulkRowValue(row, "[data-bulk-email]").toLowerCase(),
+        phone: bulkRowValue(row, "[data-bulk-phone]"),
+        area: bulkRowValue(row, "[data-bulk-area]"),
+        rank: Number(bulkRowValue(row, "[data-bulk-rank]")),
+        bidAs: bulkRowValue(row, "[data-bulk-bid-as]") || "CPC",
+        active: bulkRowValue(row, "[data-bulk-active]") !== "false",
+      };
+    });
+}
+
+function validateBulkRosterRows(rows) {
+  for (const row of rows) {
+    if (!row.firstName || !row.lastName || !row.initials) return "Every edited BUE needs first name, last name, and initials.";
+    if (!ZLA_AREAS.includes(row.area)) return `Choose a valid area for ${row.initials}.`;
+    if (!Number.isFinite(row.rank) || row.rank < 1) return `Enter a valid seniority rank for ${row.initials}.`;
+  }
+
+  const proposedInitials = new Map();
+  senioritySource.forEach((entry) => {
+    const initials = rosterEntryInitials(entry);
+    proposedInitials.set(initials, initials);
+  });
+  rows.forEach((row) => {
+    proposedInitials.delete(row.originalInitials);
+  });
+
+  for (const row of rows) {
+    if (proposedInitials.has(row.initials)) return `${row.initials} is already assigned outside this bulk edit.`;
+    proposedInitials.set(row.initials, row.initials);
+  }
+
+  const duplicateRank = rows.find((row, index) =>
+    row.active &&
+    rows.some((other, otherIndex) =>
+      otherIndex !== index &&
+      other.active &&
+      other.area === row.area &&
+      other.rank === row.rank
+    )
+  );
+  if (duplicateRank) return `Two active BUEs in ${duplicateRank.area} have seniority #${duplicateRank.rank}.`;
+
+  return "";
+}
+
+function applyBulkRosterChanges() {
+  if (!hasSystemAdminAccess()) return;
+  const rows = bulkRosterRows();
+  if (!rows.length) {
+    setRosterStatus("No visible roster rows to apply.", "error");
+    return;
+  }
+
+  const validationMessage = validateBulkRosterRows(rows);
+  if (validationMessage) {
+    setRosterStatus(validationMessage, "error");
+    return;
+  }
+
+  const editedEntries = rows.map((row) => {
+    const entry = findRosterEntryByInitials(row.originalInitials);
+    if (!entry) return null;
+    entry[0] = row.lastName;
+    entry[1] = row.firstName;
+    entry[2] = row.bidAs;
+    entry[3] = row.initials;
+    entry[5] = row.email;
+    entry[6] = row.phone;
+    entry[7] = row.active;
+    if (!row.active) intakeTeamInitials.delete(row.initials);
+    return { entry, row };
+  }).filter(Boolean);
+
+  editedEntries
+    .sort((a, b) => {
+      if (a.row.area !== b.row.area) return a.row.area.localeCompare(b.row.area);
+      return a.row.rank - b.row.rank;
+    })
+    .forEach(({ entry, row }) => {
+      placeRosterEntry(entry, row.area, row.rank);
+      syncCurrentUserFromRoster(row.originalInitials, row.initials);
+    });
+
+  logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} roster changes from the bulk editor.`);
+  renderApp();
+  setRosterStatus(`${editedEntries.length} roster changes applied. Supabase sync is the next persistence step.`, "success");
+}
+
 function renderRosterManager() {
   const filter = document.querySelector("[data-roster-area-filter]");
   if (filter && !filter.value) filter.value = currentViewArea();
@@ -4428,15 +4545,19 @@ function renderRosterManager() {
   target.innerHTML = rows.length
     ? rows.map(({ person }) => `
       <tr class="${person.active ? "" : "inactive"}">
-        <td>${Number.isFinite(person.rank) ? person.rank : "—"}</td>
+        <td><input class="bulk-rank" type="number" min="1" step="1" value="${Number.isFinite(person.rank) ? person.rank : ""}" data-bulk-rank data-original-initials="${escapeHtml(person.initials)}" /></td>
         <td>
-          <strong>${escapeHtml(personDisplayName(person))}</strong>
-          <small>${escapeHtml(person.email || "No login email")}</small>
+          <div class="bulk-name-grid">
+            <input type="text" value="${escapeHtml(person.firstName)}" data-bulk-first-name data-original-initials="${escapeHtml(person.initials)}" aria-label="First name for ${escapeHtml(person.initials)}" />
+            <input type="text" value="${escapeHtml(person.lastName)}" data-bulk-last-name data-original-initials="${escapeHtml(person.initials)}" aria-label="Last name for ${escapeHtml(person.initials)}" />
+          </div>
+          <input type="email" value="${escapeHtml(person.email)}" data-bulk-email data-original-initials="${escapeHtml(person.initials)}" aria-label="Email for ${escapeHtml(person.initials)}" />
+          <input type="tel" value="${escapeHtml(person.phone)}" data-bulk-phone data-original-initials="${escapeHtml(person.initials)}" aria-label="Phone for ${escapeHtml(person.initials)}" />
         </td>
-        <td>${escapeHtml(person.initials)}</td>
-        <td>${escapeHtml(person.area)}</td>
-        <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-        <td><span class="status ${person.active ? "approved" : "pending"}">${person.active ? "Active" : "Inactive"}</span></td>
+        <td><input class="bulk-initials" type="text" maxlength="4" value="${escapeHtml(person.initials)}" data-bulk-initials data-original-initials="${escapeHtml(person.initials)}" /></td>
+        <td><select data-bulk-area data-original-initials="${escapeHtml(person.initials)}">${rosterAreaOptions(person.area)}</select></td>
+        <td><select data-bulk-bid-as data-original-initials="${escapeHtml(person.initials)}">${rosterBidAsOptions(person.bidAs)}</select></td>
+        <td><select data-bulk-active data-original-initials="${escapeHtml(person.initials)}">${rosterActiveOptions(person.active)}</select></td>
         <td>
           <div class="roster-row-actions">
             <button class="secondary-action small" type="button" data-edit-roster-bue="${escapeHtml(person.initials)}">Edit</button>
@@ -5857,6 +5978,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-roster-new]")) {
     resetRosterForm();
+    return;
+  }
+
+  if (event.target.closest("[data-apply-bulk-roster]")) {
+    applyBulkRosterChanges();
     return;
   }
 
