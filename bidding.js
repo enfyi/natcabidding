@@ -419,50 +419,54 @@ const extraLeaveSlotData = {
 let selectedLeaveDateKey = "2027-01-18";
 
 const senioritySource = [
-  ["Denham", "Corey", "CPC"],
-  ["Grider", "Brian", "CPC"],
-  ["Hutson", "Jeffrey", "CPC"],
-  ["Bonanno", "Justin", "GL"],
-  ["Schoelen", "Michael", "GL", "OC"],
-  ["Lane", "Joshua", "CPC"],
-  ["Wagner", "Aaron", "CPC"],
-  ["Harold", "Kristina", "CPC"],
-  ["Bickel", "Shane", "CPC"],
-  ["Couche", "Rachel", "CPC"],
-  ["Robertson", "Rajanish", "CPC"],
-  ["Alvarez", "Mark", "CPC"],
-  ["Carpenter", "Jonathan", "CPC"],
-  ["Lohrman", "Joshua", "CPC"],
-  ["Norr", "Garrett", "GL"],
-  ["Carlin", "Russell", "CPC"],
-  ["Bengard", "Erik", "GL"],
-  ["Arce", "Adolfo", "CPC"],
-  ["Christie", "Philip", "CPC"],
-  ["Holder", "Joseph", "CPC"],
-  ["Gabriel", "Colin", "CPC"],
-  ["Susnitzky", "Brett", "CPC"],
-  ["Barrett", "Timothy", "CPC"],
-  ["Romano", "Frank", "CPC"],
-  ["Lowther", "Timothy", "CPC"],
-  ["Tshudy", "Matthew", "CPC"],
-  ["Hanson", "Brett", "CPC"],
-  ["Vo", "Kevin", "CPC"],
-  ["Moss", "Gerrit", "CPC"],
-  ["Kelsey", "Taylor", "CPC"],
-  ["Speakman", "Erik", "CPC"],
-  ["Meuleners", "Janessa", "CPC"],
-  ["Graham", "Kaleb", "CPC"],
-  ["Griffin", "Dylan", "CPC"],
-  ["Pastore", "Tanner", "R-DEV"],
-  ["De La O", "Kevin", "R-DEV"],
-  ["Stout", "Joshua", "R-DEV"],
-  ["Madera", "Allan", "R-DEV"],
-  ["Macias", "Benny", "D-DEV"],
-  ["Von Buck", "Corbin", "D-DEV"],
-  ["Greer", "William", "D-DEV"],
-  ["Hansen", "Dallas", "D-DEV"],
-  ["Myers", "Kyle", "D-DEV"],
-  ["McCarthy", "Aidan", "D-DEV"],
+  ["Denham", "Corey", "CPC", "CE", "Area A"],
+  ["Hutson", "Jeffrey", "CPC", "HN", "Area A"],
+  ["Bonanno", "Justin", "GL", "JJ", "Area A"],
+  ["Schoelen", "Michael", "GL", "OC", "Area A"],
+  ["Lane", "Joshua", "CPC", "CP", "Area A"],
+  ["Wagner", "Aaron", "CPC", "AM", "Area A"],
+  ["Harold", "Kristina", "CPC", "TE", "Area A"],
+  ["Bickel", "Shane", "CPC", "SS", "Area A"],
+  ["Couche", "Rachel", "CPC", "VC", "Area A"],
+  ["Harris", "Sarah", "CPC", "SZ", "Area A"],
+  ["Robertson", "Rajnish", "CPC", "RO", "Area A"],
+  ["Alvarez", "Mark", "CPC", "LA", "Area A"],
+  ["Carpenter", "Jonathan", "CPC", "XJ", "Area A"],
+  ["Lohrman", "Joshua", "CPC", "OP", "Area A"],
+  ["Norr", "Garrett", "GL", "GJ", "Area A"],
+  ["Carlin", "Russell", "CPC", "AR", "Area A"],
+  ["Bengard", "Erik", "GL", "EB", "Area A"],
+  ["Arce", "Adolfo", "CPC", "RC", "Area A"],
+  ["Holder", "Joseph", "CPC", "HH", "Area A"],
+  ["Gabriel", "Colin", "CPC", "CZ", "Area A"],
+  ["Susnitzky", "Brett", "CPC", "ZY", "Area A"],
+  ["Barrett", "Timothy", "CPC", "AG", "Area A"],
+  ["Romano", "Frank", "CPC", "FJ", "Area A"],
+  ["Lowther", "Timothy (Scott)", "CPC", "GS", "Area A"],
+  ["Tshudy", "Matthew", "CPC", "TY", "Area A"],
+  ["Hanson", "Brett", "CPC", "ZH", "Area A"],
+  ["Vo", "Kevin", "CPC", "VO", "Area A"],
+  ["Moss", "Gerrit", "CPC", "GM", "Area A"],
+  ["Kelsey", "Taylor", "CPC", "TK", "Area A"],
+  ["Speakman", "Erik", "CPC", "ES", "Area A"],
+  ["Meuleners", "Janessa", "CPC", "NO", "Area A"],
+  ["Graham", "Kaleb", "CPC", "GK", "Area A"],
+  ["Griffin", "Dylan", "CPC", "DG", "Area A"],
+  ["Pastore", "Tanner", "CPC", "TP", "Area A"],
+  ["De La O", "Kevin", "CPC", "KE", "Area A"],
+  ["Madera", "Allan", "R-DEV", "AW", "Area A"],
+  ["Macias", "Benny", "R-DEV", "BY", "Area A"],
+  ["Von Buck", "Corbin", "R-DEV", "XO", "Area A"],
+  ["Greer", "William", "D-DEV", "WG", "Area A"],
+  ["Hansen", "Dallas", "D-DEV", "DL", "Area A"],
+  ["Myers", "Kyle", "D-DEV", "KM", "Area A"],
+  ["McCarthy", "Aidan", "D-DEV", "PM", "Area A"],
+  ["Nestojko", "Adam", "D-DEV", "YD", "Area A"],
+  ["Galland", "Jacob", "D-DEV", "KJ", "Area A"],
+  ["Padilla", "Felipe", "D-DEV", null, "Area A"],
+  ["Plendl", "Justin", "D-DEV", "JP", "Area A"],
+  ["Montano", "Bryan", "D-DEV", null, "Area A"],
+  ["Griffin", "Emily", "D-DEV", null, "Area A"],
 ];
 
 const roundDateBlocks = [
@@ -873,6 +877,7 @@ function addOrUpdateRdoSubmission() {
   }
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is required before the line is populated.`);
+  queueBidSubmittedEmail(request);
 }
 
 function controllerName(person) {
@@ -1045,6 +1050,7 @@ function submitManualRdoBid(panel, person, area) {
   }
 
   logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is required before the line is populated.`);
+  queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -1114,6 +1120,7 @@ function submitManualLeaveBid(panel, person, area) {
   });
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
+  queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -1721,30 +1728,84 @@ function submitLeaveDraftBatch() {
   leaveDraftQueue = [];
   activeOverrideId = null;
   activeDenialId = null;
+  queueBidSubmittedEmail(newRequests);
   renderApp();
   setLeaveBuilderStatus("Leave batch sent to intake review.", "success");
 }
 
-function queuePrototypeEmail(to, subject, body) {
+function queuePrototypeEmail(to, subject, body, area = currentUser.area) {
   prototypeEmails.unshift({
     to,
     subject,
     body,
     time: formatDateTime(new Date()),
   });
-  logHistory(currentUser.area, "Email queued", `${currentUser.initials} queued "${subject}" to ${to}.`);
+  logHistory(area, "Email queued", `${currentUser.initials} queued "${subject}" to ${to}.`);
+}
+
+function bidRecipientEmail(item) {
+  const recipient = bueByInitials(item.initials) || Object.values(testAccounts).find((account) => account.initials === item.initials);
+  return recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`;
+}
+
+function bidEmailDetail(item) {
+  if (item.type === "RDO Line") {
+    return `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
+  }
+
+  const weekText = item.weekUnits ? `, ${item.weekUnits} bid ${item.weekUnits === 1 ? "week" : "weeks"}` : "";
+  const roundText = item.round ? `, Round ${item.round}` : "";
+  return `${item.range}, ${item.days} ${item.days === 1 ? "day" : "days"}${weekText}${roundText}.`;
+}
+
+const BID_OFFICE_CONTACT = "If you have any questions, please use the messaging system on the website, or text the Bidding Office at (661) 434-1004.";
+
+function bidRound(item) {
+  const round = item.type === "Leave" ? leaveRoundForItem(item) : Number(item.round || currentRoundNumber());
+  return Number.isFinite(round) && round > 0 ? round : currentRoundNumber();
+}
+
+function queueBidSubmittedEmail(items) {
+  const submissions = Array.isArray(items) ? items : [items];
+  if (!submissions.length) return;
+
+  const first = submissions[0];
+  const round = bidRound(first);
+  const detail = submissions.map((item, index) => {
+    const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
+    return `${prefix}${item.type} bid details: ${bidEmailDetail(item)}`;
+  }).join("\n");
+  const subjectType = submissions.length > 1 ? `${submissions.length} leave bids` : `${first.type} bid`;
+
+  queuePrototypeEmail(
+    bidRecipientEmail(first),
+    `Bid received for ${first.initials} Round ${round} ${BID_YEAR}`,
+    `Your ${subjectType} has been received and sent to Bidding Intake for review.\n\n${detail}\n\nYou will receive another email once Intake approves the bid.\n\n${BID_OFFICE_CONTACT}`,
+    first.area
+  );
 }
 
 function queueBidVerifiedEmail(item) {
-  const subject = `${item.type} verified for ${BID_YEAR}`;
-  const recipient = Object.values(testAccounts).find((account) => account.initials === item.initials);
-  const detail = item.type === "RDO Line"
-    ? `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex ${item.flex}, AWS ${item.aws}, Mid ${item.mid}.`
-    : `${item.range}, ${item.days} ${item.days === 1 ? "day" : "days"}.`;
+  const round = bidRound(item);
+  const subject = `Bid approved for ${item.initials} Round ${round} ${BID_YEAR}`;
+  const detail = bidEmailDetail(item);
   queuePrototypeEmail(
-    recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`,
+    bidRecipientEmail(item),
     subject,
-    `Your ${item.type.toLowerCase()} bid has been verified and completed. ${detail} If you need to make changes, please do so before your bid window closes.`
+    `Your submitted bid has been approved for Round ${round}.\n\n${item.type} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
+    item.area
+  );
+}
+
+function queueBidDeniedEmail(item) {
+  const round = bidRound(item);
+  const detail = bidEmailDetail(item);
+  const reason = item.denialReason ? `\n\nReason: ${item.denialReason}` : "";
+  queuePrototypeEmail(
+    bidRecipientEmail(item),
+    `Bid denied for ${item.initials} Round ${round} ${BID_YEAR}`,
+    `Your submitted bid was not approved for Round ${round}.\n\n${item.type} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
+    item.area
   );
 }
 
@@ -1982,6 +2043,7 @@ function denyIntakeItem(id) {
   }
 
   logHistory(item.area, `${item.type} denied`, `${currentUser.initials} denied ${item.initials}'s ${item.type} request. Reason: ${reason}`);
+  queueBidDeniedEmail(item);
   activeDenialId = null;
   activeOverrideId = null;
   renderApp();
