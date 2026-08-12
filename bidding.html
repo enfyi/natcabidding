@@ -175,7 +175,7 @@
           <p>Bidding</p>
           <button class="nav-item" type="button" data-page="seniority">
             <span class="nav-icon">#</span>
-            Seniority
+            Bid Times
           </button>
           <button class="nav-item" type="button" data-page="rdos">
             <span class="nav-icon">▦</span>
@@ -340,10 +340,20 @@
               <strong data-user-rank-metric>#5</strong>
               <small data-user-priority-summary>4 ahead · 40 behind</small>
             </article>
+            <article class="metric-card bid-window-metric">
+              <span>Your Next Bid Window</span>
+              <strong data-bid-window-range>Loading bid window</strong>
+              <small data-next-bid-window-round>Round 1</small>
+            </article>
             <article class="metric-card selected">
               <span>RDO Line</span>
               <strong data-dashboard-rdo-line>Line 15</strong>
               <small data-dashboard-rdo-summary>Choose fatigue group, AWS, Flex, and Mid when you bid.</small>
+            </article>
+            <article class="metric-card round-rule-card">
+              <span>Round Rules</span>
+              <strong data-next-bid-window-rule>1 or 2 weeks</strong>
+              <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</span></small>
             </article>
           </div>
 
@@ -383,39 +393,6 @@
             </section>
 
             <aside class="right-stack">
-              <section class="panel next-bid-window-card">
-                <div class="panel-header compact">
-                  <div>
-                    <h2>Your Next Bid Window</h2>
-                    <p data-next-bid-window-round>Round 1</p>
-                  </div>
-                  <span class="pill open" data-bid-window-pill>Checking</span>
-                </div>
-                <strong data-bid-window-range>Loading bid window</strong>
-                <dl class="bid-window-detail-list">
-                  <div>
-                    <dt data-bid-window-countdown-label>Countdown</dt>
-                    <dd data-bid-window-countdown>--:--:--</dd>
-                  </div>
-                  <div>
-                    <dt>Round Rules</dt>
-                    <dd>
-                      <b data-next-bid-window-rule>1 or 2 weeks</b>
-                      <small data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</small>
-                    </dd>
-                  </div>
-                </dl>
-                <ul>
-                  <li>Selected line open</li>
-                  <li>Fatigue group selected</li>
-                  <li>Preferences complete</li>
-                  <li>Leave within allowance</li>
-                </ul>
-                <div class="button-row">
-                  <button class="primary-action window-action" type="button" data-page="rdos">Submit Bid</button>
-                  <button class="secondary-action" type="button">Save Draft</button>
-                </div>
-              </section>
               <section class="panel selected-line-card">
                 <div class="panel-header compact">
                   <div>

@@ -1568,7 +1568,7 @@ input {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(160px, 0.8fr) minmax(270px, 1.15fr) minmax(360px, 1.55fr) minmax(230px, 1fr);
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -1630,6 +1630,16 @@ input {
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
     rgba(255, 255, 255, 0.02);
   box-shadow: none;
+}
+
+.metric-card.bid-window-metric {
+  display: grid;
+  align-content: start;
+}
+
+.metric-card.bid-window-metric strong {
+  font-size: 1.35rem;
+  line-height: 1.18;
 }
 
 .metric-card.leave-balance {
@@ -4961,6 +4971,10 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   .dashboard-grid,
   .workspace-grid {
     grid-template-columns: minmax(650px, 1fr) 380px;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #seniority-page .workspace-grid {

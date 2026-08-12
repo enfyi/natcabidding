@@ -106,26 +106,18 @@ const intakeSchedules = [
   },
 ];
 
-// Prototype data: in production these timestamps come from the logged-in user's bid window.
-const userBidWindow = {
-  start: new Date(Date.now() - 30 * 60 * 1000),
-  end: new Date(Date.now() + 90 * 60 * 1000),
-};
-
-function isBidWindowOpen(date = new Date()) {
-  return date >= userBidWindow.start && date <= userBidWindow.end;
-}
-
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
   if (roundState?.phase === "open") return roundState.activeRank;
   if (roundState?.phase === "validation") return null;
   if (area !== currentUser.area) return null;
-  if (!Number.isFinite(currentUser.seniorityRank)) return null;
-  if (isBidWindowOpen(date)) return currentUser.seniorityRank;
-  if (date < userBidWindow.start) return Math.max(1, currentUser.seniorityRank - 1);
-  const nextRank = currentUser.seniorityRank + 1;
-  return nextRank <= currentUser.bidderCount ? nextRank : null;
+  const rank = currentUserSeniorityRank(area);
+  const window = currentUserBidWindow(date, area);
+  if (!Number.isFinite(rank) || !window) return null;
+  if (date >= window.start && date <= window.end) return rank;
+  if (date < window.start) return Math.max(1, rank - 1);
+  const nextRank = rank + 1;
+  return nextRank <= currentUserBidderCount(area) ? nextRank : null;
 }
 
 const holidayOverrides = new Set();
@@ -1126,6 +1118,29 @@ function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
     start: roundWindowDate(parsedWindow, parsedWindow.start),
     end: roundWindowDate(parsedWindow, parsedWindow.end),
   };
+}
+
+function currentUserSeniorityRank(area = currentUser.area) {
+  const currentEntryIndex = activeRosterEntries(area).findIndex(seniorityEntryMatchesCurrentUser);
+  if (currentEntryIndex >= 0) return currentEntryIndex + 1;
+  return area === currentUser.area && Number.isFinite(currentUser.seniorityRank)
+    ? currentUser.seniorityRank
+    : null;
+}
+
+function currentUserBidderCount(area = currentUser.area) {
+  return activeRosterEntries(area).length || currentUser.bidderCount;
+}
+
+function currentUserBidWindow(date = new Date(), area = currentUser.area) {
+  const rank = currentUserSeniorityRank(area);
+  if (!Number.isFinite(rank)) return null;
+
+  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
+  const windows = Array.from({ length: roundCount }, (_, index) => bidWindowForRankRound(rank, index + 1, area))
+    .filter(Boolean);
+
+  return windows.find((window) => date < window.end) || null;
 }
 
 function roundWindows(roundNumber, area = currentViewArea()) {
@@ -2732,20 +2747,28 @@ function calendarActiveDate() {
 function makeCalendar(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
+  const isPublicCalendar = targetId === "public-calendar";
+  const ownerPage = target.closest(".page");
+  if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
-  const showRdo = targetId !== "public-calendar" && area === currentUser.area;
-  const showPersonalLeave = targetId !== "public-calendar" && area === currentUser.area;
+  const showRdo = !isPublicCalendar && area === currentUser.area;
+  const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
   const monthIndexes = monthNames.map((_, index) => index);
 
   target.classList.remove("month-view", "week-view");
 
   target.innerHTML = monthIndexes
-    .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, { showRdo, showPersonalLeave, area }))
+    .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip: isPublicCalendar,
+    }))
     .join("");
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
-  const { showRdo = true, showPersonalLeave = true } = options;
+  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false } = options;
   const name = monthNames[monthIndex];
   const date = new Date(year, monthIndex, 1);
   const firstDay = date.getDay();
@@ -2756,7 +2779,12 @@ function renderMonthCard(monthIndex, year, options = {}) {
   for (let i = 0; i < firstDay; i += 1) cells.push("<span></span>");
 
   for (let day = 1; day <= daysInMonth; day += 1) {
-    cells.push(renderCalendarDay(monthIndex, day, false, year, { showRdo, showPersonalLeave }));
+    cells.push(renderCalendarDay(monthIndex, day, false, year, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip,
+    }));
   }
 
   return `
@@ -2817,7 +2845,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const isClosed = canShowLeaveState && isLeaveSlotsFull(key, options.area);
   const hasDetail = showVacationLayer && !isPreviousLeaveYear;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
-  const slotTooltip = hasDetail ? quickLeaveSlotTooltip(key, holidayKind, options.area) : "";
+  const slotTooltip = hasDetail && !options.deferSlotTooltip
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area)
+    : "";
   const className = [
     holidayKind?.className || "",
     isPreviousLeaveYear ? "previous-leave-year-day" : "",
@@ -2869,13 +2899,15 @@ function updateCalendarViewControls() {
   });
 }
 
-function renderCalendars() {
+function renderCalendars({ includePublic = true, includeMember = true } = {}) {
   updateCalendarViewControls();
   updateCalendarYearLabels();
-  makeCalendar("public-calendar");
-  makeCalendar("dashboard-calendar");
-  makeCalendar("leave-calendar");
-  makeCalendar("full-calendar");
+  if (includePublic) makeCalendar("public-calendar");
+  if (includeMember) {
+    makeCalendar("dashboard-calendar");
+    makeCalendar("leave-calendar");
+    makeCalendar("full-calendar");
+  }
 }
 
 function leaveSlotMap(area = currentUser.area) {
@@ -4028,6 +4060,29 @@ function updatePublicView(area = publicState.area, section = publicState.section
   });
 }
 
+function publicRosterArea(area = publicState.area) {
+  return ZLA_AREAS.includes(area) ? area : currentUser.area;
+}
+
+function renderPublicPage(area = publicState.area, section = publicState.section) {
+  seniority = buildSeniority(publicRosterArea(area));
+  updatePublicView(area, section);
+  renderCalendars({ includeMember: false });
+}
+
+function isMemberAppVisible() {
+  const appShell = document.querySelector(".app-shell");
+  return Boolean(appShell && !appShell.hidden);
+}
+
+function renderVisibleCalendars() {
+  const memberVisible = isMemberAppVisible();
+  renderCalendars({
+    includePublic: !memberVisible,
+    includeMember: memberVisible,
+  });
+}
+
 function userFullName() {
   return `${currentUser.firstName} ${currentUser.lastName}`;
 }
@@ -4115,20 +4170,24 @@ function adminGrantWindowText() {
 }
 
 function userSeniorityText() {
-  return Number.isFinite(currentUser.seniorityRank) ? `#${currentUser.seniorityRank} / ${currentUser.bidderCount}` : "Admin";
+  const rank = currentUserSeniorityRank();
+  return Number.isFinite(rank) ? `#${rank} / ${currentUserBidderCount()}` : "Admin";
 }
 
 function userSeniorityLongText() {
-  return Number.isFinite(currentUser.seniorityRank) ? `#${currentUser.seniorityRank} of ${currentUser.bidderCount}` : "Admin access";
+  const rank = currentUserSeniorityRank();
+  return Number.isFinite(rank) ? `#${rank} of ${currentUserBidderCount()}` : "Admin access";
 }
 
 function renderCurrentUser() {
   const canOpenIntake = canUseIntakeView();
-  const hasSeniority = Number.isFinite(currentUser.seniorityRank);
+  const displayedSeniorityRank = currentUserSeniorityRank();
+  const displayedBidderCount = currentUserBidderCount();
+  const hasSeniority = Number.isFinite(displayedSeniorityRank);
   const bidAs = currentUserBidAs();
   const bidAsClassName = `bid-as-${bidAsClass(bidAs)}`;
-  const ahead = hasSeniority ? currentUser.seniorityRank - 1 : "—";
-  const behind = hasSeniority ? currentUser.bidderCount - currentUser.seniorityRank : "—";
+  const ahead = hasSeniority ? displayedSeniorityRank - 1 : "—";
+  const behind = hasSeniority ? displayedBidderCount - displayedSeniorityRank : "—";
   const viewArea = currentViewArea();
   setText("[data-user-initials]", currentUser.initials);
   setText("[data-user-name]", userFullName());
@@ -4158,12 +4217,12 @@ function renderCurrentUser() {
   setText("[data-user-role]", accessLabel());
   setText("[data-user-seniority]", userSeniorityText());
   setText("[data-user-seniority-long]", userSeniorityLongText());
-  setText("[data-user-rank-metric]", hasSeniority ? `#${currentUser.seniorityRank}` : "Admin");
-  setText("[data-user-rank-total]", hasSeniority ? `of ${currentUser.bidderCount}` : "all areas");
+  setText("[data-user-rank-metric]", hasSeniority ? `#${displayedSeniorityRank}` : "Admin");
+  setText("[data-user-rank-total]", hasSeniority ? `of ${displayedBidderCount}` : "all areas");
   setText("[data-ahead-count]", ahead);
   setText("[data-behind-count]", behind);
   setText("[data-user-priority-summary]", hasSeniority ? `${ahead} ahead · ${behind} behind` : "All areas · intake access");
-  setText("[data-bidder-count]", `${currentUser.bidderCount} bidders`);
+  setText("[data-bidder-count]", `${displayedBidderCount} bidders`);
   setText(
     "[data-seniority-summary]",
     canOpenIntake ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
@@ -4223,10 +4282,11 @@ function updateBidWindow() {
   const now = new Date();
   const roundState = areaBidRoundState(now);
   const isValidationPeriod = roundState?.phase === "validation";
-  const currentRound = latestAreaRound(now);
+  const personalBidWindow = currentUserBidWindow(now);
+  const currentRound = personalBidWindow?.round || latestAreaRound(now);
   const viewingHomeArea = isViewingHomeArea();
-  const isBefore = viewingHomeArea && now < userBidWindow.start;
-  const isOpen = viewingHomeArea && now >= userBidWindow.start && now <= userBidWindow.end;
+  const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
+  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
   const isAdmin = hasIntakeAccess();
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -4239,11 +4299,11 @@ function updateBidWindow() {
   const countdownText = isValidationPeriod
     ? formatDuration(roundState.validationEndsAt - now)
     : isOpen
-      ? formatDuration(userBidWindow.end - now)
+      ? formatDuration(personalBidWindow.end - now)
       : isBefore
-      ? formatDuration(userBidWindow.start - now)
+      ? formatDuration(personalBidWindow.start - now)
       : showCurrentBidder
-        ? `#${activePerson.rank} / ${currentUser.bidderCount}`
+        ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
   const countdownLabel = isValidationPeriod
     ? "Validation Ends In"
@@ -4278,9 +4338,10 @@ function updateBidWindow() {
   setText("[data-bid-window-text]", statusText);
   setText("[data-bid-window-countdown]", countdownText);
   setText("[data-bid-window-countdown-label]", countdownLabel);
-  setText("[data-bid-window-close]", formatDateTime(userBidWindow.end));
-  setText("[data-bid-window-range]", formatDateRange(userBidWindow.start, userBidWindow.end));
+  setText("[data-bid-window-close]", personalBidWindow ? formatDateTime(personalBidWindow.end) : "Not scheduled");
+  setText("[data-bid-window-range]", personalBidWindow ? formatDateRange(personalBidWindow.start, personalBidWindow.end) : "Not scheduled");
   setText("[data-next-bid-window-round]", isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
+  setText("[data-next-bid-window-rule-round]", `Round ${currentRound}`);
   setText("[data-next-bid-window-rule]", currentRoundRule.label);
   setText("[data-next-bid-window-rule-detail]", currentRoundRule.detail);
   setText(
@@ -6320,6 +6381,10 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
+  if (isMemberAppVisible()) {
+    renderCalendars({ includePublic: false });
+    if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
+  }
 }
 
 function updateSelectedBidYear(year) {
@@ -6683,9 +6748,14 @@ function downloadBiddingXlsx() {
 }
 
 function renderApp() {
+  if (!isMemberAppVisible()) {
+    renderPublicPage();
+    return;
+  }
+
   seniority = buildSeniority();
   renderCurrentUser();
-  renderCalendars();
+  renderCalendars({ includePublic: false });
   syncLeaveBuilderInputs();
   syncRdoFilterControls();
   renderRdoLines();
@@ -6717,7 +6787,7 @@ function logOut() {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   document.querySelector(".login-screen")?.removeAttribute("hidden");
-  updatePublicView();
+  renderPublicPage();
 }
 
 document.addEventListener("click", (event) => {
@@ -6780,7 +6850,7 @@ document.addEventListener("click", (event) => {
   if (leavePickerDateButton) {
     selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
     selectLeaveBuilderDate(selectedLeaveDateKey);
-    renderCalendars();
+    renderCalendars({ includePublic: false });
     renderLeaveSlotBoard();
     renderLeaveDatePicker();
     return;
@@ -6792,7 +6862,7 @@ document.addEventListener("click", (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    updatePublicView(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar");
+    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar");
     return;
   }
 
@@ -7084,7 +7154,7 @@ document.addEventListener("click", (event) => {
     selectedLineId = row.dataset.lineId;
     renderRdoLines();
     updateSelectedLine();
-    renderCalendars();
+    renderCalendars({ includePublic: false });
     renderLeaveSlotBoard();
     return;
   }
@@ -7096,9 +7166,9 @@ document.addEventListener("click", (event) => {
     if (isAppCalendar) {
       selectLeaveBuilderDate(selectedLeaveDateKey);
     }
-    renderCalendars();
-    syncLeaveBuilderInputs();
+    renderVisibleCalendars();
     if (!isAppCalendar) return;
+    syncLeaveBuilderInputs();
     openLeaveSlotModal();
     return;
   }
@@ -7106,7 +7176,7 @@ document.addEventListener("click", (event) => {
   const calendarModeButton = event.target.closest("[data-calendar-mode]");
   if (calendarModeButton) {
     calendarMode = calendarModeButton.dataset.calendarMode;
-    renderCalendars();
+    renderVisibleCalendars();
     return;
   }
 
@@ -7117,8 +7187,8 @@ document.addEventListener("click", (event) => {
     if (action === "previous") displayedCalendarYear -= 1;
     if (action === "today") displayedCalendarYear = BID_YEAR;
     setSelectedDateYear(displayedCalendarYear);
-    renderCalendars();
-    renderLeaveSlotBoard();
+    renderVisibleCalendars();
+    if (isMemberAppVisible()) renderLeaveSlotBoard();
     return;
   }
 
@@ -7257,12 +7327,14 @@ document.addEventListener("change", (event) => {
   renderApp();
 });
 
-updatePublicView();
-renderApp();
+renderPublicPage();
 initializeSupabaseAuth();
 loadSupabaseReferenceData().then(() => {
-  updatePublicView();
-  renderApp();
+  if (isMemberAppVisible()) {
+    renderApp();
+  } else {
+    renderPublicPage();
+  }
 });
 setInterval(updateBidWindow, 1000);
 window.NATCA_BIDDING_READY = true;
