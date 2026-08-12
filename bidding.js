@@ -996,6 +996,44 @@ const roundDateBlocks = [
 ];
 
 const bidStartTimes = ["0700", "0900", "1100", "1300", "1500", "1700"];
+const BID_OFFICE_CLOSED_DATE_KEYS = new Set([
+  "2026-10-12",
+  "2026-11-11",
+]);
+
+function roundDateBlocksForArea(area = currentViewArea()) {
+  if (area !== "Area A") return roundDateBlocks;
+
+  const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
+  const roundOneDates = areaARoundOneDateLabels(requiredDateCount);
+
+  return Array.from({ length: requiredDateCount }, (_, index) => {
+    const defaultBlock = roundDateBlocks[index] || [];
+    return [
+      roundOneDates[index],
+      defaultBlock[1] || "",
+      defaultBlock[2] || "",
+      defaultBlock[3] || "",
+    ];
+  });
+}
+
+function areaARoundOneDateLabels(requiredDateCount) {
+  const labels = [];
+  const date = new Date(BID_YEAR - 1, 9, 1);
+
+  while (labels.length < requiredDateCount) {
+    const key = dateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+    if (!BID_OFFICE_CLOSED_DATE_KEYS.has(key)) labels.push(bidOfficeDateLabel(date));
+    date.setDate(date.getDate() + 1);
+  }
+
+  return labels;
+}
+
+function bidOfficeDateLabel(date) {
+  return `${dayNames[date.getDay()]}, ${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function bidWindowLabel(date, start) {
   const hour = Number(start.slice(0, 2));
@@ -1061,10 +1099,10 @@ function roundWindowDate(parsedWindow, time) {
   return new Date(BID_YEAR - 1, parsedWindow.month - 1, parsedWindow.day, hour, minute);
 }
 
-function bidWindowForRankRound(rank, roundNumber) {
+function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
   const index = rank - 1;
   const rowBlock = Math.floor(index / bidStartTimes.length);
-  const dateLabel = roundDateBlocks[rowBlock]?.[roundNumber - 1];
+  const dateLabel = roundDateBlocksForArea(area)[rowBlock]?.[roundNumber - 1];
   const startTime = bidStartTimes[index % bidStartTimes.length];
   if (!dateLabel || !startTime) return null;
 
@@ -1081,12 +1119,12 @@ function bidWindowForRankRound(rank, roundNumber) {
 
 function roundWindows(roundNumber, area = currentViewArea()) {
   return activeRosterEntries(area)
-    .map((_, index) => bidWindowForRankRound(index + 1, roundNumber))
+    .map((_, index) => bidWindowForRankRound(index + 1, roundNumber, area))
     .filter(Boolean);
 }
 
 function areaBidRoundState(date = new Date(), area = currentViewArea()) {
-  const roundCount = roundDateBlocks[0]?.length || 0;
+  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
   for (let round = 1; round <= roundCount; round += 1) {
     const windows = roundWindows(round, area);
     const activeWindow = windows.find((window) => date >= window.start && date < window.end);
@@ -1252,6 +1290,7 @@ function rosterEntryToPerson(entry, rank = null) {
 
 function buildSeniority(area = currentViewArea()) {
   const openRank = activeBidderRank(new Date(), area);
+  const areaDateBlocks = roundDateBlocksForArea(area);
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
     const rank = index + 1;
@@ -1271,7 +1310,7 @@ function buildSeniority(area = currentViewArea()) {
       phone: seniorityEntryPhone(entry),
       active: true,
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
-      rounds: roundDateBlocks[rowBlock].map((date) => bidWindowLabel(date, start)),
+      rounds: (areaDateBlocks[rowBlock] || []).map((date) => bidWindowLabel(date, start)),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
       openRound: isCurrentBidder ? 1 : undefined,
     };
@@ -4947,6 +4986,101 @@ function rosterFormValues() {
   };
 }
 
+function supabaseRosterPayload(values) {
+  return {
+    original_area_name: values.originalArea || values.area,
+    original_initials: values.originalInitials || values.editInitials || values.initials,
+    profile_first_name: values.firstName,
+    profile_last_name: values.lastName,
+    profile_initials: values.initials,
+    profile_email: values.email,
+    profile_phone: values.phone,
+    profile_area_name: values.area,
+    profile_bid_role: values.bidAs || "CPC",
+    profile_seniority_rank: Number.isFinite(values.rank) ? values.rank : null,
+    profile_active: values.active !== false,
+  };
+}
+
+function friendlyRosterSyncFailure(error) {
+  const message = error?.message || "";
+  if (/admin_save_bidder_roster_entry|function .*not found|Could not find/i.test(message)) {
+    return "Working roster updated. Run the updated Supabase SQL helper, then save again to make it permanent.";
+  }
+  if (/Authentication is required|JWT|not authenticated|session/i.test(message)) {
+    return "Working roster updated. Sign in with a Supabase admin account to save it permanently.";
+  }
+  if (/Admin access is required/i.test(message)) {
+    return "Working roster updated. The signed-in Supabase account is not marked as an admin.";
+  }
+  return `Working roster updated, but Supabase did not save it: ${message || "unknown error"}`;
+}
+
+async function saveSupabaseRosterEntry(values) {
+  const client = supabaseClient();
+  if (!client) {
+    return {
+      saved: false,
+      message: "Working roster updated. Supabase is not configured on this page yet.",
+    };
+  }
+
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData?.session) {
+    return {
+      saved: false,
+      message: "Working roster updated. Sign in with a Supabase admin account to save it permanently.",
+    };
+  }
+
+  const { data, error } = await client.rpc("admin_save_bidder_roster_entry", supabaseRosterPayload(values));
+  if (error) {
+    return {
+      saved: false,
+      message: friendlyRosterSyncFailure(error),
+    };
+  }
+
+  return {
+    saved: true,
+    profile: Array.isArray(data) ? data[0] : data,
+  };
+}
+
+async function saveSupabaseRosterRows(rows) {
+  const client = supabaseClient();
+  if (!client) {
+    return {
+      saved: false,
+      message: "Working roster updated. Supabase is not configured on this page yet.",
+    };
+  }
+
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData?.session) {
+    return {
+      saved: false,
+      message: "Working roster updated. Sign in with a Supabase admin account to save it permanently.",
+    };
+  }
+
+  for (const row of rows) {
+    const { error } = await client.rpc("admin_save_bidder_roster_entry", supabaseRosterPayload({
+      ...row,
+      originalArea: row.originalArea || row.area,
+      originalInitials: row.originalInitials || row.initials,
+    }));
+    if (error) {
+      return {
+        saved: false,
+        message: friendlyRosterSyncFailure(error),
+      };
+    }
+  }
+
+  return { saved: true };
+}
+
 function placeRosterEntry(entry, area, rank) {
   const oldIndex = senioritySource.indexOf(entry);
   if (oldIndex >= 0) senioritySource.splice(oldIndex, 1);
@@ -4989,7 +5123,7 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
   selectedViewArea = person.area;
 }
 
-function saveRosterEntry(event) {
+async function saveRosterEntry(event) {
   event.preventDefault();
   if (!hasSystemAdminAccess()) return;
 
@@ -5014,6 +5148,8 @@ function saveRosterEntry(event) {
     return;
   }
 
+  const originalArea = existingEntry ? seniorityEntryArea(existingEntry) : values.area;
+  const originalInitials = values.editInitials || values.initials;
   const entry = existingEntry || [];
   entry[0] = values.lastName;
   entry[1] = values.firstName;
@@ -5028,7 +5164,18 @@ function saveRosterEntry(event) {
   logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area} at seniority #${values.rank}.`);
   renderApp();
   editRosterEntryByIndex(senioritySource.indexOf(entry));
-  setRosterStatus(`${values.firstName} ${values.lastName} saved. Supabase sync is the next persistence step.`, "success");
+  setRosterStatus(`${values.firstName} ${values.lastName} saved in the working roster. Syncing to Supabase...`, "info");
+  const supabaseSave = await saveSupabaseRosterEntry({
+    ...values,
+    originalArea,
+    originalInitials,
+  });
+  setRosterStatus(
+    supabaseSave.saved
+      ? `${values.firstName} ${values.lastName} saved to Supabase.`
+      : supabaseSave.message,
+    supabaseSave.saved ? "success" : "error"
+  );
 }
 
 function deleteRosterEntry(initials) {
@@ -5199,7 +5346,7 @@ function rebuildRosterFromBulkRows(rows) {
   return editedEntries;
 }
 
-function applyBulkRosterChanges() {
+async function applyBulkRosterChanges() {
   if (!hasSystemAdminAccess()) return;
   renumberBulkRosterRows();
   const rows = bulkRosterRows();
@@ -5221,7 +5368,14 @@ function applyBulkRosterChanges() {
 
   logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} visible roster rows from the bulk editor.`);
   renderApp();
-  setRosterStatus(`${editedEntries.length} visible roster rows applied. Supabase sync is the next persistence step.`, "success");
+  setRosterStatus(`${editedEntries.length} visible roster rows applied. Syncing to Supabase...`, "info");
+  const supabaseSave = await saveSupabaseRosterRows(rows);
+  setRosterStatus(
+    supabaseSave.saved
+      ? `${editedEntries.length} visible roster rows saved to Supabase.`
+      : supabaseSave.message,
+    supabaseSave.saved ? "success" : "error"
+  );
 }
 
 function renderRosterManager() {
