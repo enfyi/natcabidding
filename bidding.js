@@ -2003,7 +2003,8 @@ function leaveApprovalDates(item) {
 }
 
 function leaveRoundForItem(item) {
-  if (Number.isFinite(Number(item.round))) return Number(item.round);
+  const explicitRound = Number(item.round);
+  if (Number.isFinite(explicitRound) && explicitRound > 0) return explicitRound;
   const roundMatch = String(item.notes || item.summary || "").match(/Round\s+(\d+)/i);
   return roundMatch ? Number(roundMatch[1]) : 1;
 }
@@ -4844,24 +4845,29 @@ function renderLeaveRows(targetId) {
   const compact = false;
 
   target.innerHTML = leaveBids
-    .map((bid) => compact
-      ? `
+    .map((bid) => {
+      const round = leaveRoundForItem(bid);
+      return compact
+        ? `
         <tr>
           <td><b>${bid.priority}</b></td>
+          <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
         </tr>
       `
-      : `
+        : `
         <tr>
           <td><b>${bid.priority}</b></td>
+          <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
           <td>${bid.notes ? escapeHtml(bid.notes) : "—"}</td>
         </tr>
-      `)
+      `;
+    })
     .join("");
 }
 
@@ -4935,20 +4941,33 @@ function renderRoundRuleSummary(date = new Date()) {
   setText("[data-round-rule-detail]", `${rule.detail} ${phaseDetail}`);
 }
 
-function leaveBucketUsage(bucket) {
-  return Object.values(leaveSlotMap()).reduce((sum, day) => sum + (day[bucket] || []).length, 0);
+function areaLeaveSlotTotals() {
+  return Object.values(leaveSlotMap()).reduce((totals, day) => {
+    const cpcFilled = (day.cpc || []).length;
+    const devFilled = (day.dev || []).length;
+    const cpcCapacity = day.unavailable ? cpcFilled : leaveSlotCapacity.cpc;
+    const devCapacity = day.unavailable ? devFilled : leaveSlotCapacity.dev;
+
+    totals.cpcTotal += cpcCapacity;
+    totals.devTotal += devCapacity;
+    totals.cpcUsed += cpcFilled;
+    totals.devUsed += devFilled;
+    return totals;
+  }, {
+    cpcTotal: 0,
+    devTotal: 0,
+    cpcUsed: 0,
+    devUsed: 0,
+  });
 }
 
 function renderLeaveBucketCards() {
-  const cpcCount = seniority.filter((person) => leaveSlotBucketForBidAs(person.bidAs) === "cpc").length;
-  const devCount = seniority.filter((person) => leaveSlotBucketForBidAs(person.bidAs) === "dev").length;
-  const cpcTotal = cpcCount * 36;
-  const devTotal = devCount * 36;
-  const cpcUsed = leaveBucketUsage("cpc");
-  const devUsed = leaveBucketUsage("dev");
+  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveSlotTotals();
+  const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
+  const devLeft = Math.max(0, devTotal - devUsed);
 
-  setText("[data-cpc-leave-remaining]", `${Math.max(0, cpcTotal - cpcUsed)} days`);
-  setText("[data-dev-leave-remaining]", `${Math.max(0, devTotal - devUsed)} days`);
+  setText("[data-cpc-leave-remaining]", `${cpcLeft} ${cpcLeft === 1 ? "slot" : "slots"}`);
+  setText("[data-dev-leave-remaining]", `${devLeft} ${devLeft === 1 ? "slot" : "slots"}`);
   setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal}`);
   setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal}`);
 }

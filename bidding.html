@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary" />
   </head>
   <body>
     <section class="login-screen public-shell" aria-label="Public bidding website">
@@ -356,6 +356,14 @@
               <strong data-next-bid-window-rule>1 or 2 weeks</strong>
               <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</span></small>
             </article>
+            <article class="metric-card area-slots-metric">
+              <span>Area Leave Slots Left</span>
+              <dl>
+                <div><dt>CPC</dt><dd data-cpc-leave-remaining>--</dd></div>
+                <div><dt>DEV</dt><dd data-dev-leave-remaining>--</dd></div>
+              </dl>
+              <small><span data-cpc-leave-detail>Area CPC bucket</span> · <span data-dev-leave-detail>Developmental bucket</span></small>
+            </article>
             <article class="metric-card allowance-summary-metric">
               <span>Leave Allowance Summary</span>
               <dl>
@@ -467,6 +475,7 @@
                   <thead>
                     <tr>
                       <th>Priority</th>
+                      <th>Round</th>
                       <th>Date Range</th>
                       <th>Days</th>
                       <th>Status</th>
@@ -641,6 +650,7 @@
                     <thead>
                       <tr>
                         <th>Priority</th>
+                        <th>Round</th>
                         <th>Date Range</th>
                         <th>Days</th>
                         <th>Status</th>
@@ -663,7 +673,7 @@
                 </dl>
               </section>
               <section class="panel allowance-card area-leave-card">
-                <h2>Area Leave Remaining</h2>
+                <h2>Area Leave Slots Left</h2>
                 <dl>
                   <div><dt>CPC</dt><dd data-cpc-leave-remaining>--</dd></div>
                   <div><dt>CPC Used</dt><dd data-cpc-leave-detail>Area CPC bucket</dd></div>
@@ -1294,7 +1304,7 @@
 
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
