@@ -1005,30 +1005,41 @@ function roundDateBlocksForArea(area = currentViewArea()) {
   if (area !== "Area A") return roundDateBlocks;
 
   const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
-  const roundOneDates = areaARoundOneDateLabels(requiredDateCount);
+  return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
+}
 
-  return Array.from({ length: requiredDateCount }, (_, index) => {
-    const defaultBlock = roundDateBlocks[index] || [];
-    return [
-      roundOneDates[index],
-      defaultBlock[1] || "",
-      defaultBlock[2] || "",
-      defaultBlock[3] || "",
-    ];
+function areaRoundDateBlocksFromStart(requiredDateCount, roundCount) {
+  const rounds = Array.from({ length: roundCount }, () => []);
+  const date = new Date(BID_YEAR - 1, 9, 1);
+
+  rounds.forEach((roundDates, roundIndex) => {
+    while (roundDates.length < requiredDateCount) {
+      if (isBidOfficeOpenDate(date)) roundDates.push(bidOfficeDateLabel(date));
+      date.setDate(date.getDate() + 1);
+    }
+
+    if (roundIndex < roundCount - 1) advancePastFullBidOfficeCheckDay(date);
+  });
+
+  return Array.from({ length: requiredDateCount }, (_, dateIndex) => {
+    return rounds.map((roundDates) => roundDates[dateIndex] || "");
   });
 }
 
-function areaARoundOneDateLabels(requiredDateCount) {
-  const labels = [];
-  const date = new Date(BID_YEAR - 1, 9, 1);
+function advancePastFullBidOfficeCheckDay(date) {
+  while (true) {
+    if (isBidOfficeOpenDate(date)) {
+      date.setDate(date.getDate() + 1);
+      return;
+    }
 
-  while (labels.length < requiredDateCount) {
-    const key = dateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
-    if (!BID_OFFICE_CLOSED_DATE_KEYS.has(key)) labels.push(bidOfficeDateLabel(date));
     date.setDate(date.getDate() + 1);
   }
+}
 
-  return labels;
+function isBidOfficeOpenDate(date) {
+  const key = dateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  return !BID_OFFICE_CLOSED_DATE_KEYS.has(key);
 }
 
 function bidOfficeDateLabel(date) {
