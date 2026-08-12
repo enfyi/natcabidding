@@ -1383,6 +1383,10 @@ input {
   margin-top: 14px;
 }
 
+.account-menu [data-log-out] {
+  grid-column: 1 / -1;
+}
+
 .alert-list {
   display: grid;
   gap: 10px;
@@ -3181,77 +3185,10 @@ tr.occupied-row .rdo-tag {
   background: rgba(148, 163, 184, 0.07);
 }
 
-.allowance-card h2,
-.next-bid-window-card h2 {
+.allowance-card h2 {
   margin-bottom: 10px;
 }
 
-.next-bid-window-card {
-  border-color: rgba(122, 189, 194, 0.42);
-}
-
-.next-bid-window-card > strong {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--ink);
-  font-family: Montserrat, Arial, sans-serif;
-  font-size: 1.05rem;
-  line-height: 1.35;
-}
-
-.next-bid-window-card .panel-header {
-  margin-bottom: 10px;
-}
-
-.next-bid-window-card .panel-header p {
-  color: var(--teal);
-  font-size: 0.76rem;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.bid-window-detail-list {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0 0;
-}
-
-.bid-window-detail-list div {
-  display: grid;
-  gap: 5px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 10px;
-  background: rgba(248, 250, 252, 0.82);
-}
-
-.bid-window-detail-list dt {
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.bid-window-detail-list dd {
-  margin: 0;
-  color: var(--ink);
-  font-weight: 900;
-}
-
-.bid-window-detail-list dd > b {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.bid-window-detail-list dd > small {
-  display: block;
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.next-bid-window-card ul,
 .plain-list {
   display: grid;
   gap: 8px;
@@ -3262,7 +3199,6 @@ tr.occupied-row .rdo-tag {
   font-size: 0.82rem;
 }
 
-.next-bid-window-card li::before,
 .success-list li::before {
   color: var(--green);
   content: "✓ ";
@@ -5130,7 +5066,6 @@ body {
 
 .app-main .metric-card strong,
 .app-main .line-title strong,
-.app-main .next-bid-window-card > strong,
 .app-main .month-card h3 {
   color: #0f172a;
 }
@@ -5801,7 +5736,6 @@ body {
   background: #ffffff;
 }
 
-.app-main .next-bid-window-card li::before,
 .app-main .success-list li::before {
   color: #15803d;
 }

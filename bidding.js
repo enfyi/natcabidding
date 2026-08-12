@@ -5077,7 +5077,7 @@ function supabaseRosterPayload(values) {
 function friendlyRosterSyncFailure(error) {
   const message = error?.message || "";
   if (/admin_save_bidder_roster_entry|function .*not found|Could not find/i.test(message)) {
-    return "Working roster updated. Run the updated Supabase SQL helper, then save again to make it permanent.";
+    return "Working roster updated, but the backend roster sync helper is not installed for this Supabase project.";
   }
   if (/Authentication is required|JWT|not authenticated|session/i.test(message)) {
     return "Working roster updated. Sign in with a Supabase admin account to save it permanently.";
@@ -5136,18 +5136,36 @@ async function saveSupabaseRosterRows(rows) {
     };
   }
 
-  for (const row of rows) {
-    const { error } = await client.rpc("admin_save_bidder_roster_entry", supabaseRosterPayload({
-      ...row,
-      originalArea: row.originalArea || row.area,
-      originalInitials: row.originalInitials || row.initials,
-    }));
-    if (error) {
-      return {
-        saved: false,
-        message: friendlyRosterSyncFailure(error),
-      };
+  const rosterRows = rows.map((row) => supabaseRosterPayload({
+    ...row,
+    originalArea: row.originalArea || row.area,
+    originalInitials: row.originalInitials || row.initials,
+  }));
+
+  const { error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
+  if (error) {
+    if (/admin_save_bidder_roster_rows|function .*not found|Could not find/i.test(error.message || "")) {
+      for (const row of rows) {
+        const { error: rowError } = await client.rpc("admin_save_bidder_roster_entry", supabaseRosterPayload({
+          ...row,
+          originalArea: row.originalArea || row.area,
+          originalInitials: row.originalInitials || row.initials,
+        }));
+        if (rowError) {
+          return {
+            saved: false,
+            message: friendlyRosterSyncFailure(rowError),
+          };
+        }
+      }
+
+      return { saved: true };
     }
+
+    return {
+      saved: false,
+      message: friendlyRosterSyncFailure(error),
+    };
   }
 
   return { saved: true };
@@ -5195,6 +5213,28 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
   selectedViewArea = person.area;
 }
 
+function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
+  return [...areas].flatMap((area) =>
+    activeRosterEntries(area).map((entry, index) => {
+      const person = rosterEntryToPerson(entry, index + 1);
+      const override = entryOverrides.get(entry) || {};
+      return {
+        firstName: person.firstName,
+        lastName: person.lastName,
+        initials: person.initials,
+        email: person.email,
+        phone: person.phone,
+        area: person.area,
+        rank: person.rank,
+        bidAs: person.bidAs,
+        active: person.active,
+        originalArea: override.originalArea || person.area,
+        originalInitials: override.originalInitials || person.initials,
+      };
+    })
+  );
+}
+
 async function saveRosterEntry(event) {
   event.preventDefault();
   if (!hasSystemAdminAccess()) return;
@@ -5237,11 +5277,10 @@ async function saveRosterEntry(event) {
   renderApp();
   editRosterEntryByIndex(senioritySource.indexOf(entry));
   setRosterStatus(`${values.firstName} ${values.lastName} saved in the working roster. Syncing to Supabase...`, "info");
-  const supabaseSave = await saveSupabaseRosterEntry({
-    ...values,
-    originalArea,
-    originalInitials,
-  });
+  const supabaseSave = await saveSupabaseRosterRows(rosterSyncRowsForAreas(
+    new Set([originalArea, values.area]),
+    new Map([[entry, { originalArea, originalInitials }]])
+  ));
   setRosterStatus(
     supabaseSave.saved
       ? `${values.firstName} ${values.lastName} saved to Supabase.`
@@ -5355,10 +5394,16 @@ function rebuildRosterFromBulkRows(rows) {
   senioritySource.forEach((entry, index) => {
     const row = rowsByIndex.get(index);
     if (!row) return;
+    const originalRow = rows.find((item) => item.sourceIndex === index);
 
     row.originalArea = seniorityEntryArea(entry);
     row.originalRank = originalRanks.get(entry);
     row.positionChanged = row.active && (row.area !== row.originalArea || row.rank !== row.originalRank);
+    if (originalRow) {
+      originalRow.originalArea = row.originalArea;
+      originalRow.originalInitials = row.originalInitials;
+      originalRow.originalRank = row.originalRank;
+    }
 
     entry[0] = row.lastName;
     entry[1] = row.firstName;
