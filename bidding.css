@@ -5032,6 +5032,19 @@ body {
   color: #475569;
 }
 
+.app-main .view-area-control.view-area-control-away {
+  border-color: #8b1c62;
+  color: #ffffff;
+  background: #8b1c62;
+  box-shadow: 0 0 0 3px rgba(237, 23, 136, 0.18);
+}
+
+.app-main .view-area-control.view-area-control-away select {
+  border-color: rgba(255, 255, 255, 0.7);
+  color: #ffffff;
+  background: #a32172;
+}
+
 .app-main .view-mode-switch {
   border-color: #d5e2f0;
   background: rgba(255, 255, 255, 0.72);

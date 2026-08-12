@@ -116,10 +116,11 @@ function isBidWindowOpen(date = new Date()) {
   return date >= userBidWindow.start && date <= userBidWindow.end;
 }
 
-function activeBidderRank(date = new Date()) {
-  const roundState = areaBidRoundState(date);
+function activeBidderRank(date = new Date(), area = currentViewArea()) {
+  const roundState = areaBidRoundState(date, area);
   if (roundState?.phase === "open") return roundState.activeRank;
   if (roundState?.phase === "validation") return null;
+  if (area !== currentUser.area) return null;
   if (!Number.isFinite(currentUser.seniorityRank)) return null;
   if (isBidWindowOpen(date)) return currentUser.seniorityRank;
   if (date < userBidWindow.start) return Math.max(1, currentUser.seniorityRank - 1);
@@ -156,6 +157,99 @@ const selectedWeek = [
   ["Sat", "700"],
 ];
 
+const mockRdoWeekTemplates = {
+  "S/S": [
+    ["RDO", "M1300", "M1100", "RDO", "M2100", "M2100", "RDO"],
+    ["RDO", "1500", "1330", "730", "630", "600", "RDO"],
+    ["RDO", "1430", "1330", "1200", "700", "630", "RDO"],
+    ["RDO", "1330", "730", "630", "630", "630", "RDO"],
+  ],
+  "S/M": [
+    ["RDO", "RDO", "1500", "1330", "730", "630", "600"],
+    ["RDO", "RDO", "1430", "1330", "1200", "700", "630"],
+    ["RDO", "RDO", "1430", "M1300", "730", "S530", "2230"],
+    ["RDO", "RDO", "M1100", "M1100", "RDO", "M2130", "M2130"],
+  ],
+  "M/T": [
+    ["600", "RDO", "RDO", "1500", "1330", "730", "630"],
+    ["630", "RDO", "RDO", "1430", "1330", "1200", "630"],
+    ["M2130", "RDO", "RDO", "M1100", "M700", "RDO", "M2130"],
+    ["700", "RDO", "RDO", "1500", "1330", "730", "630"],
+  ],
+  "T/W": [
+    ["630", "600", "RDO", "RDO", "1500", "1330", "730"],
+    ["700", "630", "RDO", "RDO", "1430", "1330", "730"],
+    ["M2130", "M2130", "RDO", "RDO", "M1100", "M700", "RDO"],
+    ["S530", "2230", "RDO", "RDO", "1430", "M1300", "730"],
+  ],
+  "W/T": [
+    ["730", "630", "600", "RDO", "RDO", "1500", "1330"],
+    ["700", "S530", "2230", "RDO", "RDO", "1430", "M1230"],
+    ["M2130", "M2130", "RDO", "RDO", "M1100", "M1100", "RDO"],
+    ["1500", "1330", "730", "RDO", "RDO", "1500", "1330"],
+  ],
+  "T/F": [
+    ["1330", "730", "630", "600", "RDO", "RDO", "1430"],
+    ["1330", "730", "630", "630", "RDO", "RDO", "1500"],
+    ["M700", "RDO", "M2130", "M2130", "RDO", "RDO", "M1100"],
+    ["M1200", "730", "S530", "2230", "RDO", "RDO", "1330"],
+  ],
+  "F/S": [
+    ["1430", "1330", "730", "630", "600", "RDO", "RDO"],
+    ["1500", "1330", "730", "700", "645", "RDO", "RDO"],
+    ["M1100", "M1100", "RDO", "M2130", "M2130", "RDO", "RDO"],
+    ["1330", "1330", "730", "630", "630", "RDO", "RDO"],
+  ],
+  "R-DEV": [
+    ["RDO", "1500", "1330", "730", "630", "600", "RDO"],
+    ["RDO", "RDO", "1500", "1330", "730", "630", "600"],
+    ["600", "RDO", "RDO", "1500", "1330", "730", "630"],
+    ["730", "630", "600", "RDO", "RDO", "1500", "1330"],
+    ["1330", "730", "630", "600", "RDO", "RDO", "1500"],
+    ["1500", "1330", "730", "630", "600", "RDO", "RDO"],
+  ],
+  "D-DEV": [
+    ["RDO", "1330", "1330", "730", "630", "630", "RDO"],
+    ["RDO", "RDO", "1330", "1330", "730", "630", "630"],
+    ["630", "RDO", "RDO", "1330", "1330", "730", "630"],
+    ["630", "630", "RDO", "RDO", "1330", "1330", "730"],
+    ["1330", "730", "630", "630", "RDO", "RDO", "1330"],
+    ["1330", "1330", "730", "630", "630", "RDO", "RDO"],
+  ],
+};
+
+function mockRdoLine(area, row, templateIndex) {
+  const [pattern, line, cpc, group, mid = "No", aws = "No", overrides = {}] = row;
+  const templates = mockRdoWeekTemplates[pattern] || mockRdoWeekTemplates["S/S"];
+  const week = overrides.week || templates[templateIndex % templates.length];
+  const fourTen = overrides.fourTen || (week.filter((value) => value !== "RDO").length === 4 ? "Yes" : "No");
+
+  return {
+    area,
+    pattern,
+    line,
+    ...(pattern.includes("DEV") ? { lineType: "DEV" } : {}),
+    cpc,
+    week: [...week],
+    group,
+    mid,
+    aws,
+    fourTen,
+    flex: overrides.flex || aws,
+    status: "Open",
+  };
+}
+
+function mockRdoLines(area, rows) {
+  const templateCounts = {};
+  return rows.map((row) => {
+    const pattern = row[0];
+    const templateIndex = templateCounts[pattern] || 0;
+    templateCounts[pattern] = templateIndex + 1;
+    return mockRdoLine(area, row, templateIndex);
+  });
+}
+
 const rdoLines = [
   { pattern: "S/S", line: "1", cpc: "CD", week: ["RDO", "M1300", "M1100", "RDO", "M2100", "M2100", "RDO"], group: "A", mid: "BID", aws: "Yes", fourTen: "Yes", flex: "Yes", status: "Taken" },
   { pattern: "S/S", line: "2", cpc: "BG", week: ["RDO", "1330", "1300", "700", "630", "600", "RDO"], group: "C", mid: "No", aws: "No", fourTen: "No", flex: "No", status: "Taken" },
@@ -183,6 +277,96 @@ const rdoLines = [
   { pattern: "T/F", line: "23", cpc: "VV", week: ["1300", "700", "S530", "2230", "RDO", "RDO", "N1330"], group: "A", mid: "BID", aws: "Yes", fourTen: "No", flex: "Yes", status: "Open" },
   { pattern: "T/F", line: "24", cpc: "CZ", week: ["1330", "730", "630", "600", "RDO", "RDO", "1500"], group: "B", mid: "No", aws: "No", fourTen: "No", flex: "No", status: "Open" },
   { pattern: "F/S", line: "27", cpc: "HH", week: ["N1330", "1300", "700", "S530", "2230", "RDO", "RDO"], group: "C", mid: "BID", aws: "Yes", fourTen: "No", flex: "Yes", status: "Open" },
+  ...mockRdoLines("Area B", [
+    ["S/S", "1", "VL", "A", "No", "Yes", { fourTen: "Yes" }],
+    ["S/S", "2", "BW", "C", "No", "No"],
+    ["S/S", "3", "MM", "C", "No", "No"],
+    ["S/S", "4", "TT", "B", "No", "Yes"],
+    ["S/S", "5", "PE", "B", "No", "No"],
+    ["S/M", "6", "LJ", "C", "No", "Yes", { fourTen: "Yes" }],
+    ["S/M", "7", "XL", "A", "No", "No"],
+    ["S/M", "8", "KR", "C", "No", "Yes"],
+    ["S/M", "9", "JX", "B", "No", "No"],
+    ["S/M", "10", "MX", "A", "No", "No"],
+    ["M/T", "11", "YP", "A", "No", "No"],
+    ["M/T", "12", "AJ", "C", "No", "Yes"],
+    ["M/T", "13", "HZ", "B", "No", "Yes"],
+    ["T/W", "14", "B2", "A", "No", "Yes"],
+    ["T/W", "15", "DD", "B", "No", "No"],
+    ["T/W", "16", "CX", "C", "No", "No"],
+    ["T/W", "17", "DE", "A", "No", "No"],
+    ["W/T", "18", "ZN", "B", "No", "No"],
+    ["W/T", "19", "WS", "A", "No", "No"],
+    ["W/T", "20", "MK", "B", "No", "No"],
+    ["W/T", "21", "BD", "C", "No", "No"],
+    ["T/F", "22", "LE", "A", "No", "Yes", { fourTen: "Yes" }],
+    ["T/F", "23", "WN", "B", "No", "Yes"],
+    ["T/F", "24", "ZF", "C", "No", "No"],
+    ["T/F", "25", "CY", "B", "No", "No"],
+    ["F/S", "26", "MV", "A", "No", "Yes", { fourTen: "Yes" }],
+    ["F/S", "27", "IX", "B", "No", "Yes"],
+    ["F/S", "28", "PL", "C", "No", "Yes"],
+    ["F/S", "29", "XM", "C", "No", "Yes"],
+    ["F/S", "30", "CV", "A", "No", "Yes"],
+    ["R-DEV", "31", "UA", "B", "No", "No"],
+    ["R-DEV", "32", "", "Available", "No", "No"],
+    ["R-DEV", "33", "LB", "C", "No", "No"],
+    ["R-DEV", "34", "PW", "B", "No", "No"],
+    ["R-DEV", "35", "TO", "A", "No", "No"],
+    ["D-DEV", "36", "GZ", "B", "No", "No"],
+    ["D-DEV", "37", "BL", "C", "No", "No"],
+    ["D-DEV", "38", "PF", "C", "No", "No"],
+    ["D-DEV", "39", "PX", "A", "No", "No"],
+    ["D-DEV", "40", "SM", "B", "No", "No"],
+  ]),
+  ...mockRdoLines("Area C", [
+    ["S/S", "1", "JG", "C", "No", "Yes"],
+    ["S/S", "2", "CK", "C", "No", "No"],
+    ["S/S", "3", "CR", "A", "No", "No"],
+    ["S/S", "4", "VA", "A", "No", "No"],
+    ["S/S", "5", "BM", "B", "No", "Yes", { fourTen: "Yes" }],
+    ["S/S", "6", "KV", "B", "BID", "Yes", { fourTen: "Yes" }],
+    ["S/M", "7", "QT", "C", "No", "No"],
+    ["S/M", "8", "KC", "B", "No", "Yes"],
+    ["S/M", "9", "TT", "B", "No", "Yes"],
+    ["S/M", "10", "CS", "A", "No", "Yes", { fourTen: "Yes" }],
+    ["S/M", "11", "YM", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["M/T", "12", "NA", "C", "No", "Yes"],
+    ["M/T", "13", "JH", "A", "No", "Yes"],
+    ["M/T", "14", "VR", "A", "No", "Yes"],
+    ["M/T", "15", "AQ", "B", "No", "Yes"],
+    ["M/T", "16", "KU", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["T/W", "17", "AD", "C", "No", "Yes"],
+    ["T/W", "18", "CU", "A", "No", "Yes"],
+    ["T/W", "19", "KX", "B", "No", "No"],
+    ["T/W", "20", "BR", "A", "No", "Yes"],
+    ["T/W", "21", "XS", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["W/T", "22", "AS", "A", "No", "Yes"],
+    ["W/T", "23", "FO", "B", "No", "No"],
+    ["W/T", "24", "JA", "C", "No", "Yes"],
+    ["W/T", "25", "EG", "B", "No", "Yes"],
+    ["W/T", "26", "DN", "A", "BID", "Yes", { fourTen: "Yes" }],
+    ["T/F", "27", "AE", "B", "No", "No"],
+    ["T/F", "28", "TD", "A", "No", "No"],
+    ["T/F", "29", "CD", "B", "No", "No"],
+    ["T/F", "30", "JS", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["F/S", "31", "OJ", "B", "No", "Yes"],
+    ["F/S", "32", "BH", "B", "No", "No"],
+    ["F/S", "33", "TN", "C", "No", "No"],
+    ["F/S", "34", "OL", "A", "No", "Yes"],
+    ["F/S", "35", "RK", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["R-DEV", "36", "AD", "C", "No", "No"],
+    ["R-DEV", "37", "LZ", "A", "No", "No"],
+    ["R-DEV", "38", "RI", "B", "No", "No"],
+    ["R-DEV", "39", "DN", "B", "No", "No"],
+    ["R-DEV", "40", "LO", "C", "No", "No"],
+    ["R-DEV", "41", "RS", "C", "No", "No"],
+    ["R-DEV", "42", "BR", "A", "No", "No"],
+    ["D-DEV", "43", "XS", "A", "No", "No"],
+    ["D-DEV", "44", "CL", "B", "No", "No"],
+    ["D-DEV", "45", "RJ", "C", "No", "No"],
+    ["D-DEV", "46", "BT", "A", "No", "No"],
+  ]),
   { area: "Area D", pattern: "S/S", line: "1", cpc: "EL", week: ["RDO", "M1100", "M700", "RDO", "M2130", "M2130", "RDO"], group: "Unselected", mid: "BID", aws: "Unselected", flex: "Unselected", status: "Open" },
   { area: "Area D", pattern: "S/S", line: "2", cpc: "HS", week: ["RDO", "1500", "1330", "730", "630", "600", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
   { area: "Area D", pattern: "S/S", line: "3", cpc: "EX", week: ["RDO", "1330", "730", "630", "630", "630", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
@@ -228,6 +412,107 @@ const rdoLines = [
   { area: "Area D", pattern: "D-DEV", line: "44", lineType: "DEV", cpc: "FF", week: ["630", "630", "RDO", "RDO", "1330", "1330", "730"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
   { area: "Area D", pattern: "D-DEV", line: "45", lineType: "DEV", cpc: "IN", week: ["1330", "730", "630", "630", "RDO", "RDO", "1330"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
   { area: "Area D", pattern: "D-DEV", line: "46", lineType: "DEV", cpc: "PJ", week: ["1330", "1330", "730", "630", "630", "RDO", "RDO"], group: "Unselected", mid: "Unselected", aws: "Unselected", flex: "Unselected", status: "Open" },
+  ...mockRdoLines("Area E", [
+    ["S/S", "1", "CA", "C", "No", "Yes"],
+    ["S/S", "2", "BZ", "A", "BID", "Yes"],
+    ["S/S", "3", "ET", "B", "BID", "Yes"],
+    ["S/S", "4", "LT", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["S/M", "5", "RY", "C", "BID", "No"],
+    ["S/M", "6", "WW", "C", "BID", "No"],
+    ["S/M", "7", "JT", "B", "BID", "No"],
+    ["S/M", "8", "DS", "A", "No", "No"],
+    ["M/T", "9", "MT", "C", "BID", "Yes"],
+    ["M/T", "10", "SC", "A", "No", "Yes"],
+    ["M/T", "11", "QQ", "A", "BID", "Yes"],
+    ["M/T", "12", "YN", "B", "BID", "No"],
+    ["T/W", "13", "PP", "A", "BID", "Yes"],
+    ["T/W", "14", "JE", "A", "BID", "No"],
+    ["T/W", "15", "IU", "C", "BID", "Yes"],
+    ["T/W", "16", "BA", "B", "BID", "Yes"],
+    ["W/T", "17", "JW", "B", "BID", "Yes"],
+    ["W/T", "18", "CT", "B", "BID", "Yes"],
+    ["W/T", "19", "PC", "A", "No", "No"],
+    ["W/T", "20", "GB", "C", "BID", "No"],
+    ["T/F", "21", "ZM", "B", "No", "No"],
+    ["T/F", "22", "JN", "C", "BID", "Yes"],
+    ["T/F", "23", "RH", "A", "BID", "No"],
+    ["F/S", "24", "MD", "C", "No", "Yes"],
+    ["F/S", "25", "SJ", "B", "No", "No"],
+    ["F/S", "26", "AF", "B", "BID", "No"],
+    ["F/S", "27", "VZ", "A", "BID", "Yes"],
+    ["R-DEV", "28", "MP", "A", "No", "No"],
+    ["R-DEV", "29", "MA", "A", "No", "No"],
+    ["R-DEV", "30", "LW", "B", "No", "No"],
+    ["R-DEV", "31", "MH", "C", "No", "No"],
+    ["R-DEV", "32", "DV", "A", "No", "No"],
+    ["R-DEV", "33", "ED", "C", "No", "No"],
+    ["R-DEV", "34", "DO", "C", "No", "No"],
+    ["R-DEV", "35", "TX", "B", "No", "No"],
+    ["R-DEV", "36", "KO", "B", "No", "No"],
+    ["D-DEV", "37", "TC", "A", "No", "No"],
+    ["D-DEV", "38", "JU", "C", "No", "No"],
+    ["D-DEV", "39", "YL", "B", "No", "No"],
+  ]),
+  ...mockRdoLines("Area F", [
+    ["S/S", "1", "AA", "C", "No", "Yes"],
+    ["S/S", "2", "XN", "C", "No", "No"],
+    ["S/S", "3", "JO", "B", "No", "No"],
+    ["S/S", "4", "YQ", "A", "BID", "No"],
+    ["S/M", "5", "CJ", "C", "No", "No"],
+    ["S/M", "6", "ML", "A", "No", "No"],
+    ["S/M", "7", "NY", "B", "BID", "Yes"],
+    ["S/M", "8", "JL", "B", "BID", "Yes", { fourTen: "Yes" }],
+    ["M/T", "9", "AP", "A", "No", "No"],
+    ["M/T", "10", "PS", "C", "No", "No"],
+    ["M/T", "11", "BC", "B", "BID", "Yes"],
+    ["T/W", "12", "HL", "B", "No", "No"],
+    ["T/W", "13", "AX", "B", "No", "Yes"],
+    ["T/W", "14", "AU", "A", "BID", "Yes"],
+    ["T/W", "15", "WC", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["W/T", "16", "ZU", "C", "No", "No"],
+    ["W/T", "17", "JK", "B", "No", "No"],
+    ["W/T", "18", "EV", "A", "No", "No"],
+    ["T/F", "19", "JF", "B", "No", "Yes"],
+    ["T/F", "20", "VN", "C", "No", "Yes"],
+    ["T/F", "21", "DC", "A", "No", "No"],
+    ["T/F", "22", "CO", "A", "BID", "Yes"],
+    ["F/S", "23", "FK", "A", "No", "No"],
+    ["F/S", "24", "MI", "C", "No", "Yes"],
+    ["F/S", "25", "MI", "B", "BID", "Yes"],
+    ["F/S", "26", "JZ", "C", "BID", "Yes", { fourTen: "Yes" }],
+    ["R-DEV", "27", "PA", "A", "No", "No"],
+    ["R-DEV", "28", "XF", "C", "No", "No"],
+    ["R-DEV", "29", "IV", "A", "No", "No"],
+    ["R-DEV", "30", "CH", "A", "No", "No"],
+    ["R-DEV", "31", "KH", "C", "No", "No"],
+    ["R-DEV", "32", "JB", "B", "No", "No"],
+    ["R-DEV", "33", "JV", "C", "No", "No"],
+    ["D-DEV", "34", "AS", "B only", "No", "No"],
+    ["D-DEV", "35", "VT", "A", "No", "No"],
+    ["D-DEV", "36", "TF", "B", "No", "No"],
+    ["D-DEV", "37", "TV", "C", "No", "No"],
+    ["D-DEV", "38", "HO", "A", "No", "No"],
+    ["D-DEV", "39", "KK", "B", "No", "No"],
+  ]),
+  ...mockRdoLines("TMU", [
+    ["S/S", "1", "EH", "A", "No", "Yes", { week: ["RDO", "1315", "1315", "725", "645", "315", "RDO"] }],
+    ["S/S", "2", "HK", "C", "No", "Yes", { week: ["RDO", "1315", "1315", "815", "715", "645", "RDO"] }],
+    ["S/S", "T", "HE", "", "No", "No", { week: ["RDO", "1315", "1315", "815", "715", "645", "RDO"] }],
+    ["S/M", "3", "LL", "A", "No", "Yes", { week: ["RDO", "RDO", "1415", "1315", "815", "645", "315"] }],
+    ["S/M", "4", "TM", "B", "BID", "Yes", { week: ["RDO", "RDO", "RDO", "M1300", "M1300", "M1100", "M700"], fourTen: "Yes" }],
+    ["M/T", "5", "SB", "C", "No", "Yes", { week: ["315", "RDO", "RDO", "1315", "1315", "715", "645"] }],
+    ["M/T", "6", "ZI", "A", "No", "Yes", { week: ["645", "RDO", "RDO", "1200", "1315", "815", "645"] }],
+    ["M/T", "T", "WL", "B only", "No", "Yes", { week: ["315", "RDO", "RDO", "1315", "1315", "715", "645"] }],
+    ["T/W", "7", "CN", "B", "No", "Yes", { week: ["1415", "1415", "RDO", "RDO", "1200", "1200", "1415"], fourTen: "Yes" }],
+    ["W/T", "8", "PD", "C", "No", "Yes", { week: ["645", "315", "315", "RDO", "RDO", "1315", "815"] }],
+    ["W/T", "9", "NJ", "A", "No", "Yes", { week: ["715", "645", "645", "RDO", "RDO", "1415", "1315"] }],
+    ["T/F", "10", "ZT", "B", "No", "Yes", { week: ["815", "645", "645", "315", "RDO", "RDO", "1315"] }],
+    ["T/F", "11", "TR", "C", "BID", "Yes", { week: ["M1200", "M1200", "M1200", "RDO", "RDO", "RDO", "M1200"], fourTen: "Yes" }],
+    ["F/S", "12", "WE", "A", "No", "Yes", { week: ["1415", "1315", "725", "645", "315", "RDO", "RDO"] }],
+    ["F/S", "13", "HA", "B", "No", "Yes", { week: ["1315", "1315", "815", "715", "645", "RDO", "RDO"] }],
+    ["F/S", "14", "EU", "C", "No", "Yes", { week: ["1200", "1315", "815", "715", "645", "RDO", "RDO"] }],
+    ["F/S", "15", "KB", "A", "No", "Yes", { week: ["1415", "1415", "1200", "815", "715", "RDO", "RDO"] }],
+  ]),
 ];
 
 let selectedLineId = "15";
@@ -794,16 +1079,16 @@ function bidWindowForRankRound(rank, roundNumber) {
   };
 }
 
-function roundWindows(roundNumber) {
-  return activeRosterEntries(currentViewArea())
+function roundWindows(roundNumber, area = currentViewArea()) {
+  return activeRosterEntries(area)
     .map((_, index) => bidWindowForRankRound(index + 1, roundNumber))
     .filter(Boolean);
 }
 
-function areaBidRoundState(date = new Date()) {
+function areaBidRoundState(date = new Date(), area = currentViewArea()) {
   const roundCount = roundDateBlocks[0]?.length || 0;
   for (let round = 1; round <= roundCount; round += 1) {
-    const windows = roundWindows(round);
+    const windows = roundWindows(round, area);
     const activeWindow = windows.find((window) => date >= window.start && date < window.end);
     if (activeWindow) {
       return {
@@ -829,8 +1114,12 @@ function areaBidRoundState(date = new Date()) {
   return null;
 }
 
-function downloadBidWindowsIcs(rank = currentUser.seniorityRank) {
-  const person = seniority.find((item) => item.rank === Number(rank));
+function downloadBidWindowsIcs(rank = null) {
+  const requestedRank = Number(rank);
+  const hasRequestedRank = rank !== null && rank !== undefined && rank !== "" && Number.isFinite(requestedRank);
+  const person = hasRequestedRank
+    ? seniority.find((item) => item.rank === requestedRank)
+    : seniority.find(personMatchesCurrentUser) || buildSeniority(currentUser.area).find(personMatchesCurrentUser);
   if (!person) return;
 
   const calendarYear = BID_YEAR - 1;
@@ -905,6 +1194,39 @@ function seniorityEntryActive(entry) {
   return entry[7] !== false;
 }
 
+function normalizedInitials(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizedEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function seniorityIdentityMatchesCurrentUser({ area, initials, email } = {}) {
+  if ((area || currentUser.area) !== currentUser.area) return false;
+
+  const personEmail = normalizedEmail(email);
+  const userEmail = normalizedEmail(currentUser.email);
+  if (personEmail && userEmail && personEmail === userEmail) return true;
+
+  const personInitials = normalizedInitials(initials);
+  const userInitials = normalizedInitials(currentUser.initials);
+  return Boolean(personInitials && userInitials && personInitials === userInitials);
+}
+
+function seniorityEntryMatchesCurrentUser(entry) {
+  if (!entry) return false;
+  return seniorityIdentityMatchesCurrentUser({
+    area: seniorityEntryArea(entry),
+    initials: entry[3] || fallbackInitials(entry[1] || "", entry[0] || ""),
+    email: seniorityEntryEmail(entry),
+  });
+}
+
+function personMatchesCurrentUser(person) {
+  return seniorityIdentityMatchesCurrentUser(person);
+}
+
 function activeRosterEntries(area = null) {
   return senioritySource.filter((entry) =>
     seniorityEntryActive(entry) &&
@@ -929,7 +1251,7 @@ function rosterEntryToPerson(entry, rank = null) {
 }
 
 function buildSeniority(area = currentViewArea()) {
-  const openRank = activeBidderRank();
+  const openRank = activeBidderRank(new Date(), area);
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
     const rank = index + 1;
@@ -3661,8 +3983,9 @@ function userFullName() {
 }
 
 function currentUserBidAs() {
-  const seniorityMatch = seniority.find((person) => person.rank === currentUser.seniorityRank || person.initials === currentUser.initials);
-  return currentUser.bidAs || seniorityMatch?.bidAs || "CPC";
+  const rosterMatch = senioritySource.find((entry) => seniorityEntryActive(entry) && seniorityEntryMatchesCurrentUser(entry));
+  const seniorityMatch = seniority.find(personMatchesCurrentUser);
+  return currentUser.bidAs || rosterMatch?.[2] || seniorityMatch?.bidAs || "CPC";
 }
 
 function activeAdminGrant() {
@@ -3770,6 +4093,17 @@ function renderCurrentUser() {
   });
   document.querySelectorAll("[data-view-area-select]").forEach((select) => {
     select.innerHTML = ZLA_AREAS.map((area) => `<option value="${area}" ${area === viewArea ? "selected" : ""}>${area}</option>`).join("");
+    const isAwayArea = viewArea !== currentUser.area;
+    const control = select.closest(".view-area-control");
+    control?.classList.toggle("view-area-control-away", isAwayArea);
+    control?.setAttribute(
+      "title",
+      isAwayArea ? `Viewing ${viewArea}. Your assigned area is ${currentUser.area}.` : `Viewing your assigned area: ${currentUser.area}.`
+    );
+    select.setAttribute(
+      "aria-label",
+      isAwayArea ? `Change view area. Warning: viewing ${viewArea}, not your assigned area ${currentUser.area}.` : "Change view area"
+    );
   });
   setText("[data-user-role]", accessLabel());
   setText("[data-user-seniority]", userSeniorityText());
@@ -3840,8 +4174,9 @@ function updateBidWindow() {
   const roundState = areaBidRoundState(now);
   const isValidationPeriod = roundState?.phase === "validation";
   const currentRound = latestAreaRound(now);
-  const isBefore = now < userBidWindow.start;
-  const isOpen = now >= userBidWindow.start && now <= userBidWindow.end;
+  const viewingHomeArea = isViewingHomeArea();
+  const isBefore = viewingHomeArea && now < userBidWindow.start;
+  const isOpen = viewingHomeArea && now >= userBidWindow.start && now <= userBidWindow.end;
   const isAdmin = hasIntakeAccess();
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -3990,7 +4325,7 @@ function selectedMidValue(line) {
 }
 
 function userChoiceCell(value) {
-  if (value === "BID") return '<span class="status open">BID</span>';
+  if (value === "BID") return '<span class="status open">Bid Line</span>';
   if (value === "—") return "—";
   if (value === "UNSELECTED") return "Unselected";
   return value;
@@ -4003,7 +4338,8 @@ function publicPreferenceCell(value) {
 }
 
 function lineMidReferenceValue(line) {
-  return isMidLineByDesign(line) ? "BID" : "UNSELECTED";
+  if (line.mid === "BID" || line.mid === "Yes" || line.mid === "No") return line.mid;
+  return "UNSELECTED";
 }
 
 function selectedLineStatus(line) {
@@ -5312,10 +5648,11 @@ function renderSeniority() {
     compactTarget.innerHTML = seniority
       .map((person) => {
         const isBiddingNow = Boolean(person.openRound);
+        const isCurrentUser = personMatchesCurrentUser(person);
         return `
         <div class="seniority-row ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
           <span>#${person.rank}</span>
-          <b>${person.initials}${person.rank === currentUser.seniorityRank ? " · You" : ""}</b>
+          <b>${person.initials}${isCurrentUser ? " · You" : ""}</b>
           <i class="dot ${isBiddingNow ? "active" : person.status}" title="${isBiddingNow ? `Round ${person.openRound} bid window open` : ""}"></i>
         </div>
       `;
@@ -5329,16 +5666,17 @@ function renderSeniority() {
   pageTarget.innerHTML = seniority
     .map((person) => {
       const isBiddingNow = Boolean(person.openRound);
+      const isCurrentUser = personMatchesCurrentUser(person);
       return `
       <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
         <div class="seniority-card-head">
           <span>#${person.rank}</span>
           ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
         </div>
-        <strong>${person.rank === currentUser.seniorityRank ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
+        <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
         <div class="seniority-card-meta">
           <small class="bid-as ${person.bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${person.bidAs}</small>
-          ${person.rank === currentUser.seniorityRank ? '<button class="secondary-action calendar-download" type="button" data-download-bid-windows>Download .ics</button>' : ""}
+          ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
         </div>
         <div class="round-times">
           ${person.rounds.map((time, index) => {
@@ -5892,11 +6230,11 @@ function biddingExportRows() {
   seniority.forEach((person) => {
     rows.push([
       "Bid Times",
-      "Area A",
+      person.area || currentViewArea(),
       `${person.firstName} ${person.lastName}`,
       person.initials,
       person.bidAs,
-      person.rank === currentUser.seniorityRank ? "Current User" : "",
+      personMatchesCurrentUser(person) ? "Current User" : "",
       `Seniority #${person.rank} · R1 ${person.rounds[0]} · R2 ${person.rounds[1]} · R3 ${person.rounds[2]} · R4 ${person.rounds[3]}`,
       "",
       "",
@@ -6392,7 +6730,7 @@ document.addEventListener("click", (event) => {
 
   const bidWindowDownload = event.target.closest("[data-download-bid-windows]");
   if (bidWindowDownload) {
-    downloadBidWindowsIcs();
+    downloadBidWindowsIcs(bidWindowDownload.dataset.downloadBidWindows);
     return;
   }
 
