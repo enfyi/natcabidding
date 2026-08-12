@@ -341,20 +341,29 @@
               <strong data-user-rank-metric>#5</strong>
               <small data-user-priority-summary>4 ahead · 40 behind</small>
             </article>
-            <article class="metric-card bid-window-metric">
-              <span>Your Next Bid Window</span>
-              <strong data-bid-window-range>Loading bid window</strong>
-              <small data-next-bid-window-round>Round 1</small>
-            </article>
             <article class="metric-card selected">
               <span>RDO Line</span>
               <strong data-dashboard-rdo-line>Line 15</strong>
               <small data-dashboard-rdo-summary>Choose fatigue group, AWS, Flex, and Mid when you bid.</small>
             </article>
+            <article class="metric-card bid-window-metric">
+              <span>Your Next Bid Window</span>
+              <strong data-bid-window-range>Loading bid window</strong>
+              <small data-next-bid-window-round>Round 1</small>
+            </article>
             <article class="metric-card round-rule-card">
               <span>Round Rules</span>
               <strong data-next-bid-window-rule>1 or 2 weeks</strong>
               <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</span></small>
+            </article>
+            <article class="metric-card allowance-summary-metric">
+              <span>Leave Allowance Summary</span>
+              <dl>
+                <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
+                <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
+                <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
+                <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
+              </dl>
             </article>
           </div>
 
@@ -459,16 +468,6 @@
 
             <div class="summary-stack">
               <section class="panel allowance-card">
-                <h2>Leave Allowance Summary</h2>
-                <dl>
-                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
-                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
-                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
-                  <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
-                </dl>
-              </section>
-
-              <section class="panel allowance-card">
                 <h2>Round Rules</h2>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
@@ -570,6 +569,12 @@
                   <span>AWS <b>No</b></span>
                   <span>Mid <b>No</b></span>
                 </div>
+                <ul class="bid-readiness-list" data-bid-readiness-list aria-label="Bid readiness checklist">
+                  <li class="checked">Selected line open</li>
+                  <li class="checked">Fatigue group selected</li>
+                  <li class="checked">Preferences complete</li>
+                  <li class="checked">Leave within allowance</li>
+                </ul>
                 <button class="primary-action submit window-action" type="button" data-select-line data-bid-entry-action>Bid</button>
               </section>
               <section class="panel">

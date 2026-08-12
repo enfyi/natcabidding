@@ -1572,7 +1572,7 @@ input {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: minmax(160px, 0.8fr) minmax(270px, 1.15fr) minmax(360px, 1.55fr) minmax(230px, 1fr);
+  grid-template-columns: minmax(150px, 0.72fr) minmax(320px, 1.35fr) minmax(250px, 1fr) minmax(210px, 0.9fr) minmax(250px, 1.05fr);
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -1669,6 +1669,44 @@ input {
 .metric-card.round-rule-card small {
   display: block;
   line-height: 1.35;
+}
+
+.metric-card.allowance-summary-metric {
+  display: grid;
+  align-content: start;
+}
+
+.allowance-summary-metric dl {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+}
+
+.allowance-summary-metric dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.allowance-summary-metric dl div:last-child {
+  border-bottom: 0;
+}
+
+.allowance-summary-metric dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.allowance-summary-metric dd {
+  margin: 0;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .balance-split {
@@ -2766,6 +2804,55 @@ input {
 .attribute-grid b {
   color: white;
   font-size: 0.82rem;
+}
+
+.bid-readiness-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.bid-readiness-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.bid-readiness-list li::before {
+  display: inline-grid;
+  flex: 0 0 16px;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: transparent;
+  content: "";
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.bid-readiness-list li.checked {
+  color: white;
+}
+
+.bid-readiness-list li.checked::before {
+  color: #071018;
+  border-color: var(--teal);
+  background: var(--teal);
+  content: "✓";
 }
 
 .group {
@@ -5101,6 +5188,18 @@ body {
   color: #111827;
 }
 
+.app-main .allowance-summary-metric dl div {
+  border-bottom-color: #dbe4ef;
+}
+
+.app-main .allowance-summary-metric dt {
+  color: #64748b;
+}
+
+.app-main .allowance-summary-metric dd {
+  color: #111827;
+}
+
 .app-main select,
 .app-main input,
 .app-main textarea {
@@ -5671,6 +5770,22 @@ body {
 .app-main .flex-picker em,
 .app-main .fatigue-option small {
   color: #64748b;
+}
+
+.app-main .bid-readiness-list li {
+  color: #64748b;
+  border-color: #dbe4ef;
+  background: #f8fafc;
+}
+
+.app-main .bid-readiness-list li.checked {
+  color: #111827;
+}
+
+.app-main .bid-readiness-list li.checked::before {
+  color: #ffffff;
+  border-color: #15803d;
+  background: #15803d;
 }
 
 .app-main .capacity-grid strong {
@@ -6408,6 +6523,10 @@ body {
   .profile-form,
   .account-form,
   .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bid-readiness-list {
     grid-template-columns: 1fr;
   }
 

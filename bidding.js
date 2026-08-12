@@ -2025,7 +2025,10 @@ function leaveHolidayDateSet(items) {
 
 function leaveHolidayCreditsForRound(round) {
   if (round < 4) return 0;
-  const priorItems = leaveCommittedItems().filter((item) => leaveRoundForItem(item) < round);
+  const priorItems = leaveCommittedItems().filter((item) =>
+    (!item.initials || item.initials === currentUser.initials) &&
+    leaveRoundForItem(item) < round
+  );
   return leaveHolidayDateSet(priorItems).size;
 }
 
@@ -2038,8 +2041,15 @@ function leaveProjectedChargedDays(extraItems = []) {
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
+function leaveCommittedChargedDays() {
+  return leaveCommittedItems()
+    .filter((item) => !item.initials || item.initials === currentUser.initials)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+}
+
 function leaveHolidayBidCount() {
-  return leaveHolidayDateSet([...leaveCommittedItems(), ...leaveDraftQueue]).size;
+  const committedItems = leaveCommittedItems().filter((item) => !item.initials || item.initials === currentUser.initials);
+  return leaveHolidayDateSet([...committedItems, ...leaveDraftQueue]).size;
 }
 
 function leaveDraftDateSet() {
@@ -2089,8 +2099,8 @@ function showInitialsInVisibleSlot(visible, bucket, initials) {
   visible[bucket] = values.slice(0, capacity);
 }
 
-function visibleLeaveSlotDetails(key, area = currentUser.area) {
-  const details = leaveSlotsForDate(key, area);
+function visibleLeaveSlotDetailsFromMap(key, area = currentUser.area, slotMap = leaveSlotMap(area)) {
+  const details = leaveSlotsForDateFromMap(key, area, slotMap);
   const visible = {
     ...details,
     cpc: [...(details.cpc || [])],
@@ -2126,6 +2136,10 @@ function visibleLeaveSlotDetails(key, area = currentUser.area) {
   });
 
   return visible;
+}
+
+function visibleLeaveSlotDetails(key, area = currentUser.area) {
+  return visibleLeaveSlotDetailsFromMap(key, area);
 }
 
 function personalLeaveDateStatus(key) {
@@ -2744,6 +2758,66 @@ function calendarActiveDate() {
   return new Date(displayedCalendarYear, activeDate.getMonth(), day);
 }
 
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip }) {
+  return {
+    area,
+    mode: calendarMode,
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip,
+    rdoWeekdays: showRdo ? selectedRdoWeekdays() : new Set(),
+    draftDates: showPersonalLeave ? leaveDraftDateSet() : new Set(),
+    previewDates: showPersonalLeave && leaveRangePreviewActive ? new Set(leaveBuilderDateKeys()) : new Set(),
+    slotMap: leaveSlotMap(area),
+    baseSlotDetails: new Map(),
+    visibleSlotDetails: new Map(),
+    personalLeaveStatuses: new Map(),
+    holidayKinds: new Map(),
+    fatigueGroups: new Map(),
+  };
+}
+
+function cachedBaseLeaveSlotDetails(key, context) {
+  if (!context.baseSlotDetails.has(key)) {
+    context.baseSlotDetails.set(key, leaveSlotsForDateFromMap(key, context.area, context.slotMap));
+  }
+
+  return context.baseSlotDetails.get(key);
+}
+
+function cachedVisibleLeaveSlotDetails(key, context) {
+  if (!context.visibleSlotDetails.has(key)) {
+    context.visibleSlotDetails.set(key, visibleLeaveSlotDetailsFromMap(key, context.area, context.slotMap));
+  }
+
+  return context.visibleSlotDetails.get(key);
+}
+
+function cachedPersonalLeaveDateStatus(key, context) {
+  if (!context.personalLeaveStatuses.has(key)) {
+    context.personalLeaveStatuses.set(key, personalLeaveDateStatus(key));
+  }
+
+  return context.personalLeaveStatuses.get(key);
+}
+
+function cachedCalendarHolidayKind(key, context, options = {}) {
+  if (!context.holidayKinds.has(key)) {
+    context.holidayKinds.set(key, calendarHolidayKind(key, options));
+  }
+
+  return context.holidayKinds.get(key);
+}
+
+function cachedFatigueGroupForDate(key, context) {
+  const weekKey = roundOneWeekKeyForDateKey(key);
+  if (!context.fatigueGroups.has(weekKey)) {
+    context.fatigueGroups.set(weekKey, fatigueGroupForDate(key));
+  }
+
+  return context.fatigueGroups.get(weekKey);
+}
+
 function makeCalendar(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
@@ -2754,6 +2828,12 @@ function makeCalendar(targetId) {
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
   const monthIndexes = monthNames.map((_, index) => index);
+  const context = makeCalendarRenderContext({
+    area,
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip: isPublicCalendar,
+  });
 
   target.classList.remove("month-view", "week-view");
 
@@ -2763,6 +2843,7 @@ function makeCalendar(targetId) {
       showPersonalLeave,
       area,
       deferSlotTooltip: isPublicCalendar,
+      context,
     }))
     .join("");
 }
@@ -2784,6 +2865,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
       showPersonalLeave,
       area,
       deferSlotTooltip,
+      context: options.context,
     }));
   }
 
@@ -2797,6 +2879,12 @@ function renderMonthCard(monthIndex, year, options = {}) {
 
 function renderWeekCalendar(activeDate, options = {}) {
   const { showRdo = true, showPersonalLeave = true } = options;
+  const context = options.context || makeCalendarRenderContext({
+    area: options.area || currentViewArea(),
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip: false,
+  });
   const start = new Date(activeDate);
   start.setDate(activeDate.getDate() - activeDate.getDay());
   const weekDays = Array.from({ length: 7 }, (_, index) => {
@@ -2813,7 +2901,7 @@ function renderWeekCalendar(activeDate, options = {}) {
         ${weekDays.map((date) => `
           <div class="week-day-column">
             <span class="week-day-label">${dayNames[date.getDay()]}</span>
-            ${renderCalendarDay(date.getMonth(), date.getDate(), true, date.getFullYear(), { showRdo, showPersonalLeave, area: options.area })}
+            ${renderCalendarDay(date.getMonth(), date.getDate(), true, date.getFullYear(), { showRdo, showPersonalLeave, area: options.area, context })}
           </div>
         `).join("")}
       </div>
@@ -2823,30 +2911,42 @@ function renderWeekCalendar(activeDate, options = {}) {
 
 function renderCalendarDay(monthIndex, day, includeMonth = false, year = displayedCalendarYear, options = {}) {
   const { showRdo = true, showPersonalLeave = true } = options;
-  const mode = options.mode || calendarMode;
+  const context = options.context || null;
+  const mode = options.mode || context?.mode || calendarMode;
   const showVacationLayer = mode === "vacation" || mode === "combined";
   const showFatigueLayer = mode === "fatigue" || mode === "combined";
   const date = new Date(year, monthIndex, day);
   const weekday = date.getDay();
   const key = dateKey(year, monthIndex + 1, day);
   const isPreviousLeaveYear = key < BID_LEAVE_YEAR_START_KEY;
-  const fatigueGroup = isPreviousLeaveYear || !showFatigueLayer ? "" : fatigueGroupForDate(key);
+  const fatigueGroup = isPreviousLeaveYear || !showFatigueLayer ? "" : context ? cachedFatigueGroupForDate(key, context) : fatigueGroupForDate(key);
   const fatigueClass = groupClass(fatigueGroup);
   const nextFatigueGroup = weekday === 6 ? nextFatigueGroupAfter(fatigueGroup) : "";
   const nextFatigueClass = groupClass(nextFatigueGroup);
   const isFatigueWeekStart = fatigueClass && (weekday === 0 || day === 1);
-  const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && selectedRdoWeekdays().has(weekday);
-  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR ? personalLeaveDateStatus(key) : "";
+  const rdoWeekdays = context ? context.rdoWeekdays : selectedRdoWeekdays();
+  const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && rdoWeekdays.has(weekday);
+  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR
+    ? context ? cachedPersonalLeaveDateStatus(key, context) : personalLeaveDateStatus(key)
+    : "";
   const canShowLeaveState = showVacationLayer && !isRdo && !isPreviousLeaveYear;
   const isApprovedLeave = leaveStatus === "approved" && canShowLeaveState;
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
-  const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (isDraftLeaveDate(key) || isLeavePreviewRangeDate(key));
-  const holidayKind = isPreviousLeaveYear || !showVacationLayer ? null : calendarHolidayKind(key, options);
-  const isClosed = canShowLeaveState && isLeaveSlotsFull(key, options.area);
+  const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (
+    context ? context.draftDates.has(key) || context.previewDates.has(key) : isDraftLeaveDate(key) || isLeavePreviewRangeDate(key)
+  );
+  const holidayKind = isPreviousLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
+  const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
+  const detailArea = context?.area || options.area || currentUser.area;
+  const isClosed = canShowLeaveState && (
+    baseSlotDetails
+      ? baseSlotDetails.cpc.length >= leaveSlotCapacity.cpc || (detailArea === "Area A" && fullLeaveDates.has(key))
+      : isLeaveSlotsFull(key, options.area)
+  );
   const hasDetail = showVacationLayer && !isPreviousLeaveYear;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -2938,8 +3038,8 @@ function leaveSlotMap(area = currentUser.area) {
   return entries;
 }
 
-function leaveSlotsForDate(key, area = currentUser.area) {
-  const details = leaveSlotMap(area)[key] || {
+function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveSlotMap(area)) {
+  const details = slotMap[key] || {
     date: key,
     label: formatCalendarDate(key),
     cpc: [],
@@ -2956,6 +3056,10 @@ function leaveSlotsForDate(key, area = currentUser.area) {
     holiday: details.holiday || isHolidayDate(key),
     holidayInLieu,
   };
+}
+
+function leaveSlotsForDate(key, area = currentUser.area) {
+  return leaveSlotsForDateFromMap(key, area);
 }
 
 function hasLeaveSlotDetails(key, area = currentUser.area) {
@@ -2979,8 +3083,8 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area) {
-  const details = visibleLeaveSlotDetails(key, area);
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null) {
+  const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcSlots = Array.from({ length: leaveSlotCapacity.cpc }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: leaveSlotCapacity.dev }, (_, index) => details.dev[index] || "");
   const renderSlotRow = (prefix, value, index) => {
@@ -4067,7 +4171,12 @@ function publicRosterArea(area = publicState.area) {
 function renderPublicPage(area = publicState.area, section = publicState.section) {
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
-  renderCalendars({ includeMember: false });
+  if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
+    renderCalendars({ includeMember: false });
+  } else {
+    updateCalendarViewControls();
+    updateCalendarYearLabels();
+  }
 }
 
 function isMemberAppVisible() {
@@ -4464,6 +4573,25 @@ function selectedLineStatus(line) {
   return "Open";
 }
 
+function selectedLineReadinessItems(line) {
+  const existingRequest = currentUserRdoRequest();
+  const requestMatchesLine = existingRequest?.line === line.line;
+  const fatigueGroup = selectedFatigueGroup || (requestMatchesLine ? existingRequest.fatigueGroup : "");
+  const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
+  const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
+  const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
+  const lineStatus = selectedLineStatus(line);
+  const selectedLineOpen = lineStatus !== "Taken";
+  const preferencesComplete = Boolean(flexPreference && awsPreference && (isForcedMid(line) || midPreference));
+
+  return [
+    { label: "Selected line open", checked: selectedLineOpen },
+    { label: "Fatigue group selected", checked: Boolean(fatigueGroup) },
+    { label: "Preferences complete", checked: preferencesComplete },
+    { label: "Leave within allowance", checked: true },
+  ];
+}
+
 function syncRdoFilterControls() {
   const search = document.querySelector('[data-rdo-filter="search"]');
   const open = document.querySelector('[data-rdo-filter="open"]');
@@ -4647,6 +4775,11 @@ function updateSelectedLine() {
       </span>
     `;
   });
+  document.querySelectorAll("[data-bid-readiness-list]").forEach((element) => {
+    element.innerHTML = selectedLineReadinessItems(line)
+      .map((item) => `<li class="${item.checked ? "checked" : "pending"}">${item.label}</li>`)
+      .join("");
+  });
 
   renderWeek("selected-week", line.week);
   renderWeek("rdo-week", line.week);
@@ -4761,13 +4894,22 @@ function renderLeaveAllowanceSummary() {
   const holidayText = `${holidayCount} ${holidayCount === 1 ? "holiday" : "holidays"} bid`;
   const round = currentRoundNumber();
   const credits = leaveHolidayCreditsForRound(round);
+  const totalAllowance = leaveAllowanceLimitForRound(round);
+  const bidDays = leaveCommittedChargedDays();
+  const leftDays = Math.max(0, totalAllowance - bidDays);
+  const approvedDays = leaveCommittedItems()
+    .filter((item) => (!item.initials || item.initials === currentUser.initials) && item.status === "Approved")
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+  const pendingDays = leaveCommittedItems()
+    .filter((item) => (!item.initials || item.initials === currentUser.initials) && item.status === "Pending")
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 
-  setText("[data-leave-already-detail]", `Approved: 8 days · Pending: 4 days · ${holidayText}`);
+  setText("[data-leave-already-detail]", `Approved: ${approvedDays} days · Pending: ${pendingDays} days · ${holidayText}`);
   setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
-  setText("[data-leave-total-allowance]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} days`);
-  setText("[data-leave-left-days]", "18 days");
-  setText("[data-leave-bid-days]", "12 days");
-  setText("[data-leave-balance-summary]", `${ANNUAL_LEAVE_ALLOWANCE_DAYS} total · ${holidayText}`);
+  setText("[data-leave-total-allowance]", `${totalAllowance} days`);
+  setText("[data-leave-left-days]", `${leftDays} days`);
+  setText("[data-leave-bid-days]", `${bidDays} days`);
+  setText("[data-leave-balance-summary]", `${totalAllowance} total · ${holidayText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
@@ -6426,7 +6568,7 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
-  if (isMemberAppVisible()) {
+  if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
     renderCalendars({ includePublic: false });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
   }
