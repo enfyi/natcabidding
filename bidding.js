@@ -922,6 +922,7 @@ const senioritySource = [
   ["Williams", "Jaclyn", "CPC", "JO", "Area F", "", "(661) 435-4964"],
   ["Mancinelli", "Michelle", "CPC", "XN", "Area F", "", "(626) 260-0820"],
   ["Scott", "Jason", "CPC", "JL", "Area F", "", "(310) 948-6772"],
+  ["Lowe", "Lydia", "R-DEV", "LY", "Area F", "", ""],
   ["Rosales", "Elda", "CPC", "YQ", "Area F", "", "(619) 861-2398"],
   ["Williams", "David", "CPC", "AA", "Area F", "", "(818) 322-7362"],
   ["Dunlap", "Kelli", "CPC", "FK", "Area F", "", "(661) 916-5542"],
