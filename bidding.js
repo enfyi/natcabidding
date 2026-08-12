@@ -526,6 +526,8 @@ const publicState = {
 };
 
 const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
+const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV"];
+const TMU_BID_ROLES = ["TMC", "DEV", "GL"];
 
 const supabaseState = {
   enabled: false,
@@ -960,7 +962,7 @@ const senioritySource = [
   ["Barcenas", "Joshua", "D-DEV", "HO", "Area F", "", "(626) 756-7044"],
   ["Kimball", "Bryan", "D-DEV", "KK", "Area F", "", "(702) 862-9183"],
   ["Giron Gonzalez", "Josue", "D-DEV", "TF", "Area F", "", "(760) 269-9189"],
-  ["Hopkins", "Matthew", "TMCIT", "HK", "TMU", "", "(503) 440-8029"],
+  ["Hopkins", "Matthew", "DEV", "HK", "TMU", "", "(503) 440-8029"],
   ["Mauldin", "Trent", "TMC", "TR", "TMU", "", "(661) 350-7099"],
   ["Baugh", "Jeanette", "TMC", "KB", "TMU", "", "(724) 513-6397"],
   ["Beale", "Scott", "TMC", "SB", "TMU", "", "(650) 784-8884"],
@@ -969,7 +971,7 @@ const senioritySource = [
   ["Prater", "Matthew", "TMC", "ZT", "TMU", "", "(310) 525-9888"],
   ["Carey", "Nicolas", "TMC", "EU", "TMU", "", "(909) 762-2747"],
   ["Zimmerman", "Jared", "TMC", "ZI", "TMU", "", "(801) 635-9184"],
-  ["Palmer", "Whitney", "TMCIT", "WE", "TMU", "", "(619) 203-4108"],
+  ["Palmer", "Whitney", "DEV", "WE", "TMU", "", "(619) 203-4108"],
   ["Matsumoto", "Christopher", "TMC", "CN", "TMU", "", "(661) 317-5931"],
   ["Henry", "Erika", "TMC", "EH", "TMU", "", "(619) 840-9283"],
   ["Moreno", "Tracy", "TMC", "", "TMU", "", ""],
@@ -1299,16 +1301,18 @@ function activeRosterEntries(area = null) {
   );
 }
 
-function rosterEntryToPerson(entry, rank = null) {
+function rosterEntryToPerson(entry, rank = null, options = {}) {
   const [lastName, firstName, bidAs, initials] = entry;
+  const area = seniorityEntryArea(entry);
   const resolvedRank = Number.isFinite(rank) ? rank : activeRosterEntries(seniorityEntryArea(entry)).findIndex((item) => item === entry) + 1;
+  const shouldUseFallbackInitials = options.fallbackInitials !== false;
   return {
     rank: resolvedRank,
     firstName,
     lastName,
-    bidAs,
-    initials: initials || fallbackInitials(firstName, lastName),
-    area: seniorityEntryArea(entry),
+    bidAs: normalizeBidRoleForArea(bidAs, area),
+    initials: initials || (shouldUseFallbackInitials ? fallbackInitials(firstName, lastName) : ""),
+    area,
     email: seniorityEntryEmail(entry),
     phone: seniorityEntryPhone(entry),
     active: seniorityEntryActive(entry),
@@ -1320,6 +1324,7 @@ function buildSeniority(area = currentViewArea()) {
   const areaDateBlocks = roundDateBlocksForArea(area);
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
+    const normalizedBidAs = normalizeBidRoleForArea(bidAs, area);
     const rank = index + 1;
     const rowBlock = Math.floor(index / bidStartTimes.length);
     const start = bidStartTimes[index % bidStartTimes.length];
@@ -1330,7 +1335,7 @@ function buildSeniority(area = currentViewArea()) {
       rank,
       firstName,
       lastName,
-      bidAs,
+      bidAs: normalizedBidAs,
       initials: initials || fallbackInitials(firstName, lastName),
       area,
       email: seniorityEntryEmail(entry),
@@ -2543,7 +2548,7 @@ function datesInLeaveRange(range) {
 }
 
 function leaveSlotBucketForBidAs(bidAs) {
-  if (bidAs === "R-DEV" || bidAs === "D-DEV" || bidAs === "TMCIT") return "dev";
+  if (bidAs === "R-DEV" || bidAs === "D-DEV" || bidAs === "DEV") return "dev";
   if (bidAs === "CPC" || bidAs === "GL" || bidAs === "TMC") return "cpc";
   return null;
 }
@@ -3444,7 +3449,7 @@ function profileFromSupabase(row) {
     area: row.area_name || "Area A",
     role: row.role || "controller",
     roleLabel: row.role === "admin" ? "Bidding Admin" : "BUE Controller",
-    bidAs: row.bid_role || "CPC",
+    bidAs: normalizeBidRoleForArea(row.bid_role || "CPC", row.area_name || "Area A"),
     systemAdmin: row.role === "admin",
     phone: row.phone || "",
     email: row.email || "",
@@ -4200,7 +4205,7 @@ function userFullName() {
 function currentUserBidAs() {
   const rosterMatch = senioritySource.find((entry) => seniorityEntryActive(entry) && seniorityEntryMatchesCurrentUser(entry));
   const seniorityMatch = seniority.find(personMatchesCurrentUser);
-  return currentUser.bidAs || rosterMatch?.[2] || seniorityMatch?.bidAs || "CPC";
+  return normalizeBidRoleForArea(currentUser.bidAs || rosterMatch?.[2] || seniorityMatch?.bidAs || defaultBidRoleForArea(currentUser.area), currentUser.area);
 }
 
 function activeAdminGrant() {
@@ -4935,8 +4940,8 @@ function leaveBucketUsage(bucket) {
 }
 
 function renderLeaveBucketCards() {
-  const cpcCount = seniority.filter((person) => person.bidAs === "CPC").length;
-  const devCount = seniority.filter((person) => person.bidAs === "R-DEV" || person.bidAs === "D-DEV").length;
+  const cpcCount = seniority.filter((person) => leaveSlotBucketForBidAs(person.bidAs) === "cpc").length;
+  const devCount = seniority.filter((person) => leaveSlotBucketForBidAs(person.bidAs) === "dev").length;
   const cpcTotal = cpcCount * 36;
   const devTotal = devCount * 36;
   const cpcUsed = leaveBucketUsage("cpc");
@@ -5081,7 +5086,7 @@ function selectedRosterArea() {
 }
 
 function rosterEntryInitials(entry) {
-  return entry[3] || fallbackInitials(entry[1], entry[0]);
+  return entry[3] || "";
 }
 
 function rosterEntriesForArea(area = selectedRosterArea()) {
@@ -5093,7 +5098,7 @@ function rosterEntriesForArea(area = selectedRosterArea()) {
       return {
         entry,
         sourceIndex: senioritySource.indexOf(entry),
-        person: rosterEntryToPerson(entry, activeRank > 0 ? activeRank : null),
+        person: rosterEntryToPerson(entry, activeRank > 0 ? activeRank : null, { fallbackInitials: false }),
       };
     });
 }
@@ -5102,8 +5107,50 @@ function rosterAreaOptions(selectedArea) {
   return ZLA_AREAS.map((area) => `<option value="${area}" ${area === selectedArea ? "selected" : ""}>${area}</option>`).join("");
 }
 
-function rosterBidAsOptions(selectedBidAs) {
-  return ["CPC", "GL", "R-DEV", "D-DEV", "TMC", "TMCIT"].map((bidAs) => `<option value="${bidAs}" ${bidAs === selectedBidAs ? "selected" : ""}>${bidAs}</option>`).join("");
+function bidRoleOptionsForArea(area) {
+  return area === "TMU" ? TMU_BID_ROLES : LETTERED_AREA_BID_ROLES;
+}
+
+function normalizeBidRoleForArea(bidAs, area) {
+  const value = String(bidAs || "").trim().toUpperCase();
+  if (area === "TMU") {
+    if (value === "R-DEV" || value === "D-DEV" || value === "TMCIT") return "DEV";
+    if (value === "CPC") return "TMC";
+  } else {
+    if (value === "TMC") return "CPC";
+    if (value === "TMCIT" || value === "DEV") return "D-DEV";
+  }
+  return value;
+}
+
+function defaultBidRoleForArea(area) {
+  return bidRoleOptionsForArea(area)[0];
+}
+
+function validBidRoleForArea(bidAs, area) {
+  return bidRoleOptionsForArea(area).includes(bidAs);
+}
+
+function rosterBidAsOptions(selectedBidAs, area = selectedRosterArea()) {
+  const selectedRole = normalizeBidRoleForArea(selectedBidAs, area);
+  return bidRoleOptionsForArea(area).map((bidAs) => `<option value="${bidAs}" ${bidAs === selectedRole ? "selected" : ""}>${bidAs}</option>`).join("");
+}
+
+function syncRosterBidAsSelect(area, selectedBidAs) {
+  const select = document.querySelector("[data-roster-bid-as]");
+  if (!select) return;
+  const selectedRole = normalizeBidRoleForArea(selectedBidAs || select.value, area);
+  select.innerHTML = rosterBidAsOptions(selectedRole, area);
+  select.value = validBidRoleForArea(selectedRole, area) ? selectedRole : defaultBidRoleForArea(area);
+}
+
+function syncBulkRosterBidAsSelect(row, selectedBidAs) {
+  const area = row.querySelector("[data-bulk-area]")?.value || selectedRosterArea();
+  const select = row.querySelector("[data-bulk-bid-as]");
+  if (!select) return;
+  const selectedRole = normalizeBidRoleForArea(selectedBidAs || select.value, area);
+  select.innerHTML = rosterBidAsOptions(selectedRole, area);
+  select.value = validBidRoleForArea(selectedRole, area) ? selectedRole : defaultBidRoleForArea(area);
 }
 
 function findRosterEntryByInitials(initials) {
@@ -5133,7 +5180,7 @@ function defaultRosterFormValues(area = selectedRosterArea()) {
     phone: "",
     area,
     rank: activeRosterEntries(area).length + 1,
-    bidAs: "CPC",
+    bidAs: defaultBidRoleForArea(area),
   };
 }
 
@@ -5151,7 +5198,7 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
   setValue("[data-roster-phone]", values.phone);
   setValue("[data-roster-area]", values.area);
   setValue("[data-roster-rank]", values.rank);
-  setValue("[data-roster-bid-as]", values.bidAs);
+  syncRosterBidAsSelect(values.area, values.bidAs);
 }
 
 function resetRosterForm() {
@@ -5186,6 +5233,7 @@ function editRosterEntryByIndex(index) {
 
 function rosterFormValues() {
   const value = (selector) => document.querySelector(selector)?.value.trim() || "";
+  const area = value("[data-roster-area]") || selectedRosterArea();
   return {
     editInitials: value("[data-roster-edit-initials]").toUpperCase(),
     firstName: value("[data-roster-first-name]"),
@@ -5193,9 +5241,9 @@ function rosterFormValues() {
     initials: value("[data-roster-initials]").toUpperCase(),
     email: value("[data-roster-email]").toLowerCase(),
     phone: value("[data-roster-phone]"),
-    area: value("[data-roster-area]") || selectedRosterArea(),
+    area,
     rank: Number(value("[data-roster-rank]")),
-    bidAs: value("[data-roster-bid-as]") || "CPC",
+    bidAs: normalizeBidRoleForArea(value("[data-roster-bid-as]") || defaultBidRoleForArea(area), area),
     editIndex: Number(value("[data-roster-edit-index]")),
     active: true,
   };
@@ -5205,6 +5253,7 @@ function supabaseRosterPayload(values) {
   return {
     original_area_name: values.originalArea || values.area,
     original_initials: values.originalInitials || values.editInitials || values.initials,
+    original_seniority_rank: Number.isFinite(values.originalRank) ? values.originalRank : null,
     profile_first_name: values.firstName,
     profile_last_name: values.lastName,
     profile_initials: values.initials,
@@ -5359,7 +5408,7 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
 function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
   return [...areas].flatMap((area) =>
     activeRosterEntries(area).map((entry, index) => {
-      const person = rosterEntryToPerson(entry, index + 1);
+      const person = rosterEntryToPerson(entry, index + 1, { fallbackInitials: false });
       const override = entryOverrides.get(entry) || {};
       return {
         firstName: person.firstName,
@@ -5389,6 +5438,10 @@ async function saveRosterEntry(event) {
   }
   if (!ZLA_AREAS.includes(values.area)) {
     setRosterStatus("Choose a valid area.", "error");
+    return;
+  }
+  if (!validBidRoleForArea(values.bidAs, values.area)) {
+    setRosterStatus("Choose a valid bid role.", "error");
     return;
   }
   if (!Number.isFinite(values.rank) || values.rank < 1) {
@@ -5478,6 +5531,7 @@ function bulkRosterRows() {
   return rosterTableRows()
     .map((row) => {
       const originalInitials = row.dataset.originalInitials || "";
+      const area = bulkRowValue(row, "[data-bulk-area]");
       return {
         originalInitials,
         sourceIndex: Number(row.dataset.rosterEntryIndex),
@@ -5486,9 +5540,9 @@ function bulkRosterRows() {
         initials: bulkRowValue(row, "[data-bulk-initials]").toUpperCase(),
         email: bulkRowValue(row, "[data-bulk-email]").toLowerCase(),
         phone: bulkRowValue(row, "[data-bulk-phone]"),
-        area: bulkRowValue(row, "[data-bulk-area]"),
+        area,
         rank: Number(bulkRowValue(row, "[data-bulk-rank]")),
-        bidAs: bulkRowValue(row, "[data-bulk-bid-as]") || "CPC",
+        bidAs: normalizeBidRoleForArea(bulkRowValue(row, "[data-bulk-bid-as]") || defaultBidRoleForArea(area), area),
         active: true,
       };
     });
@@ -5497,19 +5551,21 @@ function bulkRosterRows() {
 function validateBulkRosterRows(rows) {
   for (const row of rows) {
     if (!Number.isInteger(row.sourceIndex) || !senioritySource[row.sourceIndex]) return `Could not match ${row.initials || "that row"} to the roster. Refresh and try again.`;
-    if (!row.firstName || !row.lastName || !row.initials) return "Every edited BUE needs first name, last name, and initials.";
+    if (!row.firstName || !row.lastName) return "Every edited BUE needs first name and last name.";
     if (!ZLA_AREAS.includes(row.area)) return `Choose a valid area for ${row.initials}.`;
+    if (!validBidRoleForArea(row.bidAs, row.area)) return `Choose a valid bid role for ${row.initials}.`;
     if (!Number.isFinite(row.rank) || row.rank < 1) return `Enter a valid seniority rank for ${row.initials}.`;
   }
 
   const rowsByIndex = new Map(rows.map((row) => [row.sourceIndex, row]));
 
   for (const row of rows) {
-    if (row.initials === row.originalInitials) continue;
+    if (!row.initials || row.initials === row.originalInitials) continue;
     const conflictingEntry = senioritySource.some((entry, index) => {
       if (index === row.sourceIndex) return false;
       const matchingRow = rowsByIndex.get(index);
       const proposedInitials = matchingRow ? matchingRow.initials : rosterEntryInitials(entry);
+      if (!proposedInitials) return false;
       return proposedInitials === row.initials;
     });
     if (conflictingEntry) return `${row.initials} is already assigned to another BUE.`;
@@ -5648,6 +5704,7 @@ function renderRosterManager() {
   if (areaInput && !areaInput.value) areaInput.value = selectedArea;
   const rankInput = document.querySelector("[data-roster-rank]");
   if (rankInput && !rankInput.value) rankInput.value = activeRosterEntries(selectedArea).length + 1;
+  if (areaInput) syncRosterBidAsSelect(areaInput.value || selectedArea);
 
   const target = document.querySelector("[data-roster-table]");
   if (!target) return;
@@ -5664,7 +5721,7 @@ function renderRosterManager() {
         <td><input type="email" value="${escapeHtml(person.email)}" data-bulk-email aria-label="Email for ${escapeHtml(person.initials)}" /></td>
         <td><input type="tel" value="${escapeHtml(person.phone)}" data-bulk-phone aria-label="Phone for ${escapeHtml(person.initials)}" /></td>
         <td><select data-bulk-area>${rosterAreaOptions(person.area)}</select></td>
-        <td><select data-bulk-bid-as>${rosterBidAsOptions(person.bidAs)}</select></td>
+        <td><select data-bulk-bid-as>${rosterBidAsOptions(person.bidAs, person.area)}</select></td>
         <td>
           <div class="roster-row-actions">
             <button class="secondary-action small" type="button" data-edit-roster-bue="${sourceIndex}">Edit</button>
@@ -7480,9 +7537,19 @@ document.addEventListener("change", (event) => {
   }
 
   const rosterAreaInput = event.target.closest("[data-roster-area]");
-  if (rosterAreaInput && !document.querySelector("[data-roster-edit-initials]")?.value) {
-    const rankInput = document.querySelector("[data-roster-rank]");
-    if (rankInput) rankInput.value = activeRosterEntries(rosterAreaInput.value).length + 1;
+  if (rosterAreaInput) {
+    syncRosterBidAsSelect(rosterAreaInput.value);
+    if (!document.querySelector("[data-roster-edit-initials]")?.value) {
+      const rankInput = document.querySelector("[data-roster-rank]");
+      if (rankInput) rankInput.value = activeRosterEntries(rosterAreaInput.value).length + 1;
+    }
+    return;
+  }
+
+  const bulkRosterAreaInput = event.target.closest("[data-bulk-area]");
+  if (bulkRosterAreaInput) {
+    const row = bulkRosterAreaInput.closest("[data-roster-row]");
+    if (row) syncBulkRosterBidAsSelect(row);
     return;
   }
 
