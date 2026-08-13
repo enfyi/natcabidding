@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance" />
   </head>
   <body>
     <section class="login-screen public-shell" aria-label="Public bidding website">
@@ -978,7 +978,7 @@
                 <div class="panel-header compact">
                   <div>
                     <h3>BUE Roster</h3>
-                    <p>Add, amend, move, deactivate, or delete BUE records.</p>
+                    <p>Add, amend, move, deactivate, delete, or adjust leave-slot counts for BUE records.</p>
                   </div>
                   <label class="compact-filter">
                     Area
@@ -1022,6 +1022,7 @@
                         <option>D-DEV</option>
                       </select>
                     </label>
+                    <label>Leave Slots <input type="number" min="0" step="1" data-roster-leave-slots /></label>
                     <div class="roster-form-actions">
                       <button class="secondary-action small" type="button" data-roster-new>New</button>
                       <button class="primary-action small" type="submit">Save BUE</button>
@@ -1048,6 +1049,7 @@
                           <col data-roster-col="phone" />
                           <col data-roster-col="area" />
                           <col data-roster-col="role" />
+                          <col data-roster-col="leaveSlots" />
                           <col data-roster-col="actions" />
                         </colgroup>
                         <thead>
@@ -1061,6 +1063,7 @@
                             <th data-roster-resizable-col="phone"><span>Phone</span><i data-roster-col-resizer="phone"></i></th>
                             <th data-roster-resizable-col="area"><span>Area</span><i data-roster-col-resizer="area"></i></th>
                             <th data-roster-resizable-col="role"><span>Role</span><i data-roster-col-resizer="role"></i></th>
+                            <th data-roster-resizable-col="leaveSlots"><span>Leave Slots</span><i data-roster-col-resizer="leaveSlots"></i></th>
                             <th data-roster-resizable-col="actions"><span></span><i data-roster-col-resizer="actions"></i></th>
                           </tr>
                         </thead>
@@ -1304,7 +1307,7 @@
 
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

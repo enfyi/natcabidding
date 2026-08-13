@@ -1966,6 +1966,46 @@ input {
   text-transform: uppercase;
 }
 
+.leave-year-continuation {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(132px, 180px) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(122, 189, 194, 0.22);
+  border-radius: 8px;
+  padding: 10px;
+  background:
+    linear-gradient(90deg, rgba(122, 189, 194, 0.1), rgba(255, 215, 127, 0.08)),
+    rgba(10, 6, 20, 0.42);
+}
+
+.leave-year-continuation-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.leave-year-continuation-copy strong {
+  color: var(--gold);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.leave-year-continuation-copy span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.month-grid.leave-year-continuation-days {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.month-grid.leave-year-continuation-days button {
+  min-height: 30px;
+}
+
 .month-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -4477,7 +4517,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .roster-table {
-  min-width: 1220px;
+  min-width: 1324px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -7042,6 +7082,14 @@ video {
   .public-rail,
   .public-topbar {
     padding-inline: 10px;
+  }
+
+  .leave-year-continuation {
+    grid-template-columns: 1fr;
+  }
+
+  .month-grid.leave-year-continuation-days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .public-nav-item,

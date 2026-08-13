@@ -16,11 +16,14 @@ const monthNames = [
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BID_YEAR = 2027;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
+const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = 4;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
+const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
+const BID_LEAVE_YEAR_CONTINUATION_DAYS = Number(BID_LEAVE_YEAR_END_KEY.slice(-2));
 const ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -61,6 +64,7 @@ const testAccounts = {
     systemAdmin: true,
     phone: "(626) 392-1194",
     email: "m.schoelen@yahoo.com",
+    leaveSlotAllowance: DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE,
     adminGrant: {
       type: "Bidding Intake",
       scope: "All Areas",
@@ -1261,6 +1265,15 @@ function seniorityEntryActive(entry) {
   return entry[7] !== false;
 }
 
+function normalizeLeaveSlotAllowance(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
+}
+
+function seniorityEntryLeaveSlotAllowance(entry) {
+  return normalizeLeaveSlotAllowance(entry?.[8]);
+}
+
 function normalizedInitials(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -1316,6 +1329,7 @@ function rosterEntryToPerson(entry, rank = null, options = {}) {
     email: seniorityEntryEmail(entry),
     phone: seniorityEntryPhone(entry),
     active: seniorityEntryActive(entry),
+    leaveSlotAllowance: seniorityEntryLeaveSlotAllowance(entry),
   };
 }
 
@@ -1341,6 +1355,7 @@ function buildSeniority(area = currentViewArea()) {
       email: seniorityEntryEmail(entry),
       phone: seniorityEntryPhone(entry),
       active: true,
+      leaveSlotAllowance: seniorityEntryLeaveSlotAllowance(entry),
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: (areaDateBlocks[rowBlock] || []).map((date) => bidWindowLabel(date, start)),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
@@ -1705,6 +1720,16 @@ function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
+  const capacityMessage = leaveAreaCapacityMessage(area, person.bidAs, [{
+    area,
+    bidAs: person.bidAs,
+    initials: person.initials,
+  }]);
+  if (capacityMessage) {
+    setManualBidStatus(panel, capacityMessage, "error");
+    return;
+  }
+
   const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const weekUnits = weekKeys.length;
   const submittedAt = formatDateTime(new Date());
@@ -2015,6 +2040,54 @@ function leaveCommittedItems() {
     .map((item) => ({ ...item, round: leaveRoundForItem(item) }));
 }
 
+function leaveItemArea(item) {
+  return item.area || currentUser.area;
+}
+
+function leaveItemBidAs(item) {
+  if (item.bidAs) return item.bidAs;
+  const initials = item.initials || currentUser.initials;
+  const person = bueByInitials(initials);
+  return person?.bidAs || currentUserBidAs();
+}
+
+function leaveSlotUnitsForItem() {
+  return 1;
+}
+
+function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
+  return bueRoster()
+    .filter((person) => person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
+    .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
+}
+
+function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
+  return [...leaveCommittedItems(), ...extraItems]
+    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
+}
+
+function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
+  return {
+    cpcTotal: areaLeaveSlotBudget(area, "cpc"),
+    devTotal: areaLeaveSlotBudget(area, "dev"),
+    cpcUsed: areaLeaveSlotUsed(area, "cpc", extraItems),
+    devUsed: areaLeaveSlotUsed(area, "dev", extraItems),
+  };
+}
+
+function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
+  const bucket = leaveSlotBucketForBidAs(bidAs);
+  if (!bucket) return "";
+  const total = areaLeaveSlotBudget(area, bucket);
+  const used = areaLeaveSlotUsed(area, bucket);
+  const projectedUsed = areaLeaveSlotUsed(area, bucket, extraItems);
+  if (projectedUsed <= total) return "";
+
+  const label = bucket === "dev" ? "DEV" : "CPC";
+  return `${area} ${label} leave slots are exhausted (${used} used of ${total}). No additional leave bids can be submitted in that bucket.`;
+}
+
 function leaveItemChargedDays(item) {
   const days = Number(item.days);
   if (Number.isFinite(days) && days > 0) return days;
@@ -2237,6 +2310,15 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  const capacityMessage = leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
+    ...leaveDraftQueue,
+    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials },
+  ]);
+  if (capacityMessage) {
+    setLeaveBuilderStatus(capacityMessage, "error");
+    return;
+  }
+
   const normalizedRange = range.toLowerCase();
   const matchingBid = leaveBids.find((bid) => bid.range.toLowerCase() === normalizedRange);
   if (matchingBid?.status === "Approved") {
@@ -2316,6 +2398,21 @@ function removeLeaveDraft(id) {
 function submitLeaveDraftBatch() {
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
+    return;
+  }
+
+  const capacityMessage = leaveAreaCapacityMessage(
+    currentUser.area,
+    currentUserBidAs(),
+    leaveDraftQueue.map((draft) => ({
+      ...draft,
+      area: currentUser.area,
+      bidAs: currentUserBidAs(),
+      initials: currentUser.initials,
+    }))
+  );
+  if (capacityMessage) {
+    setLeaveBuilderStatus(capacityMessage, "error");
     return;
   }
 
@@ -2852,7 +2949,13 @@ function makeCalendar(targetId) {
       deferSlotTooltip: isPublicCalendar,
       context,
     }))
-    .join("");
+    .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip: isPublicCalendar,
+      context,
+    });
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -2881,6 +2984,33 @@ function renderMonthCard(monthIndex, year, options = {}) {
       <h3>${name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
+  `;
+}
+
+function renderLeaveYearContinuation(year, options = {}) {
+  if (year !== BID_YEAR) return "";
+  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false, context = null } = options;
+  const continuationYear = BID_YEAR + 1;
+  const cells = [];
+
+  for (let day = 1; day <= BID_LEAVE_YEAR_CONTINUATION_DAYS; day += 1) {
+    cells.push(renderCalendarDay(0, day, true, continuationYear, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip,
+      context,
+    }));
+  }
+
+  return `
+    <section class="leave-year-continuation" aria-label="${BID_YEAR} leave year continues through January 8, ${continuationYear}">
+      <div class="leave-year-continuation-copy">
+        <strong>Jan ${continuationYear}</strong>
+        <span>Leave year ends Jan 8</span>
+      </div>
+      <div class="month-grid leave-year-continuation-days">${cells.join("")}</div>
+    </section>
   `;
 }
 
@@ -2997,7 +3127,8 @@ function setSelectedDateYear(year) {
 }
 
 function updateCalendarYearLabels() {
-  setText("[data-calendar-year-label]", displayedCalendarYear);
+  const label = displayedCalendarYear === BID_YEAR ? `${displayedCalendarYear} Leave Year` : displayedCalendarYear;
+  setText("[data-calendar-year-label]", label);
 }
 
 function updateCalendarViewControls() {
@@ -3451,6 +3582,7 @@ function profileFromSupabase(row) {
     role: row.role || "controller",
     roleLabel: row.role === "admin" ? "Bidding Admin" : "BUE Controller",
     bidAs: normalizeBidRoleForArea(row.bid_role || "CPC", row.area_name || "Area A"),
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(row.leave_slot_allowance),
     systemAdmin: row.role === "admin",
     phone: row.phone || "",
     email: row.email || "",
@@ -4962,14 +5094,14 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveSlotTotals();
+  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveBucketTotals();
   const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
   const devLeft = Math.max(0, devTotal - devUsed);
 
   setText("[data-cpc-leave-remaining]", `${cpcLeft} ${cpcLeft === 1 ? "slot" : "slots"}`);
   setText("[data-dev-leave-remaining]", `${devLeft} ${devLeft === 1 ? "slot" : "slots"}`);
-  setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal}`);
-  setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal}`);
+  setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal} area slots`);
+  setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal} area slots`);
 }
 
 function syncAdminScheduleFormDefaults() {
@@ -5001,6 +5133,7 @@ function bueRoster() {
     email: currentUser.email,
     phone: currentUser.phone,
     bidAs: currentUserBidAs(),
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance),
   };
   const byInitials = new Map();
 
@@ -5200,6 +5333,7 @@ function defaultRosterFormValues(area = selectedRosterArea()) {
     area,
     rank: activeRosterEntries(area).length + 1,
     bidAs: defaultBidRoleForArea(area),
+    leaveSlotAllowance: DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE,
   };
 }
 
@@ -5217,6 +5351,7 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
   setValue("[data-roster-phone]", values.phone);
   setValue("[data-roster-area]", values.area);
   setValue("[data-roster-rank]", values.rank);
+  setValue("[data-roster-leave-slots]", normalizeLeaveSlotAllowance(values.leaveSlotAllowance));
   syncRosterBidAsSelect(values.area, values.bidAs);
 }
 
@@ -5246,6 +5381,7 @@ function editRosterEntryByIndex(index) {
     area: person.area,
     rank: Number.isFinite(person.rank) ? person.rank : activeRosterEntries(person.area).length + 1,
     bidAs: person.bidAs,
+    leaveSlotAllowance: person.leaveSlotAllowance,
   });
   setRosterStatus(`Editing ${personDisplayName(person)}.`);
 }
@@ -5263,6 +5399,7 @@ function rosterFormValues() {
     area,
     rank: Number(value("[data-roster-rank]")),
     bidAs: normalizeBidRoleForArea(value("[data-roster-bid-as]") || defaultBidRoleForArea(area), area),
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")),
     editIndex: Number(value("[data-roster-edit-index]")),
     active: true,
   };
@@ -5281,6 +5418,7 @@ function supabaseRosterPayload(values) {
     profile_area_name: values.area,
     profile_bid_role: values.bidAs || "CPC",
     profile_seniority_rank: Number.isFinite(values.rank) ? values.rank : null,
+    profile_leave_slot_allowance: normalizeLeaveSlotAllowance(values.leaveSlotAllowance),
     profile_active: values.active !== false,
   };
 }
@@ -5420,6 +5558,7 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
     bidAs: person.bidAs,
     phone: person.phone,
     email: person.email,
+    leaveSlotAllowance: person.leaveSlotAllowance,
   };
   selectedViewArea = person.area;
 }
@@ -5438,6 +5577,7 @@ function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
         area: person.area,
         rank: person.rank,
         bidAs: person.bidAs,
+        leaveSlotAllowance: person.leaveSlotAllowance,
         active: person.active,
         originalArea: override.originalArea || person.area,
         originalInitials: override.originalInitials || person.initials,
@@ -5485,6 +5625,7 @@ async function saveRosterEntry(event) {
   entry[5] = values.email;
   entry[6] = values.phone;
   entry[7] = true;
+  entry[8] = values.leaveSlotAllowance;
   placeRosterEntry(entry, values.area, values.rank);
 
   syncCurrentUserFromRoster(values.editInitials || values.initials, values.initials);
@@ -5562,6 +5703,7 @@ function bulkRosterRows() {
         area,
         rank: Number(bulkRowValue(row, "[data-bulk-rank]")),
         bidAs: normalizeBidRoleForArea(bulkRowValue(row, "[data-bulk-bid-as]") || defaultBidRoleForArea(area), area),
+        leaveSlotAllowance: normalizeLeaveSlotAllowance(bulkRowValue(row, "[data-bulk-leave-slots]")),
         active: true,
       };
     });
@@ -5574,6 +5716,7 @@ function validateBulkRosterRows(rows) {
     if (!ZLA_AREAS.includes(row.area)) return `Choose a valid area for ${row.initials}.`;
     if (!validBidRoleForArea(row.bidAs, row.area)) return `Choose a valid bid role for ${row.initials}.`;
     if (!Number.isFinite(row.rank) || row.rank < 1) return `Enter a valid seniority rank for ${row.initials}.`;
+    if (!Number.isFinite(row.leaveSlotAllowance) || row.leaveSlotAllowance < 0) return `Enter a valid leave-slot allowance for ${row.initials}.`;
   }
 
   const rowsByIndex = new Map(rows.map((row) => [row.sourceIndex, row]));
@@ -5631,6 +5774,7 @@ function rebuildRosterFromBulkRows(rows) {
     entry[5] = row.email;
     entry[6] = row.phone;
     entry[7] = row.active;
+    entry[8] = row.leaveSlotAllowance;
 
     if (!row.active) intakeTeamInitials.delete(row.initials);
     editedEntries.push({ entry, row });
@@ -5741,6 +5885,7 @@ function renderRosterManager() {
         <td><input type="tel" value="${escapeHtml(person.phone)}" data-bulk-phone aria-label="Phone for ${escapeHtml(person.initials)}" /></td>
         <td><select data-bulk-area>${rosterAreaOptions(person.area)}</select></td>
         <td><select data-bulk-bid-as>${rosterBidAsOptions(person.bidAs, person.area)}</select></td>
+        <td><input type="number" min="0" step="1" value="${normalizeLeaveSlotAllowance(person.leaveSlotAllowance)}" data-bulk-leave-slots aria-label="Leave slots for ${escapeHtml(person.initials)}" /></td>
         <td>
           <div class="roster-row-actions">
             <button class="secondary-action small" type="button" data-edit-roster-bue="${sourceIndex}">Edit</button>
@@ -5749,7 +5894,7 @@ function renderRosterManager() {
         </td>
       </tr>
     `).join("")
-    : '<tr><td colspan="10">No BUEs in this area yet.</td></tr>';
+    : '<tr><td colspan="11">No BUEs in this area yet.</td></tr>';
   applyRosterColumnWidths();
 }
 
@@ -5765,6 +5910,7 @@ const rosterColumnWidths = {
   phone: 165,
   area: 110,
   role: 96,
+  leaveSlots: 104,
   actions: 132,
 };
 const rosterColumnMinimumWidths = {
@@ -5777,6 +5923,7 @@ const rosterColumnMinimumWidths = {
   phone: 120,
   area: 92,
   role: 82,
+  leaveSlots: 88,
   actions: 112,
 };
 
