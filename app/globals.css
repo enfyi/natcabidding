@@ -120,6 +120,20 @@ h1 {
 .dashboard-shell { padding: 28px 0 72px; }
 .dashboard-nav { display: flex; align-items: center; justify-content: space-between; min-height: 72px; }
 .dashboard-nav .brand { margin: 0; }
+.dashboard-app-shell { min-height: 100vh; background: #fff; }
+.dashboard-app-nav {
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 clamp(16px, 3vw, 40px);
+  background: var(--card);
+}
+.dashboard-app-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 56px);
+  border: 0;
+  background: #fff;
+}
 .text-button { border: 0; padding: 8px; color: var(--green-dark); background: transparent; cursor: pointer; font-weight: 700; }
 .identity-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 36px 0 0; }
 .identity-row div { min-width: 0; border-top: 1px solid var(--line); padding-top: 18px; }

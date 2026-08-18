@@ -34,6 +34,7 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims()
   const isAuthenticated = Boolean(data?.claims?.sub)
   const isProtectedRoute = request.nextUrl.pathname.startsWith('/dashboard')
+    || request.nextUrl.pathname === '/bidding.html'
   const isLoginRoute = request.nextUrl.pathname === '/login'
 
   if (isProtectedRoute && !isAuthenticated) {
