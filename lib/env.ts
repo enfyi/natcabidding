@@ -1,4 +1,9 @@
 const LOCAL_SITE_URL = 'http://localhost:3000'
+// These are public client credentials for the same Supabase project already used
+// by the static bidding prototype. Deployment environment variables can override
+// them, but a missing Vercel variable should not make the application unbuildable.
+const DEFAULT_SUPABASE_URL = 'https://ohufaffutpkjhmkpstpr.supabase.co'
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yRSPVRYC6dQ_GgoIQhJpHA_UvEWh_tr'
 
 function requiredValue(name: string, value: string | undefined) {
   const normalized = value?.trim()
@@ -31,11 +36,11 @@ function normalizedUrl(name: string, value: string) {
 export function getSupabaseEnv() {
   const url = requiredValue(
     'NEXT_PUBLIC_SUPABASE_URL',
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL,
   )
   const publishableKey = requiredValue(
     'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY,
   )
 
   return {
