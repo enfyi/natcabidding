@@ -1700,6 +1700,7 @@ input {
   font-family: Montserrat, Arial, sans-serif;
   font-size: 1.25rem;
   font-weight: 900;
+  text-align: left;
   white-space: nowrap;
 }
 

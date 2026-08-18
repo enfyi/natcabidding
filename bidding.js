@@ -5098,8 +5098,8 @@ function renderLeaveBucketCards() {
   const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
   const devLeft = Math.max(0, devTotal - devUsed);
 
-  setText("[data-cpc-leave-remaining]", `${cpcLeft} ${cpcLeft === 1 ? "slot" : "slots"}`);
-  setText("[data-dev-leave-remaining]", `${devLeft} ${devLeft === 1 ? "slot" : "slots"}`);
+  setText("[data-cpc-leave-remaining]", cpcLeft);
+  setText("[data-dev-leave-remaining]", devLeft);
   setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal} area slots`);
   setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal} area slots`);
 }
