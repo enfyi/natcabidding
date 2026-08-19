@@ -127,7 +127,7 @@
           <div class="panel-header">
             <div>
               <h2 data-public-sheet-title>Bid Calendar</h2>
-              <p data-public-sheet-code>Holidays, filled leave slots, and bid windows.</p>
+              <p data-public-sheet-code>Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.</p>
             </div>
             <div class="segmented" aria-label="Public calendar mode">
               <button type="button" data-calendar-mode="vacation">Vacation</button>
@@ -516,11 +516,11 @@
                   <h2>RDO Bid Lines - Area A</h2>
                   <p>Select an open negotiated line. Flex, AWS, fatigue group, and most Mid preferences are chosen by the employee.</p>
                 </div>
-                <span class="pill open" data-rdo-filter-count>42 open lines</span>
+                <span class="pill open" data-rdo-filter-count>All lines</span>
               </div>
               <div class="filter-bar">
                 <input type="search" placeholder="Search line or CPC..." aria-label="Search RDO lines" data-rdo-filter="search" />
-                <label><input type="checkbox" checked data-rdo-filter="open" /> Open Only</label>
+                <label><input type="checkbox" data-rdo-filter="open" /> Open Only</label>
                 <select data-rdo-filter="mid" aria-label="Filter by mid preference">
                   <option value="all">Mid: All</option>
                   <option value="BID">Mid: Bid Line</option>
@@ -532,7 +532,7 @@
                   <option value="No">4-10: No</option>
                 </select>
               </div>
-              <div class="table-wrap tall">
+              <div class="table-wrap tall rdo-page-table-wrap">
                 <table class="line-table">
                   <thead>
                     <tr>
