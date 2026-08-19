@@ -524,6 +524,12 @@ const rdoFilters = {
   mid: "all",
   fourTen: "all",
 };
+const publicRdoFilters = {
+  search: "",
+  openOnly: true,
+  mid: "all",
+  fourTen: "all",
+};
 const publicState = {
   area: "Area A",
   section: "Calendar",
@@ -3478,13 +3484,17 @@ function friendlyAuthFailure(error) {
   return message || "That login did not work.";
 }
 
+function requestedLandingPage() {
+  return new URLSearchParams(window.location.search).get("page") === "admin" ? "admin" : "dashboard";
+}
+
 function supabaseAuthRedirectUrl() {
   const configuredUrl = window.NATCA_SUPABASE_CONFIG?.authRedirectUrl;
   if (configuredUrl && configuredUrl !== "auto") return configuredUrl;
 
   const url = new URL(window.location.href);
   url.hash = "";
-  url.search = "";
+  url.search = requestedLandingPage() === "admin" ? "?page=admin" : "";
   return url.toString();
 }
 
@@ -3629,7 +3639,7 @@ async function initializeSupabaseAuth() {
   await restoreSupabaseSession();
 }
 
-async function restoreSupabaseSession(page = "dashboard") {
+async function restoreSupabaseSession(page = requestedLandingPage()) {
   if (supabaseState.authRestorePromise) return supabaseState.authRestorePromise;
 
   supabaseState.authRestorePromise = (async () => {
@@ -3728,7 +3738,7 @@ async function loginWithSupabasePassword(email, password) {
     }
     currentUser = profile;
     setAuthStatus("Signed in.", "success");
-    showLoggedInApp("dashboard");
+    showLoggedInApp(requestedLandingPage());
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
@@ -3768,7 +3778,7 @@ async function loginWithUsernamePassword(username, password) {
   currentUser = profileFromSupabase(profile);
   clearSupabaseAccountState();
   setAuthStatus("Signed in.", "success");
-  showLoggedInApp("dashboard");
+  showLoggedInApp(requestedLandingPage());
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -4177,39 +4187,91 @@ function bidAsClass(bidAs) {
   return bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
+function publicRdoFilteredLines(area) {
+  return rdoLinesForArea(area).filter((line) => rdoLineMatchesFilterSet(line, publicRdoFilters));
+}
+
+function publicRdoRowsMarkup(area, lines = publicRdoFilteredLines(area)) {
+  if (!lines.length) return `<tr><td colspan="11">No RDO lines match those filters for ${area}.</td></tr>`;
+
+  let lastPattern = "";
+  const rows = [];
+
+  lines.forEach((line) => {
+    if (line.pattern !== lastPattern) {
+      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
+      lastPattern = line.pattern;
+    }
+
+    rows.push(`
+      <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
+        <td>${line.line}</td>
+        <td><b>${lineOccupant(line)}</b></td>
+        ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
+        <td></td>
+        <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
+      </tr>
+    `);
+  });
+
+  return rows.join("");
+}
+
+function updatePublicRdoResults() {
+  const rowsTarget = document.querySelector("[data-public-rdo-rows]");
+  if (!rowsTarget) return;
+
+  const lines = publicRdoFilteredLines(publicState.area);
+  const lineLabel = lines.length === 1 ? "line" : "lines";
+  rowsTarget.innerHTML = publicRdoRowsMarkup(publicState.area, lines);
+  setText("[data-public-rdo-filter-count]", `${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}`);
+}
+
 function renderPublicRdoTable(area) {
-  const lines = rdoLinesForArea(area);
+  const areaLines = rdoLinesForArea(area);
+  const lines = areaLines.filter((line) => rdoLineMatchesFilterSet(line, publicRdoFilters));
+  const lineLabel = lines.length === 1 ? "line" : "lines";
+
   return `
-    <div class="public-table-heading flat">
-      <strong>${area} RDO Bid Lines</strong>
-      <small>${supabaseState.connected ? "Loaded from Supabase for this area." : "Prototype data is being used until Supabase is available."}</small>
-    </div>
-    <div class="table-wrap public-table-wrap flat">
-      <table class="line-table public-rdo-table">
-        <thead>
-          <tr>
-            <th>Line #</th>
-            <th>CPC</th>
-            ${dayNames.map((day) => `<th>${day}</th>`).join("")}
-            <th>Flex</th>
-            <th>AWS</th>
-            <th>Mid</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${lines.length ? lines.map((line) => `
-            <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
-              <td>${line.line}</td>
-              <td>${lineOccupant(line)}</td>
-              ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
-              <td>${publicPreferenceCell(line.flex)}</td>
-              <td>${publicPreferenceCell(line.aws)}</td>
-              <td>${publicPreferenceCell(lineMidReferenceValue(line))}</td>
+    <section class="panel rdo-table-panel public-rdo-panel">
+      <div class="panel-header">
+        <div>
+          <h2>RDO Bid Lines - ${area}</h2>
+          <p>Review the negotiated lines for this area. Sign in to select a line and complete your bid preferences.</p>
+        </div>
+        <span class="pill open" data-public-rdo-filter-count>${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}</span>
+      </div>
+      <div class="filter-bar">
+        <input type="search" value="${escapeHtml(publicRdoFilters.search)}" placeholder="Search line or CPC..." aria-label="Search public RDO lines" data-public-rdo-filter="search" />
+        <label><input type="checkbox" ${publicRdoFilters.openOnly ? "checked" : ""} data-public-rdo-filter="open" /> Open Only</label>
+        <select data-public-rdo-filter="mid" aria-label="Filter public lines by mid preference">
+          <option value="all" ${publicRdoFilters.mid === "all" ? "selected" : ""}>Mid: All</option>
+          <option value="BID" ${publicRdoFilters.mid === "BID" ? "selected" : ""}>Mid: Bid Line</option>
+          <option value="UNSELECTED" ${publicRdoFilters.mid === "UNSELECTED" ? "selected" : ""}>Mid: Unselected</option>
+        </select>
+        <select data-public-rdo-filter="fourTen" aria-label="Filter public lines by 4-10 schedule">
+          <option value="all" ${publicRdoFilters.fourTen === "all" ? "selected" : ""}>4-10: All</option>
+          <option value="Yes" ${publicRdoFilters.fourTen === "Yes" ? "selected" : ""}>4-10: Yes</option>
+          <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
+        </select>
+      </div>
+      <div class="table-wrap tall">
+        <table class="line-table public-rdo-table">
+          <thead>
+            <tr>
+              <th>Line #</th>
+              <th>CPC</th>
+              ${dayNames.map((day) => `<th>${day}</th>`).join("")}
+              <th>Group</th>
+              <th>Mid</th>
             </tr>
-          `).join("") : `<tr><td colspan="12">No RDO lines have been loaded for ${area} yet.</td></tr>`}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody data-public-rdo-rows>
+            ${publicRdoRowsMarkup(area, lines)}
+          </tbody>
+        </table>
+      </div>
+    </section>
   `;
 }
 
@@ -4743,10 +4805,10 @@ function syncRdoFilterControls() {
   if (fourTen) fourTen.value = rdoFilters.fourTen;
 }
 
-function rdoLineMatchesFilters(line) {
-  if (rdoFilters.openOnly && line.status === "Taken") return false;
+function rdoLineMatchesFilterSet(line, filters) {
+  if (filters.openOnly && line.status === "Taken") return false;
 
-  const search = rdoFilters.search.trim().toLowerCase();
+  const search = filters.search.trim().toLowerCase();
   if (search) {
     const searchable = [
       line.line,
@@ -4760,10 +4822,14 @@ function rdoLineMatchesFilters(line) {
   }
 
   const midValue = lineMidReferenceValue(line);
-  if (rdoFilters.mid !== "all" && midValue !== rdoFilters.mid) return false;
-  if (rdoFilters.fourTen !== "all" && lineFourTenValue(line) !== rdoFilters.fourTen) return false;
+  if (filters.mid !== "all" && midValue !== filters.mid) return false;
+  if (filters.fourTen !== "all" && lineFourTenValue(line) !== filters.fourTen) return false;
 
   return true;
+}
+
+function rdoLineMatchesFilters(line) {
+  return rdoLineMatchesFilterSet(line, rdoFilters);
 }
 
 function isRdoFilterActive() {
@@ -7688,6 +7754,13 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  const publicFilter = event.target.closest("[data-public-rdo-filter]");
+  if (publicFilter?.dataset.publicRdoFilter === "search") {
+    publicRdoFilters.search = publicFilter.value;
+    updatePublicRdoResults();
+    return;
+  }
+
   const filter = event.target.closest("[data-rdo-filter]");
   if (!filter || filter.dataset.rdoFilter !== "search") return;
   rdoFilters.search = filter.value;
@@ -7695,6 +7768,16 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  const publicRdoFilter = event.target.closest("[data-public-rdo-filter]");
+  if (publicRdoFilter) {
+    const filterName = publicRdoFilter.dataset.publicRdoFilter;
+    if (filterName === "open") publicRdoFilters.openOnly = publicRdoFilter.checked;
+    if (filterName === "mid") publicRdoFilters.mid = publicRdoFilter.value;
+    if (filterName === "fourTen") publicRdoFilters.fourTen = publicRdoFilter.value;
+    updatePublicRdoResults();
+    return;
+  }
+
   const rosterAreaFilter = event.target.closest("[data-roster-area-filter]");
   if (rosterAreaFilter) {
     resetRosterForm();
