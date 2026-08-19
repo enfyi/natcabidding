@@ -3675,6 +3675,24 @@ function showLoggedInApp(page = "dashboard") {
   setPage(page);
 }
 
+function showPublicHome() {
+  document.querySelector(".app-shell")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
+  document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
+  document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
+  document.querySelector(".login-screen")?.removeAttribute("hidden");
+  const loginToggle = document.querySelector("[data-public-login-toggle]");
+  if (loginToggle) {
+    loginToggle.textContent = "Dashboard";
+    loginToggle.setAttribute("aria-expanded", "false");
+  }
+  document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
+  renderPublicPage();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 async function initializeSupabaseAuth() {
   const client = supabaseClient();
   if (!client || supabaseState.authInitialized) return;
@@ -7315,6 +7333,8 @@ function logOut() {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   document.querySelector(".login-screen")?.removeAttribute("hidden");
+  const loginToggle = document.querySelector("[data-public-login-toggle]");
+  if (loginToggle) loginToggle.textContent = "Login";
   renderPublicPage();
 }
 
@@ -7324,9 +7344,18 @@ document.addEventListener("click", (event) => {
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
+    if (supabaseState.authUserId) {
+      showLoggedInApp();
+      return;
+    }
     const shouldOpen = publicLoginMenu.hidden;
     publicLoginMenu.hidden = !shouldOpen;
     publicLoginToggle.setAttribute("aria-expanded", String(shouldOpen));
+    return;
+  }
+
+  if (event.target.closest("[data-public-home]")) {
+    showPublicHome();
     return;
   }
 
