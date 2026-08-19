@@ -2993,7 +2993,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const cells = [];
 
-  dayNames.forEach((day) => cells.push(`<span class="dow">${day[0]}</span>`));
+  dayNames.forEach((day) => cells.push(`<span class="dow">${expandedSlots ? day.slice(0, 3) : day[0]}</span>`));
   for (let i = 0; i < firstDay; i += 1) cells.push("<span></span>");
 
   for (let day = 1; day <= daysInMonth; day += 1) {
@@ -3009,7 +3009,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
 
   return `
     <article class="month-card">
-      <h3>${name}</h3>
+      <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
   `;
@@ -3136,7 +3136,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : showVacationLayer ? vacationStatus : fatigueStatus;
-  const label = includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
+  const label = expandedSlots || includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
   const fatigueAttribute = fatigueGroup ? `data-fatigue-week="${fatigueGroup}"` : "";
   const nextFatigueAttribute = nextFatigueGroup ? `data-fatigue-next-week="${nextFatigueGroup}"` : "";
   const ariaStatus = showVacationLayer && fatigueGroup ? `${status}; ${fatigueStatus}` : status;
@@ -3148,7 +3148,11 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   return `
     <button class="${className}" type="button" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
       ${isFatigueWeekStart ? `<i class="fatigue-week-dot" aria-hidden="true"></i>` : ""}
-      <span class="date-number">${label}</span>
+      ${expandedSlots ? `
+        <span class="expanded-day-heading">
+          <span class="date-number">${label}</span>
+        </span>
+      ` : `<span class="date-number">${label}</span>`}
       ${slotTooltip}
     </button>
   `;
@@ -3284,8 +3288,8 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
 
   return `
     <span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}" role="${persistent ? "group" : "tooltip"}"${persistent ? ` aria-label="Leave slots for ${formatCalendarDate(key)}"` : ""}>
-      <strong>${formatCalendarDate(key)}</strong>
-      ${holidayKind ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
+      ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
+      ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
         <span class="tooltip-slot-heading">CPC</span>
         ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
