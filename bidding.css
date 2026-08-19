@@ -4229,6 +4229,149 @@ tr.occupied-row .rdo-tag {
   min-height: 26px;
 }
 
+/* Minimal/full calendar detail tabs and permanently expanded annual slot view. */
+.calendar-layout-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 4px;
+  background: #f1f5f9;
+}
+
+.calendar-layout-tabs button {
+  min-width: 92px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  color: #475569;
+  background: transparent;
+  font-weight: 900;
+}
+
+.calendar-layout-tabs button.active {
+  color: #ffffff;
+  background: #2b7f86;
+  box-shadow: 0 3px 10px rgba(43, 127, 134, 0.2);
+}
+
+.calendar-layout-description {
+  margin: 0 0 14px !important;
+  color: #64748b !important;
+  font-size: 0.76rem !important;
+  font-weight: 700;
+}
+
+.year-calendar.expanded-slots-calendar,
+.year-calendar.large.expanded-slots-calendar {
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+.expanded-slots-calendar .month-card {
+  padding: 16px;
+}
+
+.expanded-slots-calendar .month-card h3 {
+  margin-bottom: 12px;
+  font-size: 0.92rem;
+  text-align: left;
+}
+
+.expanded-slots-calendar .month-grid {
+  gap: 8px;
+}
+
+.expanded-slots-calendar .month-grid > .dow {
+  min-height: 24px;
+  font-size: 0.68rem;
+}
+
+.expanded-slots-calendar .month-grid > button.slot-expanded-day {
+  display: flex;
+  min-width: 0;
+  min-height: 190px !important;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+  padding: 7px;
+  text-align: left;
+}
+
+.expanded-slots-calendar .slot-expanded-day > .date-number {
+  align-self: flex-start;
+  margin-bottom: 5px;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.expanded-slots-calendar .leave-date-tooltip.permanent-slot-summary,
+.public-main .expanded-slots-calendar .leave-date-tooltip.permanent-slot-summary,
+.app-main .expanded-slots-calendar .leave-date-tooltip.permanent-slot-summary {
+  position: static !important;
+  inset: auto !important;
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin-top: 0;
+  border-color: #dbe4ef !important;
+  padding: 7px !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  transform: none !important;
+  visibility: visible !important;
+}
+
+.expanded-slots-calendar .leave-date-tooltip.permanent-slot-summary::after,
+.expanded-slots-calendar .leave-date-tooltip.permanent-slot-summary::before {
+  display: none !important;
+}
+
+.expanded-slots-calendar .permanent-slot-summary > strong {
+  font-size: 0.62rem !important;
+}
+
+.expanded-slots-calendar .leave-year-continuation {
+  grid-template-columns: 1fr;
+}
+
+.expanded-slots-calendar .leave-year-continuation-days {
+  grid-template-columns: repeat(8, minmax(132px, 1fr));
+  min-width: 1120px;
+}
+
+.expanded-slots-calendar .leave-year-continuation {
+  overflow-x: auto;
+}
+
+@media (max-width: 1100px) {
+  .expanded-slots-calendar .month-card {
+    overflow-x: auto;
+  }
+
+  .expanded-slots-calendar .month-card > .month-grid {
+    grid-template-columns: repeat(7, minmax(132px, 1fr));
+    min-width: 980px;
+  }
+}
+
+@media (max-width: 720px) {
+  .calendar-layout-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .calendar-layout-tabs button {
+    min-height: 42px;
+  }
+}
+
 .intake-schedule-workspace {
   grid-template-columns: minmax(0, 1fr) 260px;
 }
