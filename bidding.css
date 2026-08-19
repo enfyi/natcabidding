@@ -3230,6 +3230,10 @@ dd {
   max-height: calc(100vh - 250px);
 }
 
+.table-wrap.rdo-page-table-wrap {
+  max-height: none;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

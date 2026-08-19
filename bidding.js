@@ -520,13 +520,13 @@ let calendarMode = "combined";
 let displayedCalendarYear = BID_YEAR;
 const rdoFilters = {
   search: "",
-  openOnly: true,
+  openOnly: false,
   mid: "all",
   fourTen: "all",
 };
 const publicRdoFilters = {
   search: "",
-  openOnly: true,
+  openOnly: false,
   mid: "all",
   fourTen: "all",
 };
@@ -2185,14 +2185,19 @@ function showInitialsInVisibleSlot(visible, bucket, initials) {
   visible[bucket] = values.slice(0, capacity);
 }
 
-function visibleLeaveSlotDetailsFromMap(key, area = currentUser.area, slotMap = leaveSlotMap(area)) {
+function visibleLeaveSlotDetailsFromMap(
+  key,
+  area = currentUser.area,
+  slotMap = leaveSlotMap(area),
+  { includePrivateOverlays = true } = {}
+) {
   const details = leaveSlotsForDateFromMap(key, area, slotMap);
   const visible = {
     ...details,
     cpc: [...(details.cpc || [])],
     dev: [...(details.dev || [])],
   };
-  const showCurrentUserOverlay = area === currentUser.area;
+  const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
   if (showCurrentUserOverlay && previewItem && leaveDisplayDatesForItem(previewItem, currentUser.initials).includes(key)) {
     const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
@@ -2868,13 +2873,14 @@ function calendarActiveDate() {
   return new Date(displayedCalendarYear, activeDate.getMonth(), day);
 }
 
-function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip }) {
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
   return {
     area,
     mode: calendarMode,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
+    publicReadOnly,
     rdoWeekdays: showRdo ? selectedRdoWeekdays() : new Set(),
     draftDates: showPersonalLeave ? leaveDraftDateSet() : new Set(),
     previewDates: showPersonalLeave && leaveRangePreviewActive ? new Set(leaveBuilderDateKeys()) : new Set(),
@@ -2897,7 +2903,12 @@ function cachedBaseLeaveSlotDetails(key, context) {
 
 function cachedVisibleLeaveSlotDetails(key, context) {
   if (!context.visibleSlotDetails.has(key)) {
-    context.visibleSlotDetails.set(key, visibleLeaveSlotDetailsFromMap(key, context.area, context.slotMap));
+    context.visibleSlotDetails.set(
+      key,
+      visibleLeaveSlotDetailsFromMap(key, context.area, context.slotMap, {
+        includePrivateOverlays: !context.publicReadOnly,
+      })
+    );
   }
 
   return context.visibleSlotDetails.get(key);
@@ -2942,7 +2953,8 @@ function makeCalendar(targetId) {
     area,
     showRdo,
     showPersonalLeave,
-    deferSlotTooltip: isPublicCalendar,
+    deferSlotTooltip: false,
+    publicReadOnly: isPublicCalendar,
   });
 
   target.classList.remove("month-view", "week-view");
@@ -2952,14 +2964,14 @@ function makeCalendar(targetId) {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: isPublicCalendar,
+      deferSlotTooltip: false,
       context,
     }))
     .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: isPublicCalendar,
+      deferSlotTooltip: false,
       context,
     });
 }
@@ -3112,10 +3124,13 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     ? "2026 leave year - leave bidding unavailable"
     : showVacationLayer ? vacationStatus : fatigueStatus;
   const label = includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
-  const leaveDateAttribute = canShowLeaveState ? `data-leave-date="${key}"` : 'aria-disabled="true"';
   const fatigueAttribute = fatigueGroup ? `data-fatigue-week="${fatigueGroup}"` : "";
   const nextFatigueAttribute = nextFatigueGroup ? `data-fatigue-next-week="${nextFatigueGroup}"` : "";
   const ariaStatus = showVacationLayer && fatigueGroup ? `${status}; ${fatigueStatus}` : status;
+  const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
+  const leaveDateAttribute = canShowLeaveState
+    ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
+    : 'aria-disabled="true"';
 
   return `
     <button class="${className}" type="button" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
@@ -4152,7 +4167,7 @@ function publicSheetCode(area, section) {
   if (area === "Previous Years") return "Historical RDO, bid-time, and leave calendar resources.";
   if (section === "RDO") return "Public RDO line reference for this area.";
   if (section === "Bid Time") return "Public bid-time schedule for this area.";
-  return "Holidays, filled leave slots, and bid windows.";
+  return "Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.";
 }
 
 function publicInfoText(area, section) {
@@ -4255,7 +4270,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <div class="table-wrap tall">
+      <div class="table-wrap tall rdo-page-table-wrap">
         <table class="line-table public-rdo-table">
           <thead>
             <tr>
