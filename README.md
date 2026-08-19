@@ -2,12 +2,35 @@
 
 Next.js App Router authentication backed by Supabase Auth.
 
+## Project status
+
+The active application is the Next.js app in `app/`. The HTML, CSS, and JavaScript
+files at the repository root are the earlier static prototype and are reference
+material while its bidding workflows are migrated into Next.js.
+
+The current Next.js application provides:
+
+- email/password signup and sign-in through Supabase Auth
+- confirmation and PKCE callback routes
+- server-validated sessions and a protected dashboard
+- a deployment-safe environment-variable setup
+
+The database starter files are in `database/`. Treat bidding and admin write
+workflows as unfinished until their database permissions have been reviewed and
+the repository has a migration workflow that matches the connected Supabase
+project.
+
 ## Local development
 
-1. Install dependencies with `pnpm install`.
+Requirements: Node.js 20.9 or newer and pnpm 11.19.
+
+1. Install dependencies with `pnpm install --frozen-lockfile`.
 2. Copy `.env.example` to `.env.local` and replace the placeholder values.
 3. Run `pnpm dev`.
 4. Open `http://localhost:3000`.
+
+Before committing, run `pnpm check`. It performs both the TypeScript check and a
+production build.
 
 The local Supabase project URL and publishable key are stored in the gitignored
 `.env.local`. Copy `.env.example` when configuring another environment. Never put

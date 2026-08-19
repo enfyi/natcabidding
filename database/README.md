@@ -10,10 +10,12 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
 2. Open the SQL editor.
 3. Run `database/schema.sql`.
 4. Run `database/seed.sql` for starter 2027 Area A data.
-5. Add these environment variables later when the website starts reading live data:
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY` for server-only admin actions
+5. Configure the public client variables used by the Next.js app:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+If a future server-only admin workflow requires a Supabase secret key, keep it in
+a non-`NEXT_PUBLIC_` variable and never expose it to browser code.
 
 ## What This Covers
 
@@ -77,7 +79,9 @@ The live `bidders.initials` field can start blank. The app should let a BUE upda
 
 ## Email Login
 
-Supabase Auth should use email sign-in links. The roster import should include an `email` column, and each `bidders.email` value should match the email the BUE will use to log in.
+The current Next.js application uses Supabase email/password authentication. The
+roster import should include an `email` column, and each `bidders.email` value
+should match the email the BUE will use to log in.
 
 When a BUE logs in, `claim_current_bidder_profile()` links the Supabase auth user to the matching `bidders` row by email. After that, the site can load the user's area, seniority, bid role, initials, and contact profile.
 
