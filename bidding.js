@@ -517,6 +517,10 @@ let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "Yes";
 let calendarMode = "combined";
+const calendarLayouts = {
+  public: "minimal",
+  member: "minimal",
+};
 let displayedCalendarYear = BID_YEAR;
 const rdoFilters = {
   search: "",
@@ -2948,6 +2952,8 @@ function makeCalendar(targetId) {
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
+  const calendarScope = isPublicCalendar ? "public" : targetId === "full-calendar" ? "member" : "";
+  const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
     area,
@@ -2958,6 +2964,7 @@ function makeCalendar(targetId) {
   });
 
   target.classList.remove("month-view", "week-view");
+  target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
   target.innerHTML = monthIndexes
     .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, {
@@ -2965,6 +2972,7 @@ function makeCalendar(targetId) {
       showPersonalLeave,
       area,
       deferSlotTooltip: false,
+      expandedSlots,
       context,
     }))
     .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
@@ -2972,12 +2980,13 @@ function makeCalendar(targetId) {
       showPersonalLeave,
       area,
       deferSlotTooltip: false,
+      expandedSlots,
       context,
     });
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
-  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false } = options;
+  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false, expandedSlots = false } = options;
   const name = monthNames[monthIndex];
   const date = new Date(year, monthIndex, 1);
   const firstDay = date.getDay();
@@ -2993,6 +3002,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
       showPersonalLeave,
       area,
       deferSlotTooltip,
+      expandedSlots,
       context: options.context,
     }));
   }
@@ -3017,6 +3027,7 @@ function renderLeaveYearContinuation(year, options = {}) {
       showPersonalLeave,
       area,
       deferSlotTooltip,
+      expandedSlots: options.expandedSlots,
       context,
     }));
   }
@@ -3098,10 +3109,11 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       ? baseSlotDetails.cpc.length >= leaveSlotCapacity.cpc || (detailArea === "Area A" && fullLeaveDates.has(key))
       : isLeaveSlotsFull(key, options.area)
   );
-  const hasDetail = showVacationLayer && !isPreviousLeaveYear;
+  const expandedSlots = Boolean(options.expandedSlots);
+  const hasDetail = !isPreviousLeaveYear && (showVacationLayer || expandedSlots);
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -3114,6 +3126,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
     nextFatigueClass ? `fatigue-split fatigue-to-${nextFatigueClass}` : "",
     hasDetail ? "has-slot-detail" : "",
+    expandedSlots ? "slot-expanded-day" : "",
     isSelected ? "selected-date" : "",
   ].filter(Boolean).join(" ");
   const fatigueStatus = nextFatigueGroup
@@ -3155,6 +3168,18 @@ function updateCalendarYearLabels() {
 function updateCalendarViewControls() {
   document.querySelectorAll("[data-calendar-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.calendarMode === calendarMode);
+  });
+  document.querySelectorAll("[data-calendar-layout]").forEach((button) => {
+    const scope = button.dataset.calendarScope;
+    const isActive = calendarLayouts[scope] === button.dataset.calendarLayout;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
+    const scope = description.dataset.calendarLayoutDescription;
+    description.textContent = calendarLayouts[scope] === "full"
+      ? "Every CPC and developmental slot is shown directly on each date."
+      : "Hover or focus a date to view its slots.";
   });
 }
 
@@ -3242,7 +3267,7 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null) {
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcSlots = Array.from({ length: leaveSlotCapacity.cpc }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: leaveSlotCapacity.dev }, (_, index) => details.dev[index] || "");
@@ -3258,7 +3283,7 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   };
 
   return `
-    <span class="leave-date-tooltip slot-summary" role="tooltip">
+    <span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}" role="${persistent ? "group" : "tooltip"}"${persistent ? ` aria-label="Leave slots for ${formatCalendarDate(key)}"` : ""}>
       <strong>${formatCalendarDate(key)}</strong>
       ${holidayKind ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
@@ -4333,7 +4358,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
   const tabs = document.querySelector(".public-tabs");
   const publicPanel = document.querySelector(".public-calendar-panel");
   const calendarContent = document.querySelector("[data-public-calendar-content]");
-  const calendarViewControls = document.querySelector(".public-calendar-panel .segmented");
+  const calendarViewControls = document.querySelector(".public-calendar-panel [data-calendar-mode-control]");
   const infoMessage = document.querySelector("[data-public-info]");
   const isTableView = area !== "FAQ" && area !== "Previous Years" && section !== "Calendar";
 
@@ -7669,6 +7694,16 @@ document.addEventListener("click", (event) => {
   if (calendarModeButton) {
     calendarMode = calendarModeButton.dataset.calendarMode;
     renderVisibleCalendars();
+    return;
+  }
+
+  const calendarLayoutButton = event.target.closest("[data-calendar-layout]");
+  if (calendarLayoutButton) {
+    const scope = calendarLayoutButton.dataset.calendarScope;
+    if (scope && Object.hasOwn(calendarLayouts, scope)) {
+      calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
+      renderVisibleCalendars();
+    }
     return;
   }
 

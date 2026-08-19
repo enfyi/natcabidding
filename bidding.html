@@ -129,7 +129,7 @@
               <h2 data-public-sheet-title>Bid Calendar</h2>
               <p data-public-sheet-code>Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.</p>
             </div>
-            <div class="segmented" aria-label="Public calendar mode">
+            <div class="segmented" aria-label="Public calendar mode" data-calendar-mode-control>
               <button type="button" data-calendar-mode="vacation">Vacation</button>
               <button type="button" data-calendar-mode="fatigue">Fatigue</button>
               <button class="active" type="button" data-calendar-mode="combined">Combined</button>
@@ -137,6 +137,11 @@
           </div>
           <div class="public-info-message" hidden data-public-info></div>
           <div data-public-calendar-content>
+            <div class="calendar-layout-tabs" role="tablist" aria-label="Public calendar detail">
+              <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="public">Minimal</button>
+              <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="public">Full</button>
+            </div>
+            <p class="calendar-layout-description" data-calendar-layout-description="public">Hover or focus a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
@@ -755,6 +760,11 @@
                 <button class="active" type="button" data-calendar-mode="combined">Combined</button>
               </div>
             </div>
+            <div class="calendar-layout-tabs" role="tablist" aria-label="Annual calendar detail">
+              <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="member">Minimal</button>
+              <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="member">Full</button>
+            </div>
+            <p class="calendar-layout-description" data-calendar-layout-description="member">Hover or focus a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
