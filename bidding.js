@@ -519,6 +519,7 @@ let selectedFlexPreference = "Yes";
 let calendarMode = "combined";
 const calendarLayouts = {
   public: "minimal",
+  dashboard: "minimal",
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
@@ -2952,7 +2953,13 @@ function makeCalendar(targetId) {
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
-  const calendarScope = isPublicCalendar ? "public" : targetId === "full-calendar" ? "member" : "";
+  const calendarScope = isPublicCalendar
+    ? "public"
+    : targetId === "dashboard-calendar"
+      ? "dashboard"
+      : targetId === "full-calendar"
+        ? "member"
+        : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
