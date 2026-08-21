@@ -4754,7 +4754,11 @@ function activeScheduledIntakeWindow() {
 }
 
 function hasIntakeAccess() {
-  return currentUser.role === "bidding-intake" || Boolean(activeAdminGrant()) || Boolean(activeScheduledIntakeWindow());
+  return currentUser.role === "bidding-intake"
+    || currentUser.role === "intake"
+    || hasSystemAdminAccess()
+    || Boolean(activeAdminGrant())
+    || Boolean(activeScheduledIntakeWindow());
 }
 
 function hasSystemAdminAccess() {
@@ -7049,6 +7053,7 @@ function renderOverrideEditor(item) {
       <div class="button-row">
         <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Save Admin Edit"}</button>
         ${approveButton}
+        ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
       </div>
     `;
   }
@@ -7075,6 +7080,7 @@ function renderOverrideEditor(item) {
     <div class="button-row">
       <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Save Admin Edit"}</button>
       ${pending ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">${approveLabel}</button>` : ""}
+      ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
     </div>
   `;
 }
