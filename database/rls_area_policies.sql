@@ -12,6 +12,7 @@ as $$
   select b.id
   from bidders b
   where b.auth_user_id = auth.uid()
+    and lower(b.email) = lower(auth.jwt() ->> 'email')
     and b.active
   limit 1
 $$;
@@ -26,9 +27,92 @@ as $$
   select b.area_id
   from bidders b
   where b.auth_user_id = auth.uid()
+    and lower(b.email) = lower(auth.jwt() ->> 'email')
     and b.active
   limit 1
 $$;
+
+create or replace function public.is_current_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from bidders b
+    where b.auth_user_id = auth.uid()
+      and lower(b.email) = lower(auth.jwt() ->> 'email')
+      and b.role = 'admin'
+      and b.active
+  )
+$$;
+
+create or replace function public.read_leave_intake_queue(queue_bid_year integer default null)
+returns table (
+  id uuid,
+  bidder_id uuid,
+  round_number integer,
+  priority integer,
+  leave_type text,
+  status text,
+  requested_start_date date,
+  requested_end_date date,
+  charged_days integer,
+  notes text,
+  submitted_at timestamptz,
+  reviewed_at timestamptz,
+  denial_reason text,
+  created_at timestamptz,
+  first_name text,
+  last_name text,
+  initials text,
+  bid_role text,
+  seniority_rank integer,
+  area_id uuid,
+  area_name text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    lr.id,
+    lr.bidder_id,
+    lr.round_number,
+    lr.priority,
+    lr.leave_type,
+    lr.status,
+    lr.requested_start_date,
+    lr.requested_end_date,
+    lr.charged_days,
+    lr.notes,
+    lr.submitted_at,
+    lr.reviewed_at,
+    lr.denial_reason,
+    lr.created_at,
+    b.first_name,
+    b.last_name,
+    b.initials,
+    b.bid_role,
+    b.seniority_rank,
+    b.area_id,
+    a.name as area_name
+  from leave_requests lr
+  join bid_years byear on byear.id = lr.bid_year_id
+  join bidders b on b.id = lr.bidder_id and b.active
+  join areas a on a.id = b.area_id
+  where (queue_bid_year is null or byear.bid_year = queue_bid_year)
+    and (
+      public.is_current_admin()
+      or b.area_id = public.current_bidder_area_id()
+    )
+  order by lr.created_at desc
+$$;
+
+grant execute on function public.read_leave_intake_queue(integer) to authenticated;
 
 create or replace function public.is_current_area(area_to_check uuid)
 returns boolean
@@ -191,7 +275,7 @@ on leave_request_week_buckets for select
 to authenticated
 using (
   exists (
-    select 1
+      select 1
     from leave_requests lr
     where lr.id = leave_request_week_buckets.leave_request_id
       and public.is_bidder_in_current_area(lr.bidder_id)
@@ -204,7 +288,7 @@ on leave_request_dates for select
 to authenticated
 using (
   exists (
-    select 1
+      select 1
     from leave_requests lr
     where lr.id = leave_request_dates.leave_request_id
       and public.is_bidder_in_current_area(lr.bidder_id)
@@ -247,7 +331,7 @@ on help_messages for select
 to authenticated
 using (
   exists (
-    select 1
+      select 1
     from help_threads ht
     where ht.id = help_messages.thread_id
       and public.is_bidder_in_current_area(ht.bidder_id)

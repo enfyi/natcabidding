@@ -7,6 +7,24 @@ create unique index if not exists bidders_email_unique
   on bidders(lower(email))
   where active and email is not null;
 
+create or replace function public.can_request_login_link(login_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from bidders b
+    where b.active
+      and b.email is not null
+      and lower(b.email) = lower(trim(login_email))
+  )
+$$;
+
+grant execute on function public.can_request_login_link(text) to anon, authenticated;
+
 create or replace function public.claim_current_bidder_profile()
 returns table (
   profile_id uuid,
@@ -35,6 +53,13 @@ begin
   end if;
 
   update bidders b
+  set auth_user_id = null,
+      updated_at = now()
+  where b.auth_user_id = auth.uid()
+    and b.active
+    and lower(b.email) <> login_email;
+
+  update bidders b
   set auth_user_id = auth.uid(),
       updated_at = now()
   where lower(b.email) = login_email
@@ -60,6 +85,7 @@ begin
   join areas a on a.id = b.area_id
   left join bidders area_bidders on area_bidders.area_id = b.area_id and area_bidders.active
   where b.auth_user_id = auth.uid()
+    and lower(b.email) = login_email
     and b.active
   group by b.id, a.name
   limit 1;

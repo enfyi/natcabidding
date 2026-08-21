@@ -1110,37 +1110,6 @@ h3 {
   gap: 14px;
 }
 
-.view-mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 56px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  padding: 5px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.view-mode-switch button {
-  min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0 12px;
-  color: var(--muted);
-  background: transparent;
-  font-size: 0.68rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.view-mode-switch button:hover,
-.view-mode-switch button.active {
-  color: var(--deep);
-  border-color: rgba(122, 189, 194, 0.25);
-  background: var(--teal);
-}
-
 .topbar-user-context {
   flex: 1 1 auto;
   min-width: 180px;
@@ -5359,22 +5328,6 @@ body {
   border-color: rgba(255, 255, 255, 0.7);
   color: #ffffff;
   background: #a32172;
-}
-
-.app-main .view-mode-switch {
-  border-color: #d5e2f0;
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.app-main .view-mode-switch button {
-  color: #64748b;
-}
-
-.app-main .view-mode-switch button:hover,
-.app-main .view-mode-switch button.active {
-  color: #172033;
-  border-color: rgba(122, 189, 194, 0.45);
-  background: #7abdc2;
 }
 
 .app-main h2,

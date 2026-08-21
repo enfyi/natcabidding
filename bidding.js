@@ -552,6 +552,7 @@ const supabaseState = {
   authRestorePromise: null,
   message: "Using built-in prototype data.",
   loadedAt: null,
+  bidYearId: "",
   authEmail: "",
   authUserId: "",
   pendingAuthEmail: "",
@@ -1855,6 +1856,23 @@ function formatLeaveRangeFromKeys(keys) {
   return `${fullFormatter.format(start)} - ${fullFormatter.format(end)}`;
 }
 
+function uiStatusFromDatabase(status) {
+  const normalized = String(status || "").toLowerCase();
+  const labels = {
+    draft: "Draft",
+    preview: "Preview",
+    pending: "Pending",
+    approved: "Approved",
+    denied: "Denied",
+    cancelled: "Cancelled",
+  };
+  return labels[normalized] || "Pending";
+}
+
+function databaseStatusFromUi(status) {
+  return String(status || "Pending").toLowerCase();
+}
+
 function syncLeaveBuilderInputs() {
   const keys = leaveBuilderDateKeys();
   const rangeInput = document.querySelector("[data-leave-range-input]");
@@ -2411,7 +2429,7 @@ function removeLeaveDraft(id) {
   setLeaveBuilderStatus("Removed from the preview batch.", "info");
 }
 
-function submitLeaveDraftBatch() {
+async function submitLeaveDraftBatch() {
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
     return;
@@ -2434,6 +2452,7 @@ function submitLeaveDraftBatch() {
 
   const batchId = `leave-batch-${currentUser.initials.toLowerCase()}-${Date.now()}`;
   const submittedAt = formatDateTime(new Date());
+  const startingPriority = nextLeavePriority();
   const newRequests = leaveDraftQueue.map((draft) => ({
     id: `leave-${currentUser.initials.toLowerCase()}-${Date.now()}-${draft.id}`,
     type: "Leave",
@@ -2442,6 +2461,7 @@ function submitLeaveDraftBatch() {
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
+    priority: startingPriority + leaveDraftQueue.indexOf(draft),
     status: "Pending",
     submittedAt,
     batchId,
@@ -2453,21 +2473,32 @@ function submitLeaveDraftBatch() {
     summary: `${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
+  const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
+  let savedToSupabase = false;
+  try {
+    savedToSupabase = await saveSupabaseLeaveRequests(newRequests, draftsByRange);
+  } catch (error) {
+    setLeaveBuilderStatus(error.message || "Leave batch could not be saved to Supabase. Please try again before leaving this page.", "error");
+    return;
+  }
+
   newRequests.forEach((request) => {
-    const draft = leaveDraftQueue.find((item) => item.range === request.range);
-    intakeQueue.unshift(request);
-    leaveBids.push({
-      priority: nextLeavePriority(),
-      range: request.range,
-      days: request.days,
-      status: "Pending",
-      notes: draft?.notes || "",
-      initials: request.initials,
-      area: request.area,
-      round: request.round,
-      weekUnits: request.weekUnits,
-      weekKeys: request.weekKeys,
-    });
+    const draft = draftsByRange.get(request.range);
+    if (!savedToSupabase) {
+      intakeQueue.unshift(request);
+      leaveBids.push({
+        priority: request.priority,
+        range: request.range,
+        days: request.days,
+        status: "Pending",
+        notes: draft?.notes || "",
+        initials: request.initials,
+        area: request.area,
+        round: request.round,
+        weekUnits: request.weekUnits,
+        weekKeys: request.weekKeys,
+      });
+    }
   });
 
   logHistory(
@@ -2481,7 +2512,7 @@ function submitLeaveDraftBatch() {
   activeDenialId = null;
   queueBidSubmittedEmail(newRequests);
   renderApp();
-  setLeaveBuilderStatus("Leave batch sent to intake review.", "success");
+  setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
 }
 
 function queuePrototypeEmail(to, subject, body, area = currentUser.area) {
@@ -3660,6 +3691,23 @@ async function claimSupabaseProfile() {
   return profile ? profileFromSupabase(profile) : null;
 }
 
+async function canRequestSupabaseLoginEmail(email) {
+  const client = supabaseClient();
+  if (!client) return false;
+  const { data, error } = await client.rpc("can_request_login_link", { login_email: email });
+  if (error) throw error;
+  return data === true;
+}
+
+async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no BUE profile matches this email yet.") {
+  const client = supabaseClient();
+  currentUser = null;
+  if (client) await client.auth.signOut();
+  clearSupabaseAccountState();
+  showPublicHome();
+  setAuthStatus(message, "error");
+}
+
 function showLoggedInApp(page = "dashboard") {
   selectedViewArea = currentUser.area;
   document.querySelector(".login-screen")?.setAttribute("hidden", "");
@@ -3718,7 +3766,7 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
     try {
       const profile = await claimSupabaseProfile();
       if (!profile) {
-        setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+        await rejectUnmatchedSupabaseLogin();
         return false;
       }
       currentUser = profile;
@@ -3743,10 +3791,26 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
+  let canRequestLink = false;
+  try {
+    canRequestLink = await canRequestSupabaseLoginEmail(email);
+  } catch (error) {
+    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+    return;
+  }
+  if (!canRequestLink) {
+    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+    return;
+  }
+
+  await client.auth.signOut();
+  clearSupabaseAccountState();
+
   const { error } = await client.auth.signInWithOtp({
     email,
     options: {
       emailRedirectTo: supabaseAuthRedirectUrl(),
+      shouldCreateUser: false,
     },
   });
 
@@ -3762,6 +3826,18 @@ async function sendSupabasePasswordReset(email) {
   const client = supabaseClient();
   if (!client) {
     setAuthStatus("Login is not configured yet.", "error");
+    return;
+  }
+
+  let canRequestLink = false;
+  try {
+    canRequestLink = await canRequestSupabaseLoginEmail(email);
+  } catch (error) {
+    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+    return;
+  }
+  if (!canRequestLink) {
+    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
     return;
   }
 
@@ -3786,6 +3862,8 @@ async function loginWithSupabasePassword(email, password) {
 
   let signInResult;
   try {
+    await client.auth.signOut();
+    clearSupabaseAccountState();
     signInResult = await client.auth.signInWithPassword({ email, password });
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error), "error");
@@ -3802,7 +3880,7 @@ async function loginWithSupabasePassword(email, password) {
   try {
     const profile = await claimSupabaseProfile();
     if (!profile) {
-      setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+      await rejectUnmatchedSupabaseLogin();
       return;
     }
     currentUser = profile;
@@ -4078,6 +4156,183 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
   });
 }
 
+function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
+  const bidder = row.bidders || row;
+  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const dateKeys = row.requested_start_date && row.requested_end_date
+    ? datesBetweenKeys(row.requested_start_date, row.requested_end_date)
+    : [];
+  const range = dateKeys.length ? formatLeaveRangeFromKeys(dateKeys) : "Leave request";
+  const round = Number(row.round_number || currentRoundNumber());
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const days = Number(row.charged_days || 0);
+
+  return {
+    id: `supabase-leave-${row.id}`,
+    supabaseRequestId: row.id,
+    type: "Leave",
+    area,
+    name: controllerName({
+      firstName: bidder.first_name,
+      lastName: bidder.last_name,
+      initials: bidder.initials,
+    }),
+    initials: bidder.initials || "",
+    bidAs: normalizeBidRoleForArea(bidder.bid_role || "CPC", area),
+    seniority: bidder.seniority_rank,
+    priority: Number(row.priority || 0),
+    status: uiStatusFromDatabase(row.status),
+    submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
+    approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    denialReason: row.denial_reason || "",
+    range,
+    days,
+    round,
+    weekUnits: weekKeys.length,
+    weekKeys,
+    notes: row.notes || "",
+    summary: `${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
+  };
+}
+
+function datesBetweenKeys(startKey, endKey) {
+  if (!startKey || !endKey) return [];
+  const keys = [];
+  const cursor = dateFromKey(startKey);
+  const end = dateFromKey(endKey);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  while (cursor <= end) {
+    keys.push(dateKeyFromDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
+function upsertLeaveRequestsFromDatabase(rows, areaById) {
+  const items = (rows || []).map((row) => supabaseLeaveRequestToIntakeItem(row, areaById));
+  const ids = new Set(items.map((item) => item.supabaseRequestId));
+  intakeQueue = intakeQueue.filter((item) => !item.supabaseRequestId || !ids.has(item.supabaseRequestId));
+  intakeQueue.unshift(...items);
+
+  const personalItems = items.filter((item) => item.initials === currentUser.initials);
+  const personalIds = new Set(personalItems.map((item) => item.supabaseRequestId));
+  for (let index = leaveBids.length - 1; index >= 0; index -= 1) {
+    if (leaveBids[index].supabaseRequestId && personalIds.has(leaveBids[index].supabaseRequestId)) {
+      leaveBids.splice(index, 1);
+    }
+  }
+  personalItems.forEach((item) => {
+    leaveBids.push({
+      supabaseRequestId: item.supabaseRequestId,
+      priority: item.priority || nextLeavePriority(),
+      range: item.range,
+      days: item.days,
+      status: item.status,
+      notes: item.notes,
+      initials: item.initials,
+      area: item.area,
+      round: item.round,
+      weekUnits: item.weekUnits,
+      weekKeys: item.weekKeys,
+    });
+  });
+}
+
+async function ensureSupabaseBidYearId() {
+  if (supabaseState.bidYearId) return supabaseState.bidYearId;
+  const client = supabaseClient();
+  if (!client) return "";
+
+  const { data, error } = await client
+    .from("bid_years")
+    .select("id")
+    .eq("bid_year", BID_YEAR)
+    .single();
+  if (error) throw error;
+  supabaseState.bidYearId = data.id;
+  return data.id;
+}
+
+function leaveRequestRowForSupabase(request, notes = "") {
+  const dateKeys = datesInLeaveRange(request.range);
+  return {
+    bid_year_id: supabaseState.bidYearId,
+    bidder_id: currentUser.supabaseProfileId,
+    round_number: request.round,
+    priority: request.priority,
+    leave_type: "Annual Leave",
+    status: databaseStatusFromUi(request.status),
+    requested_start_date: dateKeys[0],
+    requested_end_date: dateKeys[dateKeys.length - 1],
+    charged_days: request.days,
+    notes,
+    submitted_at: new Date().toISOString(),
+  };
+}
+
+function leaveDateRowsForSupabase(request, leaveRequestId) {
+  const chargedDates = new Set(chargeableLeaveDatesForInitials(request.range, request.initials, request.round));
+  return datesInLeaveRange(request.range).map((key) => ({
+    leave_request_id: leaveRequestId,
+    leave_date: key,
+    charged: chargedDates.has(key),
+    is_rdo: isRdoDateForInitials(key, request.initials),
+    is_holiday: isLegalHolidayDate(key),
+    is_holiday_in_lieu: isHolidayInLieuDate(key),
+  }));
+}
+
+function leaveWeekBucketRowsForSupabase(request, leaveRequestId) {
+  return (request.weekKeys || []).map((weekKey) => {
+    const end = dateFromKey(weekKey);
+    end.setDate(end.getDate() + 6);
+    return {
+      leave_request_id: leaveRequestId,
+      bucket_start_date: weekKey,
+      bucket_end_date: dateKeyFromDate(end),
+    };
+  });
+}
+
+async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return false;
+
+  await ensureSupabaseBidYearId();
+  const requestRows = newRequests.map((request) =>
+    leaveRequestRowForSupabase(request, draftsByRange.get(request.range)?.notes || "")
+  );
+
+  const { data: savedRequests, error } = await client
+    .from("leave_requests")
+    .insert(requestRows)
+    .select("id,bidder_id,round_number,priority,leave_type,status,requested_start_date,requested_end_date,charged_days,notes,submitted_at,reviewed_at,denial_reason,created_at,bidders(first_name,last_name,initials,bid_role,seniority_rank,area_id)");
+  if (error) throw error;
+
+  const dateRows = [];
+  const weekRows = [];
+  (savedRequests || []).forEach((row, index) => {
+    const request = newRequests[index];
+    dateRows.push(...leaveDateRowsForSupabase(request, row.id));
+    weekRows.push(...leaveWeekBucketRowsForSupabase(request, row.id));
+  });
+
+  if (weekRows.length) {
+    const { error: weekError } = await client.from("leave_request_week_buckets").insert(weekRows);
+    if (weekError) throw weekError;
+  }
+  if (dateRows.length) {
+    const { error: dateError } = await client.from("leave_request_dates").insert(dateRows);
+    if (dateError) throw dateError;
+  }
+
+  const areaById = new Map();
+  upsertLeaveRequestsFromDatabase(savedRequests || [], areaById);
+  return true;
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client || supabaseState.loading) return;
@@ -4100,17 +4355,20 @@ async function loadSupabaseReferenceData() {
       rdoLinesResult,
       rdoLineDaysResult,
       leaveSlotsResult,
+      leaveRequestsResult,
     ] = await Promise.all([
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
     ]);
 
-    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult].find((result) => result.error)?.error;
+    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult].find((result) => result.error)?.error;
     if (firstError) throw firstError;
 
+    supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
 
     (holidaysResult.data || []).forEach((holiday) => {
@@ -4119,10 +4377,11 @@ async function loadSupabaseReferenceData() {
 
     upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
     upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+    upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, and ${(leaveSlotsResult.data || []).length} leave slots.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, and ${(leaveRequestsResult.data || []).length} leave requests.`;
   } catch (error) {
     supabaseState.connected = false;
     supabaseState.message = `Supabase data unavailable, using prototype fallback. ${error.message || error}`;
@@ -7338,7 +7597,7 @@ function logOut() {
   renderPublicPage();
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   primeAlertSound();
 
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
@@ -7543,7 +7802,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-submit-leave-batch]")) {
-    submitLeaveDraftBatch();
+    await submitLeaveDraftBatch();
     return;
   }
 
