@@ -4741,10 +4741,6 @@ function activeAdminGrant() {
   return nowDate >= start && nowDate <= end ? currentUser.adminGrant : null;
 }
 
-function currentUserHasIntakeSchedule() {
-  return intakeSchedules.some((schedule) => schedule.initials === currentUser.initials);
-}
-
 function activeScheduledIntakeWindow() {
   const nowDate = new Date();
   return intakeSchedules.find((schedule) => {
@@ -4754,9 +4750,7 @@ function activeScheduledIntakeWindow() {
 }
 
 function hasIntakeAccess() {
-  return currentUser.role === "bidding-intake"
-    || currentUser.role === "intake"
-    || hasSystemAdminAccess()
+  return hasSystemAdminAccess()
     || Boolean(activeAdminGrant())
     || Boolean(activeScheduledIntakeWindow());
 }
@@ -4766,7 +4760,7 @@ function hasSystemAdminAccess() {
 }
 
 function canUseIntakeView() {
-  return hasIntakeAccess() || currentUserHasIntakeSchedule() || hasSystemAdminAccess();
+  return hasIntakeAccess();
 }
 
 function pageForViewMode(mode) {
