@@ -520,6 +520,7 @@ let calendarMode = "combined";
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
+  leave: "minimal",
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
@@ -2988,9 +2989,11 @@ function makeCalendar(targetId) {
     ? "public"
     : targetId === "dashboard-calendar"
       ? "dashboard"
-      : targetId === "full-calendar"
-        ? "member"
-        : "";
+      : targetId === "leave-calendar"
+        ? "leave"
+        : targetId === "full-calendar"
+          ? "member"
+          : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
