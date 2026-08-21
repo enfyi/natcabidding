@@ -67,6 +67,17 @@ begin
     and (b.auth_user_id is null or b.auth_user_id = auth.uid());
 
   return query
+  with ranked_bidders as (
+    select
+      area_bidders.id,
+      row_number() over (
+        partition by area_bidders.area_id
+        order by area_bidders.seniority_rank nulls last, area_bidders.last_name, area_bidders.first_name, area_bidders.id
+      )::integer as area_seniority_rank,
+      count(*) over (partition by area_bidders.area_id) as area_bidder_count
+    from bidders area_bidders
+    where area_bidders.active
+  )
   select
     b.id,
     b.first_name,
@@ -77,17 +88,16 @@ begin
     b.phone,
     b.role,
     b.bid_role,
-    b.seniority_rank,
+    rb.area_seniority_rank,
     b.area_id,
     a.name as area_name,
-    count(area_bidders.id) as bidder_count
+    rb.area_bidder_count as bidder_count
   from bidders b
   join areas a on a.id = b.area_id
-  left join bidders area_bidders on area_bidders.area_id = b.area_id and area_bidders.active
+  join ranked_bidders rb on rb.id = b.id
   where b.auth_user_id = auth.uid()
     and lower(b.email) = login_email
     and b.active
-  group by b.id, a.name
   limit 1;
 end;
 $$;

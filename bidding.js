@@ -1141,14 +1141,19 @@ function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
+  if (area === currentUser.area && Number.isFinite(currentUser.seniorityRank)) {
+    return currentUser.seniorityRank;
+  }
+
   const currentEntryIndex = activeRosterEntries(area).findIndex(seniorityEntryMatchesCurrentUser);
-  if (currentEntryIndex >= 0) return currentEntryIndex + 1;
-  return area === currentUser.area && Number.isFinite(currentUser.seniorityRank)
-    ? currentUser.seniorityRank
-    : null;
+  return currentEntryIndex >= 0 ? currentEntryIndex + 1 : null;
 }
 
 function currentUserBidderCount(area = currentUser.area) {
+  if (area === currentUser.area && Number.isFinite(currentUser.bidderCount) && currentUser.bidderCount > 0) {
+    return currentUser.bidderCount;
+  }
+
   return activeRosterEntries(area).length || currentUser.bidderCount;
 }
 

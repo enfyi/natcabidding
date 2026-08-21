@@ -78,6 +78,16 @@ stable
 security definer
 set search_path = public
 as $$
+  with ranked_bidders as (
+    select
+      area_bidders.id,
+      row_number() over (
+        partition by area_bidders.area_id
+        order by area_bidders.seniority_rank nulls last, area_bidders.last_name, area_bidders.first_name, area_bidders.id
+      )::integer as area_seniority_rank
+    from bidders area_bidders
+    where area_bidders.active
+  )
   select
     lr.id,
     lr.bidder_id,
@@ -97,12 +107,13 @@ as $$
     b.last_name,
     b.initials,
     b.bid_role,
-    b.seniority_rank,
+    rb.area_seniority_rank as seniority_rank,
     b.area_id,
     a.name as area_name
   from leave_requests lr
   join bid_years byear on byear.id = lr.bid_year_id
   join bidders b on b.id = lr.bidder_id and b.active
+  join ranked_bidders rb on rb.id = b.id
   join areas a on a.id = b.area_id
   where (queue_bid_year is null or byear.bid_year = queue_bid_year)
     and (
