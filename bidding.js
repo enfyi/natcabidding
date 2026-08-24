@@ -1428,6 +1428,14 @@ let intakeQueue = [
 
 let activeOverrideId = null;
 let activeDenialId = null;
+let activeIntakeDetailId = null;
+let intakeSearchQuery = "";
+const intakeFilters = {
+  status: "all",
+  type: "all",
+  area: "all",
+  round: "all",
+};
 let helpPanelMode = "user";
 let activeHelpThreadId = "help-oc-1";
 let helpThreads = [
@@ -1590,21 +1598,24 @@ function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
 
-function manualFatigueGroupIsAvailable(line, group) {
+function manualFatigueGroupIsAvailable(line, group, allowOverride = false) {
+  if (allowOverride) return Boolean(line && group);
   if (!line || !group) return false;
   const capacity = fatigueCapacityForLine(line, null, "").find((item) => item.group === group);
   return Boolean(capacity && isGroupAvailable(capacity));
 }
 
-function manualFatigueGroupOptions(line, selectedGroup) {
+function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
   if (!line) return "";
 
   return fatigueCapacityForLine(line, null, "").map((item) => {
     const isSelected = item.group === selectedGroup;
     const isAvailable = isGroupAvailable(item);
+    const isSelectable = isAvailable || allowOverride;
     const label = `Group ${item.group}`;
     const capacity = `Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}`;
-    return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isAvailable ? "" : " disabled"}>${label}${isAvailable ? "" : " - Full"} (${capacity})</option>`;
+    const suffix = isAvailable ? "" : allowOverride ? " - Full, override" : " - Full";
+    return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isSelectable ? "" : " disabled"}>${label}${suffix} (${capacity})</option>`;
   }).join("");
 }
 
@@ -1615,6 +1626,7 @@ function renderManualBidPanel(panel) {
     area: panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(),
     line: panel.querySelector("[data-manual-rdo-line]")?.value || selectedLineId,
     fatigueGroup: panel.querySelector("[data-manual-fatigue-group]")?.value || selectedFatigueGroup || "A",
+    fatigueOverride: Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked),
     flex: panel.querySelector("[data-manual-flex]")?.value || selectedFlexPreference || "Yes",
     aws: panel.querySelector("[data-manual-aws]")?.value || selectedAwsPreference || "No",
     mid: panel.querySelector("[data-manual-mid]")?.value || selectedMidPreference || "No",
@@ -1668,16 +1680,20 @@ function renderManualBidPanel(panel) {
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+  const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
+  if (fatigueOverrideInput) {
+    fatigueOverrideInput.checked = values.fatigueOverride;
+  }
   const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
   if (fatigueSelect) {
     const requestedGroup = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
     const availableGroups = selectedLine
       ? fatigueCapacityForLine(selectedLine, null, "")
-        .filter(isGroupAvailable)
+        .filter((item) => values.fatigueOverride || isGroupAvailable(item))
         .map((item) => item.group)
       : [];
     const resolvedGroup = availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
-    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup);
+    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride);
     fatigueSelect.value = resolvedGroup;
     fatigueSelect.disabled = !resolvedGroup;
     fatigueSelect.title = resolvedGroup ? "" : "No fatigue groups are available for this line.";
@@ -1739,10 +1755,13 @@ function submitManualRdoBid(panel, person, area) {
   }
 
   const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
-  if (!manualFatigueGroupIsAvailable(line, fatigueGroup)) {
+  const fatigueOverride = Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked);
+  const fatigueGroupClosed = !manualFatigueGroupIsAvailable(line, fatigueGroup);
+  if (!manualFatigueGroupIsAvailable(line, fatigueGroup, fatigueOverride)) {
     setManualBidStatus(panel, `Group ${fatigueGroup} is full for Line ${line.line}. Choose an available fatigue group before adding this bid.`, "error");
     return;
   }
+  const usedFatigueOverride = fatigueOverride && fatigueGroupClosed;
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
@@ -1766,10 +1785,12 @@ function submitManualRdoBid(panel, person, area) {
     enteredBy: currentUser.initials,
     line: line.line,
     fatigueGroup,
+    fatigueOverride: usedFatigueOverride,
+    reviewNote: usedFatigueOverride ? `Fatigue override: Group ${fatigueGroup} was full or closed when entered by ${currentUser.initials}.` : "",
     flex,
     aws,
     mid,
-    summary: `Line ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+    summary: `Line ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
 
   if (existing) {
@@ -7256,18 +7277,121 @@ function renderDenialEditor(item) {
   `;
 }
 
+function intakeItemRound(item) {
+  const explicitRound = Number(item.round);
+  if (Number.isFinite(explicitRound) && explicitRound > 0) return explicitRound;
+  const roundMatch = String(item.summary || item.notes || "").match(/Round\s+(\d+)/i);
+  if (roundMatch) return Number(roundMatch[1]);
+  return 1;
+}
+
+function intakeSearchText(item) {
+  return [
+    item.type,
+    item.status,
+    item.name,
+    item.initials,
+    item.area,
+    item.bidAs,
+    item.seniority,
+    item.line ? `Line ${item.line}` : "",
+    item.range,
+    item.summary,
+    item.reviewNote,
+    item.submittedAt,
+    item.approvedAt,
+    item.deniedAt,
+    `Round ${intakeItemRound(item)}`,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function intakeItemMatchesFilters(item) {
+  const query = intakeSearchQuery.trim().toLowerCase();
+  if (query && !intakeSearchText(item).includes(query)) return false;
+  if (intakeFilters.status !== "all" && item.status !== intakeFilters.status) return false;
+  if (intakeFilters.type !== "all" && item.type !== intakeFilters.type) return false;
+  if (intakeFilters.area !== "all" && item.area !== intakeFilters.area) return false;
+  if (intakeFilters.round !== "all" && String(intakeItemRound(item)) !== intakeFilters.round) return false;
+  return true;
+}
+
+function syncIntakeSearchControls() {
+  const search = document.querySelector("[data-intake-search]");
+  if (search && search.value !== intakeSearchQuery) search.value = intakeSearchQuery;
+
+  document.querySelectorAll("[data-intake-filter]").forEach((select) => {
+    const filterName = select.dataset.intakeFilter;
+    if (filterName === "area") {
+      const selected = intakeFilters.area;
+      select.innerHTML = `
+        <option value="all">All Areas</option>
+        ${Object.values(AREA_NAME_BY_CODE).map((area) => `<option value="${area}">${area}</option>`).join("")}
+      `;
+      select.value = Object.values(AREA_NAME_BY_CODE).includes(selected) ? selected : "all";
+      return;
+    }
+    if (filterName && Object.hasOwn(intakeFilters, filterName)) {
+      select.value = intakeFilters[filterName];
+    }
+  });
+}
+
+function intakeRoundDetailItems(item, visibleItems) {
+  if (!item) return [];
+  const round = intakeItemRound(item);
+  return visibleItems.filter((entry) =>
+    entry.initials === item.initials &&
+    intakeItemRound(entry) === round
+  );
+}
+
+function renderIntakeDetailPanel(item, visibleItems) {
+  const panel = document.querySelector("[data-intake-detail-panel]");
+  if (!panel) return;
+  if (!item) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+
+  const round = intakeItemRound(item);
+  const detailItems = intakeRoundDetailItems(item, visibleItems);
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div>
+      <span class="intake-type">Round ${round} Bid Detail</span>
+      <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
+      <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+    </div>
+    <div class="intake-detail-list">
+      ${detailItems.map((entry) => `
+        <article>
+          <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
+          <strong>${escapeHtml(entry.type)}</strong>
+          <p>${escapeHtml(entry.summary)}</p>
+          <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderIntakeQueue() {
   const target = document.getElementById("intake-queue");
   if (!target) return;
 
+  syncIntakeSearchControls();
   const canReview = hasIntakeAccess();
   const visibleItems = canReview
     ? intakeQueue
     : intakeQueue.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
+  renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
-  target.innerHTML = visibleItems.length
-    ? visibleItems.map((item) => `
-      <article class="intake-card ${item.status.toLowerCase()}">
+  target.innerHTML = filteredItems.length
+    ? filteredItems.map((item) => `
+      <article class="intake-card ${item.status.toLowerCase()} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${item.type}</span>
           <h3>${item.name} · ${item.initials}</h3>
@@ -7295,7 +7419,7 @@ function renderIntakeQueue() {
         </div>
       </article>
     `).join("")
-    : '<div class="empty-state">No intake submissions are waiting for review.</div>';
+    : '<div class="empty-state">No intake submissions match the current search.</div>';
 
   const panel = document.getElementById("override-panel");
   const editor = document.querySelector("[data-override-editor]");
@@ -8074,6 +8198,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const intakeCard = event.target.closest("[data-intake-card]");
+  if (intakeCard) {
+    activeIntakeDetailId = intakeCard.dataset.intakeCard;
+    renderIntakeQueue();
+    return;
+  }
+
   const fatigueButton = event.target.closest("[data-fatigue-group]");
   if (fatigueButton && !fatigueButton.disabled) {
     selectedFatigueGroup = fatigueButton.dataset.fatigueGroup;
@@ -8189,6 +8320,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeLeaveSlotModal();
   }
+
+  if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
+    event.preventDefault();
+    activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
+    renderIntakeQueue();
+  }
 });
 
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
@@ -8272,6 +8409,13 @@ document.addEventListener("input", (event) => {
     return;
   }
 
+  const intakeSearch = event.target.closest("[data-intake-search]");
+  if (intakeSearch) {
+    intakeSearchQuery = intakeSearch.value;
+    renderIntakeQueue();
+    return;
+  }
+
   const publicFilter = event.target.closest("[data-public-rdo-filter]");
   if (publicFilter?.dataset.publicRdoFilter === "search") {
     publicRdoFilters.search = publicFilter.value;
@@ -8286,6 +8430,16 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  const intakeFilter = event.target.closest("[data-intake-filter]");
+  if (intakeFilter) {
+    const filterName = intakeFilter.dataset.intakeFilter;
+    if (filterName && Object.hasOwn(intakeFilters, filterName)) {
+      intakeFilters[filterName] = intakeFilter.value;
+      renderIntakeQueue();
+    }
+    return;
+  }
+
   const publicRdoFilter = event.target.closest("[data-public-rdo-filter]");
   if (publicRdoFilter) {
     const filterName = publicRdoFilter.dataset.publicRdoFilter;
@@ -8327,7 +8481,7 @@ document.addEventListener("change", (event) => {
     return;
   }
 
-  const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
+  const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);
     return;

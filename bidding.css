@@ -3405,7 +3405,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .intake-workspace {
-  grid-template-columns: minmax(520px, 0.9fr) 280px 360px;
+  grid-template-columns: minmax(520px, 0.9fr) 360px 360px;
 }
 
 .intake-info-stack {
@@ -3419,6 +3419,72 @@ tr.occupied-row .rdo-tag {
   gap: 12px;
 }
 
+.intake-search-tools {
+  display: grid;
+  gap: 8px;
+  min-width: 360px;
+  max-width: 520px;
+  flex: 1 1 420px;
+}
+
+.intake-search-tools input,
+.intake-search-tools select {
+  width: 100%;
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.intake-filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.intake-detail-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(122, 189, 194, 0.55);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(122, 189, 194, 0.1);
+}
+
+.intake-detail-panel h3,
+.intake-detail-panel p {
+  margin: 0;
+}
+
+.intake-detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.intake-detail-list article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.intake-detail-list strong {
+  color: white;
+}
+
+.intake-detail-list small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .intake-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
@@ -3428,6 +3494,14 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.intake-card:hover,
+.intake-card:focus-visible,
+.intake-card.selected {
+  border-color: var(--teal);
+  background: rgba(122, 189, 194, 0.1);
+  outline: none;
 }
 
 .intake-card.approved {
@@ -4590,6 +4664,18 @@ tr.occupied-row .rdo-tag {
 
 .manual-bid-fields label.wide {
   grid-column: 1 / -1;
+}
+
+.manual-bid-fields .manual-override-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: start;
+  color: #475569;
+  text-transform: none;
+}
+
+.manual-bid-fields .manual-override-check input {
+  width: auto;
 }
 
 .manual-bid-card .primary-action,
@@ -6746,6 +6832,16 @@ body {
   }
 
   .filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .intake-search-tools {
+    min-width: 0;
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .intake-filter-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
