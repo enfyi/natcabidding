@@ -23,7 +23,6 @@ const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
 const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
-const BID_LEAVE_YEAR_CONTINUATION_DAYS = Number(BID_LEAVE_YEAR_END_KEY.slice(-2));
 const ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -520,6 +519,7 @@ let calendarMode = "combined";
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
+  leave: "minimal",
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
@@ -552,6 +552,7 @@ const supabaseState = {
   authRestorePromise: null,
   message: "Using built-in prototype data.",
   loadedAt: null,
+  bidYearId: "",
   authEmail: "",
   authUserId: "",
   pendingAuthEmail: "",
@@ -1139,14 +1140,19 @@ function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
+  if (area === currentUser.area && Number.isFinite(currentUser.seniorityRank)) {
+    return currentUser.seniorityRank;
+  }
+
   const currentEntryIndex = activeRosterEntries(area).findIndex(seniorityEntryMatchesCurrentUser);
-  if (currentEntryIndex >= 0) return currentEntryIndex + 1;
-  return area === currentUser.area && Number.isFinite(currentUser.seniorityRank)
-    ? currentUser.seniorityRank
-    : null;
+  return currentEntryIndex >= 0 ? currentEntryIndex + 1 : null;
 }
 
 function currentUserBidderCount(area = currentUser.area) {
+  if (area === currentUser.area && Number.isFinite(currentUser.bidderCount) && currentUser.bidderCount > 0) {
+    return currentUser.bidderCount;
+  }
+
   return activeRosterEntries(area).length || currentUser.bidderCount;
 }
 
@@ -1715,8 +1721,8 @@ function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
     return;
   }
-  if (dateKeys.some((key) => key < BID_LEAVE_YEAR_START_KEY)) {
-    setManualBidStatus(panel, "Leave bids must start on Jan 10, 2027 or later.", "error");
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setManualBidStatus(panel, "Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
     return;
   }
 
@@ -1855,6 +1861,23 @@ function formatLeaveRangeFromKeys(keys) {
   return `${fullFormatter.format(start)} - ${fullFormatter.format(end)}`;
 }
 
+function uiStatusFromDatabase(status) {
+  const normalized = String(status || "").toLowerCase();
+  const labels = {
+    draft: "Draft",
+    preview: "Preview",
+    pending: "Pending",
+    approved: "Approved",
+    denied: "Denied",
+    cancelled: "Cancelled",
+  };
+  return labels[normalized] || "Pending";
+}
+
+function databaseStatusFromUi(status) {
+  return String(status || "Pending").toLowerCase();
+}
+
 function syncLeaveBuilderInputs() {
   const keys = leaveBuilderDateKeys();
   const rangeInput = document.querySelector("[data-leave-range-input]");
@@ -1940,8 +1963,9 @@ function renderLeaveDatePicker() {
     const key = dateKey(leavePickerYear, leavePickerMonthIndex + 1, day);
     const isInRange = selectedKeys.has(key);
     const isEdge = isLeaveBuilderRangeEdge(key);
+    const isUnavailable = !isBidLeaveYearDate(key);
     cells.push(`
-      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""}" type="button" data-leave-picker-date="${key}" aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}">
+      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""} ${isUnavailable ? "unavailable" : ""}" type="button" ${isUnavailable ? "disabled" : `data-leave-picker-date="${key}"`} aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}${isUnavailable ? ": leave bidding unavailable" : ""}">
         ${day}
       </button>
     `);
@@ -2287,6 +2311,11 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const weekUnits = weekKeys.length;
@@ -2381,6 +2410,11 @@ function previewLeaveSubmission() {
     return;
   }
 
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
   if (Number.isFinite(days) && days > 0 && chargeableDates.length !== days) {
@@ -2411,7 +2445,7 @@ function removeLeaveDraft(id) {
   setLeaveBuilderStatus("Removed from the preview batch.", "info");
 }
 
-function submitLeaveDraftBatch() {
+async function submitLeaveDraftBatch() {
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
     return;
@@ -2434,6 +2468,7 @@ function submitLeaveDraftBatch() {
 
   const batchId = `leave-batch-${currentUser.initials.toLowerCase()}-${Date.now()}`;
   const submittedAt = formatDateTime(new Date());
+  const startingPriority = nextLeavePriority();
   const newRequests = leaveDraftQueue.map((draft) => ({
     id: `leave-${currentUser.initials.toLowerCase()}-${Date.now()}-${draft.id}`,
     type: "Leave",
@@ -2442,6 +2477,7 @@ function submitLeaveDraftBatch() {
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
+    priority: startingPriority + leaveDraftQueue.indexOf(draft),
     status: "Pending",
     submittedAt,
     batchId,
@@ -2453,21 +2489,32 @@ function submitLeaveDraftBatch() {
     summary: `${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
+  const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
+  let savedToSupabase = false;
+  try {
+    savedToSupabase = await saveSupabaseLeaveRequests(newRequests, draftsByRange);
+  } catch (error) {
+    setLeaveBuilderStatus(error.message || "Leave batch could not be saved to Supabase. Please try again before leaving this page.", "error");
+    return;
+  }
+
   newRequests.forEach((request) => {
-    const draft = leaveDraftQueue.find((item) => item.range === request.range);
-    intakeQueue.unshift(request);
-    leaveBids.push({
-      priority: nextLeavePriority(),
-      range: request.range,
-      days: request.days,
-      status: "Pending",
-      notes: draft?.notes || "",
-      initials: request.initials,
-      area: request.area,
-      round: request.round,
-      weekUnits: request.weekUnits,
-      weekKeys: request.weekKeys,
-    });
+    const draft = draftsByRange.get(request.range);
+    if (!savedToSupabase) {
+      intakeQueue.unshift(request);
+      leaveBids.push({
+        priority: request.priority,
+        range: request.range,
+        days: request.days,
+        status: "Pending",
+        notes: draft?.notes || "",
+        initials: request.initials,
+        area: request.area,
+        round: request.round,
+        weekUnits: request.weekUnits,
+        weekKeys: request.weekKeys,
+      });
+    }
   });
 
   logHistory(
@@ -2481,7 +2528,7 @@ function submitLeaveDraftBatch() {
   activeDenialId = null;
   queueBidSubmittedEmail(newRequests);
   renderApp();
-  setLeaveBuilderStatus("Leave batch sent to intake review.", "success");
+  setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
 }
 
 function queuePrototypeEmail(to, subject, body, area = currentUser.area) {
@@ -2872,6 +2919,14 @@ function isRdoDateForInitials(key, initials = currentUser.initials) {
   return rdoWeekdaysForLine(line).has(dateFromKey(key).getDay());
 }
 
+function isBidLeaveYearDate(key) {
+  return key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY;
+}
+
+function invalidLeaveYearDateKeys(dateKeys) {
+  return dateKeys.filter((key) => !isBidLeaveYearDate(key));
+}
+
 function calendarActiveDate() {
   const activeDate = dateFromKey(selectedLeaveDateKey);
   const day = Math.min(activeDate.getDate(), new Date(displayedCalendarYear, activeDate.getMonth() + 1, 0).getDate());
@@ -2957,9 +3012,11 @@ function makeCalendar(targetId) {
     ? "public"
     : targetId === "dashboard-calendar"
       ? "dashboard"
-      : targetId === "full-calendar"
-        ? "member"
-        : "";
+      : targetId === "leave-calendar"
+        ? "leave"
+        : targetId === "full-calendar"
+          ? "member"
+          : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
@@ -2982,14 +3039,7 @@ function makeCalendar(targetId) {
       expandedSlots,
       context,
     }))
-    .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
-      showRdo,
-      showPersonalLeave,
-      area,
-      deferSlotTooltip: false,
-      expandedSlots,
-      context,
-    });
+    .join("");
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -3019,34 +3069,6 @@ function renderMonthCard(monthIndex, year, options = {}) {
       <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
-  `;
-}
-
-function renderLeaveYearContinuation(year, options = {}) {
-  if (year !== BID_YEAR) return "";
-  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false, context = null } = options;
-  const continuationYear = BID_YEAR + 1;
-  const cells = [];
-
-  for (let day = 1; day <= BID_LEAVE_YEAR_CONTINUATION_DAYS; day += 1) {
-    cells.push(renderCalendarDay(0, day, true, continuationYear, {
-      showRdo,
-      showPersonalLeave,
-      area,
-      deferSlotTooltip,
-      expandedSlots: options.expandedSlots,
-      context,
-    }));
-  }
-
-  return `
-    <section class="leave-year-continuation" aria-label="${BID_YEAR} leave year continues through January 8, ${continuationYear}">
-      <div class="leave-year-continuation-copy">
-        <strong>Jan ${continuationYear}</strong>
-        <span>Leave year ends Jan 8</span>
-      </div>
-      <div class="month-grid leave-year-continuation-days">${cells.join("")}</div>
-    </section>
   `;
 }
 
@@ -3092,23 +3114,25 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const weekday = date.getDay();
   const key = dateKey(year, monthIndex + 1, day);
   const isPreviousLeaveYear = key < BID_LEAVE_YEAR_START_KEY;
-  const fatigueGroup = isPreviousLeaveYear || !showFatigueLayer ? "" : context ? cachedFatigueGroupForDate(key, context) : fatigueGroupForDate(key);
+  const isAfterLeaveYear = key > BID_LEAVE_YEAR_END_KEY;
+  const isInsideLeaveYear = !isPreviousLeaveYear && !isAfterLeaveYear;
+  const fatigueGroup = !isInsideLeaveYear || !showFatigueLayer ? "" : context ? cachedFatigueGroupForDate(key, context) : fatigueGroupForDate(key);
   const fatigueClass = groupClass(fatigueGroup);
   const nextFatigueGroup = weekday === 6 ? nextFatigueGroupAfter(fatigueGroup) : "";
   const nextFatigueClass = groupClass(nextFatigueGroup);
   const isFatigueWeekStart = fatigueClass && (weekday === 0 || day === 1);
   const rdoWeekdays = context ? context.rdoWeekdays : selectedRdoWeekdays();
-  const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && rdoWeekdays.has(weekday);
-  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR
+  const isRdo = showVacationLayer && isInsideLeaveYear && showRdo && rdoWeekdays.has(weekday);
+  const leaveStatus = showVacationLayer && isInsideLeaveYear && showPersonalLeave
     ? context ? cachedPersonalLeaveDateStatus(key, context) : personalLeaveDateStatus(key)
     : "";
-  const canShowLeaveState = showVacationLayer && !isRdo && !isPreviousLeaveYear;
+  const canShowLeaveState = showVacationLayer && !isRdo && isInsideLeaveYear;
   const isApprovedLeave = leaveStatus === "approved" && canShowLeaveState;
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
   const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (
     context ? context.draftDates.has(key) || context.previewDates.has(key) : isDraftLeaveDate(key) || isLeavePreviewRangeDate(key)
   );
-  const holidayKind = isPreviousLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
+  const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
   const isClosed = canShowLeaveState && (
@@ -3117,7 +3141,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       : isLeaveSlotsFull(key, options.area)
   );
   const expandedSlots = Boolean(options.expandedSlots);
-  const hasDetail = !isPreviousLeaveYear && (showVacationLayer || expandedSlots);
+  const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
     ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
@@ -3125,6 +3149,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const className = [
     holidayKind?.className || "",
     isPreviousLeaveYear ? "previous-leave-year-day" : "",
+    isAfterLeaveYear ? "after-leave-year-day" : "",
     isDraftLeave ? "draft-leave-day" : "",
     isPendingLeave ? "pending-leave-day" : "",
     isApprovedLeave ? "leave-day" : "",
@@ -3142,6 +3167,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
+    : isAfterLeaveYear
+      ? "2027 leave year ended Jan 8, 2028 - leave bidding unavailable"
     : showVacationLayer ? vacationStatus : fatigueStatus;
   const label = expandedSlots || includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
   const fatigueAttribute = fatigueGroup ? `data-fatigue-week="${fatigueGroup}"` : "";
@@ -3660,6 +3687,23 @@ async function claimSupabaseProfile() {
   return profile ? profileFromSupabase(profile) : null;
 }
 
+async function canRequestSupabaseLoginEmail(email) {
+  const client = supabaseClient();
+  if (!client) return false;
+  const { data, error } = await client.rpc("can_request_login_link", { login_email: email });
+  if (error) throw error;
+  return data === true;
+}
+
+async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no BUE profile matches this email yet.") {
+  const client = supabaseClient();
+  currentUser = null;
+  if (client) await client.auth.signOut();
+  clearSupabaseAccountState();
+  showPublicHome();
+  setAuthStatus(message, "error");
+}
+
 function showLoggedInApp(page = "dashboard") {
   selectedViewArea = currentUser.area;
   document.querySelector(".login-screen")?.setAttribute("hidden", "");
@@ -3718,7 +3762,7 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
     try {
       const profile = await claimSupabaseProfile();
       if (!profile) {
-        setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+        await rejectUnmatchedSupabaseLogin();
         return false;
       }
       currentUser = profile;
@@ -3743,10 +3787,26 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
+  let canRequestLink = false;
+  try {
+    canRequestLink = await canRequestSupabaseLoginEmail(email);
+  } catch (error) {
+    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+    return;
+  }
+  if (!canRequestLink) {
+    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+    return;
+  }
+
+  await client.auth.signOut();
+  clearSupabaseAccountState();
+
   const { error } = await client.auth.signInWithOtp({
     email,
     options: {
       emailRedirectTo: supabaseAuthRedirectUrl(),
+      shouldCreateUser: false,
     },
   });
 
@@ -3762,6 +3822,18 @@ async function sendSupabasePasswordReset(email) {
   const client = supabaseClient();
   if (!client) {
     setAuthStatus("Login is not configured yet.", "error");
+    return;
+  }
+
+  let canRequestLink = false;
+  try {
+    canRequestLink = await canRequestSupabaseLoginEmail(email);
+  } catch (error) {
+    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+    return;
+  }
+  if (!canRequestLink) {
+    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
     return;
   }
 
@@ -3786,6 +3858,8 @@ async function loginWithSupabasePassword(email, password) {
 
   let signInResult;
   try {
+    await client.auth.signOut();
+    clearSupabaseAccountState();
     signInResult = await client.auth.signInWithPassword({ email, password });
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error), "error");
@@ -3802,7 +3876,7 @@ async function loginWithSupabasePassword(email, password) {
   try {
     const profile = await claimSupabaseProfile();
     if (!profile) {
-      setAuthStatus("You are signed in, but no BUE profile matches this email yet.", "error");
+      await rejectUnmatchedSupabaseLogin();
       return;
     }
     currentUser = profile;
@@ -4078,6 +4152,183 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
   });
 }
 
+function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
+  const bidder = row.bidders || row;
+  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const dateKeys = row.requested_start_date && row.requested_end_date
+    ? datesBetweenKeys(row.requested_start_date, row.requested_end_date)
+    : [];
+  const range = dateKeys.length ? formatLeaveRangeFromKeys(dateKeys) : "Leave request";
+  const round = Number(row.round_number || currentRoundNumber());
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const days = Number(row.charged_days || 0);
+
+  return {
+    id: `supabase-leave-${row.id}`,
+    supabaseRequestId: row.id,
+    type: "Leave",
+    area,
+    name: controllerName({
+      firstName: bidder.first_name,
+      lastName: bidder.last_name,
+      initials: bidder.initials,
+    }),
+    initials: bidder.initials || "",
+    bidAs: normalizeBidRoleForArea(bidder.bid_role || "CPC", area),
+    seniority: bidder.seniority_rank,
+    priority: Number(row.priority || 0),
+    status: uiStatusFromDatabase(row.status),
+    submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
+    approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    denialReason: row.denial_reason || "",
+    range,
+    days,
+    round,
+    weekUnits: weekKeys.length,
+    weekKeys,
+    notes: row.notes || "",
+    summary: `${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
+  };
+}
+
+function datesBetweenKeys(startKey, endKey) {
+  if (!startKey || !endKey) return [];
+  const keys = [];
+  const cursor = dateFromKey(startKey);
+  const end = dateFromKey(endKey);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return [];
+
+  while (cursor <= end) {
+    keys.push(dateKeyFromDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
+function upsertLeaveRequestsFromDatabase(rows, areaById) {
+  const items = (rows || []).map((row) => supabaseLeaveRequestToIntakeItem(row, areaById));
+  const ids = new Set(items.map((item) => item.supabaseRequestId));
+  intakeQueue = intakeQueue.filter((item) => !item.supabaseRequestId || !ids.has(item.supabaseRequestId));
+  intakeQueue.unshift(...items);
+
+  const personalItems = items.filter((item) => item.initials === currentUser.initials);
+  const personalIds = new Set(personalItems.map((item) => item.supabaseRequestId));
+  for (let index = leaveBids.length - 1; index >= 0; index -= 1) {
+    if (leaveBids[index].supabaseRequestId && personalIds.has(leaveBids[index].supabaseRequestId)) {
+      leaveBids.splice(index, 1);
+    }
+  }
+  personalItems.forEach((item) => {
+    leaveBids.push({
+      supabaseRequestId: item.supabaseRequestId,
+      priority: item.priority || nextLeavePriority(),
+      range: item.range,
+      days: item.days,
+      status: item.status,
+      notes: item.notes,
+      initials: item.initials,
+      area: item.area,
+      round: item.round,
+      weekUnits: item.weekUnits,
+      weekKeys: item.weekKeys,
+    });
+  });
+}
+
+async function ensureSupabaseBidYearId() {
+  if (supabaseState.bidYearId) return supabaseState.bidYearId;
+  const client = supabaseClient();
+  if (!client) return "";
+
+  const { data, error } = await client
+    .from("bid_years")
+    .select("id")
+    .eq("bid_year", BID_YEAR)
+    .single();
+  if (error) throw error;
+  supabaseState.bidYearId = data.id;
+  return data.id;
+}
+
+function leaveRequestRowForSupabase(request, notes = "") {
+  const dateKeys = datesInLeaveRange(request.range);
+  return {
+    bid_year_id: supabaseState.bidYearId,
+    bidder_id: currentUser.supabaseProfileId,
+    round_number: request.round,
+    priority: request.priority,
+    leave_type: "Annual Leave",
+    status: databaseStatusFromUi(request.status),
+    requested_start_date: dateKeys[0],
+    requested_end_date: dateKeys[dateKeys.length - 1],
+    charged_days: request.days,
+    notes,
+    submitted_at: new Date().toISOString(),
+  };
+}
+
+function leaveDateRowsForSupabase(request, leaveRequestId) {
+  const chargedDates = new Set(chargeableLeaveDatesForInitials(request.range, request.initials, request.round));
+  return datesInLeaveRange(request.range).map((key) => ({
+    leave_request_id: leaveRequestId,
+    leave_date: key,
+    charged: chargedDates.has(key),
+    is_rdo: isRdoDateForInitials(key, request.initials),
+    is_holiday: isLegalHolidayDate(key),
+    is_holiday_in_lieu: isHolidayInLieuDate(key),
+  }));
+}
+
+function leaveWeekBucketRowsForSupabase(request, leaveRequestId) {
+  return (request.weekKeys || []).map((weekKey) => {
+    const end = dateFromKey(weekKey);
+    end.setDate(end.getDate() + 6);
+    return {
+      leave_request_id: leaveRequestId,
+      bucket_start_date: weekKey,
+      bucket_end_date: dateKeyFromDate(end),
+    };
+  });
+}
+
+async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return false;
+
+  await ensureSupabaseBidYearId();
+  const requestRows = newRequests.map((request) =>
+    leaveRequestRowForSupabase(request, draftsByRange.get(request.range)?.notes || "")
+  );
+
+  const { data: savedRequests, error } = await client
+    .from("leave_requests")
+    .insert(requestRows)
+    .select("id,bidder_id,round_number,priority,leave_type,status,requested_start_date,requested_end_date,charged_days,notes,submitted_at,reviewed_at,denial_reason,created_at,bidders(first_name,last_name,initials,bid_role,seniority_rank,area_id)");
+  if (error) throw error;
+
+  const dateRows = [];
+  const weekRows = [];
+  (savedRequests || []).forEach((row, index) => {
+    const request = newRequests[index];
+    dateRows.push(...leaveDateRowsForSupabase(request, row.id));
+    weekRows.push(...leaveWeekBucketRowsForSupabase(request, row.id));
+  });
+
+  if (weekRows.length) {
+    const { error: weekError } = await client.from("leave_request_week_buckets").insert(weekRows);
+    if (weekError) throw weekError;
+  }
+  if (dateRows.length) {
+    const { error: dateError } = await client.from("leave_request_dates").insert(dateRows);
+    if (dateError) throw dateError;
+  }
+
+  const areaById = new Map();
+  upsertLeaveRequestsFromDatabase(savedRequests || [], areaById);
+  return true;
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client || supabaseState.loading) return;
@@ -4100,17 +4351,20 @@ async function loadSupabaseReferenceData() {
       rdoLinesResult,
       rdoLineDaysResult,
       leaveSlotsResult,
+      leaveRequestsResult,
     ] = await Promise.all([
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
     ]);
 
-    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult].find((result) => result.error)?.error;
+    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult].find((result) => result.error)?.error;
     if (firstError) throw firstError;
 
+    supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
 
     (holidaysResult.data || []).forEach((holiday) => {
@@ -4119,10 +4373,11 @@ async function loadSupabaseReferenceData() {
 
     upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
     upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+    upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, and ${(leaveSlotsResult.data || []).length} leave slots.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, and ${(leaveRequestsResult.data || []).length} leave requests.`;
   } catch (error) {
     supabaseState.connected = false;
     supabaseState.message = `Supabase data unavailable, using prototype fallback. ${error.message || error}`;
@@ -4479,10 +4734,6 @@ function activeAdminGrant() {
   return nowDate >= start && nowDate <= end ? currentUser.adminGrant : null;
 }
 
-function currentUserHasIntakeSchedule() {
-  return intakeSchedules.some((schedule) => schedule.initials === currentUser.initials);
-}
-
 function activeScheduledIntakeWindow() {
   const nowDate = new Date();
   return intakeSchedules.find((schedule) => {
@@ -4492,7 +4743,9 @@ function activeScheduledIntakeWindow() {
 }
 
 function hasIntakeAccess() {
-  return currentUser.role === "bidding-intake" || Boolean(activeAdminGrant()) || Boolean(activeScheduledIntakeWindow());
+  return hasSystemAdminAccess()
+    || Boolean(activeAdminGrant())
+    || Boolean(activeScheduledIntakeWindow());
 }
 
 function hasSystemAdminAccess() {
@@ -4500,7 +4753,7 @@ function hasSystemAdminAccess() {
 }
 
 function canUseIntakeView() {
-  return hasIntakeAccess() || currentUserHasIntakeSchedule() || hasSystemAdminAccess();
+  return hasIntakeAccess();
 }
 
 function pageForViewMode(mode) {
@@ -6787,6 +7040,7 @@ function renderOverrideEditor(item) {
       <div class="button-row">
         <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Save Admin Edit"}</button>
         ${approveButton}
+        ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
       </div>
     `;
   }
@@ -6813,6 +7067,7 @@ function renderOverrideEditor(item) {
     <div class="button-row">
       <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Save Admin Edit"}</button>
       ${pending ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">${approveLabel}</button>` : ""}
+      ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
     </div>
   `;
 }
@@ -7338,7 +7593,7 @@ function logOut() {
   renderPublicPage();
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   primeAlertSound();
 
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
@@ -7543,7 +7798,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-submit-leave-batch]")) {
-    submitLeaveDraftBatch();
+    await submitLeaveDraftBatch();
     return;
   }
 

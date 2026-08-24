@@ -216,7 +216,7 @@
         </nav>
 
         <div class="side-footer">
-          <button class="ghost-link" type="button" data-help-toggle>Help</button>
+          <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
           <button class="ghost-link" type="button" data-log-out>Log Out</button>
         </div>
       </aside>
@@ -229,11 +229,6 @@
           </div>
           <div class="topbar-user-context" data-user-context>Michael Schoelen · Area A</div>
           <div class="topbar-controls">
-            <div class="view-mode-switch" aria-label="Change app view" data-view-mode-switcher>
-              <button class="active" type="button" data-view-mode="bue">BUE View</button>
-              <button type="button" data-view-mode="intake" data-intake-view-option hidden>Intake View</button>
-              <button type="button" data-view-mode="admin" data-admin-view-option hidden>Admin View</button>
-            </div>
             <label class="view-area-control">
               <span>Change View Area</span>
               <select data-view-area-select aria-label="Change view area">
@@ -626,6 +621,11 @@
                   <button class="active" type="button" data-calendar-mode="combined">Combined</button>
                 </div>
               </div>
+              <div class="calendar-layout-tabs" role="tablist" aria-label="Leave calendar detail">
+                <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="leave">Minimal</button>
+                <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
+              </div>
+              <p class="calendar-layout-description" data-calendar-layout-description="leave">Hover or focus a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong data-calendar-year-label>2027</strong>

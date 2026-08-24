@@ -1110,37 +1110,6 @@ h3 {
   gap: 14px;
 }
 
-.view-mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 56px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  padding: 5px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.view-mode-switch button {
-  min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0 12px;
-  color: var(--muted);
-  background: transparent;
-  font-size: 0.68rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.view-mode-switch button:hover,
-.view-mode-switch button.active {
-  color: var(--deep);
-  border-color: rgba(122, 189, 194, 0.25);
-  background: var(--teal);
-}
-
 .topbar-user-context {
   flex: 1 1 auto;
   min-width: 180px;
@@ -2143,7 +2112,17 @@ input {
   box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
 }
 
-.month-grid .previous-leave-year-day .date-number {
+.month-grid .after-leave-year-day {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
+}
+
+.month-grid .previous-leave-year-day .date-number,
+.month-grid .after-leave-year-day .date-number {
   text-decoration: line-through;
   text-decoration-thickness: 2px;
   text-decoration-color: rgba(51, 65, 85, 0.68);
@@ -3999,6 +3978,21 @@ tr.occupied-row .rdo-tag {
   background: var(--teal);
 }
 
+.leave-picker-grid button.unavailable,
+.leave-picker-grid button.unavailable.in-range,
+.leave-picker-grid button.unavailable.range-edge,
+.leave-picker-grid button.unavailable:hover,
+.leave-picker-grid button:disabled {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(51, 65, 85, 0.68);
+}
+
 .leave-draft-panel {
   display: grid;
   gap: 10px;
@@ -5361,22 +5355,6 @@ body {
   background: #a32172;
 }
 
-.app-main .view-mode-switch {
-  border-color: #d5e2f0;
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.app-main .view-mode-switch button {
-  color: #64748b;
-}
-
-.app-main .view-mode-switch button:hover,
-.app-main .view-mode-switch button.active {
-  color: #172033;
-  border-color: rgba(122, 189, 194, 0.45);
-  background: #7abdc2;
-}
-
 .app-main h2,
 .app-main h3 {
   color: #111827;
@@ -5870,11 +5848,21 @@ body {
 .month-grid .previous-leave-year-day.holiday-day,
 .month-grid .previous-leave-year-day.holiday-in-lieu-day,
 .month-grid .previous-leave-year-day.closed-day,
+.month-grid .after-leave-year-day,
+.month-grid .after-leave-year-day.rdo-day,
+.month-grid .after-leave-year-day.holiday-day,
+.month-grid .after-leave-year-day.holiday-in-lieu-day,
+.month-grid .after-leave-year-day.closed-day,
 .app-main .month-grid .previous-leave-year-day,
 .app-main .month-grid .previous-leave-year-day.rdo-day,
 .app-main .month-grid .previous-leave-year-day.holiday-day,
 .app-main .month-grid .previous-leave-year-day.holiday-in-lieu-day,
-.app-main .month-grid .previous-leave-year-day.closed-day {
+.app-main .month-grid .previous-leave-year-day.closed-day,
+.app-main .month-grid .after-leave-year-day,
+.app-main .month-grid .after-leave-year-day.rdo-day,
+.app-main .month-grid .after-leave-year-day.holiday-day,
+.app-main .month-grid .after-leave-year-day.holiday-in-lieu-day,
+.app-main .month-grid .after-leave-year-day.closed-day {
   cursor: not-allowed;
   color: #64748b;
   background:
