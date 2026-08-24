@@ -586,7 +586,7 @@ const crewSizeByPattern = {
   "F/S": 6,
 };
 
-function fatigueCapacityForLine(line) {
+function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidateGroup = selectedFatigueGroup) {
   const area = line.area || currentUser.area || "Area A";
   const areaLines = rdoLinesForArea(area);
   const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
@@ -595,14 +595,14 @@ function fatigueCapacityForLine(line) {
   return ["A", "B", "C"].map((group) => {
     const areaUsed = areaLines.filter((item) => {
       if (!isCpcLine(item)) return false;
-      if (item.line === selectedLineId) return selectedFatigueGroup === group;
+      if (item.line === candidateLineId) return candidateGroup === group;
       return item.status === "Taken" && item.group === group;
     }).length;
 
     const crewUsed = areaLines.filter((item) => {
       if (!isCpcLine(item)) return false;
       if (item.pattern !== line.pattern) return false;
-      if (item.line === selectedLineId) return selectedFatigueGroup === group;
+      if (item.line === candidateLineId) return candidateGroup === group;
       return item.status === "Taken" && item.group === group;
     }).length;
 
@@ -1590,6 +1590,24 @@ function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
 
+function manualFatigueGroupIsAvailable(line, group) {
+  if (!line || !group) return false;
+  const capacity = fatigueCapacityForLine(line, null, "").find((item) => item.group === group);
+  return Boolean(capacity && isGroupAvailable(capacity));
+}
+
+function manualFatigueGroupOptions(line, selectedGroup) {
+  if (!line) return "";
+
+  return fatigueCapacityForLine(line, null, "").map((item) => {
+    const isSelected = item.group === selectedGroup;
+    const isAvailable = isGroupAvailable(item);
+    const label = `Group ${item.group}`;
+    const capacity = `Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}`;
+    return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isAvailable ? "" : " disabled"}>${label}${isAvailable ? "" : " - Full"} (${capacity})</option>`;
+  }).join("");
+}
+
 function renderManualBidPanel(panel) {
   const values = {
     controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
@@ -1650,6 +1668,20 @@ function renderManualBidPanel(panel) {
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+  const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
+  if (fatigueSelect) {
+    const requestedGroup = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
+    const availableGroups = selectedLine
+      ? fatigueCapacityForLine(selectedLine, null, "")
+        .filter(isGroupAvailable)
+        .map((item) => item.group)
+      : [];
+    const resolvedGroup = availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
+    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup);
+    fatigueSelect.value = resolvedGroup;
+    fatigueSelect.disabled = !resolvedGroup;
+    fatigueSelect.title = resolvedGroup ? "" : "No fatigue groups are available for this line.";
+  }
   const midSelect = panel.querySelector("[data-manual-mid]");
   if (midSelect) {
     if (selectedLine && isMidLineByDesign(selectedLine)) {
@@ -1666,8 +1698,6 @@ function renderManualBidPanel(panel) {
     }
   }
 
-  const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
-  if (fatigueSelect) fatigueSelect.value = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
   const flexSelect = panel.querySelector("[data-manual-flex]");
   if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
   const awsSelect = panel.querySelector("[data-manual-aws]");
@@ -1681,7 +1711,7 @@ function renderManualBidPanel(panel) {
   if (endInput) endInput.value = values.leaveEnd;
   const daysInput = panel.querySelector("[data-manual-leave-days]");
   const roundSelect = panel.querySelector("[data-manual-leave-round]");
-  if (roundSelect) roundSelect.value = ["1", "2", "3", "4"].includes(values.round) ? values.round : String(currentRoundNumber());
+  if (roundSelect) roundSelect.value = ["1", "2", "3", "4", "5", "6"].includes(values.round) ? values.round : String(currentRoundNumber());
   if (daysInput) {
     const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
     const dateInputRange = manualLeaveRangeFromDateInputs(panel);
@@ -1709,6 +1739,10 @@ function submitManualRdoBid(panel, person, area) {
   }
 
   const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
+  if (!manualFatigueGroupIsAvailable(line, fatigueGroup)) {
+    setManualBidStatus(panel, `Group ${fatigueGroup} is full for Line ${line.line}. Choose an available fatigue group before adding this bid.`, "error");
+    return;
+  }
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
@@ -1752,6 +1786,35 @@ function submitManualRdoBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s RDO bid was added to the intake queue.`, "success");
 }
 
+function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
+  if (round === 1) {
+    const usedWeeks = roundOneWeekKeySetForItems([
+      ...leaveRoundUsageForInitials(person.initials, 1),
+      { range, round },
+    ]);
+
+    if (usedWeeks.size > roundOneWeekLimit()) {
+      return `Round 1 can include up to ${roundOneWeekLimit()} bid weeks for ${person.initials}. This request counts as ${weekKeys.length} and would bring ${person.initials} to ${usedWeeks.size}.`;
+    }
+    return "";
+  }
+
+  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, person.initials));
+  if (rdoConflicts.length) {
+    return `Round ${round} leave cannot include ${person.initials}'s RDO: ${formatLeaveConflictDates(rdoConflicts)}.`;
+  }
+
+  const roundLimit = leaveDayLimitForRound(round);
+  const alreadyBidDays = leaveRoundUsageForInitials(person.initials, round)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+  const projectedDays = alreadyBidDays + days;
+  if (projectedDays > roundLimit) {
+    return `Round ${round} can include up to ${roundLimit} charged days for ${person.initials}. This would bring ${person.initials} to ${projectedDays}.`;
+  }
+
+  return "";
+}
+
 function submitManualLeaveBid(panel, person, area) {
   const range = manualLeaveRangeValue(panel);
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
@@ -1777,6 +1840,22 @@ function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const weekUnits = weekKeys.length;
+  const validationMessage = manualLeaveValidationMessage({
+    person,
+    area,
+    range,
+    dateKeys,
+    round,
+    days: enteredDays,
+    weekKeys,
+  });
+  if (validationMessage) {
+    setManualBidStatus(panel, validationMessage, "error");
+    return;
+  }
+
   const capacityMessage = leaveAreaCapacityMessage(area, person.bidAs, [{
     area,
     bidAs: person.bidAs,
@@ -1787,8 +1866,6 @@ function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
-  const weekUnits = weekKeys.length;
   const submittedAt = formatDateTime(new Date());
   const request = {
     id: `manual-leave-${person.initials.toLowerCase()}-${Date.now()}`,
@@ -2031,6 +2108,10 @@ function currentRoundLeaveLimit() {
   return round <= 3 ? 10 : 5;
 }
 
+function leaveDayLimitForRound(round) {
+  return round <= 3 ? 10 : 5;
+}
+
 function currentRoundNumber() {
   return latestAreaRound();
 }
@@ -2062,18 +2143,32 @@ function roundOneWeekKeyForDateKey(key) {
 }
 
 function roundOneWeekKeysForDateKeys(dateKeys) {
-  return [...new Set(dateKeys.map((key) => roundOneWeekKeyForDateKey(key)))].sort();
+  const sortedKeys = [...new Set(dateKeys)].sort();
+  const periodKeys = [];
+  let periodEnd = null;
+
+  sortedKeys.forEach((key) => {
+    const date = dateFromKey(key);
+    if (!periodEnd || date > periodEnd) {
+      const start = dateFromKey(key);
+      periodEnd = new Date(start);
+      periodEnd.setDate(start.getDate() + 6);
+      periodKeys.push(key);
+    }
+  });
+
+  return periodKeys;
+}
+
+function roundOneWeekKeySetForItems(items = []) {
+  const dateKeys = items.flatMap((item) =>
+    isRoundOneLeaveItem(item) ? datesInLeaveRange(item.range) : []
+  );
+  return new Set(roundOneWeekKeysForDateKeys(dateKeys));
 }
 
 function roundOneDraftWeekKeySet(extraItems = []) {
-  return [...leaveDraftQueue, ...extraItems].reduce((weeks, item) => {
-    if (!isRoundOneLeaveItem(item)) return weeks;
-    const itemWeeks = item.weekKeys?.length
-      ? item.weekKeys
-      : roundOneWeekKeysForDateKeys(datesInLeaveRange(item.range));
-    itemWeeks.forEach((week) => weeks.add(week));
-    return weeks;
-  }, new Set());
+  return roundOneWeekKeySetForItems([...leaveDraftQueue, ...extraItems]);
 }
 
 function leaveDraftTotalDays() {
@@ -2113,6 +2208,37 @@ function leaveCommittedItems() {
   return leaveBids
     .filter((item) => ["Approved", "Pending"].includes(item.status))
     .map((item) => ({ ...item, round: leaveRoundForItem(item) }));
+}
+
+function activeLeaveItemsForInitials(initials, extraItems = []) {
+  const targetInitials = String(initials || currentUser.initials).trim().toUpperCase();
+  const items = [
+    ...leaveBids,
+    ...intakeQueue.filter((item) => item.type === "Leave"),
+    ...extraItems,
+  ];
+  const byRequest = new Map();
+
+  items.forEach((item) => {
+    if (!["Approved", "Pending"].includes(item.status || "Pending")) return;
+    const itemInitials = String(item.initials || currentUser.initials).trim().toUpperCase();
+    if (itemInitials !== targetInitials) return;
+    const round = leaveRoundForItem(item);
+    const key = `${itemInitials}|${round}|${item.range}|${item.status || "Pending"}`;
+    byRequest.set(key, {
+      ...item,
+      initials: itemInitials,
+      round,
+      status: item.status || "Pending",
+    });
+  });
+
+  return [...byRequest.values()];
+}
+
+function leaveRoundUsageForInitials(initials, round, extraItems = []) {
+  return activeLeaveItemsForInitials(initials, extraItems)
+    .filter((item) => leaveRoundForItem(item) === round);
 }
 
 function leaveItemArea(item) {
@@ -2371,7 +2497,7 @@ function addOrUpdateLeaveSubmission() {
       setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This would use ${combinedWeeks}.`, "error");
       return;
     }
-    var newRoundOneWeeks = weekKeys.filter((week) => !existingWeeks.has(week)).length;
+    var newRoundOneWeeks = Math.max(0, combinedWeeks - existingWeeks.size);
   } else {
     const currentTotal = leaveDraftTotalDays();
     if (currentTotal + days > currentRoundLeaveLimit()) {
