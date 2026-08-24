@@ -4556,6 +4556,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-form option.manual-rdo-line-taken,
+.schedule-form option.manual-fatigue-group-full,
 .schedule-form option:disabled {
   color: #94a3b8;
   text-decoration: line-through;
