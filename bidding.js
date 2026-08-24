@@ -23,7 +23,6 @@ const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
 const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
-const BID_LEAVE_YEAR_CONTINUATION_DAYS = Number(BID_LEAVE_YEAR_END_KEY.slice(-2));
 const ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -1722,8 +1721,8 @@ function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
     return;
   }
-  if (dateKeys.some((key) => key < BID_LEAVE_YEAR_START_KEY)) {
-    setManualBidStatus(panel, "Leave bids must start on Jan 10, 2027 or later.", "error");
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setManualBidStatus(panel, "Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
     return;
   }
 
@@ -1964,8 +1963,9 @@ function renderLeaveDatePicker() {
     const key = dateKey(leavePickerYear, leavePickerMonthIndex + 1, day);
     const isInRange = selectedKeys.has(key);
     const isEdge = isLeaveBuilderRangeEdge(key);
+    const isUnavailable = !isBidLeaveYearDate(key);
     cells.push(`
-      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""}" type="button" data-leave-picker-date="${key}" aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}">
+      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""} ${isUnavailable ? "unavailable" : ""}" type="button" ${isUnavailable ? "disabled" : `data-leave-picker-date="${key}"`} aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}${isUnavailable ? ": leave bidding unavailable" : ""}">
         ${day}
       </button>
     `);
@@ -2311,6 +2311,11 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const weekUnits = weekKeys.length;
@@ -2402,6 +2407,11 @@ function previewLeaveSubmission() {
 
   if (!dateKeys.length) {
     setLeaveBuilderStatus("Enter a date range before previewing leave.", "error");
+    return;
+  }
+
+  if (invalidLeaveYearDateKeys(dateKeys).length) {
+    setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
     return;
   }
 
@@ -2909,6 +2919,14 @@ function isRdoDateForInitials(key, initials = currentUser.initials) {
   return rdoWeekdaysForLine(line).has(dateFromKey(key).getDay());
 }
 
+function isBidLeaveYearDate(key) {
+  return key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY;
+}
+
+function invalidLeaveYearDateKeys(dateKeys) {
+  return dateKeys.filter((key) => !isBidLeaveYearDate(key));
+}
+
 function calendarActiveDate() {
   const activeDate = dateFromKey(selectedLeaveDateKey);
   const day = Math.min(activeDate.getDate(), new Date(displayedCalendarYear, activeDate.getMonth() + 1, 0).getDate());
@@ -3021,14 +3039,7 @@ function makeCalendar(targetId) {
       expandedSlots,
       context,
     }))
-    .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
-      showRdo,
-      showPersonalLeave,
-      area,
-      deferSlotTooltip: false,
-      expandedSlots,
-      context,
-    });
+    .join("");
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -3058,34 +3069,6 @@ function renderMonthCard(monthIndex, year, options = {}) {
       <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
-  `;
-}
-
-function renderLeaveYearContinuation(year, options = {}) {
-  if (year !== BID_YEAR) return "";
-  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false, context = null } = options;
-  const continuationYear = BID_YEAR + 1;
-  const cells = [];
-
-  for (let day = 1; day <= BID_LEAVE_YEAR_CONTINUATION_DAYS; day += 1) {
-    cells.push(renderCalendarDay(0, day, true, continuationYear, {
-      showRdo,
-      showPersonalLeave,
-      area,
-      deferSlotTooltip,
-      expandedSlots: options.expandedSlots,
-      context,
-    }));
-  }
-
-  return `
-    <section class="leave-year-continuation" aria-label="${BID_YEAR} leave year continues through January 8, ${continuationYear}">
-      <div class="leave-year-continuation-copy">
-        <strong>Jan ${continuationYear}</strong>
-        <span>Leave year ends Jan 8</span>
-      </div>
-      <div class="month-grid leave-year-continuation-days">${cells.join("")}</div>
-    </section>
   `;
 }
 
@@ -3131,23 +3114,25 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const weekday = date.getDay();
   const key = dateKey(year, monthIndex + 1, day);
   const isPreviousLeaveYear = key < BID_LEAVE_YEAR_START_KEY;
-  const fatigueGroup = isPreviousLeaveYear || !showFatigueLayer ? "" : context ? cachedFatigueGroupForDate(key, context) : fatigueGroupForDate(key);
+  const isAfterLeaveYear = key > BID_LEAVE_YEAR_END_KEY;
+  const isInsideLeaveYear = !isPreviousLeaveYear && !isAfterLeaveYear;
+  const fatigueGroup = !isInsideLeaveYear || !showFatigueLayer ? "" : context ? cachedFatigueGroupForDate(key, context) : fatigueGroupForDate(key);
   const fatigueClass = groupClass(fatigueGroup);
   const nextFatigueGroup = weekday === 6 ? nextFatigueGroupAfter(fatigueGroup) : "";
   const nextFatigueClass = groupClass(nextFatigueGroup);
   const isFatigueWeekStart = fatigueClass && (weekday === 0 || day === 1);
   const rdoWeekdays = context ? context.rdoWeekdays : selectedRdoWeekdays();
-  const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && rdoWeekdays.has(weekday);
-  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR
+  const isRdo = showVacationLayer && isInsideLeaveYear && showRdo && rdoWeekdays.has(weekday);
+  const leaveStatus = showVacationLayer && isInsideLeaveYear && showPersonalLeave
     ? context ? cachedPersonalLeaveDateStatus(key, context) : personalLeaveDateStatus(key)
     : "";
-  const canShowLeaveState = showVacationLayer && !isRdo && !isPreviousLeaveYear;
+  const canShowLeaveState = showVacationLayer && !isRdo && isInsideLeaveYear;
   const isApprovedLeave = leaveStatus === "approved" && canShowLeaveState;
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
   const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (
     context ? context.draftDates.has(key) || context.previewDates.has(key) : isDraftLeaveDate(key) || isLeavePreviewRangeDate(key)
   );
-  const holidayKind = isPreviousLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
+  const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
   const isClosed = canShowLeaveState && (
@@ -3156,7 +3141,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       : isLeaveSlotsFull(key, options.area)
   );
   const expandedSlots = Boolean(options.expandedSlots);
-  const hasDetail = !isPreviousLeaveYear && (showVacationLayer || expandedSlots);
+  const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
     ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
@@ -3164,6 +3149,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const className = [
     holidayKind?.className || "",
     isPreviousLeaveYear ? "previous-leave-year-day" : "",
+    isAfterLeaveYear ? "after-leave-year-day" : "",
     isDraftLeave ? "draft-leave-day" : "",
     isPendingLeave ? "pending-leave-day" : "",
     isApprovedLeave ? "leave-day" : "",
@@ -3181,6 +3167,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
+    : isAfterLeaveYear
+      ? "2027 leave year ended Jan 8, 2028 - leave bidding unavailable"
     : showVacationLayer ? vacationStatus : fatigueStatus;
   const label = expandedSlots || includeMonth ? `${monthNames[monthIndex].slice(0, 3)} ${day}` : day;
   const fatigueAttribute = fatigueGroup ? `data-fatigue-week="${fatigueGroup}"` : "";

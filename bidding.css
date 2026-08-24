@@ -2112,7 +2112,17 @@ input {
   box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
 }
 
-.month-grid .previous-leave-year-day .date-number {
+.month-grid .after-leave-year-day {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.32);
+}
+
+.month-grid .previous-leave-year-day .date-number,
+.month-grid .after-leave-year-day .date-number {
   text-decoration: line-through;
   text-decoration-thickness: 2px;
   text-decoration-color: rgba(51, 65, 85, 0.68);
@@ -3966,6 +3976,21 @@ tr.occupied-row .rdo-tag {
 .leave-picker-grid button.range-edge {
   color: #ffffff;
   background: var(--teal);
+}
+
+.leave-picker-grid button.unavailable,
+.leave-picker-grid button.unavailable.in-range,
+.leave-picker-grid button.unavailable.range-edge,
+.leave-picker-grid button.unavailable:hover,
+.leave-picker-grid button:disabled {
+  cursor: not-allowed;
+  color: #64748b;
+  background:
+    repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
+    #e2e8f0;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(51, 65, 85, 0.68);
 }
 
 .leave-draft-panel {
@@ -5823,11 +5848,21 @@ body {
 .month-grid .previous-leave-year-day.holiday-day,
 .month-grid .previous-leave-year-day.holiday-in-lieu-day,
 .month-grid .previous-leave-year-day.closed-day,
+.month-grid .after-leave-year-day,
+.month-grid .after-leave-year-day.rdo-day,
+.month-grid .after-leave-year-day.holiday-day,
+.month-grid .after-leave-year-day.holiday-in-lieu-day,
+.month-grid .after-leave-year-day.closed-day,
 .app-main .month-grid .previous-leave-year-day,
 .app-main .month-grid .previous-leave-year-day.rdo-day,
 .app-main .month-grid .previous-leave-year-day.holiday-day,
 .app-main .month-grid .previous-leave-year-day.holiday-in-lieu-day,
-.app-main .month-grid .previous-leave-year-day.closed-day {
+.app-main .month-grid .previous-leave-year-day.closed-day,
+.app-main .month-grid .after-leave-year-day,
+.app-main .month-grid .after-leave-year-day.rdo-day,
+.app-main .month-grid .after-leave-year-day.holiday-day,
+.app-main .month-grid .after-leave-year-day.holiday-in-lieu-day,
+.app-main .month-grid .after-leave-year-day.closed-day {
   cursor: not-allowed;
   color: #64748b;
   background:
