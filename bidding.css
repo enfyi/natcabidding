@@ -3681,6 +3681,131 @@ tr.occupied-row .rdo-tag {
   line-height: 1.35;
 }
 
+.editable-rule-card {
+  display: grid;
+  gap: 12px;
+}
+
+.editable-rule-card .panel-header {
+  margin-bottom: 0;
+}
+
+.rule-editor-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.rule-editor-heading strong,
+.round-rule-row > span {
+  color: #0f172a;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.rule-editor-heading small {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.round-rule-editor,
+.round-rule-list,
+.round-rule-row {
+  display: grid;
+  gap: 10px;
+}
+
+.round-rule-row {
+  border-top: 1px solid #dce6f0;
+  padding-top: 10px;
+}
+
+.round-rule-row label {
+  display: grid;
+  gap: 5px;
+  color: #47627f;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.round-rule-row input,
+.round-rule-row textarea,
+.rule-editor-row input {
+  width: 100%;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #172033;
+  background: #ffffff;
+}
+
+.round-rule-row textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+
+.editable-rule-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.editable-rule-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  border-top: 1px solid #dce6f0;
+  padding: 10px 0;
+}
+
+.editable-rule-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.editable-rule-item > span {
+  grid-column: 2;
+  color: #496681;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.editable-rule-item.empty-rule {
+  grid-template-columns: 1fr;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.editable-rule-item.empty-rule::before {
+  content: "";
+}
+
+.rule-actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rule-actions .secondary-action.small,
+.round-rule-row .secondary-action.small,
+.rule-editor-row .secondary-action.small {
+  min-height: 31px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+}
+
+.rule-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 #leave-page .allowance-card dl div {
   gap: 8px;
   padding: 7px 0;

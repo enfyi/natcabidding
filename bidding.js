@@ -23,7 +23,7 @@ const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
 const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
-const ROUND_RULES = {
+const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
     detail: "Leave may include up to 2 bid weeks.",
@@ -49,6 +49,44 @@ const ROUND_RULES = {
     detail: "Leave may include up to 5 charged days.",
   },
 };
+const DEFAULT_APPROVAL_RULES = [
+  "Approve applies the BUE initials automatically.",
+  "Filled leave days require an explicit override before approval.",
+  "Overrides require an intake user and are logged.",
+  "GL bidders do not populate public floor templates.",
+  "Developmentals bid against developmental slots.",
+  "BUEs may not bid before the start of their Bid Window.",
+  "BUEs may bid after their window has closed when bidding during Intake Hours: 7a-7p Monday-Sunday, excluding holidays.",
+  "Once the round is closed, BUEs may not make bids or adjustments for that round.",
+  "BUEs may not make changes once they have bid and their window is closed. Changes are only allowed during the change period.",
+];
+const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
+const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+
+function storedJsonValue(key, fallback) {
+  try {
+    const raw = window.localStorage?.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function storeJsonValue(key, value) {
+  try {
+    window.localStorage?.setItem(key, JSON.stringify(value));
+  } catch (_error) {
+    // Prototype-only persistence can safely no-op when storage is unavailable.
+  }
+}
+
+const storedRoundRules = storedJsonValue(ROUND_RULES_STORAGE_KEY, null);
+const storedApprovalRules = storedJsonValue(APPROVAL_RULES_STORAGE_KEY, null);
+let roundRules = {
+  ...DEFAULT_ROUND_RULES,
+  ...(storedRoundRules && typeof storedRoundRules === "object" ? storedRoundRules : {}),
+};
+let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -1619,6 +1657,13 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
   }).join("");
 }
 
+function rdoLineOptionLabel(line) {
+  const status = line.status === "Taken"
+    ? ` · ${line.cpc || "Taken"} · unavailable`
+    : " · Open";
+  return `Line ${line.line} · ${line.pattern}${status}`;
+}
+
 function renderManualBidPanel(panel) {
   const values = {
     controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
@@ -1670,9 +1715,8 @@ function renderManualBidPanel(panel) {
     const openLines = areaLines.filter((line) => line.status !== "Taken");
     lineSelect.innerHTML = areaLines.map((line) => {
       const isTaken = line.status === "Taken";
-      const status = isTaken ? ` · ${line.cpc || "Taken"} · unavailable` : " · Open";
       const selected = !isTaken && line.line === values.line ? " selected" : "";
-      return `<option class="${isTaken ? "manual-rdo-line-taken" : ""}" value="${line.line}"${selected}${isTaken ? " disabled" : ""}>Line ${line.line} · ${line.pattern}${status}</option>`;
+      return `<option class="${isTaken ? "manual-rdo-line-taken" : ""}" value="${line.line}"${selected}${isTaken ? " disabled" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`;
     }).join("");
     lineSelect.value = openLines.some((line) => line.line === values.line) ? values.line : openLines[0]?.line || "";
     lineSelect.disabled = !openLines.length;
@@ -2146,7 +2190,7 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  return ROUND_RULES[round] || {
+  return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
   };
@@ -5648,6 +5692,162 @@ function renderRoundRuleSummary(date = new Date()) {
   setText("[data-round-rule-detail]", `${rule.detail} ${phaseDetail}`);
 }
 
+function roundRuleNumbers() {
+  return Object.keys(roundRules)
+    .map((round) => Number(round))
+    .filter((round) => Number.isFinite(round))
+    .sort((first, second) => first - second);
+}
+
+function saveApprovalRules() {
+  storeJsonValue(APPROVAL_RULES_STORAGE_KEY, approvalRules);
+}
+
+function saveRoundRules() {
+  storeJsonValue(ROUND_RULES_STORAGE_KEY, roundRules);
+}
+
+function renderRoundRuleSummaryList() {
+  document.querySelectorAll("[data-round-rules-summary]").forEach((list) => {
+    list.innerHTML = roundRuleNumbers().map((round) => {
+      const rule = roundRuleForRound(round);
+      return `<div><dt>Round ${round} Maximum</dt><dd>${escapeHtml(rule.label)}</dd></div>`;
+    }).join("");
+  });
+}
+
+function renderRoundRuleEditor() {
+  const editor = document.querySelector("[data-round-rule-editor]");
+  if (!editor) return;
+
+  editor.innerHTML = `
+    <div class="rule-editor-heading">
+      <strong>Edit Round Rules</strong>
+      <small>Update the wording shown for each bidding round.</small>
+    </div>
+    <div class="round-rule-list">
+      ${roundRuleNumbers().map((round) => {
+        const rule = roundRuleForRound(round);
+        return `
+          <div class="round-rule-row" data-round-rule-row="${round}">
+            <span>Round ${round}</span>
+            <label>
+              Limit
+              <input type="text" data-round-rule-label="${round}" value="${escapeHtml(rule.label)}">
+            </label>
+            <label>
+              Rule
+              <textarea data-round-rule-detail="${round}" rows="2">${escapeHtml(rule.detail)}</textarea>
+            </label>
+            <button class="secondary-action small" type="button" data-save-round-rule="${round}">Save</button>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderApprovalRuleEditor() {
+  const list = document.querySelector("[data-approval-rule-list]");
+  if (!list) return;
+
+  list.innerHTML = approvalRules.length
+    ? approvalRules.map((rule, index) => `
+      <li class="editable-rule-item">
+        <span>${escapeHtml(rule)}</span>
+        <div class="rule-actions">
+          <button class="secondary-action small" type="button" data-approval-rule-edit="${index}">Edit</button>
+          <button class="secondary-action small" type="button" data-approval-rule-move="${index}" data-direction="up" ${index === 0 ? "disabled" : ""}>Up</button>
+          <button class="secondary-action small" type="button" data-approval-rule-move="${index}" data-direction="down" ${index === approvalRules.length - 1 ? "disabled" : ""}>Down</button>
+          <button class="secondary-action small danger" type="button" data-approval-rule-remove="${index}">Remove</button>
+        </div>
+      </li>
+    `).join("")
+    : '<li class="editable-rule-item empty-rule">No approval rules have been added yet.</li>';
+}
+
+function renderRuleEditors() {
+  renderRoundRuleSummaryList();
+  renderRoundRuleEditor();
+  renderApprovalRuleEditor();
+}
+
+function resetApprovalRuleInput() {
+  const input = document.querySelector("[data-approval-rule-input]");
+  const button = document.querySelector("[data-add-approval-rule]");
+  if (input) {
+    input.value = "";
+    delete input.dataset.editingIndex;
+  }
+  if (button) button.textContent = "Add";
+}
+
+function saveApprovalRuleFromInput() {
+  const input = document.querySelector("[data-approval-rule-input]");
+  if (!input) return;
+
+  const value = input.value.trim();
+  if (!value) return;
+
+  const editingIndex = Number(input.dataset.editingIndex);
+  if (Number.isInteger(editingIndex) && approvalRules[editingIndex]) {
+    approvalRules[editingIndex] = value;
+  } else {
+    approvalRules.push(value);
+  }
+
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleEditor();
+}
+
+function editApprovalRule(index) {
+  const input = document.querySelector("[data-approval-rule-input]");
+  const button = document.querySelector("[data-add-approval-rule]");
+  if (!input || !approvalRules[index]) return;
+
+  input.value = approvalRules[index];
+  input.dataset.editingIndex = String(index);
+  if (button) button.textContent = "Save";
+  input.focus();
+}
+
+function moveApprovalRule(index, direction) {
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (!approvalRules[index] || nextIndex < 0 || nextIndex >= approvalRules.length) return;
+
+  const nextRule = approvalRules[nextIndex];
+  approvalRules[nextIndex] = approvalRules[index];
+  approvalRules[index] = nextRule;
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleEditor();
+}
+
+function removeApprovalRule(index) {
+  if (!approvalRules[index]) return;
+
+  approvalRules.splice(index, 1);
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleEditor();
+}
+
+function saveRoundRule(round) {
+  const labelInput = document.querySelector(`[data-round-rule-label="${round}"]`);
+  const detailInput = document.querySelector(`[data-round-rule-detail="${round}"]`);
+  if (!labelInput || !detailInput) return;
+
+  const label = labelInput.value.trim();
+  const detail = detailInput.value.trim();
+  if (!label || !detail) return;
+
+  roundRules[round] = { label, detail };
+  saveRoundRules();
+  renderRoundRuleSummary();
+  renderRoundRuleSummaryList();
+}
+
 function areaLeaveSlotTotals() {
   return Object.values(leaveSlotMap()).reduce((totals, day) => {
     const cpcFilled = (day.cpc || []).length;
@@ -7201,7 +7401,7 @@ function renderOverrideEditor(item) {
     return `
       <label>Line
         <select data-override-line>
-          ${rdoLinesForArea(item.area).map((line) => `<option value="${line.line}" ${line.line === item.line ? "selected" : ""}>Line ${line.line}</option>`).join("")}
+          ${rdoLinesForArea(item.area).map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
         </select>
       </label>
       <label>Fatigue Group
@@ -7856,6 +8056,7 @@ function renderApp() {
   renderLeaveDraftQueue();
   renderLeaveAllowanceSummary();
   renderRoundRuleSummary();
+  renderRuleEditors();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
   renderLeaveSlotBoard();
@@ -7885,6 +8086,38 @@ function logOut() {
 
 document.addEventListener("click", async (event) => {
   primeAlertSound();
+
+  if (event.target.closest("[data-add-approval-rule]")) {
+    saveApprovalRuleFromInput();
+    return;
+  }
+
+  const approvalRuleEdit = event.target.closest("[data-approval-rule-edit]");
+  if (approvalRuleEdit) {
+    editApprovalRule(Number(approvalRuleEdit.dataset.approvalRuleEdit));
+    return;
+  }
+
+  const approvalRuleMove = event.target.closest("[data-approval-rule-move]");
+  if (approvalRuleMove) {
+    moveApprovalRule(
+      Number(approvalRuleMove.dataset.approvalRuleMove),
+      approvalRuleMove.dataset.direction,
+    );
+    return;
+  }
+
+  const approvalRuleRemove = event.target.closest("[data-approval-rule-remove]");
+  if (approvalRuleRemove) {
+    removeApprovalRule(Number(approvalRuleRemove.dataset.approvalRuleRemove));
+    return;
+  }
+
+  const roundRuleSave = event.target.closest("[data-save-round-rule]");
+  if (roundRuleSave) {
+    saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule));
+    return;
+  }
 
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
@@ -8319,6 +8552,12 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeLeaveSlotModal();
+  }
+
+  if (event.key === "Enter" && event.target.closest("[data-approval-rule-input]")) {
+    event.preventDefault();
+    saveApprovalRuleFromInput();
+    return;
   }
 
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
