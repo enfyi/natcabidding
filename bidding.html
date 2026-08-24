@@ -736,14 +736,7 @@
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
                   <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
                 </div>
-                <dl>
-                  <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
-                  <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
-                  <div><dt>Round 3 Maximum</dt><dd>10 days</dd></div>
-                  <div><dt>Round 4 Maximum</dt><dd>5 days</dd></div>
-                  <div><dt>Round 5 Maximum</dt><dd>5 days</dd></div>
-                  <div><dt>Round 6 Maximum</dt><dd>5 days</dd></div>
-                </dl>
+                <dl data-round-rules-summary></dl>
               </section>
               <section class="panel">
                 <h3>Round Validation</h3>
@@ -840,22 +833,26 @@
               <div class="intake-queue" id="intake-queue"></div>
             </section>
             <aside class="intake-info-stack">
-              <section class="panel">
+              <section class="panel editable-rule-card">
                 <h3 data-round-rule-heading>Round 1 Rules</h3>
                 <div class="current-round-rule">
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
                   <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
                 </div>
+                <div class="round-rule-editor" data-round-rule-editor></div>
               </section>
-              <section class="panel">
-                <h3>Approval Rules</h3>
-                <ul class="plain-list success-list">
-                  <li>Approve applies the BUE initials automatically.</li>
-                  <li>Filled leave days require an explicit override before approval.</li>
-                  <li>Overrides require an intake user and are logged.</li>
-                  <li>GL bidders do not populate public floor templates.</li>
-                  <li>Developmentals bid against developmental slots.</li>
-                </ul>
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Add, edit, remove, or reorder intake guidance.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list editable-rule-list" data-approval-rule-list></ul>
+                <div class="rule-editor-row">
+                  <input type="text" data-approval-rule-input placeholder="Add approval rule">
+                  <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
+                </div>
               </section>
               <section class="panel help-summary-card">
                 <div class="panel-header compact">
