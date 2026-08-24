@@ -806,11 +806,47 @@
                   <h2>Intake Queue</h2>
                   <p>Review submitted bids before they are applied to bid lines or leave slots.</p>
                 </div>
+                <div class="intake-search-tools" aria-label="Search intake queue">
+                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
+                  <div class="intake-filter-row">
+                    <select data-intake-filter="status" aria-label="Filter intake by status">
+                      <option value="all">All Statuses</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Denied">Denied</option>
+                    </select>
+                    <select data-intake-filter="type" aria-label="Filter intake by bid type">
+                      <option value="all">All Types</option>
+                      <option value="RDO Line">RDO</option>
+                      <option value="Leave">Leave</option>
+                    </select>
+                    <select data-intake-filter="area" aria-label="Filter intake by area">
+                      <option value="all">All Areas</option>
+                    </select>
+                    <select data-intake-filter="round" aria-label="Filter intake by round">
+                      <option value="all">All Rounds</option>
+                      <option value="1">Round 1</option>
+                      <option value="2">Round 2</option>
+                      <option value="3">Round 3</option>
+                      <option value="4">Round 4</option>
+                      <option value="5">Round 5</option>
+                      <option value="6">Round 6</option>
+                    </select>
+                  </div>
+                </div>
                 <span class="pill open"><b data-intake-count>0</b> pending</span>
               </div>
+              <div class="intake-detail-panel" data-intake-detail-panel hidden></div>
               <div class="intake-queue" id="intake-queue"></div>
             </section>
             <aside class="intake-info-stack">
+              <section class="panel">
+                <h3 data-round-rule-heading>Round 1 Rules</h3>
+                <div class="current-round-rule">
+                  <strong data-round-rule-limit>1 or 2 weeks</strong>
+                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
+                </div>
+              </section>
               <section class="panel">
                 <h3>Approval Rules</h3>
                 <ul class="plain-list success-list">
@@ -886,6 +922,10 @@
                         <option value="B">Group B</option>
                         <option value="C">Group C</option>
                       </select>
+                    </label>
+                    <label class="manual-override-check wide">
+                      <input type="checkbox" data-manual-fatigue-override />
+                      Override full fatigue group
                     </label>
                     <label>
                       Flex
@@ -1207,6 +1247,10 @@
                         <option value="B">Group B</option>
                         <option value="C">Group C</option>
                       </select>
+                    </label>
+                    <label class="manual-override-check wide">
+                      <input type="checkbox" data-manual-fatigue-override />
+                      Override full fatigue group
                     </label>
                     <label>
                       Flex
