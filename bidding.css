@@ -3405,7 +3405,13 @@ tr.occupied-row .rdo-tag {
 }
 
 .intake-workspace {
-  grid-template-columns: minmax(620px, 1fr) 360px;
+  grid-template-columns: minmax(520px, 0.9fr) 280px 360px;
+}
+
+.intake-info-stack {
+  display: grid;
+  align-content: start;
+  gap: 16px;
 }
 
 .intake-queue {
@@ -3415,12 +3421,12 @@ tr.occupied-row .rdo-tag {
 
 .intake-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 210px;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 12px;
   align-items: start;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
+  padding: 12px;
   background: rgba(255, 255, 255, 0.035);
 }
 
@@ -4571,7 +4577,8 @@ tr.occupied-row .rdo-tag {
   grid-column: 1 / -1;
 }
 
-.manual-bid-card .primary-action {
+.manual-bid-card .primary-action,
+.manual-leave-request-card .primary-action {
   width: 100%;
 }
 
@@ -6680,11 +6687,18 @@ body {
 
   .dashboard-grid,
   .workspace-grid,
-  .intake-workspace,
   #leave-page .workspace-grid,
   .bottom-grid,
   .public-calendar-shell {
     grid-template-columns: 1fr;
+  }
+
+  .intake-workspace {
+    grid-template-columns: minmax(560px, 1fr) 320px;
+  }
+
+  .intake-info-stack {
+    grid-column: 1 / -1;
   }
 
   .public-calendar-panel {
@@ -6781,6 +6795,7 @@ body {
   }
 
   .metric-grid,
+  .intake-workspace,
   .year-calendar,
   .year-calendar.large,
   .public-year-calendar,
@@ -6799,6 +6814,10 @@ body {
 
   .bid-readiness-list {
     grid-template-columns: 1fr;
+  }
+
+  .intake-info-stack {
+    grid-column: auto;
   }
 
   .public-topbar {

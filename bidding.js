@@ -1573,6 +1573,19 @@ function setManualBidStatus(panel, message, status = "info") {
   target.dataset.status = status;
 }
 
+function manualLeaveRangeFromDateInputs(panel) {
+  const startValue = panel.querySelector("[data-manual-leave-start]")?.value || "";
+  const endValue = panel.querySelector("[data-manual-leave-end]")?.value || "";
+  if (!startValue && !endValue) return "";
+
+  const keys = [...new Set([startValue || endValue, endValue || startValue].sort())];
+  return formatLeaveRangeFromKeys(keys);
+}
+
+function manualLeaveRangeValue(panel) {
+  return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
+}
+
 function renderManualBidPanel(panel) {
   const values = {
     controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
@@ -1584,6 +1597,8 @@ function renderManualBidPanel(panel) {
     aws: panel.querySelector("[data-manual-aws]")?.value || selectedAwsPreference || "No",
     mid: panel.querySelector("[data-manual-mid]")?.value || selectedMidPreference || "No",
     range: panel.querySelector("[data-manual-leave-range]")?.value || "",
+    leaveStart: panel.querySelector("[data-manual-leave-start]")?.value || "",
+    leaveEnd: panel.querySelector("[data-manual-leave-end]")?.value || "",
     days: panel.querySelector("[data-manual-leave-days]")?.value || "",
     round: panel.querySelector("[data-manual-leave-round]")?.value || String(currentRoundNumber()),
     notes: panel.querySelector("[data-manual-leave-notes]")?.value || "",
@@ -1648,10 +1663,19 @@ function renderManualBidPanel(panel) {
 
   const rangeInput = panel.querySelector("[data-manual-leave-range]");
   if (rangeInput) rangeInput.value = values.range;
+  const startInput = panel.querySelector("[data-manual-leave-start]");
+  if (startInput) startInput.value = values.leaveStart;
+  const endInput = panel.querySelector("[data-manual-leave-end]");
+  if (endInput) endInput.value = values.leaveEnd;
   const daysInput = panel.querySelector("[data-manual-leave-days]");
-  if (daysInput) daysInput.value = values.days;
   const roundSelect = panel.querySelector("[data-manual-leave-round]");
   if (roundSelect) roundSelect.value = ["1", "2", "3", "4"].includes(values.round) ? values.round : String(currentRoundNumber());
+  if (daysInput) {
+    const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
+    const dateInputRange = manualLeaveRangeFromDateInputs(panel);
+    const autoDays = dateInputRange ? chargeableLeaveDatesForInitials(dateInputRange, controllerSelect?.value || values.controller, resolvedRound).length : "";
+    daysInput.value = daysInput.hasAttribute("data-manual-leave-days-auto") ? autoDays : values.days;
+  }
   const notesInput = panel.querySelector("[data-manual-leave-notes]");
   if (notesInput) notesInput.value = values.notes;
 }
@@ -1713,7 +1737,7 @@ function submitManualRdoBid(panel, person, area) {
 }
 
 function submitManualLeaveBid(panel, person, area) {
-  const range = panel.querySelector("[data-manual-leave-range]")?.value.trim() || "";
+  const range = manualLeaveRangeValue(panel);
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
   const dateKeys = datesInLeaveRange(range);
@@ -8099,6 +8123,13 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  const manualPanel = event.target.closest("[data-manual-bid-panel]");
+  const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
+  if (manualPanel && manualLeaveDateField) {
+    renderManualBidPanel(manualPanel);
+    return;
+  }
+
   const publicFilter = event.target.closest("[data-public-rdo-filter]");
   if (publicFilter?.dataset.publicRdoFilter === "search") {
     publicRdoFilters.search = publicFilter.value;
@@ -8154,7 +8185,7 @@ document.addEventListener("change", (event) => {
     return;
   }
 
-  const manualReactiveField = event.target.closest("[data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line]");
+  const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);
     return;
