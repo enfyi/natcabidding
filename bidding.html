@@ -810,6 +810,28 @@
               </div>
               <div class="intake-queue" id="intake-queue"></div>
             </section>
+            <aside class="intake-info-stack">
+              <section class="panel">
+                <h3>Approval Rules</h3>
+                <ul class="plain-list success-list">
+                  <li>Approve applies the BUE initials automatically.</li>
+                  <li>Filled leave days require an explicit override before approval.</li>
+                  <li>Overrides require an intake user and are logged.</li>
+                  <li>GL bidders do not populate public floor templates.</li>
+                  <li>Developmentals bid against developmental slots.</li>
+                </ul>
+              </section>
+              <section class="panel help-summary-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Help Messages</h3>
+                    <p>Saved BUE conversations for intake follow-up.</p>
+                  </div>
+                  <span class="pill open"><b data-help-thread-count>0</b> open</span>
+                </div>
+                <div class="help-thread-summary" data-help-thread-summary></div>
+              </section>
+            </aside>
             <aside class="right-stack">
               <section class="panel" id="override-panel" hidden>
                 <div class="panel-header compact">
@@ -911,25 +933,55 @@
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
-              <section class="panel help-summary-card">
+              <section class="panel manual-leave-request-card" data-manual-bid-panel>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Help Messages</h3>
-                    <p>Saved BUE conversations for intake follow-up.</p>
+                    <h3>Requested Leave Dates</h3>
+                    <p>Submit requested leave dates on behalf of any controller.</p>
                   </div>
-                  <span class="pill open"><b data-help-thread-count>0</b> open</span>
                 </div>
-                <div class="help-thread-summary" data-help-thread-summary></div>
-              </section>
-              <section class="panel">
-                <h3>Approval Rules</h3>
-                <ul class="plain-list success-list">
-                  <li>Approve applies the BUE initials automatically.</li>
-                  <li>Filled leave days require an explicit override before approval.</li>
-                  <li>Overrides require an intake user and are logged.</li>
-                  <li>GL bidders do not populate public floor templates.</li>
-                  <li>Developmentals bid against developmental slots.</li>
-                </ul>
+                <div class="schedule-form manual-bid-form">
+                  <label>
+                    Controller
+                    <select data-manual-bid-controller></select>
+                  </label>
+                  <select data-manual-bid-type hidden aria-hidden="true">
+                    <option value="Leave" selected>Leave</option>
+                  </select>
+                  <label>
+                    Bid Area
+                    <select data-manual-bid-area></select>
+                  </label>
+                  <div class="manual-bid-fields" data-manual-leave-fields>
+                    <label>
+                      Start Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
+                    </label>
+                    <label>
+                      End Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
+                    </label>
+                    <label>
+                      Days
+                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
+                    </label>
+                    <label>
+                      Round
+                      <select data-manual-leave-round>
+                        <option value="1">Round 1</option>
+                        <option value="2">Round 2</option>
+                        <option value="3">Round 3</option>
+                        <option value="4">Round 4</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      Notes
+                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
+                    </label>
+                  </div>
+                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  <p class="form-status" data-manual-bid-status></p>
+                </div>
               </section>
               <section class="panel">
                 <h3>Data Export</h3>
@@ -1195,6 +1247,56 @@
                     </label>
                   </div>
                   <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
+                  <p class="form-status" data-manual-bid-status></p>
+                </div>
+              </section>
+              <section class="panel manual-leave-request-card" data-manual-bid-panel>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Requested Leave Dates</h3>
+                    <p>Submit requested leave dates on behalf of any controller.</p>
+                  </div>
+                </div>
+                <div class="schedule-form manual-bid-form">
+                  <label>
+                    Controller
+                    <select data-manual-bid-controller></select>
+                  </label>
+                  <select data-manual-bid-type hidden aria-hidden="true">
+                    <option value="Leave" selected>Leave</option>
+                  </select>
+                  <label>
+                    Bid Area
+                    <select data-manual-bid-area></select>
+                  </label>
+                  <div class="manual-bid-fields" data-manual-leave-fields>
+                    <label>
+                      Start Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
+                    </label>
+                    <label>
+                      End Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
+                    </label>
+                    <label>
+                      Days
+                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
+                    </label>
+                    <label>
+                      Round
+                      <select data-manual-leave-round>
+                        <option value="1">Round 1</option>
+                        <option value="2">Round 2</option>
+                        <option value="3">Round 3</option>
+                        <option value="4">Round 4</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      Notes
+                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
+                    </label>
+                  </div>
+                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
