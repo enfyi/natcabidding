@@ -1553,10 +1553,9 @@ function manualBidAreaOptions(selectedArea) {
   }).join("");
 }
 
-function manualBidPerson(panel) {
-  const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+function manualBidSelectedPerson(selectedInitials) {
   const roster = bueRoster();
-  return roster.find((person) => person.initials === initials) || roster[0] || {
+  return roster.find((person) => person.initials === selectedInitials) || roster[0] || {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
     lastName: currentUser.lastName,
@@ -1564,6 +1563,11 @@ function manualBidPerson(panel) {
     area: currentUser.area,
     bidAs: currentUserBidAs(),
   };
+}
+
+function manualBidPerson(panel) {
+  const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+  return manualBidSelectedPerson(initials);
 }
 
 function setManualBidStatus(panel, message, status = "info") {
@@ -1603,6 +1607,8 @@ function renderManualBidPanel(panel) {
     round: panel.querySelector("[data-manual-leave-round]")?.value || String(currentRoundNumber()),
     notes: panel.querySelector("[data-manual-leave-notes]")?.value || "",
   };
+  const selectedPerson = manualBidSelectedPerson(values.controller);
+  const lockedArea = selectedPerson.area || currentViewArea();
 
   const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
   if (controllerSelect) {
@@ -1616,8 +1622,10 @@ function renderManualBidPanel(panel) {
 
   const areaSelect = panel.querySelector("[data-manual-bid-area]");
   if (areaSelect) {
-    areaSelect.innerHTML = manualBidAreaOptions(values.area);
-    areaSelect.value = Object.values(AREA_NAME_BY_CODE).includes(values.area) ? values.area : currentViewArea();
+    areaSelect.innerHTML = manualBidAreaOptions(lockedArea);
+    areaSelect.value = lockedArea;
+    areaSelect.disabled = true;
+    areaSelect.title = "Area is set from the controller roster. Change it from the Admin panel.";
   }
 
   const rdoFields = panel.querySelector("[data-manual-rdo-fields]");
@@ -1627,14 +1635,18 @@ function renderManualBidPanel(panel) {
   if (leaveFields) leaveFields.hidden = !isLeave;
 
   const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const areaLines = rdoLinesForArea(areaSelect?.value || values.area);
+  const areaLines = rdoLinesForArea(areaSelect?.value || lockedArea);
   if (lineSelect) {
+    const openLines = areaLines.filter((line) => line.status !== "Taken");
     lineSelect.innerHTML = areaLines.map((line) => {
-      const status = line.status === "Taken" ? ` · ${line.cpc || "Taken"}` : " · Open";
-      const selected = line.line === values.line ? " selected" : "";
-      return `<option value="${line.line}"${selected}>Line ${line.line} · ${line.pattern}${status}</option>`;
+      const isTaken = line.status === "Taken";
+      const status = isTaken ? ` · ${line.cpc || "Taken"} · unavailable` : " · Open";
+      const selected = !isTaken && line.line === values.line ? " selected" : "";
+      return `<option class="${isTaken ? "manual-rdo-line-taken" : ""}" value="${line.line}"${selected}${isTaken ? " disabled" : ""}>Line ${line.line} · ${line.pattern}${status}</option>`;
     }).join("");
-    lineSelect.value = areaLines.some((line) => line.line === values.line) ? values.line : areaLines[0]?.line || "";
+    lineSelect.value = openLines.some((line) => line.line === values.line) ? values.line : openLines[0]?.line || "";
+    lineSelect.disabled = !openLines.length;
+    lineSelect.title = openLines.length ? "" : "No open RDO lines are available for this controller's area.";
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
@@ -1689,6 +1701,10 @@ function submitManualRdoBid(panel, person, area) {
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
     setManualBidStatus(panel, "Choose an RDO line before adding this bid.", "error");
+    return;
+  }
+  if (line.status === "Taken") {
+    setManualBidStatus(panel, `Line ${line.line} has already been bid and cannot be selected here.`, "error");
     return;
   }
 

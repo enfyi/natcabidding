@@ -4547,6 +4547,20 @@ tr.occupied-row .rdo-tag {
   font-weight: 800;
 }
 
+.schedule-form select:disabled,
+.schedule-form input:disabled {
+  color: #475569;
+  background: #eef2f7;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.schedule-form option.manual-rdo-line-taken,
+.schedule-form option:disabled {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
 .schedule-form .form-status {
   min-height: 18px;
   margin: 0;
