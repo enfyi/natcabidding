@@ -1018,11 +1018,23 @@
 
         <section class="page" id="intake-schedule-page" data-page-panel="intake-schedule">
           <div class="workspace-grid intake-schedule-workspace">
-            <section class="panel calendar-panel full">
+            <section class="panel calendar-panel full schedule-panel">
               <div class="panel-header">
                 <div>
                   <h2>Intake Schedule</h2>
                   <p>Review scheduled intake coverage. Your scheduled dates are highlighted.</p>
+                </div>
+                <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
+                  <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
+                    <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Monthly</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Weekly</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Yearly</button>
+                  </div>
+                  <div class="schedule-period-controls" aria-label="Intake schedule period">
+                    <button type="button" data-schedule-period-action="previous" aria-label="Previous schedule period">‹</button>
+                    <strong data-schedule-period-label>January 2027</strong>
+                    <button type="button" data-schedule-period-action="next" aria-label="Next schedule period">›</button>
+                  </div>
                 </div>
               </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>

@@ -557,6 +557,8 @@ const calendarLayouts = {
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
+let scheduleCalendarView = "month";
+let scheduleActiveDate = new Date(BID_YEAR, 0, 1);
 const rdoFilters = {
   search: "",
   openOnly: false,
@@ -6970,7 +6972,20 @@ function renderScheduleTooltip(key) {
   `;
 }
 
-function renderScheduleMonthCard(monthIndex, year) {
+function renderScheduleDayButton(date, includeMonth = false) {
+  const key = dateKeyFromDate(date);
+  const schedules = schedulesForDateKey(key);
+  const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
+  const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
+  return `
+    <button class="schedule-day ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+      <span class="date-number">${label}</span>
+      ${renderScheduleTooltip(key)}
+    </button>
+  `;
+}
+
+function renderScheduleMonthCard(monthIndex, year, options = {}) {
   const firstDay = new Date(year, monthIndex, 1).getDay();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const cells = [];
@@ -6979,23 +6994,84 @@ function renderScheduleMonthCard(monthIndex, year) {
   for (let i = 0; i < firstDay; i += 1) cells.push("<span></span>");
 
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const key = dateKey(year, monthIndex + 1, day);
-    const schedules = schedulesForDateKey(key);
-    const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
-    cells.push(`
-      <button class="schedule-day ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
-        <span class="date-number">${day}</span>
-        ${renderScheduleTooltip(key)}
-      </button>
-    `);
+    cells.push(renderScheduleDayButton(new Date(year, monthIndex, day), Boolean(options.includeMonth)));
   }
 
   return `
     <article class="month-card">
-      <h3>${monthNames[monthIndex]}</h3>
+      <h3>${options.showYear ? `${monthNames[monthIndex]} ${year}` : monthNames[monthIndex]}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
   `;
+}
+
+function scheduleWeekStart(date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function renderScheduleWeekCard(activeDate) {
+  const start = scheduleWeekStart(activeDate);
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+  const label = `${formatCalendarDate(dateKeyFromDate(weekDays[0]))} - ${formatCalendarDate(dateKeyFromDate(weekDays[6]))}`;
+
+  return `
+    <article class="month-card week-card">
+      <h3>${label}</h3>
+      <div class="week-calendar-grid">
+        ${weekDays.map((date) => `
+          <div class="week-day-column">
+            <span class="week-day-label">${dayNames[date.getDay()]}</span>
+            ${renderScheduleDayButton(date, true)}
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function updateScheduleCalendarControls() {
+  document.querySelectorAll("[data-schedule-calendar-view]").forEach((button) => {
+    const isActive = button.dataset.scheduleCalendarView === scheduleCalendarView;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  document.querySelectorAll("[data-schedule-period-label]").forEach((label) => {
+    if (scheduleCalendarView === "year") {
+      label.textContent = String(scheduleActiveDate.getFullYear());
+      return;
+    }
+
+    if (scheduleCalendarView === "week") {
+      const start = scheduleWeekStart(scheduleActiveDate);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      label.textContent = `${formatCalendarDate(dateKeyFromDate(start))} - ${formatCalendarDate(dateKeyFromDate(end))}`;
+      return;
+    }
+
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
+  });
+}
+
+function moveSchedulePeriod(direction) {
+  const nextDate = new Date(scheduleActiveDate);
+  if (scheduleCalendarView === "year") {
+    nextDate.setFullYear(nextDate.getFullYear() + direction);
+  } else if (scheduleCalendarView === "week") {
+    nextDate.setDate(nextDate.getDate() + direction * 7);
+  } else {
+    nextDate.setMonth(nextDate.getMonth() + direction);
+  }
+  scheduleActiveDate = nextDate;
+  renderIntakeSchedule();
 }
 
 function renderIntakeSchedule() {
@@ -7003,11 +7079,20 @@ function renderIntakeSchedule() {
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
   syncIntakeTeamControls();
+  updateScheduleCalendarControls();
 
   if (calendar) {
-    calendar.innerHTML = monthNames
-      .map((_, monthIndex) => renderScheduleMonthCard(monthIndex, BID_YEAR))
-      .join("");
+    calendar.classList.remove("month-view", "week-view", "year-view");
+    calendar.classList.add(`${scheduleCalendarView}-view`);
+    if (scheduleCalendarView === "year") {
+      calendar.innerHTML = monthNames
+        .map((_, monthIndex) => renderScheduleMonthCard(monthIndex, scheduleActiveDate.getFullYear()))
+        .join("");
+    } else if (scheduleCalendarView === "week") {
+      calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
+    } else {
+      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), { showYear: true });
+    }
   }
 
   if (!list) return;
@@ -8388,6 +8473,19 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-admin-add-intake-schedule]")) {
     addAdminScheduleFromForm();
+    return;
+  }
+
+  const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
+  if (scheduleViewButton) {
+    scheduleCalendarView = scheduleViewButton.dataset.scheduleCalendarView || "month";
+    renderIntakeSchedule();
+    return;
+  }
+
+  const schedulePeriodButton = event.target.closest("[data-schedule-period-action]");
+  if (schedulePeriodButton) {
+    moveSchedulePeriod(schedulePeriodButton.dataset.schedulePeriodAction === "next" ? 1 : -1);
     return;
   }
 
