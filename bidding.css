@@ -4495,6 +4495,10 @@ tr.occupied-row .rdo-tag {
   min-height: calc(100vh - 122px);
 }
 
+.schedule-panel.calendar-panel.full {
+  min-height: auto;
+}
+
 .calendar-panel.full .month-grid span,
 .calendar-panel.full .month-grid button {
   min-height: 26px;
@@ -4656,8 +4660,95 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: minmax(0, 1fr) 260px;
 }
 
+.schedule-view-controls {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.schedule-view-tabs button {
+  min-width: 82px;
+}
+
+.schedule-period-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.schedule-period-controls button {
+  min-width: 30px;
+  min-height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #2b7f86;
+  background: #ffffff;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.schedule-period-controls strong {
+  min-width: 156px;
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+}
+
 .schedule-calendar {
+  align-items: start;
   margin-top: 14px;
+  max-width: 740px;
+}
+
+.schedule-calendar.year-view {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-calendar.month-view {
+  grid-template-columns: minmax(0, 440px);
+  max-width: 440px;
+}
+
+.schedule-calendar.week-view {
+  grid-template-columns: minmax(0, 600px);
+  max-width: 600px;
+}
+
+.schedule-calendar .month-card {
+  padding: 8px;
+}
+
+.schedule-calendar .month-card h3 {
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+}
+
+.schedule-calendar.year-view .month-grid {
+  gap: 2px;
+}
+
+.calendar-panel.full .schedule-calendar .month-grid span,
+.calendar-panel.full .schedule-calendar .month-grid button {
+  min-height: 18px;
+  font-size: 0.58rem;
+}
+
+.calendar-panel.full .schedule-calendar.month-view .month-grid span,
+.calendar-panel.full .schedule-calendar.month-view .month-grid button {
+  min-height: 34px;
+  font-size: 0.76rem;
+}
+
+.schedule-calendar.week-view .week-calendar-grid {
+  gap: 6px;
+}
+
+.schedule-calendar.week-view .week-day-column button {
+  min-height: 72px;
+  font-size: 0.72rem;
 }
 
 .schedule-day.has-schedule {
@@ -4742,6 +4833,46 @@ tr.occupied-row .rdo-tag {
   color: #475569;
   font-size: 0.68rem;
   font-weight: 800;
+}
+
+@media (max-width: 1100px) {
+  .intake-schedule-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-view-controls {
+    justify-items: stretch;
+  }
+
+  .schedule-period-controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .schedule-view-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .schedule-view-tabs button {
+    min-width: 0;
+  }
+
+  .schedule-period-controls {
+    width: 100%;
+  }
+
+  .schedule-period-controls strong {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .schedule-calendar.year-view {
+    grid-template-columns: 1fr;
+    max-width: 440px;
+  }
 }
 
 .intake-schedule-list {
