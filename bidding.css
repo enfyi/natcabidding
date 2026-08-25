@@ -194,6 +194,9 @@ button.seniority-pill {
 }
 
 .public-login {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   position: relative;
 }
 
@@ -1532,6 +1535,20 @@ input {
   margin: 0;
   color: var(--text);
   line-height: 1.45;
+}
+
+.help-verification-warning {
+  border: 1px solid rgba(244, 135, 129, 0.55);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #ffd7d4;
+  background: rgba(244, 135, 129, 0.12);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.help-thread-card.unverified {
+  border-color: rgba(244, 135, 129, 0.55);
 }
 
 .help-composer {
@@ -3700,7 +3717,8 @@ tr.occupied-row .rdo-tag {
   margin-top: 12px;
 }
 
-.round-rule-summary-list dd {
+.round-rule-summary-list dd,
+.rule-editor-heading {
   display: grid;
   gap: 3px;
 }
@@ -3715,6 +3733,22 @@ tr.occupied-row .rdo-tag {
 .round-rule-summary-list dd small {
   color: #64748b;
   font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.rule-editor-heading strong,
+.round-rule-row > span {
+  color: #0f172a;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.rule-editor-heading small {
+  color: #64748b;
+  font-size: 0.75rem;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -3736,20 +3770,28 @@ tr.occupied-row .rdo-tag {
   padding-top: 0;
 }
 
-.round-rule-row > span {
-  color: #0f172a;
-  font-family: Montserrat, Arial, sans-serif;
-  font-size: 0.78rem;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 .round-rule-row label {
   display: grid;
   gap: 5px;
   color: #47627f;
   font-size: 0.74rem;
   font-weight: 900;
+}
+
+.round-rule-row input,
+.round-rule-row textarea,
+.rule-editor-row input {
+  width: 100%;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #172033;
+  background: #ffffff;
+}
+
+.round-rule-row textarea {
+  min-height: 78px;
+  resize: vertical;
 }
 
 .editable-rule-list {
@@ -3836,31 +3878,6 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
-
-.rule-editor-row input {
-  width: 100%;
-  border: 1px solid #cbd8e6;
-  border-radius: 6px;
-  padding: 9px 10px;
-  color: #172033;
-  background: #ffffff;
-}
-
-.round-rule-row input,
-.round-rule-row textarea {
-  width: 100%;
-  border: 1px solid #cbd8e6;
-  border-radius: 6px;
-  padding: 9px 10px;
-  color: #172033;
-  background: #ffffff;
-}
-
-.round-rule-row textarea {
-  min-height: 78px;
-  resize: vertical;
-}
-
 #leave-page .allowance-card dl div {
   gap: 8px;
   padding: 7px 0;
@@ -5885,7 +5902,8 @@ body {
 }
 
 .app-main .intake-warning,
-.app-main .override-warning {
+.app-main .override-warning,
+.app-main .help-verification-warning {
   color: #991b1b;
   background: #fee2e2;
   border-color: #fecaca;
