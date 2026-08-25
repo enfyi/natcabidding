@@ -7059,7 +7059,9 @@ function addAdminScheduleFromForm() {
 }
 
 function schedulesForDateKey(key) {
-  return intakeSchedules.filter((schedule) => dateKeyFromDate(schedule.start) === key);
+  return intakeSchedules
+    .filter((schedule) => dateKeyFromDate(schedule.start) === key)
+    .sort((a, b) => a.start - b.start);
 }
 
 function renderScheduleTooltip(key) {
@@ -7078,14 +7080,34 @@ function renderScheduleTooltip(key) {
   `;
 }
 
-function renderScheduleDayButton(date, includeMonth = false) {
+function formatScheduleStartTime(date) {
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function renderScheduleDayAssignments(schedules) {
+  if (!schedules.length) return "";
+  return `
+    <span class="schedule-day-assignments">
+      ${schedules.map((schedule) => `
+        <span class="schedule-day-assignment">
+          <b>${escapeHtml(schedule.initials)}</b>
+          <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
+        </span>
+      `).join("")}
+    </span>
+  `;
+}
+
+function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const key = dateKeyFromDate(date);
   const schedules = schedulesForDateKey(key);
   const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
+  const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
       <span class="date-number">${label}</span>
+      ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
     </button>
   `;
@@ -7100,7 +7122,9 @@ function renderScheduleMonthCard(monthIndex, year, options = {}) {
   for (let i = 0; i < firstDay; i += 1) cells.push("<span></span>");
 
   for (let day = 1; day <= daysInMonth; day += 1) {
-    cells.push(renderScheduleDayButton(new Date(year, monthIndex, day), Boolean(options.includeMonth)));
+    cells.push(renderScheduleDayButton(new Date(year, monthIndex, day), Boolean(options.includeMonth), {
+      showAssignments: Boolean(options.showAssignments),
+    }));
   }
 
   return `
@@ -7134,7 +7158,7 @@ function renderScheduleWeekCard(activeDate) {
         ${weekDays.map((date) => `
           <div class="week-day-column">
             <span class="week-day-label">${dayNames[date.getDay()]}</span>
-            ${renderScheduleDayButton(date, true)}
+            ${renderScheduleDayButton(date, true, { showAssignments: true })}
           </div>
         `).join("")}
       </div>
@@ -7197,7 +7221,10 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), { showYear: true });
+      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), {
+        showAssignments: true,
+        showYear: true,
+      });
     }
   }
 

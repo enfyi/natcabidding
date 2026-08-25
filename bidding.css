@@ -4499,6 +4499,16 @@ tr.occupied-row .rdo-tag {
   min-height: auto;
 }
 
+.schedule-panel {
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
+}
+
+.schedule-panel .panel-header {
+  align-items: flex-start;
+}
+
 .calendar-panel.full .month-grid span,
 .calendar-panel.full .month-grid button {
   min-height: 26px;
@@ -4708,13 +4718,13 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-calendar.month-view {
-  grid-template-columns: minmax(0, 440px);
-  max-width: 440px;
+  grid-template-columns: minmax(0, 520px);
+  max-width: 520px;
 }
 
 .schedule-calendar.week-view {
-  grid-template-columns: minmax(0, 600px);
-  max-width: 600px;
+  grid-template-columns: minmax(0, 660px);
+  max-width: 660px;
 }
 
 .schedule-calendar .month-card {
@@ -4738,8 +4748,8 @@ tr.occupied-row .rdo-tag {
 
 .calendar-panel.full .schedule-calendar.month-view .month-grid span,
 .calendar-panel.full .schedule-calendar.month-view .month-grid button {
-  min-height: 34px;
-  font-size: 0.76rem;
+  min-height: 70px;
+  font-size: 0.72rem;
 }
 
 .schedule-calendar.week-view .week-calendar-grid {
@@ -4747,8 +4757,68 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-calendar.week-view .week-day-column button {
-  min-height: 72px;
+  min-height: 104px;
   font-size: 0.72rem;
+}
+
+.schedule-day.show-assignments {
+  display: flex !important;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 5px;
+  text-align: left;
+}
+
+.schedule-day.show-assignments > .date-number {
+  align-self: flex-start;
+  min-height: auto;
+  color: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.schedule-day-assignments,
+.month-grid .schedule-day-assignments {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.schedule-day-assignment,
+.month-grid .schedule-day-assignment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  min-height: 14px;
+  color: inherit;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.schedule-day-assignment b {
+  min-width: 18px;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.52rem;
+  font-weight: 900;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.schedule-day-assignment small {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.5rem;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .schedule-day.has-schedule {
@@ -4880,6 +4950,7 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
+  max-width: 740px;
 }
 
 .schedule-list-section {
