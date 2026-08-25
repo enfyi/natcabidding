@@ -83,6 +83,8 @@ button.seniority-pill {
 .public-rail {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   padding: 24px 16px;
   background:
@@ -105,6 +107,10 @@ button.seniority-pill {
   display: grid;
   gap: 8px;
   margin-top: 34px;
+}
+
+.public-footer {
+  margin-top: auto;
 }
 
 .public-nav-item,
@@ -3707,9 +3713,28 @@ tr.occupied-row .rdo-tag {
   margin-bottom: 0;
 }
 
+.round-rule-summary-list {
+  margin-top: 12px;
+}
+
+.round-rule-summary-list dd,
 .rule-editor-heading {
   display: grid;
   gap: 3px;
+}
+
+.round-rule-summary-list dd strong {
+  color: #0f172a;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.round-rule-summary-list dd small {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .rule-editor-heading strong,
@@ -3740,6 +3765,11 @@ tr.occupied-row .rdo-tag {
   padding-top: 10px;
 }
 
+.round-rule-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .round-rule-row label {
   display: grid;
   gap: 5px;
@@ -3760,8 +3790,8 @@ tr.occupied-row .rdo-tag {
 }
 
 .round-rule-row textarea {
+  min-height: 78px;
   resize: vertical;
-  min-height: 64px;
 }
 
 .editable-rule-list {
@@ -3772,7 +3802,8 @@ tr.occupied-row .rdo-tag {
 
 .editable-rule-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto 28px minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   border-top: 1px solid #dce6f0;
   padding: 10px 0;
@@ -3783,8 +3814,12 @@ tr.occupied-row .rdo-tag {
   padding-top: 0;
 }
 
-.editable-rule-item > span {
-  grid-column: 2;
+.editable-rule-item.dragging {
+  opacity: 0.45;
+}
+
+.editable-rule-copy {
+  grid-column: 3;
   color: #496681;
   font-size: 0.8rem;
   font-weight: 800;
@@ -3802,15 +3837,36 @@ tr.occupied-row .rdo-tag {
   content: "";
 }
 
-.rule-actions {
+.rule-drag-handle {
   grid-column: 2;
+  width: 24px;
+  height: 28px;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle, #496681 1.4px, transparent 1.6px) 6px 6px / 7px 7px,
+    #ffffff;
+  cursor: grab;
+}
+
+.rule-drag-handle:active {
+  cursor: grabbing;
+}
+
+.rule-drag-handle:focus-visible {
+  outline: 2px solid #2b7f86;
+  outline-offset: 2px;
+}
+
+.rule-actions {
+  grid-column: 3;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.rule-actions .secondary-action.small,
 .round-rule-row .secondary-action.small,
+.rule-actions .secondary-action.small,
 .rule-editor-row .secondary-action.small {
   min-height: 31px;
   padding: 0 10px;
@@ -3822,7 +3878,6 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
-
 #leave-page .allowance-card dl div {
   gap: 8px;
   padding: 7px 0;
@@ -6724,6 +6779,7 @@ body {
   .public-rail {
     display: flex;
     align-items: center;
+    flex-direction: row;
     gap: 14px;
     min-width: 0;
   }
@@ -6826,6 +6882,12 @@ body {
   .nav-item,
   .ghost-link {
     flex: 0 0 auto;
+  }
+
+  .public-footer {
+    flex: 0 0 auto;
+    margin-top: 0;
+    margin-left: auto;
   }
 
   .public-area {
@@ -7245,6 +7307,10 @@ video {
     max-width: 100vw;
     overflow: hidden;
     padding: 12px;
+  }
+
+  .public-footer {
+    margin: 0;
   }
 
   .public-rail .brand-block {

@@ -16,6 +16,21 @@ function credentials(formData: FormData) {
   return { email, password }
 }
 
+async function requireRecognizedEmail(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  email: string,
+) {
+  const { data, error } = await supabase.rpc('can_request_login_link', { login_email: email })
+
+  if (error) {
+    redirect('/login?error=Could+not+verify+that+email+against+the+BUE+roster.')
+  }
+
+  if (data !== true) {
+    redirect('/login?error=Use+the+email+address+listed+for+you+in+the+BUE+roster.')
+  }
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithPassword(credentials(formData))
@@ -30,8 +45,12 @@ export async function login(formData: FormData) {
 
 export async function signup(formData: FormData) {
   const supabase = await createClient()
+  const userCredentials = credentials(formData)
+
+  await requireRecognizedEmail(supabase, userCredentials.email)
+
   const { data, error } = await supabase.auth.signUp({
-    ...credentials(formData),
+    ...userCredentials,
     options: { emailRedirectTo: `${getSiteUrl()}/auth/callback` },
   })
 

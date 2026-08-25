@@ -80,8 +80,8 @@ function storeJsonValue(key, value) {
   }
 }
 
-const storedRoundRules = storedJsonValue(ROUND_RULES_STORAGE_KEY, null);
 const storedApprovalRules = storedJsonValue(APPROVAL_RULES_STORAGE_KEY, null);
+const storedRoundRules = storedJsonValue(ROUND_RULES_STORAGE_KEY, null);
 let roundRules = {
   ...DEFAULT_ROUND_RULES,
   ...(storedRoundRules && typeof storedRoundRules === "object" ? storedRoundRules : {}),
@@ -5781,13 +5781,6 @@ function renderRoundRuleSummary(date = new Date()) {
   setText("[data-round-rule-detail]", `${rule.detail} ${phaseDetail}`);
 }
 
-function roundRuleNumbers() {
-  return Object.keys(roundRules)
-    .map((round) => Number(round))
-    .filter((round) => Number.isFinite(round))
-    .sort((first, second) => first - second);
-}
-
 function saveApprovalRules() {
   storeJsonValue(APPROVAL_RULES_STORAGE_KEY, approvalRules);
 }
@@ -5796,11 +5789,18 @@ function saveRoundRules() {
   storeJsonValue(ROUND_RULES_STORAGE_KEY, roundRules);
 }
 
+function roundRuleNumbers() {
+  return Object.keys(roundRules)
+    .map((round) => Number(round))
+    .filter((round) => Number.isFinite(round))
+    .sort((first, second) => first - second);
+}
+
 function renderRoundRuleSummaryList() {
   document.querySelectorAll("[data-round-rules-summary]").forEach((list) => {
     list.innerHTML = roundRuleNumbers().map((round) => {
       const rule = roundRuleForRound(round);
-      return `<div><dt>Round ${round} Maximum</dt><dd>${escapeHtml(rule.label)}</dd></div>`;
+      return `<div><dt>Round ${round}</dt><dd><strong>${escapeHtml(rule.label)}</strong><small>${escapeHtml(rule.detail)}</small></dd></div>`;
     }).join("");
   });
 }
@@ -5810,10 +5810,6 @@ function renderRoundRuleEditor() {
   if (!editor) return;
 
   editor.innerHTML = `
-    <div class="rule-editor-heading">
-      <strong>Edit Round Rules</strong>
-      <small>Update the wording shown for each bidding round.</small>
-    </div>
     <div class="round-rule-list">
       ${roundRuleNumbers().map((round) => {
         const rule = roundRuleForRound(round);
@@ -5826,7 +5822,7 @@ function renderRoundRuleEditor() {
             </label>
             <label>
               Rule
-              <textarea data-round-rule-detail="${round}" rows="2">${escapeHtml(rule.detail)}</textarea>
+              <textarea data-round-rule-detail="${round}" rows="3">${escapeHtml(rule.detail)}</textarea>
             </label>
             <button class="secondary-action small" type="button" data-save-round-rule="${round}">Save</button>
           </div>
@@ -5836,18 +5832,41 @@ function renderRoundRuleEditor() {
   `;
 }
 
+function saveRoundRule(round) {
+  const labelInput = document.querySelector(`[data-round-rule-label="${round}"]`);
+  const detailInput = document.querySelector(`[data-round-rule-detail="${round}"]`);
+  if (!labelInput || !detailInput) return;
+
+  const label = labelInput.value.trim();
+  const detail = detailInput.value.trim();
+  if (!label || !detail) return;
+
+  roundRules[round] = { label, detail };
+  saveRoundRules();
+  renderRoundRuleSummary();
+  renderRoundRuleSummaryList();
+  renderRoundRuleEditor();
+}
+
+function renderApprovalRuleSummary() {
+  document.querySelectorAll("[data-approval-rule-summary]").forEach((list) => {
+    list.innerHTML = approvalRules.length
+      ? approvalRules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")
+      : '<li>No approval rules have been added yet.</li>';
+  });
+}
+
 function renderApprovalRuleEditor() {
   const list = document.querySelector("[data-approval-rule-list]");
   if (!list) return;
 
   list.innerHTML = approvalRules.length
     ? approvalRules.map((rule, index) => `
-      <li class="editable-rule-item">
-        <span>${escapeHtml(rule)}</span>
+      <li class="editable-rule-item" data-approval-rule-index="${index}">
+        <button class="rule-drag-handle" type="button" draggable="true" data-approval-rule-drag-handle="${index}" aria-label="Drag approval rule ${index + 1}" title="Drag to reorder"></button>
+        <span class="editable-rule-copy">${escapeHtml(rule)}</span>
         <div class="rule-actions">
           <button class="secondary-action small" type="button" data-approval-rule-edit="${index}">Edit</button>
-          <button class="secondary-action small" type="button" data-approval-rule-move="${index}" data-direction="up" ${index === 0 ? "disabled" : ""}>Up</button>
-          <button class="secondary-action small" type="button" data-approval-rule-move="${index}" data-direction="down" ${index === approvalRules.length - 1 ? "disabled" : ""}>Down</button>
           <button class="secondary-action small danger" type="button" data-approval-rule-remove="${index}">Remove</button>
         </div>
       </li>
@@ -5858,6 +5877,7 @@ function renderApprovalRuleEditor() {
 function renderRuleEditors() {
   renderRoundRuleSummaryList();
   renderRoundRuleEditor();
+  renderApprovalRuleSummary();
   renderApprovalRuleEditor();
 }
 
@@ -5887,6 +5907,7 @@ function saveApprovalRuleFromInput() {
 
   saveApprovalRules();
   resetApprovalRuleInput();
+  renderApprovalRuleSummary();
   renderApprovalRuleEditor();
 }
 
@@ -5901,16 +5922,23 @@ function editApprovalRule(index) {
   input.focus();
 }
 
-function moveApprovalRule(index, direction) {
-  const nextIndex = direction === "up" ? index - 1 : index + 1;
-  if (!approvalRules[index] || nextIndex < 0 || nextIndex >= approvalRules.length) return;
+function reorderApprovalRule(fromIndex, toIndex) {
+  if (
+    fromIndex === toIndex ||
+    !approvalRules[fromIndex] ||
+    toIndex < 0 ||
+    toIndex >= approvalRules.length
+  ) {
+    return false;
+  }
 
-  const nextRule = approvalRules[nextIndex];
-  approvalRules[nextIndex] = approvalRules[index];
-  approvalRules[index] = nextRule;
+  const [rule] = approvalRules.splice(fromIndex, 1);
+  approvalRules.splice(toIndex, 0, rule);
   saveApprovalRules();
   resetApprovalRuleInput();
+  renderApprovalRuleSummary();
   renderApprovalRuleEditor();
+  return true;
 }
 
 function removeApprovalRule(index) {
@@ -5919,22 +5947,63 @@ function removeApprovalRule(index) {
   approvalRules.splice(index, 1);
   saveApprovalRules();
   resetApprovalRuleInput();
+  renderApprovalRuleSummary();
   renderApprovalRuleEditor();
 }
 
-function saveRoundRule(round) {
-  const labelInput = document.querySelector(`[data-round-rule-label="${round}"]`);
-  const detailInput = document.querySelector(`[data-round-rule-detail="${round}"]`);
-  if (!labelInput || !detailInput) return;
+let draggedApprovalRuleIndex = null;
 
-  const label = labelInput.value.trim();
-  const detail = detailInput.value.trim();
-  if (!label || !detail) return;
+function approvalRuleDragItem(event) {
+  return event.target.closest("[data-approval-rule-index]");
+}
 
-  roundRules[round] = { label, detail };
-  saveRoundRules();
-  renderRoundRuleSummary();
-  renderRoundRuleSummaryList();
+function startApprovalRuleDrag(event) {
+  const item = approvalRuleDragItem(event);
+  if (!item || !event.target.closest("[data-approval-rule-drag-handle]")) return;
+
+  draggedApprovalRuleIndex = Number(item.dataset.approvalRuleIndex);
+  item.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", String(draggedApprovalRuleIndex));
+}
+
+function moveApprovalRuleDuringDrag(event) {
+  if (draggedApprovalRuleIndex === null) return;
+  const list = event.target.closest("[data-approval-rule-list]");
+  if (!list) return;
+
+  event.preventDefault();
+  const draggedItem = list.querySelector(".editable-rule-item.dragging");
+  const targetItem = approvalRuleDragItem(event);
+  if (!draggedItem || !targetItem || targetItem === draggedItem) return;
+
+  const targetBounds = targetItem.getBoundingClientRect();
+  const insertAfter = event.clientY > targetBounds.top + targetBounds.height / 2;
+  list.insertBefore(draggedItem, insertAfter ? targetItem.nextSibling : targetItem);
+}
+
+function dropApprovalRule(event) {
+  if (draggedApprovalRuleIndex === null) return;
+  const list = event.target.closest("[data-approval-rule-list]");
+  if (!list) return;
+
+  event.preventDefault();
+  const nextOrder = [...list.querySelectorAll("[data-approval-rule-index]")]
+    .map((item) => Number(item.dataset.approvalRuleIndex))
+    .filter((index) => Number.isInteger(index) && approvalRules[index]);
+  if (nextOrder.length === approvalRules.length) {
+    approvalRules = nextOrder.map((index) => approvalRules[index]);
+    saveApprovalRules();
+  }
+  finishApprovalRuleDrag();
+  resetApprovalRuleInput();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
+}
+
+function finishApprovalRuleDrag() {
+  document.querySelector(".editable-rule-item.dragging")?.classList.remove("dragging");
+  draggedApprovalRuleIndex = null;
 }
 
 function areaLeaveSlotTotals() {
@@ -8445,15 +8514,6 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const approvalRuleMove = event.target.closest("[data-approval-rule-move]");
-  if (approvalRuleMove) {
-    moveApprovalRule(
-      Number(approvalRuleMove.dataset.approvalRuleMove),
-      approvalRuleMove.dataset.direction,
-    );
-    return;
-  }
-
   const approvalRuleRemove = event.target.closest("[data-approval-rule-remove]");
   if (approvalRuleRemove) {
     removeApprovalRule(Number(approvalRuleRemove.dataset.approvalRuleRemove));
@@ -8907,6 +8967,17 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  const approvalRuleHandle = event.target.closest("[data-approval-rule-drag-handle]");
+  if (approvalRuleHandle && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    const currentIndex = Number(approvalRuleHandle.dataset.approvalRuleDragHandle);
+    const nextIndex = event.key === "ArrowUp" ? currentIndex - 1 : currentIndex + 1;
+    if (reorderApprovalRule(currentIndex, nextIndex)) {
+      document.querySelector(`[data-approval-rule-drag-handle="${nextIndex}"]`)?.focus();
+    }
+    return;
+  }
+
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
@@ -8980,9 +9051,13 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 
 document.addEventListener("dragstart", startRosterRowDrag);
+document.addEventListener("dragstart", startApprovalRuleDrag);
 document.addEventListener("dragover", moveRosterRowDuringDrag);
+document.addEventListener("dragover", moveApprovalRuleDuringDrag);
 document.addEventListener("drop", dropRosterRow);
+document.addEventListener("drop", dropApprovalRule);
 document.addEventListener("dragend", finishRosterRowDrag);
+document.addEventListener("dragend", finishApprovalRuleDrag);
 document.addEventListener("mousedown", startRosterColumnResize);
 document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
