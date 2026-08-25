@@ -23,7 +23,7 @@ const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
 const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
-const ROUND_RULES = {
+const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
     detail: "Leave may include up to 2 bid weeks.",
@@ -49,6 +49,40 @@ const ROUND_RULES = {
     detail: "Leave may include up to 5 charged days.",
   },
 };
+const DEFAULT_APPROVAL_RULES = [
+  "Approve applies the BUE initials automatically.",
+  "Filled leave days require an explicit override before approval.",
+  "Overrides require an intake user and are logged.",
+  "GL bidders do not populate public floor templates.",
+  "Developmentals bid against developmental slots.",
+];
+const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
+const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+
+function storedJsonValue(key, fallback) {
+  try {
+    const raw = window.localStorage?.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function storeJsonValue(key, value) {
+  try {
+    window.localStorage?.setItem(key, JSON.stringify(value));
+  } catch (_error) {
+    // Prototype-only persistence can safely no-op when storage is unavailable.
+  }
+}
+
+const storedApprovalRules = storedJsonValue(APPROVAL_RULES_STORAGE_KEY, null);
+const storedRoundRules = storedJsonValue(ROUND_RULES_STORAGE_KEY, null);
+let roundRules = {
+  ...DEFAULT_ROUND_RULES,
+  ...(storedRoundRules && typeof storedRoundRules === "object" ? storedRoundRules : {}),
+};
+let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -2146,7 +2180,7 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  return ROUND_RULES[round] || {
+  return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
   };
@@ -5648,6 +5682,224 @@ function renderRoundRuleSummary(date = new Date()) {
   setText("[data-round-rule-detail]", `${rule.detail} ${phaseDetail}`);
 }
 
+function saveApprovalRules() {
+  storeJsonValue(APPROVAL_RULES_STORAGE_KEY, approvalRules);
+}
+
+function saveRoundRules() {
+  storeJsonValue(ROUND_RULES_STORAGE_KEY, roundRules);
+}
+
+function roundRuleNumbers() {
+  return Object.keys(roundRules)
+    .map((round) => Number(round))
+    .filter((round) => Number.isFinite(round))
+    .sort((first, second) => first - second);
+}
+
+function renderRoundRuleSummaryList() {
+  document.querySelectorAll("[data-round-rules-summary]").forEach((list) => {
+    list.innerHTML = roundRuleNumbers().map((round) => {
+      const rule = roundRuleForRound(round);
+      return `<div><dt>Round ${round}</dt><dd><strong>${escapeHtml(rule.label)}</strong><small>${escapeHtml(rule.detail)}</small></dd></div>`;
+    }).join("");
+  });
+}
+
+function renderRoundRuleEditor() {
+  const editor = document.querySelector("[data-round-rule-editor]");
+  if (!editor) return;
+
+  editor.innerHTML = `
+    <div class="round-rule-list">
+      ${roundRuleNumbers().map((round) => {
+        const rule = roundRuleForRound(round);
+        return `
+          <div class="round-rule-row" data-round-rule-row="${round}">
+            <span>Round ${round}</span>
+            <label>
+              Limit
+              <input type="text" data-round-rule-label="${round}" value="${escapeHtml(rule.label)}">
+            </label>
+            <label>
+              Rule
+              <textarea data-round-rule-detail="${round}" rows="3">${escapeHtml(rule.detail)}</textarea>
+            </label>
+            <button class="secondary-action small" type="button" data-save-round-rule="${round}">Save</button>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function saveRoundRule(round) {
+  const labelInput = document.querySelector(`[data-round-rule-label="${round}"]`);
+  const detailInput = document.querySelector(`[data-round-rule-detail="${round}"]`);
+  if (!labelInput || !detailInput) return;
+
+  const label = labelInput.value.trim();
+  const detail = detailInput.value.trim();
+  if (!label || !detail) return;
+
+  roundRules[round] = { label, detail };
+  saveRoundRules();
+  renderRoundRuleSummary();
+  renderRoundRuleSummaryList();
+  renderRoundRuleEditor();
+}
+
+function renderApprovalRuleSummary() {
+  document.querySelectorAll("[data-approval-rule-summary]").forEach((list) => {
+    list.innerHTML = approvalRules.length
+      ? approvalRules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("")
+      : '<li>No approval rules have been added yet.</li>';
+  });
+}
+
+function renderApprovalRuleEditor() {
+  const list = document.querySelector("[data-approval-rule-list]");
+  if (!list) return;
+
+  list.innerHTML = approvalRules.length
+    ? approvalRules.map((rule, index) => `
+      <li class="editable-rule-item" data-approval-rule-index="${index}">
+        <button class="rule-drag-handle" type="button" draggable="true" data-approval-rule-drag-handle="${index}" aria-label="Drag approval rule ${index + 1}" title="Drag to reorder"></button>
+        <span class="editable-rule-copy">${escapeHtml(rule)}</span>
+        <div class="rule-actions">
+          <button class="secondary-action small" type="button" data-approval-rule-edit="${index}">Edit</button>
+          <button class="secondary-action small danger" type="button" data-approval-rule-remove="${index}">Remove</button>
+        </div>
+      </li>
+    `).join("")
+    : '<li class="editable-rule-item empty-rule">No approval rules have been added yet.</li>';
+}
+
+function resetApprovalRuleInput() {
+  const input = document.querySelector("[data-approval-rule-input]");
+  const button = document.querySelector("[data-add-approval-rule]");
+  if (input) {
+    input.value = "";
+    delete input.dataset.editingIndex;
+  }
+  if (button) button.textContent = "Add";
+}
+
+function saveApprovalRuleFromInput() {
+  const input = document.querySelector("[data-approval-rule-input]");
+  if (!input) return;
+
+  const value = input.value.trim();
+  if (!value) return;
+
+  const editingIndex = Number(input.dataset.editingIndex);
+  if (Number.isInteger(editingIndex) && approvalRules[editingIndex]) {
+    approvalRules[editingIndex] = value;
+  } else {
+    approvalRules.push(value);
+  }
+
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
+}
+
+function editApprovalRule(index) {
+  const input = document.querySelector("[data-approval-rule-input]");
+  const button = document.querySelector("[data-add-approval-rule]");
+  if (!input || !approvalRules[index]) return;
+
+  input.value = approvalRules[index];
+  input.dataset.editingIndex = String(index);
+  if (button) button.textContent = "Save";
+  input.focus();
+}
+
+function reorderApprovalRule(fromIndex, toIndex) {
+  if (
+    fromIndex === toIndex ||
+    !approvalRules[fromIndex] ||
+    toIndex < 0 ||
+    toIndex >= approvalRules.length
+  ) {
+    return false;
+  }
+
+  const [rule] = approvalRules.splice(fromIndex, 1);
+  approvalRules.splice(toIndex, 0, rule);
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
+  return true;
+}
+
+function removeApprovalRule(index) {
+  if (!approvalRules[index]) return;
+
+  approvalRules.splice(index, 1);
+  saveApprovalRules();
+  resetApprovalRuleInput();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
+}
+
+let draggedApprovalRuleIndex = null;
+
+function approvalRuleDragItem(event) {
+  return event.target.closest("[data-approval-rule-index]");
+}
+
+function startApprovalRuleDrag(event) {
+  const item = approvalRuleDragItem(event);
+  if (!item || !event.target.closest("[data-approval-rule-drag-handle]")) return;
+
+  draggedApprovalRuleIndex = Number(item.dataset.approvalRuleIndex);
+  item.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", String(draggedApprovalRuleIndex));
+}
+
+function moveApprovalRuleDuringDrag(event) {
+  if (draggedApprovalRuleIndex === null) return;
+  const list = event.target.closest("[data-approval-rule-list]");
+  if (!list) return;
+
+  event.preventDefault();
+  const draggedItem = list.querySelector(".editable-rule-item.dragging");
+  const targetItem = approvalRuleDragItem(event);
+  if (!draggedItem || !targetItem || targetItem === draggedItem) return;
+
+  const targetBounds = targetItem.getBoundingClientRect();
+  const insertAfter = event.clientY > targetBounds.top + targetBounds.height / 2;
+  list.insertBefore(draggedItem, insertAfter ? targetItem.nextSibling : targetItem);
+}
+
+function dropApprovalRule(event) {
+  if (draggedApprovalRuleIndex === null) return;
+  const list = event.target.closest("[data-approval-rule-list]");
+  if (!list) return;
+
+  event.preventDefault();
+  const nextOrder = [...list.querySelectorAll("[data-approval-rule-index]")]
+    .map((item) => Number(item.dataset.approvalRuleIndex))
+    .filter((index) => Number.isInteger(index) && approvalRules[index]);
+  if (nextOrder.length === approvalRules.length) {
+    approvalRules = nextOrder.map((index) => approvalRules[index]);
+    saveApprovalRules();
+  }
+  finishApprovalRuleDrag();
+  resetApprovalRuleInput();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
+}
+
+function finishApprovalRuleDrag() {
+  document.querySelector(".editable-rule-item.dragging")?.classList.remove("dragging");
+  draggedApprovalRuleIndex = null;
+}
+
 function areaLeaveSlotTotals() {
   return Object.values(leaveSlotMap()).reduce((totals, day) => {
     const cpcFilled = (day.cpc || []).length;
@@ -7856,6 +8108,10 @@ function renderApp() {
   renderLeaveDraftQueue();
   renderLeaveAllowanceSummary();
   renderRoundRuleSummary();
+  renderRoundRuleSummaryList();
+  renderRoundRuleEditor();
+  renderApprovalRuleSummary();
+  renderApprovalRuleEditor();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
   renderLeaveSlotBoard();
@@ -7885,6 +8141,29 @@ function logOut() {
 
 document.addEventListener("click", async (event) => {
   primeAlertSound();
+
+  if (event.target.closest("[data-add-approval-rule]")) {
+    saveApprovalRuleFromInput();
+    return;
+  }
+
+  const approvalRuleEdit = event.target.closest("[data-approval-rule-edit]");
+  if (approvalRuleEdit) {
+    editApprovalRule(Number(approvalRuleEdit.dataset.approvalRuleEdit));
+    return;
+  }
+
+  const approvalRuleRemove = event.target.closest("[data-approval-rule-remove]");
+  if (approvalRuleRemove) {
+    removeApprovalRule(Number(approvalRuleRemove.dataset.approvalRuleRemove));
+    return;
+  }
+
+  const roundRuleSave = event.target.closest("[data-save-round-rule]");
+  if (roundRuleSave) {
+    saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule));
+    return;
+  }
 
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
@@ -8321,6 +8600,23 @@ document.addEventListener("keydown", (event) => {
     closeLeaveSlotModal();
   }
 
+  if (event.key === "Enter" && event.target.closest("[data-approval-rule-input]")) {
+    event.preventDefault();
+    saveApprovalRuleFromInput();
+    return;
+  }
+
+  const approvalRuleHandle = event.target.closest("[data-approval-rule-drag-handle]");
+  if (approvalRuleHandle && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    const currentIndex = Number(approvalRuleHandle.dataset.approvalRuleDragHandle);
+    const nextIndex = event.key === "ArrowUp" ? currentIndex - 1 : currentIndex + 1;
+    if (reorderApprovalRule(currentIndex, nextIndex)) {
+      document.querySelector(`[data-approval-rule-drag-handle="${nextIndex}"]`)?.focus();
+    }
+    return;
+  }
+
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
@@ -8394,9 +8690,13 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 
 document.addEventListener("dragstart", startRosterRowDrag);
+document.addEventListener("dragstart", startApprovalRuleDrag);
 document.addEventListener("dragover", moveRosterRowDuringDrag);
+document.addEventListener("dragover", moveApprovalRuleDuringDrag);
 document.addEventListener("drop", dropRosterRow);
+document.addEventListener("drop", dropApprovalRule);
 document.addEventListener("dragend", finishRosterRowDrag);
+document.addEventListener("dragend", finishApprovalRuleDrag);
 document.addEventListener("mousedown", startRosterColumnResize);
 document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);

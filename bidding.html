@@ -73,6 +73,9 @@
           </details>
           <button class="public-nav-item" type="button" data-public-area="Previous Years">Previous Years</button>
         </nav>
+        <div class="public-footer side-footer">
+          <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
+        </div>
       </aside>
 
       <main class="public-main">
@@ -287,32 +290,6 @@
               <button class="secondary-action small" type="button" data-alert-close>Close</button>
             </div>
             <div class="alert-list" data-alert-list></div>
-          </div>
-        </section>
-        <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
-          <div class="panel">
-            <div class="panel-header compact">
-              <div>
-                <h2>Help Messages</h2>
-                <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
-              </div>
-              <button class="secondary-action small" type="button" data-help-close>Close</button>
-            </div>
-            <div class="help-layout">
-              <div class="help-thread-list" data-help-thread-list></div>
-              <div class="help-conversation">
-                <div class="help-message-list" data-help-message-list></div>
-                <label class="help-composer">
-                  Message
-                  <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
-                </label>
-                <div class="button-row">
-                  <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
-                  <button class="primary-action" type="button" data-help-send>Send Message</button>
-                </div>
-                <p class="help-status" data-help-status aria-live="polite"></p>
-              </div>
-            </div>
           </div>
         </section>
         <section class="account-menu" aria-label="Account settings" hidden data-account-menu>
@@ -846,16 +823,16 @@
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
                   <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
                 </div>
+                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
               </section>
               <section class="panel">
-                <h3>Approval Rules</h3>
-                <ul class="plain-list success-list">
-                  <li>Approve applies the BUE initials automatically.</li>
-                  <li>Filled leave days require an explicit override before approval.</li>
-                  <li>Overrides require an intake user and are logged.</li>
-                  <li>GL bidders do not populate public floor templates.</li>
-                  <li>Developmentals bid against developmental slots.</li>
-                </ul>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Current intake guidance set by Admin.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list" data-approval-rule-summary></ul>
               </section>
               <section class="panel help-summary-card">
                 <div class="panel-header compact">
@@ -1192,6 +1169,28 @@
               <div class="admin-user-list" data-admin-user-list></div>
             </section>
             <aside class="right-stack">
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Round Rules</h3>
+                    <p>Edit the wording shown for each bidding round.</p>
+                  </div>
+                </div>
+                <div class="round-rule-editor" data-round-rule-editor></div>
+              </section>
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Add, edit, remove, or drag intake guidance into order.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list editable-rule-list" data-approval-rule-list></ul>
+                <div class="rule-editor-row">
+                  <input type="text" data-approval-rule-input placeholder="Add approval rule">
+                  <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
+                </div>
+              </section>
               <section class="panel">
                 <h3>Schedule Intake Rep</h3>
                 <p>Access opens 15 minutes before the shift starts.</p>
@@ -1459,6 +1458,32 @@
         </section>
       </main>
     </div>
+    <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
+      <div class="panel">
+        <div class="panel-header compact">
+          <div>
+            <h2>Help Messages</h2>
+            <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
+          </div>
+          <button class="secondary-action small" type="button" data-help-close>Close</button>
+        </div>
+        <div class="help-layout">
+          <div class="help-thread-list" data-help-thread-list></div>
+          <div class="help-conversation">
+            <div class="help-message-list" data-help-message-list></div>
+            <label class="help-composer">
+              Message
+              <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
+            </label>
+            <div class="button-row">
+              <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
+              <button class="primary-action" type="button" data-help-send>Send Message</button>
+            </div>
+            <p class="help-status" data-help-status aria-live="polite"></p>
+          </div>
+        </div>
+      </div>
+    </section>
     <div class="leave-slot-modal" data-leave-slot-modal hidden role="dialog" aria-modal="true" aria-labelledby="leave-slot-modal-title">
       <div class="leave-slot-modal-panel">
         <div class="panel-header compact">
