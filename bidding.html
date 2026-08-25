@@ -82,6 +82,7 @@
             <h1 data-public-heading>Area A Annual Leave Calendar</h1>
           </div>
           <div class="public-login">
+            <button class="secondary-action small" type="button" data-help-toggle>Chat with Intake</button>
             <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
@@ -287,32 +288,6 @@
               <button class="secondary-action small" type="button" data-alert-close>Close</button>
             </div>
             <div class="alert-list" data-alert-list></div>
-          </div>
-        </section>
-        <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
-          <div class="panel">
-            <div class="panel-header compact">
-              <div>
-                <h2>Help Messages</h2>
-                <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
-              </div>
-              <button class="secondary-action small" type="button" data-help-close>Close</button>
-            </div>
-            <div class="help-layout">
-              <div class="help-thread-list" data-help-thread-list></div>
-              <div class="help-conversation">
-                <div class="help-message-list" data-help-message-list></div>
-                <label class="help-composer">
-                  Message
-                  <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
-                </label>
-                <div class="button-row">
-                  <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
-                  <button class="primary-action" type="button" data-help-send>Send Message</button>
-                </div>
-                <p class="help-status" data-help-status aria-live="polite"></p>
-              </div>
-            </div>
           </div>
         </section>
         <section class="account-menu" aria-label="Account settings" hidden data-account-menu>
@@ -1456,6 +1431,32 @@
         </section>
       </main>
     </div>
+    <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
+      <div class="panel">
+        <div class="panel-header compact">
+          <div>
+            <h2>Help Messages</h2>
+            <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
+          </div>
+          <button class="secondary-action small" type="button" data-help-close>Close</button>
+        </div>
+        <div class="help-layout">
+          <div class="help-thread-list" data-help-thread-list></div>
+          <div class="help-conversation">
+            <div class="help-message-list" data-help-message-list></div>
+            <label class="help-composer">
+              Message
+              <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
+            </label>
+            <div class="button-row">
+              <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
+              <button class="primary-action" type="button" data-help-send>Send Message</button>
+            </div>
+            <p class="help-status" data-help-status aria-live="polite"></p>
+          </div>
+        </div>
+      </div>
+    </section>
     <div class="leave-slot-modal" data-leave-slot-modal hidden role="dialog" aria-modal="true" aria-labelledby="leave-slot-modal-title">
       <div class="leave-slot-modal-panel">
         <div class="panel-header compact">
