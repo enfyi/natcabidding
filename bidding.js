@@ -596,6 +596,64 @@ const supabaseState = {
   pendingAuthEmail: "",
 };
 
+const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
+
+function isMissingSupabaseRoutine(error) {
+  return /function .*live_help_|Could not find the function|schema cache|PGRST202/i.test(error?.message || "");
+}
+
+function isMissingSupabaseColumn(error) {
+  return /column .* does not exist|Could not find .* column|schema cache|PGRST204/i.test(error?.message || "");
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function liveHelpSessionId() {
+  try {
+    const stored = window.localStorage?.getItem(LIVE_HELP_SESSION_KEY);
+    if (stored) return stored;
+    const next = window.crypto?.randomUUID?.() || `anon-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    window.localStorage?.setItem(LIVE_HELP_SESSION_KEY, next);
+    return next;
+  } catch (_error) {
+    return `anon-${Date.now()}`;
+  }
+}
+
+function isConfirmedHelpUser() {
+  return Boolean(isMemberAppVisible() && currentUser?.supabaseProfileId);
+}
+
+function currentHelpRequester() {
+  if (isConfirmedHelpUser()) {
+    return {
+      key: `bidder:${currentUser.supabaseProfileId}`,
+      bidderId: currentUser.supabaseProfileId,
+      name: userFullName(),
+      initials: currentUser.initials || "BUE",
+      area: currentUser.area || "Area A",
+      email: currentUser.email || "",
+      verified: true,
+      sessionId: "",
+    };
+  }
+
+  const area = ZLA_AREAS.includes(publicState.area) ? publicState.area : "Area A";
+  const sessionId = liveHelpSessionId();
+  return {
+    key: `anon:${sessionId}`,
+    bidderId: null,
+    name: "Unverified visitor",
+    initials: "Guest",
+    area,
+    email: "",
+    verified: false,
+    sessionId,
+  };
+}
+
 const AREA_NAME_BY_CODE = {
   "area-a": "Area A",
   "area-b": "Area B",
@@ -1522,17 +1580,36 @@ function selectedLineRequest(line) {
   );
 }
 
-function logHistory(area, title, detail) {
+function logHistory(area, title, detail, actor = currentUser?.initials || "Guest") {
   history.unshift({
     area,
     time: formatDateTime(new Date()),
-    actor: currentUser.initials,
+    actor,
     title,
     detail,
   });
 }
 
+function warnUnconfirmedBidder(action = "submit bids") {
+  const message = `Sign in as a confirmed BUE before you ${action}. Public chat users are not verified for bidding.`;
+  if (isMemberAppVisible()) {
+    setLeaveBuilderStatus(message, "error");
+  } else {
+    setHelpStatus(message, "error");
+  }
+  window.alert(message);
+}
+
+function canSubmitBueBid() {
+  return isConfirmedHelpUser();
+}
+
 function addOrUpdateRdoSubmission() {
+  if (!canSubmitBueBid()) {
+    warnUnconfirmedBidder("submit an RDO bid");
+    return;
+  }
+
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
   if (!line || line.status === "Taken") return;
   if (!selectedFatigueGroup) {
@@ -2677,6 +2754,11 @@ function removeLeaveDraft(id) {
 }
 
 async function submitLeaveDraftBatch() {
+  if (!canSubmitBueBid()) {
+    warnUnconfirmedBidder("submit leave bids");
+    return;
+  }
+
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
     return;
@@ -3948,6 +4030,11 @@ function showLoggedInApp(page = "dashboard") {
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
   setPage(page);
+  void loadSupabaseHelpThreads().then(() => {
+    renderHelpSummary();
+    renderHelpPanel();
+    renderAlerts();
+  });
 }
 
 function showPublicHome() {
@@ -4605,6 +4692,7 @@ async function loadSupabaseReferenceData() {
     upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
     upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
@@ -4959,13 +5047,14 @@ function currentUserBidAs() {
 }
 
 function activeAdminGrant() {
-  if (!currentUser.adminGrant) return null;
+  if (!currentUser?.adminGrant) return null;
   const nowDate = new Date();
   const { start, end } = currentUser.adminGrant;
   return nowDate >= start && nowDate <= end ? currentUser.adminGrant : null;
 }
 
 function activeScheduledIntakeWindow() {
+  if (!currentUser?.initials) return null;
   const nowDate = new Date();
   return intakeSchedules.find((schedule) => {
     const accessStart = new Date(schedule.start.getTime() - 15 * 60 * 1000);
@@ -4980,7 +5069,7 @@ function hasIntakeAccess() {
 }
 
 function hasSystemAdminAccess() {
-  return Boolean(currentUser.systemAdmin);
+  return Boolean(currentUser?.systemAdmin);
 }
 
 function canUseIntakeView() {
@@ -7234,14 +7323,219 @@ function playAlertDing() {
   oscillator.stop(alertAudioContext.currentTime + 0.2);
 }
 
+function helpThreadFromRpc(row) {
+  const messages = Array.isArray(row.messages) ? row.messages : [];
+  const verified = Boolean(row.requester_verified || row.bidder_id);
+  const lastMessage = messages[messages.length - 1];
+  const status = row.status === "closed"
+    ? "Resolved"
+    : ["intake", "admin"].includes(String(lastMessage?.sender_role || "").toLowerCase())
+      ? "Answered"
+      : "Open";
+
+  return {
+    id: row.id,
+    supabaseThreadId: row.id,
+    requesterKey: row.bidder_id ? `bidder:${row.bidder_id}` : `anon:${row.anonymous_session_id || ""}`,
+    bidderId: row.bidder_id || null,
+    anonymousSessionId: row.anonymous_session_id || "",
+    area: row.area_name || row.area || "Area A",
+    requester: row.requester_name || (verified ? "Confirmed BUE" : "Unverified visitor"),
+    initials: row.requester_initials || (verified ? "BUE" : "Guest"),
+    verified,
+    status,
+    updatedAt: formatDateTime(new Date(row.updated_at || row.created_at || Date.now())),
+    messages: messages.map((message) => {
+      const role = String(message.sender_role || "").toLowerCase();
+      return {
+        author: message.sender_display_name || (role === "intake" || role === "admin" ? "Intake" : row.requester_initials || "Guest"),
+        role: role === "intake" || role === "admin" ? "Intake" : verified ? "BUE" : "Visitor",
+        time: formatDateTime(new Date(message.created_at || Date.now())),
+        body: message.message || "",
+        verified: Boolean(message.sender_verified),
+      };
+    }),
+  };
+}
+
+function helpThreadFromLegacyRow(row) {
+  const messages = row.help_messages || [];
+  const requester = currentHelpRequester();
+  const verified = Boolean(row.bidder_id);
+  const sortedMessages = [...messages].sort((first, second) => new Date(first.created_at) - new Date(second.created_at));
+  const lastMessage = sortedMessages[sortedMessages.length - 1];
+  const status = row.status === "closed"
+    ? "Resolved"
+    : lastMessage && lastMessage.sender_id && lastMessage.sender_id !== row.bidder_id
+      ? "Answered"
+      : "Open";
+
+  return {
+    id: row.id,
+    supabaseThreadId: row.id,
+    requesterKey: row.bidder_id ? `bidder:${row.bidder_id}` : requester.key,
+    bidderId: row.bidder_id || null,
+    anonymousSessionId: "",
+    area: requester.area,
+    requester: requester.verified && row.bidder_id === requester.bidderId ? requester.name : row.subject || "Help Thread",
+    initials: requester.verified && row.bidder_id === requester.bidderId ? requester.initials : "BUE",
+    verified,
+    status,
+    updatedAt: formatDateTime(new Date(row.updated_at || row.created_at || Date.now())),
+    messages: sortedMessages.map((message) => {
+      const fromRequester = message.sender_id && message.sender_id === row.bidder_id;
+      return {
+        author: fromRequester ? requester.initials : "Intake",
+        role: fromRequester ? "BUE" : "Intake",
+        time: formatDateTime(new Date(message.created_at || Date.now())),
+        body: message.message || "",
+        verified: fromRequester,
+      };
+    }),
+  };
+}
+
+async function loadSupabaseHelpThreads() {
+  const client = supabaseClient();
+  if (!client) return false;
+
+  const requester = currentHelpRequester();
+  try {
+    const { data, error } = await client.rpc("live_help_threads", {
+      help_bid_year: BID_YEAR,
+      help_session_id: requester.sessionId || liveHelpSessionId(),
+    });
+    if (error) throw error;
+    helpThreads = (data || []).map(helpThreadFromRpc);
+    return true;
+  } catch (error) {
+    if (!isMissingSupabaseRoutine(error)) {
+      console.warn("Live help RPC unavailable:", error.message || error);
+    }
+  }
+
+  if (!requester.verified && !hasIntakeAccess()) return false;
+
+  try {
+    await ensureSupabaseBidYearId();
+    let query = client
+      .from("help_threads")
+      .select("id,bid_year_id,bidder_id,subject,status,created_at,updated_at,help_messages(id,sender_id,message,created_at)")
+      .eq("bid_year_id", supabaseState.bidYearId)
+      .order("updated_at", { ascending: false });
+    if (!hasIntakeAccess()) query = query.eq("bidder_id", requester.bidderId);
+    const { data, error } = await query;
+    if (error) throw error;
+    helpThreads = (data || []).map(helpThreadFromLegacyRow);
+    return true;
+  } catch (error) {
+    console.warn("Live help table load unavailable:", error.message || error);
+    return false;
+  }
+}
+
+async function saveSupabaseHelpMessage(thread, body, role) {
+  const client = supabaseClient();
+  if (!client) return false;
+
+  const requester = currentHelpRequester();
+  try {
+    const { error } = await client.rpc("live_help_send_message", {
+      help_thread_id: isUuid(thread?.supabaseThreadId) ? thread.supabaseThreadId : null,
+      help_bid_year: BID_YEAR,
+      help_session_id: requester.sessionId || liveHelpSessionId(),
+      help_area: requester.area,
+      help_message: body,
+    });
+    if (error) throw error;
+    await loadSupabaseHelpThreads();
+    return true;
+  } catch (error) {
+    if (!isMissingSupabaseRoutine(error)) {
+      throw error;
+    }
+  }
+
+  if (!requester.verified && !hasIntakeAccess()) {
+    throw new Error("Supabase live help needs database/live_help.sql before unverified visitors can be saved.");
+  }
+
+  await ensureSupabaseBidYearId();
+  let threadId = thread?.supabaseThreadId;
+  if (!isUuid(threadId)) {
+    const { data: savedThread, error: threadError } = await client
+      .from("help_threads")
+      .insert({
+        bid_year_id: supabaseState.bidYearId,
+        bidder_id: requester.bidderId,
+        subject: "Live Help",
+        status: "open",
+      })
+      .select("id")
+      .single();
+    if (threadError) throw threadError;
+    threadId = savedThread.id;
+    thread.supabaseThreadId = threadId;
+    thread.id = threadId;
+  }
+
+  const { error: messageError } = await client
+    .from("help_messages")
+    .insert({
+      thread_id: threadId,
+      sender_id: role === "Intake" ? currentUser.supabaseProfileId || null : requester.bidderId,
+      message: body,
+    });
+  if (messageError) throw messageError;
+
+  const { error: updateError } = await client
+    .from("help_threads")
+    .update({ status: thread.status === "Resolved" ? "closed" : "open", updated_at: new Date().toISOString() })
+    .eq("id", threadId);
+  if (updateError && !isMissingSupabaseColumn(updateError)) throw updateError;
+  await loadSupabaseHelpThreads();
+  return true;
+}
+
+async function saveSupabaseHelpResolution(thread) {
+  const client = supabaseClient();
+  if (!client || !thread?.supabaseThreadId) return false;
+
+  try {
+    const { error } = await client.rpc("live_help_resolve_thread", {
+      help_thread_id: thread.supabaseThreadId,
+    });
+    if (error) throw error;
+    await loadSupabaseHelpThreads();
+    return true;
+  } catch (error) {
+    if (!isMissingSupabaseRoutine(error)) throw error;
+  }
+
+  const { error } = await client
+    .from("help_threads")
+    .update({ status: "closed", updated_at: new Date().toISOString() })
+    .eq("id", thread.supabaseThreadId);
+  if (error) throw error;
+  await loadSupabaseHelpThreads();
+  return true;
+}
+
 function currentUserHelpThread() {
-  let thread = helpThreads.find((item) => item.initials === currentUser.initials);
+  const requester = currentHelpRequester();
+  let thread = helpThreads.find((item) => item.requesterKey === requester.key)
+    || (requester.bidderId ? helpThreads.find((item) => item.bidderId === requester.bidderId) : null)
+    || (requester.sessionId ? helpThreads.find((item) => item.anonymousSessionId === requester.sessionId) : null);
   if (!thread) {
     thread = {
-      id: `help-${currentUser.initials.toLowerCase()}-${Date.now()}`,
-      area: currentUser.area,
-      requester: userFullName(),
-      initials: currentUser.initials,
+      id: `help-${requester.verified ? requester.initials.toLowerCase() : "anon"}-${Date.now()}`,
+      requesterKey: requester.key,
+      bidderId: requester.bidderId,
+      anonymousSessionId: requester.sessionId,
+      area: requester.area,
+      requester: requester.name,
+      initials: requester.initials,
+      verified: requester.verified,
       status: "Open",
       updatedAt: formatDateTime(new Date()),
       messages: [],
@@ -7253,7 +7547,7 @@ function currentUserHelpThread() {
 
 function activeHelpThread() {
   if (helpPanelMode === "intake" && hasIntakeAccess()) {
-    return helpThreads.find((thread) => thread.id === activeHelpThreadId) || helpThreads[0] || currentUserHelpThread();
+    return helpThreads.find((thread) => thread.id === activeHelpThreadId) || helpThreads[0] || null;
   }
   return currentUserHelpThread();
 }
@@ -7275,6 +7569,13 @@ function openHelpPanel(threadId = null) {
   document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
   document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
+  void loadSupabaseHelpThreads().then(() => {
+    const active = activeHelpThread();
+    if (active) activeHelpThreadId = active.id;
+    renderHelpPanel();
+    renderHelpSummary();
+    renderAlerts();
+  });
   renderHelpPanel();
 }
 
@@ -7290,6 +7591,7 @@ function renderHelpPanel() {
 
   const thread = activeHelpThread();
   const intakeMode = helpPanelMode === "intake" && hasIntakeAccess();
+  const requester = currentHelpRequester();
   const subtitle = document.querySelector("[data-help-panel-subtitle]");
   const threadList = document.querySelector("[data-help-thread-list]");
   const messageList = document.querySelector("[data-help-message-list]");
@@ -7298,16 +7600,18 @@ function renderHelpPanel() {
 
   if (subtitle) {
     subtitle.textContent = intakeMode
-      ? "Reply to saved BUE help conversations from the intake side."
-      : "Ask bidding intake for help. This conversation is saved.";
+      ? "Reply to saved help conversations from the intake side."
+      : requester.verified
+        ? "You are chatting as a confirmed BUE. This conversation is saved."
+        : "You can chat here, but you are not a confirmed user until you log in. Bids cannot be submitted from public chat.";
   }
 
   if (threadList) {
     threadList.hidden = !intakeMode;
     threadList.innerHTML = intakeMode
       ? helpThreads.map((item) => `
-        <button class="help-thread-card ${item.id === thread.id ? "active" : ""}" type="button" data-help-thread-open="${item.id}">
-          <span>${escapeHtml(item.status)}</span>
+        <button class="help-thread-card ${item.id === thread?.id ? "active" : ""} ${item.verified ? "" : "unverified"}" type="button" data-help-thread-open="${item.id}">
+          <span>${escapeHtml(item.status)}${item.verified ? "" : " · Unverified"}</span>
           <strong>${escapeHtml(item.requester)} · ${escapeHtml(item.initials)}</strong>
           <small>${escapeHtml(item.area)} · ${escapeHtml(item.updatedAt)}</small>
         </button>
@@ -7316,8 +7620,16 @@ function renderHelpPanel() {
   }
 
   if (messageList) {
-    messageList.innerHTML = thread.messages.length
-      ? thread.messages.map((message) => `
+    if (!thread) {
+      messageList.innerHTML = '<div class="empty-state">No help conversations are open.</div>';
+    } else {
+      const warning = intakeMode && !thread.verified
+        ? '<div class="help-verification-warning">This person is not verified as a logged-in BUE. Do not accept bids or account changes from this chat until they sign in.</div>'
+        : !requester.verified && !intakeMode
+          ? '<div class="help-verification-warning">You are chatting as an unverified visitor. Please log in before submitting any bid.</div>'
+          : "";
+      const messages = thread.messages.length
+        ? thread.messages.map((message) => `
         <article class="help-message ${message.role.toLowerCase()}">
           <div>
             <span>${escapeHtml(message.role)} · ${escapeHtml(message.author)}</span>
@@ -7326,11 +7638,13 @@ function renderHelpPanel() {
           <p>${escapeHtml(message.body)}</p>
         </article>
       `).join("")
-      : '<div class="empty-state">No messages yet. Send a question and intake will see it here.</div>';
+        : '<div class="empty-state">No messages yet. Send a question and intake will see it here.</div>';
+      messageList.innerHTML = `${warning}${messages}`;
+    }
   }
 
   if (resolveButton) {
-    resolveButton.hidden = !intakeMode || thread.status === "Resolved";
+    resolveButton.hidden = !intakeMode || !thread || thread.status === "Resolved";
   }
 }
 
@@ -7346,8 +7660,8 @@ function renderHelpSummary() {
 
   target.innerHTML = visibleThreads.length
     ? visibleThreads.map((thread) => `
-      <button class="help-thread-card" type="button" data-help-thread-open="${thread.id}">
-        <span>${escapeHtml(thread.status)}</span>
+      <button class="help-thread-card ${thread.verified ? "" : "unverified"}" type="button" data-help-thread-open="${thread.id}">
+        <span>${escapeHtml(thread.status)}${thread.verified ? "" : " · Unverified"}</span>
         <strong>${escapeHtml(thread.requester)} · ${escapeHtml(thread.initials)}</strong>
         <small>${escapeHtml(thread.area)} · ${escapeHtml(thread.messages.length)} messages · ${escapeHtml(thread.updatedAt)}</small>
       </button>
@@ -7355,7 +7669,7 @@ function renderHelpSummary() {
     : '<div class="empty-state">No open help conversations.</div>';
 }
 
-function sendHelpMessage() {
+async function sendHelpMessage() {
   const input = document.querySelector("[data-help-message-input]");
   const body = input?.value.trim() || "";
   if (!body) {
@@ -7364,30 +7678,63 @@ function sendHelpMessage() {
   }
 
   const thread = activeHelpThread();
-  const role = helpPanelMode === "intake" && hasIntakeAccess() ? "Intake" : "BUE";
+  if (!thread) {
+    setHelpStatus("Open a help conversation before replying.", "error");
+    return;
+  }
+
+  const requester = currentHelpRequester();
+  const role = helpPanelMode === "intake" && hasIntakeAccess() ? "Intake" : requester.verified ? "BUE" : "Visitor";
   thread.messages.push({
-    author: currentUser.initials,
+    author: role === "Intake" ? currentUser.initials : requester.initials,
     role,
     time: formatDateTime(new Date()),
     body,
+    verified: role === "Intake" || requester.verified,
   });
   thread.updatedAt = formatDateTime(new Date());
+  thread.verified = thread.verified || requester.verified;
   thread.status = role === "Intake" ? "Answered" : "Open";
   input.value = "";
   activeHelpThreadId = thread.id;
-  logHistory(thread.area, "Help message saved", `${currentUser.initials} added a ${role.toLowerCase()} message to ${thread.initials}'s help thread.`);
+  logHistory(
+    thread.area,
+    "Help message saved",
+    `${role === "Intake" ? currentUser.initials : requester.initials} added a ${role.toLowerCase()} message to ${thread.initials}'s help thread.`,
+    role === "Intake" ? currentUser.initials : requester.initials
+  );
   renderApp();
-  setHelpStatus(role === "Intake" ? "Reply sent and saved to the thread." : "Message sent to bidding intake and saved.", "success");
+
+  try {
+    const saved = await saveSupabaseHelpMessage(thread, body, role);
+    renderApp();
+    setHelpStatus(
+      saved
+        ? role === "Intake" ? "Reply sent and saved to Supabase." : "Message sent to bidding intake and saved to Supabase."
+        : "Message is visible here, but Supabase did not save it.",
+      saved ? "success" : "error"
+    );
+  } catch (error) {
+    renderApp();
+    setHelpStatus(error.message || "Message is visible here, but Supabase could not save it.", "error");
+  }
 }
 
-function resolveHelpThread() {
+async function resolveHelpThread() {
   if (!hasIntakeAccess()) return;
   const thread = activeHelpThread();
+  if (!thread) return;
   thread.status = "Resolved";
   thread.updatedAt = formatDateTime(new Date());
   logHistory(thread.area, "Help thread resolved", `${currentUser.initials} marked ${thread.initials}'s help conversation resolved.`);
   renderApp();
-  setHelpStatus("Thread marked resolved and saved.", "success");
+  try {
+    await saveSupabaseHelpResolution(thread);
+    renderApp();
+    setHelpStatus("Thread marked resolved and saved to Supabase.", "success");
+  } catch (error) {
+    setHelpStatus(error.message || "Thread marked resolved here, but Supabase could not save it.", "error");
+  }
 }
 
 function renderOverrideEditor(item) {
@@ -8226,12 +8573,12 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-help-send]")) {
-    sendHelpMessage();
+    await sendHelpMessage();
     return;
   }
 
   if (event.target.closest("[data-help-resolve]")) {
-    resolveHelpThread();
+    await resolveHelpThread();
     return;
   }
 

@@ -242,19 +242,42 @@ create table if not exists help_threads (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid references bid_years(id) on delete cascade,
   bidder_id uuid references bidders(id) on delete set null,
+  area_id uuid references areas(id) on delete set null,
+  requester_name text,
+  requester_initials text,
+  requester_email text,
+  requester_auth_user_id uuid,
+  anonymous_session_id text,
+  requester_verified boolean not null default false,
   subject text not null,
   status text not null default 'open' check (status in ('open', 'closed')),
+  closed_at timestamptz,
+  closed_by uuid references bidders(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists help_threads_bidder_idx
+  on help_threads(bid_year_id, bidder_id, updated_at desc)
+  where bidder_id is not null;
+
+create index if not exists help_threads_anonymous_session_idx
+  on help_threads(bid_year_id, anonymous_session_id, updated_at desc)
+  where anonymous_session_id is not null;
 
 create table if not exists help_messages (
   id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references help_threads(id) on delete cascade,
   sender_id uuid references bidders(id) on delete set null,
+  sender_role text not null default 'bue' check (sender_role in ('bue', 'visitor', 'intake', 'admin', 'system')),
+  sender_display_name text,
+  sender_verified boolean not null default false,
   message text not null,
   created_at timestamptz not null default now()
 );
+
+create index if not exists help_messages_thread_created_idx
+  on help_messages(thread_id, created_at);
 
 create table if not exists audit_events (
   id uuid primary key default gen_random_uuid(),
