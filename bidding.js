@@ -597,6 +597,16 @@ const supabaseState = {
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
+const LIVE_HELP_CLOSED_MESSAGE = "Intake Bidding Office is currently closed. Please reach out 0700-1900 (excluding holidays) for help with your bidding questions.";
+const LIVE_HELP_PACIFIC_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 function isMissingSupabaseRoutine(error) {
   return /function .*live_help_|Could not find the function|schema cache|PGRST202/i.test(error?.message || "");
@@ -620,6 +630,37 @@ function liveHelpSessionId() {
   } catch (_error) {
     return `anon-${Date.now()}`;
   }
+}
+
+function liveHelpPacificParts(date = new Date()) {
+  return LIVE_HELP_PACIFIC_FORMATTER.formatToParts(date).reduce((parts, item) => {
+    if (item.type !== "literal") parts[item.type] = item.value;
+    return parts;
+  }, {});
+}
+
+function liveHelpPacificDateKey(date = new Date()) {
+  const parts = liveHelpPacificParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function isLiveHelpOfficeClosed(date = new Date()) {
+  const parts = liveHelpPacificParts(date);
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  return minutes >= 19 * 60 + 1 || minutes < 7 * 60 || isLegalHolidayDate(liveHelpPacificDateKey(date));
+}
+
+function addLiveHelpClosedReply(thread, date = new Date()) {
+  if (!thread || !isLiveHelpOfficeClosed(date)) return false;
+  thread.messages.push({
+    author: "Intake",
+    role: "Intake",
+    time: formatDateTime(date),
+    body: LIVE_HELP_CLOSED_MESSAGE,
+    verified: true,
+  });
+  thread.status = "Answered";
+  return true;
 }
 
 function isConfirmedHelpUser() {
@@ -7327,9 +7368,10 @@ function helpThreadFromRpc(row) {
   const messages = Array.isArray(row.messages) ? row.messages : [];
   const verified = Boolean(row.requester_verified || row.bidder_id);
   const lastMessage = messages[messages.length - 1];
+  const lastMessageRole = String(lastMessage?.sender_role || "").toLowerCase();
   const status = row.status === "closed"
     ? "Resolved"
-    : ["intake", "admin"].includes(String(lastMessage?.sender_role || "").toLowerCase())
+    : ["intake", "admin", "system"].includes(lastMessageRole)
       ? "Answered"
       : "Open";
 
@@ -7347,12 +7389,13 @@ function helpThreadFromRpc(row) {
     updatedAt: formatDateTime(new Date(row.updated_at || row.created_at || Date.now())),
     messages: messages.map((message) => {
       const role = String(message.sender_role || "").toLowerCase();
+      const fromIntake = role === "intake" || role === "admin" || role === "system";
       return {
-        author: message.sender_display_name || (role === "intake" || role === "admin" ? "Intake" : row.requester_initials || "Guest"),
-        role: role === "intake" || role === "admin" ? "Intake" : verified ? "BUE" : "Visitor",
+        author: message.sender_display_name || (fromIntake ? "Intake" : row.requester_initials || "Guest"),
+        role: fromIntake ? "Intake" : verified ? "BUE" : "Visitor",
         time: formatDateTime(new Date(message.created_at || Date.now())),
         body: message.message || "",
-        verified: Boolean(message.sender_verified),
+        verified: fromIntake || Boolean(message.sender_verified),
       };
     }),
   };
@@ -7685,16 +7728,18 @@ async function sendHelpMessage() {
 
   const requester = currentHelpRequester();
   const role = helpPanelMode === "intake" && hasIntakeAccess() ? "Intake" : requester.verified ? "BUE" : "Visitor";
+  const sentAt = new Date();
   thread.messages.push({
     author: role === "Intake" ? currentUser.initials : requester.initials,
     role,
-    time: formatDateTime(new Date()),
+    time: formatDateTime(sentAt),
     body,
     verified: role === "Intake" || requester.verified,
   });
-  thread.updatedAt = formatDateTime(new Date());
+  thread.updatedAt = formatDateTime(sentAt);
   thread.verified = thread.verified || requester.verified;
   thread.status = role === "Intake" ? "Answered" : "Open";
+  if (role !== "Intake") addLiveHelpClosedReply(thread, sentAt);
   input.value = "";
   activeHelpThreadId = thread.id;
   logHistory(

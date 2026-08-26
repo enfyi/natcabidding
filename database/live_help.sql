@@ -17,16 +17,12 @@ alter table help_messages
   add column if not exists sender_display_name text,
   add column if not exists sender_verified boolean not null default false;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'help_messages_sender_role_check'
-  ) then
-    alter table help_messages
-      add constraint help_messages_sender_role_check
-      check (sender_role in ('bue', 'visitor', 'intake', 'admin', 'system'));
-  end if;
-end $$;
+alter table help_messages
+  drop constraint if exists help_messages_sender_role_check;
+
+alter table help_messages
+  add constraint help_messages_sender_role_check
+  check (sender_role in ('bue', 'visitor', 'intake', 'admin', 'system'));
 
 create index if not exists help_threads_bidder_idx
   on help_threads(bid_year_id, bidder_id, updated_at desc)
@@ -62,6 +58,33 @@ language sql
 immutable
 as $$
   select length(coalesce(trim(help_session_id), '')) between 16 and 128
+$$;
+
+create or replace function public.live_help_office_is_closed(
+  check_at timestamptz default now(),
+  help_bid_year_id uuid default null
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with pacific_clock as (
+    select
+      (check_at at time zone 'America/Los_Angeles')::date as local_date,
+      (check_at at time zone 'America/Los_Angeles')::time as local_time
+  )
+  select
+    pc.local_time >= time '19:01'
+    or pc.local_time < time '07:00'
+    or exists (
+      select 1
+      from holidays h
+      where h.holiday_date = pc.local_date
+        and (help_bid_year_id is null or h.bid_year_id = help_bid_year_id)
+    )
+  from pacific_clock pc
 $$;
 
 create or replace function public.live_help_threads(
@@ -167,6 +190,7 @@ declare
   target_bid_year_id uuid;
   target_thread_id uuid := help_thread_id;
   normalized_message text := nullif(trim(help_message), '');
+  sender_role text;
 begin
   if normalized_message is null then
     raise exception 'A help message is required.';
@@ -303,6 +327,34 @@ begin
     normalized_message
   );
 
+  sender_role := case
+    when actor_role = 'admin' then 'admin'
+    when actor_role = 'intake' then 'intake'
+    when actor_bidder_id is not null then 'bue'
+    else 'visitor'
+  end;
+
+  if sender_role in ('bue', 'visitor')
+    and public.live_help_office_is_closed(now(), target_bid_year_id)
+  then
+    insert into help_messages (
+      thread_id,
+      sender_id,
+      sender_role,
+      sender_display_name,
+      sender_verified,
+      message
+    )
+    values (
+      target_thread_id,
+      null,
+      'system',
+      'Intake',
+      true,
+      'Intake Bidding Office is currently closed. Please reach out 0700-1900 (excluding holidays) for help with your bidding questions.'
+    );
+  end if;
+
   update help_threads
   set status = 'open',
       updated_at = now()
@@ -337,6 +389,7 @@ $$;
 grant execute on function public.live_help_threads(integer, text) to anon, authenticated;
 grant execute on function public.live_help_send_message(uuid, integer, text, text, text) to anon, authenticated;
 grant execute on function public.live_help_resolve_thread(uuid) to authenticated;
+grant execute on function public.live_help_office_is_closed(timestamptz, uuid) to anon, authenticated;
 
 alter table help_threads enable row level security;
 alter table help_messages enable row level security;
