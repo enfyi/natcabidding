@@ -32,8 +32,9 @@ create table if not exists bidders (
   email text,
   phone text,
   role text not null default 'controller' check (role in ('controller', 'intake', 'admin')),
-  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV')),
+  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'TMCIT')),
   seniority_rank integer,
+  leave_slot_allowance integer not null default 4 check (leave_slot_allowance >= 0),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -65,6 +66,7 @@ create table if not exists rdo_lines (
   flex boolean not null default false,
   status text not null default 'open' check (status in ('open', 'taken', 'locked')),
   assigned_bidder_id uuid references bidders(id) on delete set null,
+  assigned_initials text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, area_id, line_code)
@@ -79,10 +81,14 @@ create table if not exists rdo_line_days (
   unique (rdo_line_id, weekday)
 );
 
+create unique index if not exists rdo_lines_one_assignment_per_bidder_idx
+  on rdo_lines(bid_year_id, assigned_bidder_id)
+  where assigned_bidder_id is not null and status = 'taken';
+
 create table if not exists bid_rounds (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
-  round_number integer not null check (round_number between 1 and 5),
+  round_number integer not null check (round_number between 1 and 4),
   label text not null,
   starts_at timestamptz,
   ends_at timestamptz,
@@ -95,7 +101,7 @@ create table if not exists bid_windows (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   bidder_id uuid not null references bidders(id) on delete cascade,
-  round_number integer not null check (round_number between 1 and 5),
+  round_number integer not null check (round_number between 1 and 4),
   opens_at timestamptz not null,
   closes_at timestamptz not null,
   status text not null default 'scheduled' check (status in ('scheduled', 'open', 'closed', 'missed')),
@@ -148,7 +154,7 @@ create table if not exists leave_requests (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   bidder_id uuid not null references bidders(id) on delete cascade,
-  round_number integer not null check (round_number between 1 and 5),
+  round_number integer not null check (round_number between 1 and 4),
   priority integer not null check (priority > 0),
   leave_type text not null default 'Annual Leave',
   status text not null default 'draft' check (status in ('draft', 'preview', 'pending', 'approved', 'denied', 'cancelled')),
@@ -168,6 +174,20 @@ create table if not exists leave_requests (
 
 create index if not exists leave_requests_bidder_idx
   on leave_requests(bid_year_id, bidder_id, round_number, status);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'leave_slots'::regclass
+      and conname = 'leave_slots_source_leave_request_id_fkey'
+  ) then
+    alter table leave_slots
+      add constraint leave_slots_source_leave_request_id_fkey
+      foreign key (source_leave_request_id) references leave_requests(id) on delete set null;
+  end if;
+end
+$$;
 
 create table if not exists leave_request_week_buckets (
   id uuid primary key default gen_random_uuid(),
@@ -199,7 +219,7 @@ create table if not exists leave_credit_events (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   bidder_id uuid not null references bidders(id) on delete cascade,
-  round_number integer not null check (round_number between 1 and 5),
+  round_number integer not null check (round_number between 1 and 4),
   credit_date date not null,
   credit_days integer not null default 1 check (credit_days > 0),
   source text not null check (source in ('holiday', 'holiday_in_lieu', 'manual_adjustment')),
@@ -213,6 +233,9 @@ create table if not exists intake_submissions (
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   area_id uuid references areas(id) on delete set null,
   bidder_id uuid references bidders(id) on delete set null,
+  round_number integer check (round_number between 1 and 4),
+  rdo_line_id uuid references rdo_lines(id) on delete set null,
+  leave_request_id uuid references leave_requests(id) on delete cascade,
   submission_type text not null check (submission_type in ('rdo', 'leave', 'override', 'help')),
   status text not null default 'pending' check (status in ('draft', 'pending', 'approved', 'denied', 'cancelled')),
   payload jsonb not null default '{}'::jsonb,
@@ -226,6 +249,10 @@ create table if not exists intake_submissions (
 
 create index if not exists intake_submissions_queue_idx
   on intake_submissions(bid_year_id, status, submitted_at);
+
+create unique index if not exists intake_submissions_one_pending_rdo_idx
+  on intake_submissions(bid_year_id, bidder_id, round_number)
+  where submission_type = 'rdo' and status = 'pending';
 
 create table if not exists intake_schedules (
   id uuid primary key default gen_random_uuid(),
