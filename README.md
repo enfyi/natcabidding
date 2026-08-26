@@ -70,6 +70,27 @@ Define `NEXT_PUBLIC_SUPABASE_URL` and
 Define `NEXT_PUBLIC_SITE_URL` only for Production (and locally in `.env.local`).
 The build intentionally fails if the Supabase URL or publishable key is missing.
 
+## Bid notification email
+
+Bid submission, approval, and denial notifications are sent through a Google
+account using Gmail SMTP. Turn on two-step verification for the Google account,
+create a Google App Password for the website, and add these server-only variables
+to Vercel Production, Preview, and Development:
+
+- `GMAIL_USER` — the complete Gmail or Google Workspace email address.
+- `GMAIL_APP_PASSWORD` — the Google-generated 16-character App Password, not the
+  account's normal password.
+- `BID_NOTIFICATION_FROM_NAME` — the display name recipients see; defaults to
+  `ZLA Bidding`.
+
+Apply `database/bid_email_notifications.sql` to Supabase before enabling email.
+It installs a narrowly scoped authenticated recipient lookup, so the notification
+route does not need a Supabase service-role key in Vercel.
+
+The bidding page must be signed in through Supabase before it will send email.
+Prototype/test-account sessions continue to record the notification in the Email
+Log, but cannot call the protected email endpoint.
+
 ## Protected routes
 
 `/dashboard` is guarded in `proxy.ts` with `auth.getClaims()`, and the page repeats
