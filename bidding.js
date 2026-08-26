@@ -2887,14 +2887,64 @@ async function submitLeaveDraftBatch() {
   setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
 }
 
-function queuePrototypeEmail(to, subject, body, area = currentUser.area) {
-  prototypeEmails.unshift({
+async function sendBidNotification(email, notification) {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase is not configured on this page.");
+
+  const { data, error } = await client.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("Sign in with Supabase before sending email notifications.");
+  }
+
+  const response = await fetch("/api/notifications/bid", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...notification,
+      subject: email.subject,
+      body: email.body,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(result.error || "The email notification could not be sent.");
+  }
+
+  return result;
+}
+
+function queueNotificationEmail(to, subject, body, area = currentUser.area, notification = null) {
+  const email = {
     to,
     subject,
     body,
     time: formatDateTime(new Date()),
-  });
+    status: notification ? "Sending" : "Logged only",
+    error: "",
+  };
+  prototypeEmails.unshift(email);
   logHistory(area, "Email queued", `${currentUser.initials} queued "${subject}" to ${to}.`);
+
+  if (!notification) return;
+
+  sendBidNotification(email, notification)
+    .then((result) => {
+      email.status = "Sent";
+      email.to = result.recipient || email.to;
+      logHistory(area, "Email sent", `${subject} was sent to ${email.to}.`);
+      renderEmailLog();
+    })
+    .catch((error) => {
+      email.status = "Not sent";
+      email.error = error.message || String(error);
+      logHistory(area, "Email failed", `${subject} was not sent. ${email.error}`);
+      renderEmailLog();
+      console.warn("Bid notification email failed:", error);
+    });
 }
 
 function bidRecipientEmail(item) {
@@ -2931,11 +2981,17 @@ function queueBidSubmittedEmail(items) {
   }).join("\n");
   const subjectType = submissions.length > 1 ? `${submissions.length} leave bids` : `${first.type} bid`;
 
-  queuePrototypeEmail(
+  queueNotificationEmail(
     bidRecipientEmail(first),
     `Bid received for ${first.initials} Round ${round} ${BID_YEAR}`,
     `Your ${subjectType} has been received and sent to Bidding Intake for review.\n\n${detail}\n\nYou will receive another email once Intake approves the bid.\n\n${BID_OFFICE_CONTACT}`,
-    first.area
+    first.area,
+    {
+      kind: "submitted",
+      eventId: first.id || `${first.initials}-${Date.now()}`,
+      initials: first.initials,
+      area: first.area,
+    }
   );
 }
 
@@ -2943,11 +2999,17 @@ function queueBidVerifiedEmail(item) {
   const round = bidRound(item);
   const subject = `Bid approved for ${item.initials} Round ${round} ${BID_YEAR}`;
   const detail = bidEmailDetail(item);
-  queuePrototypeEmail(
+  queueNotificationEmail(
     bidRecipientEmail(item),
     subject,
     `Your submitted bid has been approved for Round ${round}.\n\n${item.type} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
-    item.area
+    item.area,
+    {
+      kind: "approved",
+      eventId: item.id || `${item.initials}-${Date.now()}`,
+      initials: item.initials,
+      area: item.area,
+    }
   );
 }
 
@@ -2955,11 +3017,17 @@ function queueBidDeniedEmail(item) {
   const round = bidRound(item);
   const detail = bidEmailDetail(item);
   const reason = item.denialReason ? `\n\nReason: ${item.denialReason}` : "";
-  queuePrototypeEmail(
+  queueNotificationEmail(
     bidRecipientEmail(item),
     `Bid denied for ${item.initials} Round ${round} ${BID_YEAR}`,
     `Your submitted bid was not approved for Round ${round}.\n\n${item.type} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
-    item.area
+    item.area,
+    {
+      kind: "denied",
+      eventId: item.id || `${item.initials}-${Date.now()}`,
+      initials: item.initials,
+      area: item.area,
+    }
   );
 }
 
@@ -6999,10 +7067,11 @@ function renderEmailLog() {
     ? prototypeEmails.slice(0, 8).map((email) => `
       <article>
         <strong>${escapeHtml(email.subject)}</strong>
-        <span>${escapeHtml(email.to)} · ${escapeHtml(email.time)}</span>
+        <span>${escapeHtml(email.to)} · ${escapeHtml(email.time)} · ${escapeHtml(email.status || "Logged")}</span>
+        ${email.error ? `<small>${escapeHtml(email.error)}</small>` : ""}
       </article>
     `).join("")
-    : '<p class="empty-state small">No prototype emails have been queued yet.</p>';
+    : '<p class="empty-state small">No notification emails have been queued yet.</p>';
 }
 
 function renderAdminConsole() {
