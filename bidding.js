@@ -132,7 +132,7 @@ const fullLeaveDates = new Set([
 
 const leaveSlotCapacity = {
   cpc: 3,
-  dev: 2,
+  dev: 1,
 };
 
 const selectedWeek = [
@@ -564,23 +564,14 @@ const AREA_CODE_BY_NAME = Object.entries(AREA_NAME_BY_CODE).reduce((lookup, [cod
   return lookup;
 }, {});
 
-const crewSizeByPattern = {
-  "S/S": 6,
-  "S/M": 6,
-  "M/T": 6,
-  "T/W": 6,
-  "W/T": 6,
-  "T/F": 6,
-  "F/S": 6,
-};
-
-function fatigueCapacityForLine(line) {
+function fatigueCapacityForLine(line, bidAs = currentUserBidAs()) {
   const area = line.area || currentUser.area || "Area A";
   const areaLines = rdoLinesForArea(area);
   const areaCpcCount = areaLines.filter(isCpcLine).length;
   const areaFatigueMax = Math.max(1, Math.floor(areaCpcCount / 3));
-  const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
+  const crewSize = areaLines.filter((item) => isCpcLine(item) && item.pattern === line.pattern).length;
   const crewMax = Math.max(1, Math.floor(crewSize / 3));
+  const enforced = isCpcLine(line) && bidAs !== "GL";
 
   return ["A", "B", "C"].map((group) => {
     const areaUsed = areaLines.filter((item) => {
@@ -600,6 +591,7 @@ function fatigueCapacityForLine(line) {
       areaMax: areaFatigueMax,
       crewUsed,
       crewMax,
+      enforced,
     };
   });
 }
@@ -608,8 +600,17 @@ function isCpcLine(line) {
   return line.lineType !== "DEV" && !/DEV/i.test(line.pattern);
 }
 
+function rdoLineEligibleForBidAs(line, bidAs, area = line?.area || currentUser.area) {
+  if (!line) return false;
+  const normalizedRole = normalizeBidRoleForArea(bidAs, area);
+  if (area === "TMU") return isCpcLine(line) && ["TMC", "DEV", "GL"].includes(normalizedRole);
+  if (normalizedRole === "R-DEV") return !isCpcLine(line) && line.pattern === "R-DEV";
+  if (normalizedRole === "D-DEV") return !isCpcLine(line) && line.pattern === "D-DEV";
+  return ["CPC", "GL"].includes(normalizedRole) && isCpcLine(line);
+}
+
 function isGroupAvailable(item) {
-  return item.areaUsed < item.areaMax && item.crewUsed < item.crewMax;
+  return !item.enforced || (item.areaUsed < item.areaMax && item.crewUsed < item.crewMax);
 }
 
 function canChooseGroup(item, isSelected) {
@@ -1370,6 +1371,7 @@ let intakeQueue = [
     bidAs: "GL",
     seniority: 5,
     status: "Approved",
+    round: 1,
     submittedAt: "May 26, 2026 10:42",
     approvedBy: "OC",
     approvedAt: "May 26, 2026 10:49",
@@ -1429,19 +1431,21 @@ function pendingIntakeItems() {
   return intakeQueue.filter((item) => item.status === "Pending");
 }
 
-function currentUserRdoRequest() {
+function currentUserRdoRequest(round = currentRoundNumber()) {
   return intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === currentUser.initials &&
+    Number(item.round) === Number(round) &&
     ["Pending", "Approved"].includes(item.status)
   );
 }
 
-function selectedLineRequest(line) {
+function selectedLineRequest(line, round = currentRoundNumber()) {
   return intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.line === line.line &&
     item.initials === currentUser.initials &&
+    Number(item.round) === Number(round) &&
     item.status === "Pending"
   );
 }
@@ -1458,7 +1462,12 @@ function logHistory(area, title, detail) {
 
 async function addOrUpdateRdoSubmission() {
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+  const round = currentRoundNumber();
   if (!line || line.status === "Taken") return;
+  if (!rdoLineEligibleForBidAs(line, currentUserBidAs(), currentUser.area)) {
+    alert(`Line ${line.line} is not eligible for your ${currentUserBidAs()} bid role.`);
+    return;
+  }
   if (!selectedFatigueGroup) {
     alert("Choose a fatigue group before submitting this RDO bid.");
     return;
@@ -1490,7 +1499,7 @@ async function addOrUpdateRdoSubmission() {
         requested_flex: selectedFlexPreference === "Yes",
         requested_aws: selectedAwsPreference === "Yes",
         requested_mid: selectedMidValue(line),
-        requested_round: null,
+        requested_round: round,
         target_initials: null,
         target_area_name: null,
         manual_entry: false,
@@ -1501,7 +1510,7 @@ async function addOrUpdateRdoSubmission() {
     }
   }
 
-  const existing = currentUserRdoRequest();
+  const existing = currentUserRdoRequest(round);
   const request = {
     id: existing?.id || `rdo-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     type: "RDO Line",
@@ -1511,6 +1520,7 @@ async function addOrUpdateRdoSubmission() {
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
     status: "Pending",
+    round,
     submittedAt: formatDateTime(new Date()),
     line: line.line,
     fatigueGroup: selectedFatigueGroup,
@@ -1608,7 +1618,11 @@ function renderManualBidPanel(panel) {
   if (leaveFields) leaveFields.hidden = !isLeave;
 
   const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const areaLines = rdoLinesForArea(areaSelect?.value || values.area);
+  const selectedArea = areaSelect?.value || values.area;
+  const selectedPerson = manualBidPerson(panel);
+  const areaLines = rdoLinesForArea(selectedArea).filter((line) =>
+    rdoLineEligibleForBidAs(line, selectedPerson.bidAs, selectedArea)
+  );
   if (lineSelect) {
     lineSelect.innerHTML = areaLines.map((line) => {
       const status = line.status === "Taken" ? ` · ${line.cpc || "Taken"}` : " · Open";
@@ -1663,11 +1677,16 @@ async function submitManualRdoBid(panel, person, area) {
     setManualBidStatus(panel, "Choose an RDO line before adding this bid.", "error");
     return;
   }
+  if (!rdoLineEligibleForBidAs(line, person.bidAs, area)) {
+    setManualBidStatus(panel, `Line ${line.line} is not eligible for ${person.initials}'s ${person.bidAs} bid role.`, "error");
+    return;
+  }
 
   const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
+  const round = latestAreaRound(new Date(), area);
   if (supabaseClient()) {
     try {
       await callBiddingRpc("submit_rdo_bid", {
@@ -1677,7 +1696,7 @@ async function submitManualRdoBid(panel, person, area) {
         requested_flex: flex === "Yes",
         requested_aws: aws === "Yes",
         requested_mid: mid,
-        requested_round: latestAreaRound(new Date(), area),
+        requested_round: round,
         target_initials: person.initials,
         target_area_name: area,
         manual_entry: true,
@@ -1691,6 +1710,7 @@ async function submitManualRdoBid(panel, person, area) {
   const existing = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === person.initials &&
+    Number(item.round) === round &&
     item.status === "Pending"
   );
   const request = {
@@ -1702,6 +1722,7 @@ async function submitManualRdoBid(panel, person, area) {
     bidAs: person.bidAs,
     seniority: person.rank,
     status: "Pending",
+    round,
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
@@ -1736,8 +1757,13 @@ async function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
     return;
   }
-  if (dateKeys.some((key) => key < BID_LEAVE_YEAR_START_KEY)) {
-    setManualBidStatus(panel, "Leave bids must start on Jan 10, 2027 or later.", "error");
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setManualBidStatus(panel, leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range, person.initials);
+  if (overlap) {
+    setManualBidStatus(panel, `That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
     return;
   }
 
@@ -1856,6 +1882,37 @@ function leaveBuilderValues() {
   return { range, days, notes };
 }
 
+function leaveDateKeysWithinBidYear(keys) {
+  return keys.length > 0 && keys.every((key) => key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY);
+}
+
+function leaveYearBoundsMessage() {
+  return `Leave bids must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`;
+}
+
+function leaveRangesOverlap(firstRange, secondRange) {
+  const firstKeys = datesInLeaveRange(firstRange);
+  const secondKeys = datesInLeaveRange(secondRange);
+  if (!firstKeys.length || !secondKeys.length) return false;
+  return firstKeys[0] <= secondKeys[secondKeys.length - 1] && secondKeys[0] <= firstKeys[firstKeys.length - 1];
+}
+
+function activeLeaveItemsForInitials(initials = currentUser.initials, { includeDrafts = true } = {}) {
+  const drafts = includeDrafts && initials === currentUser.initials ? leaveDraftQueue : [];
+  const committed = leaveBids.filter((item) =>
+    ["Pending", "Approved"].includes(item.status) &&
+    (!item.initials ? initials === currentUser.initials : item.initials === initials)
+  );
+  const submissions = intakeQueue.filter((item) =>
+    item.type === "Leave" && item.initials === initials && ["Pending", "Approved"].includes(item.status)
+  );
+  return [...drafts, ...committed, ...submissions];
+}
+
+function overlappingLeaveItem(range, initials = currentUser.initials, options = {}) {
+  return activeLeaveItemsForInitials(initials, options).find((item) => leaveRangesOverlap(range, item.range));
+}
+
 function orderedLeaveRangeKeys() {
   return [leaveRangeStartKey, leaveRangeEndKey].sort();
 }
@@ -1930,6 +1987,10 @@ function isLeavePreviewRangeDate(key) {
 }
 
 function selectLeaveBuilderDate(key) {
+  if (!leaveDateKeysWithinBidYear([key])) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
   leaveRangePreviewActive = false;
 
   if (!leaveRangeSelectionComplete) {
@@ -1980,18 +2041,23 @@ function renderLeaveDatePicker() {
     const key = dateKey(leavePickerYear, leavePickerMonthIndex + 1, day);
     const isInRange = selectedKeys.has(key);
     const isEdge = isLeaveBuilderRangeEdge(key);
+    const isAvailable = leaveDateKeysWithinBidYear([key]);
     cells.push(`
-      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""}" type="button" data-leave-picker-date="${key}" aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}">
+      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""}" type="button" data-leave-picker-date="${key}" aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}" ${isAvailable ? "" : "disabled"}>
         ${day}
       </button>
     `);
   }
 
+  const displayedMonth = leavePickerYear * 12 + leavePickerMonthIndex;
+  const firstLeaveMonth = BID_YEAR * 12;
+  const lastLeaveMonth = (BID_YEAR + 1) * 12;
+
   picker.innerHTML = `
     <div class="leave-picker-head">
-      <button type="button" aria-label="Previous month" data-leave-picker-month="previous">‹</button>
+      <button type="button" aria-label="Previous month" data-leave-picker-month="previous" ${displayedMonth <= firstLeaveMonth ? "disabled" : ""}>‹</button>
       <strong>${monthNames[leavePickerMonthIndex]} ${leavePickerYear}</strong>
-      <button type="button" aria-label="Next month" data-leave-picker-month="next">›</button>
+      <button type="button" aria-label="Next month" data-leave-picker-month="next" ${displayedMonth >= lastLeaveMonth ? "disabled" : ""}>›</button>
     </div>
     <div class="leave-picker-grid">${cells.join("")}</div>
   `;
@@ -2339,6 +2405,15 @@ function addOrUpdateLeaveSubmission() {
     setLeaveBuilderStatus("Use a range like Jun 9 - Jun 13, 2027 or a single day like Jun 9, 2027.", "error");
     return;
   }
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range);
+  if (overlap) {
+    setLeaveBuilderStatus(`That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
+    return;
+  }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
@@ -2433,6 +2508,15 @@ function previewLeaveSubmission() {
     setLeaveBuilderStatus("Enter a date range before previewing leave.", "error");
     return;
   }
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range);
+  if (overlap) {
+    setLeaveBuilderStatus(`That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
+    return;
+  }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
@@ -2467,6 +2551,28 @@ function removeLeaveDraft(id) {
 async function submitLeaveDraftBatch() {
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
+    return;
+  }
+
+  const invalidRange = leaveDraftQueue.find((draft) => !leaveDateKeysWithinBidYear(datesInLeaveRange(draft.range)));
+  if (invalidRange) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlappingDraft = leaveDraftQueue.find((draft, index) =>
+    leaveDraftQueue.slice(index + 1).some((other) => leaveRangesOverlap(draft.range, other.range))
+  );
+  if (overlappingDraft) {
+    setLeaveBuilderStatus("The staged batch contains overlapping leave ranges. Remove or adjust one before submitting.", "error");
+    return;
+  }
+  const persistedOverlap = leaveDraftQueue.find((draft) => overlappingLeaveItem(
+    draft.range,
+    currentUser.initials,
+    { includeDrafts: false }
+  ));
+  if (persistedOverlap) {
+    setLeaveBuilderStatus("A staged range now overlaps a pending or approved leave request. Refresh the batch before submitting.", "error");
     return;
   }
 
@@ -2718,22 +2824,47 @@ function applyLeaveApproval(item) {
 
 function datesInLeaveRange(range) {
   const normalized = range.replace(/\s+/g, " ").trim();
+  const parseNamedDate = (monthName, dayValue, yearValue) => {
+    const monthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(String(monthName).toLowerCase()));
+    const day = Number(dayValue);
+    const year = Number(yearValue);
+    if (monthIndex < 0 || !Number.isInteger(day) || !Number.isInteger(year)) return null;
+    const date = new Date(year, monthIndex, day);
+    if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
+    return date;
+  };
+
   const singleDate = normalized.match(/^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/);
   if (singleDate) {
     const [, month, day, year] = singleDate;
-    const date = new Date(`${month} ${day}, ${year}`);
-    return Number.isNaN(date.getTime()) ? [] : [dateKeyFromDate(date)];
+    const date = parseNamedDate(month, day, year);
+    return date ? [dateKeyFromDate(date)] : [];
   }
 
-  const [, startMonth, startDay, endMonthOptional, endDay, year] =
-    normalized.match(/^([A-Za-z]+)\s+(\d{1,2})\s+-\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),\s+(\d{4})$/) || [];
+  const explicitYears = normalized.match(
+    /^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})\s+-\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/
+  );
+  let start;
+  let end;
+  if (explicitYears) {
+    const [, startMonth, startDay, startYear, endMonth, endDay, endYear] = explicitYears;
+    start = parseNamedDate(startMonth, startDay, startYear);
+    end = parseNamedDate(endMonth, endDay, endYear);
+  } else {
+    const [, startMonth, startDay, endMonthOptional, endDay, endYear] =
+      normalized.match(/^([A-Za-z]+)\s+(\d{1,2})\s+-\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),\s+(\d{4})$/) || [];
 
-  if (!startMonth || !startDay || !endDay || !year) return [];
+    if (!startMonth || !startDay || !endDay || !endYear) return [];
 
-  const endMonth = endMonthOptional || startMonth;
-  const start = new Date(`${startMonth} ${startDay}, ${year}`);
-  const end = new Date(`${endMonth} ${endDay}, ${year}`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+    const endMonth = endMonthOptional || startMonth;
+    const startMonthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(startMonth.toLowerCase()));
+    const endMonthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(endMonth.toLowerCase()));
+    const inferredStartYear = Number(endYear) - (startMonthIndex > endMonthIndex ? 1 : 0);
+    start = parseNamedDate(startMonth, startDay, inferredStartYear);
+    end = parseNamedDate(endMonth, endDay, endYear);
+  }
+
+  if (!start || !end || start > end) return [];
 
   const keys = [];
   const cursor = new Date(start);
@@ -3302,7 +3433,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const isFatigueWeekStart = fatigueClass && (weekday === 0 || day === 1);
   const rdoWeekdays = context ? context.rdoWeekdays : selectedRdoWeekdays();
   const isRdo = showVacationLayer && !isPreviousLeaveYear && showRdo && rdoWeekdays.has(weekday);
-  const leaveStatus = showVacationLayer && !isPreviousLeaveYear && showPersonalLeave && year === BID_YEAR
+  const leaveStatus = showVacationLayer && showPersonalLeave && leaveDateKeysWithinBidYear([key])
     ? context ? cachedPersonalLeaveDateStatus(key, context) : personalLeaveDateStatus(key)
     : "";
   const canShowLeaveState = showVacationLayer && !isRdo && !isPreviousLeaveYear;
@@ -3754,6 +3885,7 @@ function biddingSubmissionFromSupabase(row) {
     approvedBy: row.reviewedBy || "",
     denialReason: row.denialReason || "",
     round: row.round,
+    priority: row.priority,
     payload,
     line: row.line || payload.line,
     fatigueGroup: payload.fatigueGroup,
@@ -3767,6 +3899,27 @@ function biddingSubmissionFromSupabase(row) {
     ? `Line ${item.line} · Group ${item.fatigueGroup} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`
     : `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
   return item;
+}
+
+function leavePriorityFromSubmission(item, fallbackIndex) {
+  const priority = Number(item.priority);
+  return Number.isInteger(priority) && priority > 0 ? priority : fallbackIndex + 1;
+}
+
+function leaveSubmissionsForReload(submissions, initials = currentUser.initials) {
+  return submissions
+    .filter((item) => item.type === "Leave" && item.initials === initials)
+    .map((item, index) => ({
+      priority: leavePriorityFromSubmission(item, index),
+      range: item.range,
+      days: item.days,
+      status: item.status,
+      notes: item.payload?.notes || "",
+      initials: item.initials,
+      area: item.area,
+      round: item.round,
+    }))
+    .sort((first, second) => Number(first.round) - Number(second.round) || first.priority - second.priority);
 }
 
 async function loadSupabaseBidState() {
@@ -3784,18 +3937,7 @@ async function loadSupabaseBidState() {
 
   const submissions = (data?.submissions || []).map(biddingSubmissionFromSupabase);
   intakeQueue = submissions;
-  leaveBids.splice(0, leaveBids.length, ...submissions
-    .filter((item) => item.type === "Leave" && item.initials === currentUser.initials)
-    .map((item, index) => ({
-      priority: index + 1,
-      range: item.range,
-      days: item.days,
-      status: item.status,
-      notes: item.payload?.notes || "",
-      initials: item.initials,
-      area: item.area,
-      round: item.round,
-    })));
+  leaveBids.splice(0, leaveBids.length, ...leaveSubmissionsForReload(submissions));
   return true;
 }
 
@@ -5230,13 +5372,16 @@ function renderRdoLines() {
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
+  const eligibleLines = isViewingHomeArea()
+    ? areaLines.filter((line) => rdoLineEligibleForBidAs(line, currentUserBidAs(), viewArea))
+    : areaLines;
   const countTarget = document.querySelector("[data-rdo-filter-count]");
 
   if (countTarget) {
     const lineLabel = filteredLines.length === 1 ? "line" : "lines";
     countTarget.textContent = isRdoFilterActive()
       ? `${filteredLines.length} matching ${lineLabel}`
-      : `${areaLines.filter((line) => line.status !== "Taken").length} open ${lineLabel}`;
+      : `${eligibleLines.filter((line) => line.status !== "Taken").length} eligible open ${lineLabel}`;
   }
 
   filteredLines.forEach((line) => {
@@ -5248,11 +5393,13 @@ function renderRdoLines() {
     const isSelected = line.line === selectedLineId;
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
+    const isEligible = !isViewingHomeArea() || rdoLineEligibleForBidAs(line, currentUserBidAs(), viewArea);
+    const isSelectable = isViewingHomeArea() && isEligible && !isOccupied;
     const groupValue = isSelected ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>` : "";
     const midValue = lineMidReferenceValue(line);
 
     rows.push(`
-      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isSelected && isSelectable ? "selected-row" : ""} ${isSelectable ? "selectable-row" : "occupied-row"}" ${isSelectable ? `data-line-id="${line.line}"` : ""} ${!isEligible ? `title="Not eligible for the ${escapeHtml(currentUserBidAs())} bid role"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
@@ -5269,8 +5416,12 @@ function renderRdoLines() {
 
 function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const selectableLines = isViewingHomeArea()
+    ? areaLines.filter((item) => rdoLineEligibleForBidAs(item, currentUserBidAs(), currentViewArea()))
+    : areaLines;
+  const line = selectableLines.find((item) => item.line === selectedLineId) || selectableLines[0] || rdoLines[0];
   if (!line) return;
+  if (isViewingHomeArea()) selectedLineId = line.line;
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
@@ -5302,10 +5453,13 @@ function updateSelectedLine() {
           ${fatigueCapacity.map((item) => {
             const isSelected = selectedFatigueGroup === item.group;
             const available = canChooseGroup(item, isSelected);
+            const capacityLabel = item.enforced
+              ? `Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}`
+              : "No CPC capacity limit";
             return `
-              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="${capacityLabel}">
                 <strong>${item.group}</strong>
-                <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
+                <small>${capacityLabel}</small>
               </button>
             `;
           }).join("")}
@@ -5398,7 +5552,10 @@ function updateLineFourTenStatus(value) {
 
 function renderFatigueCapacity() {
   const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const selectableLines = isViewingHomeArea()
+    ? areaLines.filter((item) => rdoLineEligibleForBidAs(item, currentUserBidAs(), currentViewArea()))
+    : areaLines;
+  const line = selectableLines.find((item) => item.line === selectedLineId) || selectableLines[0] || rdoLines[0];
   if (!line) return;
   const fatigueCapacity = fatigueCapacityForLine(line);
 
@@ -5406,11 +5563,13 @@ function renderFatigueCapacity() {
     target.innerHTML = fatigueCapacity.map((item) => {
       const isSelected = selectedFatigueGroup === item.group;
       const available = canChooseGroup(item, isSelected);
+      const capacityDetails = item.enforced
+        ? `<span>Area ${item.areaUsed}/${item.areaMax}</span><span>Crew ${item.crewUsed}/${item.crewMax}</span>`
+        : "<span>No CPC capacity limit</span>";
       return `
         <button class="${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
           <strong>${item.group}</strong>
-          <span>Area ${item.areaUsed}/${item.areaMax}</span>
-          <span>Crew ${item.crewUsed}/${item.crewMax}</span>
+          ${capacityDetails}
         </button>
       `;
     }).join("");
@@ -7705,7 +7864,7 @@ document.addEventListener("click", (event) => {
   }
 
   const leavePickerMonthButton = event.target.closest("[data-leave-picker-month]");
-  if (leavePickerMonthButton) {
+  if (leavePickerMonthButton && !leavePickerMonthButton.disabled) {
     const direction = leavePickerMonthButton.dataset.leavePickerMonth === "next" ? 1 : -1;
     const nextMonth = new Date(leavePickerYear, leavePickerMonthIndex + direction, 1);
     leavePickerYear = nextMonth.getFullYear();
@@ -7715,7 +7874,7 @@ document.addEventListener("click", (event) => {
   }
 
   const leavePickerDateButton = event.target.closest("[data-leave-picker-date]");
-  if (leavePickerDateButton) {
+  if (leavePickerDateButton && !leavePickerDateButton.disabled) {
     selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
     selectLeaveBuilderDate(selectedLeaveDateKey);
     renderCalendars({ includePublic: false });

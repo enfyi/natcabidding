@@ -254,6 +254,130 @@ create unique index if not exists intake_submissions_one_pending_rdo_idx
   on intake_submissions(bid_year_id, bidder_id, round_number)
   where submission_type = 'rdo' and status = 'pending';
 
+create or replace function rdo_line_matches_bid_role(
+  bidder_role text,
+  area_name text,
+  requested_line_type text,
+  requested_pattern text
+)
+returns boolean
+language sql
+immutable
+security invoker
+set search_path = ''
+as $$
+  select case
+    when area_name = 'TMU' then
+      bidder_role in ('TMC', 'TMCIT', 'GL') and requested_line_type = 'CPC'
+    when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
+    when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
+    when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
+    else false
+  end
+$$;
+
+revoke all on function rdo_line_matches_bid_role(text,text,text,text) from public, anon;
+grant execute on function rdo_line_matches_bid_role(text,text,text,text) to authenticated;
+
+create or replace function enforce_leave_request_invariants()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  leave_bid_year integer;
+begin
+  select bys.bid_year into strict leave_bid_year from public.bid_years bys where bys.id = new.bid_year_id;
+  if new.status in ('pending', 'approved')
+     and (new.requested_start_date is null or new.requested_end_date is null) then
+    raise exception 'Pending and approved leave requests require a complete date range.';
+  end if;
+  if new.requested_start_date is not null or new.requested_end_date is not null then
+    if new.requested_start_date is null or new.requested_end_date is null
+       or new.requested_end_date < new.requested_start_date then
+      raise exception 'Invalid leave date range.';
+    end if;
+    if new.requested_start_date < make_date(leave_bid_year, 1, 10)
+       or new.requested_end_date > make_date(leave_bid_year + 1, 1, 8) then
+      raise exception 'Leave must stay between Jan 10, % and Jan 8, %.', leave_bid_year, leave_bid_year + 1;
+    end if;
+  end if;
+  if new.status in ('pending', 'approved') then
+    perform b.id from public.bidders b where b.id = new.bidder_id for update;
+    if exists (
+      select 1 from public.leave_requests lr
+      where lr.bid_year_id = new.bid_year_id and lr.bidder_id = new.bidder_id
+        and lr.status in ('pending', 'approved') and lr.id <> new.id
+        and daterange(lr.requested_start_date, lr.requested_end_date, '[]')
+          && daterange(new.requested_start_date, new.requested_end_date, '[]')
+    ) then
+      raise exception 'Leave request overlaps an existing pending or approved request.';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists leave_requests_enforce_invariants on leave_requests;
+create trigger leave_requests_enforce_invariants
+before insert or update of bid_year_id, bidder_id, status, requested_start_date, requested_end_date
+on leave_requests for each row execute function enforce_leave_request_invariants();
+
+create or replace function enforce_rdo_submission_eligibility()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  target public.bidders%rowtype;
+  requested_line public.rdo_lines%rowtype;
+  target_area_name text;
+begin
+  if new.submission_type <> 'rdo' or new.rdo_line_id is null then return new; end if;
+  select * into strict target from public.bidders where id = new.bidder_id;
+  select * into strict requested_line from public.rdo_lines where id = new.rdo_line_id;
+  select a.name into strict target_area_name from public.areas a where a.id = target.area_id;
+  if requested_line.area_id is distinct from target.area_id
+     or not public.rdo_line_matches_bid_role(target.bid_role, target_area_name, requested_line.line_type, requested_line.pattern) then
+    raise exception 'RDO line % is not eligible for the bidder''s % role.', requested_line.line_code, target.bid_role;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists intake_submissions_enforce_rdo_eligibility on intake_submissions;
+create trigger intake_submissions_enforce_rdo_eligibility
+before insert or update of bidder_id, rdo_line_id, submission_type
+on intake_submissions for each row execute function enforce_rdo_submission_eligibility();
+
+create or replace function enforce_rdo_assignment_eligibility()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  target public.bidders%rowtype;
+  target_area_name text;
+begin
+  if new.assigned_bidder_id is null then return new; end if;
+  select * into strict target from public.bidders where id = new.assigned_bidder_id;
+  select a.name into strict target_area_name from public.areas a where a.id = target.area_id;
+  if new.area_id is distinct from target.area_id
+     or not public.rdo_line_matches_bid_role(target.bid_role, target_area_name, new.line_type, new.pattern) then
+    raise exception 'RDO line % is not eligible for the bidder''s % role.', new.line_code, target.bid_role;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists rdo_lines_enforce_assignment_eligibility on rdo_lines;
+create trigger rdo_lines_enforce_assignment_eligibility
+before insert or update of area_id, line_type, pattern, assigned_bidder_id
+on rdo_lines for each row execute function enforce_rdo_assignment_eligibility();
+
 create table if not exists intake_schedules (
   id uuid primary key default gen_random_uuid(),
   area_id uuid references areas(id) on delete set null,
