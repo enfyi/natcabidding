@@ -30,11 +30,9 @@ Start with read-only data:
 4. Load `holidays` and `holiday_in_lieu_days`.
 5. Load `leave_slots` for the calendar.
 
-Writes are implemented through the functions in `transactional_bidding.sql`:
+After the calendar looks right with live data, wire up writes:
 
-- `submit_rdo_bid(...)`
-- `submit_leave_bid_batch(...)`
-- `review_bidding_submission(...)`
-- `read_bidding_state(...)`
-
-These functions enforce bid windows, leave charging, fatigue capacity, line/slot collisions, and audit logging in the database transaction.
+1. Save preview dates as `leave_requests.status = 'preview'`.
+2. Save batch items as `leave_requests.status = 'draft'`.
+3. Submit the batch by changing them to `pending`.
+4. Approve/deny from intake by changing status and writing `audit_events`.

@@ -9,13 +9,8 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
 1. Create a Supabase project.
 2. Open the SQL editor.
 3. Run `database/schema.sql`.
-4. Run `database/seed.sql` for the base 2027 data.
-5. Run `database/imports/rdo_lines_2027_seed.sql` for all seven areas.
-6. Run `database/transactional_bidding.sql` for authoritative windows and write operations.
-7. Run `database/rls_area_policies.sql`.
-8. Run `database/reviewer_direct_table_access.sql` to grant direct bidding-table access to active admin/intake reviewers only.
-9. Run `database/reviewer_direct_table_access_policy_cleanup.sql` to consolidate reviewer reads into the existing RLS policies.
-10. Configure the public client variables used by the Next.js app:
+4. Run `database/seed.sql` for starter 2027 Area A data.
+5. Configure the public client variables used by the Next.js app:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
@@ -46,11 +41,6 @@ Private data stays protected by Supabase Row Level Security. Leave requests, int
 
 Server-side admin actions using the Supabase service role can still manage all areas. The service role key must never be exposed in browser code.
 
-Active `admin` and `intake` roster users also receive direct Data API access to
-the operational bidding tables through reviewer-only RLS policies. Regular
-bidders retain reference reads and must use the transactional RPC functions for
-writes. Audit and leave-credit event tables are append-only for reviewers.
-
 ## Round 1 Rule
 
 Round 1 is stored with `leave_request_week_buckets`.
@@ -63,17 +53,21 @@ That lets the app support cases like:
 - June 9 through June 16 spans more than 7 calendar days, so it needs 2 Round 1 buckets.
 - A BUE can use up to 2 Round 1 buckets, even if those buckets only spend a few charged leave days.
 
-## Transactional Write Path
+## Next Build Step
 
-The website uses Supabase for both reference reads and bidding writes:
+The website now has a browser-side Supabase adapter:
 
 1. `supabase-config.js` stores the public project URL and publishable browser key.
 2. `bidding.html` loads Supabase JS before `bidding.js`.
-3. `bidding.js` reads bid year, areas, holidays, RDO lines, RDO line days, leave slots, and authenticated bidding state from Supabase.
-4. RDO and leave submissions call security-definer RPC functions that validate the authenticated bidder's exclusive bid window inside the transaction.
-5. Intake approval locks the target RDO line or leave-slot rows before applying a decision, so concurrent approvals cannot overwrite each other.
-6. `rebuild_bid_schedule(2027)` creates four rounds with six two-hour windows per day and a full 60-hour validation interval between rounds.
-7. Browser prototype data remains a read-only fallback; configured Supabase writes require an authenticated email session.
+3. `bidding.js` reads bid year, areas, holidays, RDO lines, RDO line days, and leave slots from Supabase.
+4. If Supabase is unavailable, the page keeps using the built-in prototype data.
+
+The next practical step is write support:
+
+1. Add real Supabase login.
+2. Link each logged-in Supabase auth user to a row in `bidders.auth_user_id`.
+3. Save preview/add-to-batch/submit actions into `leave_requests`, `leave_request_dates`, and `leave_request_week_buckets`.
+4. Save intake approvals/denials back to Supabase and write `audit_events`.
 
 ## Seniority Imports
 
