@@ -91,6 +91,21 @@ The bidding page must be signed in through Supabase before it will send email.
 Prototype/test-account sessions continue to record the notification in the Email
 Log, but cannot call the protected email endpoint.
 
+### Scheduled bid-window reminders
+
+`database/bid_window_email_reminders.sql` installs two reminders based on the
+live `bid_windows` rows:
+
+- 15 minutes before a bidder's window opens.
+- 30 minutes before a bidder's window closes.
+
+Supabase Cron invokes `/api/cron/bid-window-reminders` once per minute. Store the
+same random value (at least 32 characters) as `BID_REMINDER_CRON_SECRET` in Vercel
+and as `bid_reminder_cron_secret` in Supabase Vault. Store the full production
+endpoint URL as `bid_reminder_endpoint` in Vault. Delivery attempts are recorded
+in the private `bid_window_email_reminders` outbox so each window receives each
+reminder only once after successful delivery.
+
 ## Protected routes
 
 `/dashboard` is guarded in `proxy.ts` with `auth.getClaims()`, and the page repeats
