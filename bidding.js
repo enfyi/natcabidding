@@ -40,14 +40,6 @@ const DEFAULT_ROUND_RULES = {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
   },
-  5: {
-    label: "5 days",
-    detail: "Leave may include up to 5 charged days.",
-  },
-  6: {
-    label: "5 days",
-    detail: "Leave may include up to 5 charged days.",
-  },
 };
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
@@ -155,7 +147,7 @@ function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const rank = currentUserSeniorityRank(area);
   const window = currentUserBidWindow(date, area);
   if (!Number.isFinite(rank) || !window) return null;
-  if (date >= window.start && date <= window.end) return rank;
+  if (date >= window.start && date < window.end) return rank;
   if (date < window.start) return Math.max(1, rank - 1);
   const nextRank = rank + 1;
   return nextRank <= currentUserBidderCount(area) ? nextRank : null;
@@ -177,7 +169,7 @@ const fullLeaveDates = new Set([
 
 const leaveSlotCapacity = {
   cpc: 3,
-  dev: 2,
+  dev: 1,
 };
 
 const selectedWeek = [
@@ -530,12 +522,12 @@ const rdoLines = [
   ...mockRdoLines("TMU", [
     ["S/S", "1", "EH", "A", "No", "Yes", { week: ["RDO", "1315", "1315", "725", "645", "315", "RDO"] }],
     ["S/S", "2", "HK", "C", "No", "Yes", { week: ["RDO", "1315", "1315", "815", "715", "645", "RDO"] }],
-    ["S/S", "T", "HE", "", "No", "No", { week: ["RDO", "1315", "1315", "815", "715", "645", "RDO"] }],
+    ["S/S", "T1", "HE", "", "No", "No", { week: ["RDO", "1315", "1315", "815", "715", "645", "RDO"] }],
     ["S/M", "3", "LL", "A", "No", "Yes", { week: ["RDO", "RDO", "1415", "1315", "815", "645", "315"] }],
     ["S/M", "4", "TM", "B", "BID", "Yes", { week: ["RDO", "RDO", "RDO", "M1300", "M1300", "M1100", "M700"], fourTen: "Yes" }],
     ["M/T", "5", "SB", "C", "No", "Yes", { week: ["315", "RDO", "RDO", "1315", "1315", "715", "645"] }],
     ["M/T", "6", "ZI", "A", "No", "Yes", { week: ["645", "RDO", "RDO", "1200", "1315", "815", "645"] }],
-    ["M/T", "T", "WL", "B only", "No", "Yes", { week: ["315", "RDO", "RDO", "1315", "1315", "715", "645"] }],
+    ["M/T", "T2", "WL", "B only", "No", "Yes", { week: ["315", "RDO", "RDO", "1315", "1315", "715", "645"] }],
     ["T/W", "7", "CN", "B", "No", "Yes", { week: ["1415", "1415", "RDO", "RDO", "1200", "1200", "1415"], fourTen: "Yes" }],
     ["W/T", "8", "PD", "C", "No", "Yes", { week: ["645", "315", "315", "RDO", "RDO", "1315", "815"] }],
     ["W/T", "9", "NJ", "A", "No", "Yes", { week: ["715", "645", "645", "RDO", "RDO", "1415", "1315"] }],
@@ -712,24 +704,19 @@ const AREA_CODE_BY_NAME = Object.entries(AREA_NAME_BY_CODE).reduce((lookup, [cod
   return lookup;
 }, {});
 
-const areaCpcCount = 36;
-const areaFatigueMax = Math.floor(areaCpcCount / 3);
-
-const crewSizeByPattern = {
-  "S/S": 6,
-  "S/M": 6,
-  "M/T": 6,
-  "T/W": 6,
-  "W/T": 6,
-  "T/F": 6,
-  "F/S": 6,
-};
-
-function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidateGroup = selectedFatigueGroup) {
+function fatigueCapacityForLine(
+  line,
+  bidAs = currentUserBidAs(),
+  candidateLineId = selectedLineId,
+  candidateGroup = selectedFatigueGroup
+) {
   const area = line.area || currentUser.area || "Area A";
   const areaLines = rdoLinesForArea(area);
-  const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
+  const areaCpcCount = areaLines.filter(isCpcLine).length;
+  const areaFatigueMax = Math.max(1, Math.floor(areaCpcCount / 3));
+  const crewSize = areaLines.filter((item) => isCpcLine(item) && item.pattern === line.pattern).length;
   const crewMax = Math.max(1, Math.floor(crewSize / 3));
+  const enforced = isCpcLine(line) && bidAs !== "GL";
 
   return ["A", "B", "C"].map((group) => {
     const areaUsed = areaLines.filter((item) => {
@@ -751,6 +738,7 @@ function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidat
       areaMax: areaFatigueMax,
       crewUsed,
       crewMax,
+      enforced,
     };
   });
 }
@@ -759,12 +747,21 @@ function isCpcLine(line) {
   return line.lineType !== "DEV" && !/DEV/i.test(line.pattern);
 }
 
+function rdoLineEligibleForBidAs(line, bidAs, area = line?.area || currentUser.area) {
+  if (!line) return false;
+  const normalizedRole = normalizeBidRoleForArea(bidAs, area);
+  if (area === "TMU") return isCpcLine(line) && ["TMC", "DEV", "GL"].includes(normalizedRole);
+  if (normalizedRole === "R-DEV") return !isCpcLine(line) && line.pattern === "R-DEV";
+  if (normalizedRole === "D-DEV") return !isCpcLine(line) && line.pattern === "D-DEV";
+  return ["CPC", "GL"].includes(normalizedRole) && isCpcLine(line);
+}
+
 function isGroupAvailable(item) {
-  return item.areaUsed < item.areaMax && item.crewUsed < item.crewMax;
+  return !item.enforced || (item.areaUsed < item.areaMax && item.crewUsed < item.crewMax);
 }
 
 function canChooseGroup(item, isSelected) {
-  return item.areaUsed < item.areaMax && (isSelected ? item.crewUsed <= item.crewMax : item.crewUsed < item.crewMax);
+  return isSelected || isGroupAvailable(item);
 }
 
 function isForcedMid(line) {
@@ -1134,17 +1131,7 @@ const senioritySource = [
   ["Willey", "Nikki", "TMC", "NJ", "TMU", "", "(707) 529-9552"],
 ];
 
-const roundDateBlocks = [
-  ["Wed, 10/01", "Sat, 10/11", "Wed, 10/22", "Sat, 11/01"],
-  ["Thu, 10/02", "Sun, 10/12", "Thu, 10/23", "Sun, 11/02"],
-  ["Fri, 10/03", "Tue, 10/14", "Fri, 10/24", "Mon, 11/03"],
-  ["Sat, 10/04", "Wed, 10/15", "Sat, 10/25", "Tue, 11/04"],
-  ["Sun, 10/05", "Thu, 10/16", "Sun, 10/26", "Wed, 11/05"],
-  ["Mon, 10/06", "Fri, 10/17", "Mon, 10/27", "Thu, 11/06"],
-  ["Tue, 10/07", "Sat, 10/18", "Tue, 10/28", "Fri, 11/07"],
-  ["Wed, 10/08", "Sun, 10/19", "Wed, 10/29", "Sat, 11/08"],
-];
-
+const BID_ROUND_COUNT = 4;
 const bidStartTimes = ["0700", "0900", "1100", "1300", "1500", "1700"];
 const BID_OFFICE_CLOSED_DATE_KEYS = new Set([
   "2026-10-12",
@@ -1152,10 +1139,8 @@ const BID_OFFICE_CLOSED_DATE_KEYS = new Set([
 ]);
 
 function roundDateBlocksForArea(area = currentViewArea()) {
-  if (area !== "Area A") return roundDateBlocks;
-
-  const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
-  return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
+  const requiredDateCount = Math.max(1, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
+  return areaRoundDateBlocksFromStart(requiredDateCount, BID_ROUND_COUNT);
 }
 
 function areaRoundDateBlocksFromStart(requiredDateCount, roundCount) {
@@ -1177,12 +1162,11 @@ function areaRoundDateBlocksFromStart(requiredDateCount, roundCount) {
 }
 
 function advancePastFullBidOfficeCheckDay(date) {
-  while (true) {
-    if (isBidOfficeOpenDate(date)) {
-      date.setDate(date.getDate() + 1);
-      return;
-    }
-
+  // `date` already points at the day after the final bid window. Moving it two
+  // more calendar days guarantees the full 60-hour validation period has
+  // elapsed before the next round's 0700 window can open.
+  date.setDate(date.getDate() + 2);
+  while (!isBidOfficeOpenDate(date)) {
     date.setDate(date.getDate() + 1);
   }
 }
@@ -1539,6 +1523,7 @@ let intakeQueue = [
     bidAs: "GL",
     seniority: 5,
     status: "Approved",
+    round: 1,
     submittedAt: "May 26, 2026 10:42",
     approvedBy: "OC",
     approvedAt: "May 26, 2026 10:49",
@@ -1606,19 +1591,21 @@ function pendingIntakeItems() {
   return intakeQueue.filter((item) => item.status === "Pending");
 }
 
-function currentUserRdoRequest() {
+function currentUserRdoRequest(round = currentRoundNumber()) {
   return intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === currentUser.initials &&
+    Number(item.round) === Number(round) &&
     ["Pending", "Approved"].includes(item.status)
   );
 }
 
-function selectedLineRequest(line) {
+function selectedLineRequest(line, round = currentRoundNumber()) {
   return intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.line === line.line &&
     item.initials === currentUser.initials &&
+    Number(item.round) === Number(round) &&
     item.status === "Pending"
   );
 }
@@ -1647,16 +1634,25 @@ function canSubmitBueBid() {
   return isConfirmedHelpUser();
 }
 
-function addOrUpdateRdoSubmission() {
+async function addOrUpdateRdoSubmission() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit an RDO bid");
     return;
   }
-
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+  const round = currentRoundNumber();
   if (!line || line.status === "Taken") return;
+  if (!rdoLineEligibleForBidAs(line, currentUserBidAs(), currentUser.area)) {
+    alert(`Line ${line.line} is not eligible for your ${currentUserBidAs()} bid role.`);
+    return;
+  }
   if (!selectedFatigueGroup) {
     alert("Choose a fatigue group before submitting this RDO bid.");
+    return;
+  }
+  const selectedCapacity = fatigueCapacityForLine(line).find((item) => item.group === selectedFatigueGroup);
+  if (!selectedCapacity || !isGroupAvailable(selectedCapacity)) {
+    alert(`Fatigue Group ${selectedFatigueGroup} is full for this area or crew. Choose another group.`);
     return;
   }
   if (!isForcedMid(line) && !selectedMidPreference) {
@@ -1672,7 +1668,27 @@ function addOrUpdateRdoSubmission() {
     return;
   }
 
-  const existing = currentUserRdoRequest();
+  if (supabaseClient()) {
+    try {
+      await callBiddingRpc("submit_rdo_bid", {
+        requested_bid_year: BID_YEAR,
+        requested_line_code: line.line,
+        requested_fatigue_group: selectedFatigueGroup,
+        requested_flex: selectedFlexPreference === "Yes",
+        requested_aws: selectedAwsPreference === "Yes",
+        requested_mid: selectedMidValue(line),
+        requested_round: round,
+        target_initials: null,
+        target_area_name: null,
+        manual_entry: false,
+      });
+    } catch (error) {
+      alert(friendlyAuthFailure(error));
+      return;
+    }
+  }
+
+  const existing = currentUserRdoRequest(round);
   const request = {
     id: existing?.id || `rdo-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     type: "RDO Line",
@@ -1682,6 +1698,7 @@ function addOrUpdateRdoSubmission() {
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
     status: "Pending",
+    round,
     submittedAt: formatDateTime(new Date()),
     line: line.line,
     fatigueGroup: selectedFatigueGroup,
@@ -1699,6 +1716,7 @@ function addOrUpdateRdoSubmission() {
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is required before the line is populated.`);
   queueBidSubmittedEmail(request);
+  renderApp();
 }
 
 function controllerName(person) {
@@ -1756,17 +1774,17 @@ function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
 
-function manualFatigueGroupIsAvailable(line, group, allowOverride = false) {
+function manualFatigueGroupIsAvailable(line, group, allowOverride = false, bidAs = currentUserBidAs()) {
   if (allowOverride) return Boolean(line && group);
   if (!line || !group) return false;
-  const capacity = fatigueCapacityForLine(line, null, "").find((item) => item.group === group);
+  const capacity = fatigueCapacityForLine(line, bidAs, null, "").find((item) => item.group === group);
   return Boolean(capacity && isGroupAvailable(capacity));
 }
 
-function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
+function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false, bidAs = currentUserBidAs()) {
   if (!line) return "";
 
-  return fatigueCapacityForLine(line, null, "").map((item) => {
+  return fatigueCapacityForLine(line, bidAs, null, "").map((item) => {
     const isSelected = item.group === selectedGroup;
     const isAvailable = isGroupAvailable(item);
     const isSelectable = isAvailable || allowOverride;
@@ -1830,7 +1848,10 @@ function renderManualBidPanel(panel) {
   if (leaveFields) leaveFields.hidden = !isLeave;
 
   const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const areaLines = rdoLinesForArea(areaSelect?.value || lockedArea);
+  const selectedArea = areaSelect?.value || values.area;
+  const areaLines = rdoLinesForArea(selectedArea).filter((line) =>
+    rdoLineEligibleForBidAs(line, selectedPerson.bidAs, selectedArea)
+  );
   if (lineSelect) {
     const openLines = areaLines.filter((line) => line.status !== "Taken");
     lineSelect.innerHTML = areaLines.map((line) => {
@@ -1852,12 +1873,12 @@ function renderManualBidPanel(panel) {
   if (fatigueSelect) {
     const requestedGroup = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
     const availableGroups = selectedLine
-      ? fatigueCapacityForLine(selectedLine, null, "")
+      ? fatigueCapacityForLine(selectedLine, selectedPerson.bidAs, null, "")
         .filter((item) => values.fatigueOverride || isGroupAvailable(item))
         .map((item) => item.group)
       : [];
     const resolvedGroup = availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
-    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride);
+    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride, selectedPerson.bidAs);
     fatigueSelect.value = resolvedGroup;
     fatigueSelect.disabled = !resolvedGroup;
     fatigueSelect.title = resolvedGroup ? "" : "No fatigue groups are available for this line.";
@@ -1906,7 +1927,7 @@ function renderManualBidEntry() {
   document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
 }
 
-function submitManualRdoBid(panel, person, area) {
+async function submitManualRdoBid(panel, person, area) {
   const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
@@ -1917,11 +1938,15 @@ function submitManualRdoBid(panel, person, area) {
     setManualBidStatus(panel, `Line ${line.line} has already been bid and cannot be selected here.`, "error");
     return;
   }
+  if (!rdoLineEligibleForBidAs(line, person.bidAs, area)) {
+    setManualBidStatus(panel, `Line ${line.line} is not eligible for ${person.initials}'s ${person.bidAs} bid role.`, "error");
+    return;
+  }
 
   const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
   const fatigueOverride = Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked);
-  const fatigueGroupClosed = !manualFatigueGroupIsAvailable(line, fatigueGroup);
-  if (!manualFatigueGroupIsAvailable(line, fatigueGroup, fatigueOverride)) {
+  const fatigueGroupClosed = !manualFatigueGroupIsAvailable(line, fatigueGroup, false, person.bidAs);
+  if (!manualFatigueGroupIsAvailable(line, fatigueGroup, fatigueOverride, person.bidAs)) {
     setManualBidStatus(panel, `Group ${fatigueGroup} is full for Line ${line.line}. Choose an available fatigue group before adding this bid.`, "error");
     return;
   }
@@ -1929,10 +1954,31 @@ function submitManualRdoBid(panel, person, area) {
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
+  const round = latestAreaRound(new Date(), area);
+  if (supabaseClient()) {
+    try {
+      await callBiddingRpc("submit_rdo_bid", {
+        requested_bid_year: BID_YEAR,
+        requested_line_code: line.line,
+        requested_fatigue_group: fatigueGroup,
+        requested_flex: flex === "Yes",
+        requested_aws: aws === "Yes",
+        requested_mid: mid,
+        requested_round: round,
+        target_initials: person.initials,
+        target_area_name: area,
+        manual_entry: true,
+      });
+    } catch (error) {
+      setManualBidStatus(panel, friendlyAuthFailure(error), "error");
+      return;
+    }
+  }
   const submittedAt = formatDateTime(new Date());
   const existing = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === person.initials &&
+    Number(item.round) === round &&
     item.status === "Pending"
   );
   const request = {
@@ -1944,6 +1990,7 @@ function submitManualRdoBid(panel, person, area) {
     bidAs: person.bidAs,
     seniority: person.rank,
     status: "Pending",
+    round,
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
@@ -2000,7 +2047,7 @@ function manualLeaveValidationMessage({ person, area, range, dateKeys, round, da
   return "";
 }
 
-function submitManualLeaveBid(panel, person, area) {
+async function submitManualLeaveBid(panel, person, area) {
   const range = manualLeaveRangeValue(panel);
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
@@ -2009,8 +2056,13 @@ function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
     return;
   }
-  if (invalidLeaveYearDateKeys(dateKeys).length) {
-    setManualBidStatus(panel, "Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setManualBidStatus(panel, leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range, person.initials);
+  if (overlap) {
+    setManualBidStatus(panel, `That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
     return;
   }
 
@@ -2051,6 +2103,25 @@ function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
+  if (supabaseClient()) {
+    try {
+      await callBiddingRpc("submit_leave_bid_batch", {
+        requested_bid_year: BID_YEAR,
+        requested_items: [{
+          start_date: dateKeys[0],
+          end_date: dateKeys[dateKeys.length - 1],
+          round,
+          notes,
+        }],
+        target_initials: person.initials,
+        target_area_name: area,
+        manual_entry: true,
+      });
+    } catch (error) {
+      setManualBidStatus(panel, friendlyAuthFailure(error), "error");
+      return;
+    }
+  }
   const submittedAt = formatDateTime(new Date());
   const request = {
     id: `manual-leave-${person.initials.toLowerCase()}-${Date.now()}`,
@@ -2094,7 +2165,7 @@ function submitManualLeaveBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s leave bid was added to the intake queue.`, "success");
 }
 
-function submitManualBidEntry(panel) {
+async function submitManualBidEntry(panel) {
   if (!(hasIntakeAccess() || hasSystemAdminAccess())) {
     setManualBidStatus(panel, "Manual bid entry requires intake or admin access.", "error");
     return;
@@ -2104,10 +2175,10 @@ function submitManualBidEntry(panel) {
   const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
   const type = panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line";
   if (type === "Leave") {
-    submitManualLeaveBid(panel, person, area);
+    await submitManualLeaveBid(panel, person, area);
     return;
   }
-  submitManualRdoBid(panel, person, area);
+  await submitManualRdoBid(panel, person, area);
 }
 
 function setLeaveBuilderStatus(message, status = "info") {
@@ -2122,6 +2193,37 @@ function leaveBuilderValues() {
   const days = Number(document.querySelector("[data-leave-days-input]")?.value || 0);
   const notes = document.querySelector("[data-leave-notes-input]")?.value.trim() || "";
   return { range, days, notes };
+}
+
+function leaveDateKeysWithinBidYear(keys) {
+  return keys.length > 0 && keys.every((key) => key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY);
+}
+
+function leaveYearBoundsMessage() {
+  return `Leave bids must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`;
+}
+
+function leaveRangesOverlap(firstRange, secondRange) {
+  const firstKeys = datesInLeaveRange(firstRange);
+  const secondKeys = datesInLeaveRange(secondRange);
+  if (!firstKeys.length || !secondKeys.length) return false;
+  return firstKeys[0] <= secondKeys[secondKeys.length - 1] && secondKeys[0] <= firstKeys[firstKeys.length - 1];
+}
+
+function overlappingLeaveCandidatesForInitials(initials = currentUser.initials, { includeDrafts = true } = {}) {
+  const drafts = includeDrafts && initials === currentUser.initials ? leaveDraftQueue : [];
+  const committed = leaveBids.filter((item) =>
+    ["Pending", "Approved"].includes(item.status) &&
+    (!item.initials ? initials === currentUser.initials : item.initials === initials)
+  );
+  const submissions = intakeQueue.filter((item) =>
+    item.type === "Leave" && item.initials === initials && ["Pending", "Approved"].includes(item.status)
+  );
+  return [...drafts, ...committed, ...submissions];
+}
+
+function overlappingLeaveItem(range, initials = currentUser.initials, options = {}) {
+  return overlappingLeaveCandidatesForInitials(initials, options).find((item) => leaveRangesOverlap(range, item.range));
 }
 
 function orderedLeaveRangeKeys() {
@@ -2215,6 +2317,10 @@ function isLeavePreviewRangeDate(key) {
 }
 
 function selectLeaveBuilderDate(key) {
+  if (!leaveDateKeysWithinBidYear([key])) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
   leaveRangePreviewActive = false;
 
   if (!leaveRangeSelectionComplete) {
@@ -2273,11 +2379,15 @@ function renderLeaveDatePicker() {
     `);
   }
 
+  const displayedMonth = leavePickerYear * 12 + leavePickerMonthIndex;
+  const firstLeaveMonth = BID_YEAR * 12;
+  const lastLeaveMonth = (BID_YEAR + 1) * 12;
+
   picker.innerHTML = `
     <div class="leave-picker-head">
-      <button type="button" aria-label="Previous month" data-leave-picker-month="previous">‹</button>
+      <button type="button" aria-label="Previous month" data-leave-picker-month="previous" ${displayedMonth <= firstLeaveMonth ? "disabled" : ""}>‹</button>
       <strong>${monthNames[leavePickerMonthIndex]} ${leavePickerYear}</strong>
-      <button type="button" aria-label="Next month" data-leave-picker-month="next">›</button>
+      <button type="button" aria-label="Next month" data-leave-picker-month="next" ${displayedMonth >= lastLeaveMonth ? "disabled" : ""}>›</button>
     </div>
     <div class="leave-picker-grid">${cells.join("")}</div>
   `;
@@ -2320,40 +2430,37 @@ function roundOneWeekUnitsForDateKeys(dateKeys) {
   return roundOneWeekKeysForDateKeys(dateKeys).length;
 }
 
-function roundOneWeekKeyForDateKey(key) {
-  const date = dateFromKey(key);
-  const start = new Date(date);
-  start.setDate(date.getDate() - date.getDay());
-  return dateKeyFromDate(start);
-}
-
 function roundOneWeekKeysForDateKeys(dateKeys) {
   const sortedKeys = [...new Set(dateKeys)].sort();
-  const periodKeys = [];
-  let periodEnd = null;
+  const bucketStarts = [];
+  let bucketEnd = null;
 
   sortedKeys.forEach((key) => {
     const date = dateFromKey(key);
-    if (!periodEnd || date > periodEnd) {
-      const start = dateFromKey(key);
-      periodEnd = new Date(start);
-      periodEnd.setDate(start.getDate() + 6);
-      periodKeys.push(key);
+    if (!bucketEnd || date > bucketEnd) {
+      bucketStarts.push(key);
+      bucketEnd = new Date(date);
+      bucketEnd.setDate(bucketEnd.getDate() + 6);
     }
   });
 
-  return periodKeys;
+  return bucketStarts;
 }
 
-function roundOneWeekKeySetForItems(items = []) {
-  const dateKeys = items.flatMap((item) =>
+function roundOneWeekKeySetForItems(items) {
+  const dates = items.flatMap((item) =>
     isRoundOneLeaveItem(item) ? datesInLeaveRange(item.range) : []
   );
-  return new Set(roundOneWeekKeysForDateKeys(dateKeys));
+  return new Set(roundOneWeekKeysForDateKeys(dates));
 }
 
-function roundOneDraftWeekKeySet(extraItems = []) {
-  return roundOneWeekKeySetForItems([...leaveDraftQueue, ...extraItems]);
+function roundOneDraftWeekKeySet(extraItems = [], includeCommitted = false) {
+  const items = [
+    ...(includeCommitted ? leaveCommittedItems().filter((item) => !item.initials || item.initials === currentUser.initials) : []),
+    ...leaveDraftQueue,
+    ...extraItems,
+  ];
+  return roundOneWeekKeySetForItems(items);
 }
 
 function leaveDraftTotalDays() {
@@ -2364,14 +2471,22 @@ function leaveDraftTotalWeeks() {
   return roundOneDraftWeekKeySet().size;
 }
 
+function leaveCommittedChargedDaysForRound(round) {
+  return leaveCommittedItems()
+    .filter((item) => (!item.initials || item.initials === currentUser.initials) && leaveRoundForItem(item) === round)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+}
+
 function isRoundOneLeaveItem(item) {
   return item?.round === 1 || Number(item?.weekUnits || 0) > 0;
 }
 
 function chargeableLeaveDatesForInitials(range, initials = currentUser.initials, round = currentRoundNumber()) {
   const keys = datesInLeaveRange(range);
-  if (round !== 1) return keys;
-  return keys.filter((key) => !isRdoDateForInitials(key, initials));
+  return keys.filter((key) => {
+    if (isHolidayDate(key, initials) || isHolidayInLieuDate(key, initials)) return false;
+    return round !== 1 || !isRdoDateForInitials(key, initials);
+  });
 }
 
 function leaveApprovalDates(item) {
@@ -2504,6 +2619,7 @@ function leaveAllowanceLimitForRound(round) {
 
 function leaveProjectedChargedDays(extraItems = []) {
   return [...leaveCommittedItems(), ...leaveDraftQueue, ...extraItems]
+    .filter((item) => !item.initials || item.initials === currentUser.initials)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -2552,17 +2668,10 @@ function leaveDisplayDatesForItem(item, initials = currentUser.initials) {
 
 function showInitialsInVisibleSlot(visible, bucket, initials) {
   if (!bucket || !initials) return;
-  const capacity = bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
   const values = visible[bucket] || [];
   if (values.includes(initials)) return;
-
-  if (values.length < capacity) {
-    values.push(initials);
-  } else if (capacity > 0) {
-    values[capacity - 1] = initials;
-  }
-
-  visible[bucket] = values.slice(0, capacity);
+  values.push(initials);
+  visible[bucket] = values;
 }
 
 function visibleLeaveSlotDetailsFromMap(
@@ -2661,6 +2770,15 @@ function addOrUpdateLeaveSubmission() {
     setLeaveBuilderStatus("Use a range like Jun 9 - Jun 13, 2027 or a single day like Jun 9, 2027.", "error");
     return;
   }
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range);
+  if (overlap) {
+    setLeaveBuilderStatus(`That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
+    return;
+  }
 
   if (invalidLeaveYearDateKeys(dateKeys).length) {
     setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
@@ -2676,15 +2794,15 @@ function addOrUpdateLeaveSubmission() {
   }
 
   if (isRoundOne) {
-    const existingWeeks = roundOneDraftWeekKeySet();
-    const combinedWeeks = roundOneDraftWeekKeySet([{ range, round, weekKeys }]).size;
+    const existingWeeks = roundOneDraftWeekKeySet([], true);
+    const combinedWeeks = roundOneDraftWeekKeySet([{ range, round, weekKeys }], true).size;
     if (combinedWeeks > roundOneWeekLimit()) {
       setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This would use ${combinedWeeks}.`, "error");
       return;
     }
     var newRoundOneWeeks = Math.max(0, combinedWeeks - existingWeeks.size);
   } else {
-    const currentTotal = leaveDraftTotalDays();
+    const currentTotal = leaveCommittedChargedDaysForRound(round) + leaveDraftTotalDays();
     if (currentTotal + days > currentRoundLeaveLimit()) {
       setLeaveBuilderStatus(`Round ${round} can include up to ${currentRoundLeaveLimit()} total days. This batch would be ${currentTotal + days}.`, "error");
       return;
@@ -2760,6 +2878,15 @@ function previewLeaveSubmission() {
     setLeaveBuilderStatus("Enter a date range before previewing leave.", "error");
     return;
   }
+  if (!leaveDateKeysWithinBidYear(dateKeys)) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlap = overlappingLeaveItem(range);
+  if (overlap) {
+    setLeaveBuilderStatus(`That range overlaps ${overlap.range}, which is already pending, approved, or staged.`, "error");
+    return;
+  }
 
   if (invalidLeaveYearDateKeys(dateKeys).length) {
     setLeaveBuilderStatus("Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
@@ -2807,6 +2934,28 @@ async function submitLeaveDraftBatch() {
     return;
   }
 
+  const invalidRange = leaveDraftQueue.find((draft) => !leaveDateKeysWithinBidYear(datesInLeaveRange(draft.range)));
+  if (invalidRange) {
+    setLeaveBuilderStatus(leaveYearBoundsMessage(), "error");
+    return;
+  }
+  const overlappingDraft = leaveDraftQueue.find((draft, index) =>
+    leaveDraftQueue.slice(index + 1).some((other) => leaveRangesOverlap(draft.range, other.range))
+  );
+  if (overlappingDraft) {
+    setLeaveBuilderStatus("The staged batch contains overlapping leave ranges. Remove or adjust one before submitting.", "error");
+    return;
+  }
+  const persistedOverlap = leaveDraftQueue.find((draft) => overlappingLeaveItem(
+    draft.range,
+    currentUser.initials,
+    { includeDrafts: false }
+  ));
+  if (persistedOverlap) {
+    setLeaveBuilderStatus("A staged range now overlaps a pending or approved leave request. Refresh the batch before submitting.", "error");
+    return;
+  }
+
   const capacityMessage = leaveAreaCapacityMessage(
     currentUser.area,
     currentUserBidAs(),
@@ -2820,6 +2969,30 @@ async function submitLeaveDraftBatch() {
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
     return;
+  }
+
+  if (supabaseClient()) {
+    const requestedItems = leaveDraftQueue.map((draft) => {
+      const keys = datesInLeaveRange(draft.range);
+      return {
+        start_date: keys[0],
+        end_date: keys[keys.length - 1],
+        round: draft.round,
+        notes: draft.notes || "",
+      };
+    });
+    try {
+      await callBiddingRpc("submit_leave_bid_batch", {
+        requested_bid_year: BID_YEAR,
+        requested_items: requestedItems,
+        target_initials: null,
+        target_area_name: null,
+        manual_entry: false,
+      });
+    } catch (error) {
+      setLeaveBuilderStatus(friendlyAuthFailure(error), "error");
+      return;
+    }
   }
 
   const batchId = `leave-batch-${currentUser.initials.toLowerCase()}-${Date.now()}`;
@@ -2846,31 +3019,21 @@ async function submitLeaveDraftBatch() {
   }));
 
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
-  let savedToSupabase = false;
-  try {
-    savedToSupabase = await saveSupabaseLeaveRequests(newRequests, draftsByRange);
-  } catch (error) {
-    setLeaveBuilderStatus(error.message || "Leave batch could not be saved to Supabase. Please try again before leaving this page.", "error");
-    return;
-  }
-
   newRequests.forEach((request) => {
     const draft = draftsByRange.get(request.range);
-    if (!savedToSupabase) {
-      intakeQueue.unshift(request);
-      leaveBids.push({
-        priority: request.priority,
-        range: request.range,
-        days: request.days,
-        status: "Pending",
-        notes: draft?.notes || "",
-        initials: request.initials,
-        area: request.area,
-        round: request.round,
-        weekUnits: request.weekUnits,
-        weekKeys: request.weekKeys,
-      });
-    }
+    intakeQueue.unshift(request);
+    leaveBids.push({
+      priority: request.priority,
+      range: request.range,
+      days: request.days,
+      status: "Pending",
+      notes: draft?.notes || "",
+      initials: request.initials,
+      area: request.area,
+      round: request.round,
+      weekUnits: request.weekUnits,
+      weekKeys: request.weekKeys,
+    });
   });
 
   logHistory(
@@ -2884,7 +3047,7 @@ async function submitLeaveDraftBatch() {
   activeDenialId = null;
   queueBidSubmittedEmail(newRequests);
   renderApp();
-  setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
+  setLeaveBuilderStatus("Leave batch sent to intake review.", "success");
 }
 
 async function sendBidNotification(email, notification) {
@@ -3040,7 +3203,12 @@ function leaveBidForItem(item, range = item.range) {
 
 function applyRdoApproval(item) {
   const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
-  if (!line) return;
+  if (!line) return false;
+  if (item.bidAs !== "GL" && line.status === "Taken" && line.cpc && line.cpc !== item.initials) {
+    item.reviewNote = `Cannot approve: Line ${item.line} is already assigned to ${line.cpc}. Choose another open line.`;
+    activeOverrideId = item.id;
+    return false;
+  }
 
   syncApprovedRdoItem(item);
 
@@ -3056,6 +3224,7 @@ function applyRdoApproval(item) {
       : `${currentUser.initials} approved ${item.initials}'s ${item.summary}. The system applied ${item.initials} to Line ${item.line}.`
   );
   queueBidVerifiedEmail(item);
+  return true;
 }
 
 function syncApprovedRdoItem(item) {
@@ -3106,22 +3275,47 @@ function applyLeaveApproval(item) {
 
 function datesInLeaveRange(range) {
   const normalized = range.replace(/\s+/g, " ").trim();
+  const parseNamedDate = (monthName, dayValue, yearValue) => {
+    const monthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(String(monthName).toLowerCase()));
+    const day = Number(dayValue);
+    const year = Number(yearValue);
+    if (monthIndex < 0 || !Number.isInteger(day) || !Number.isInteger(year)) return null;
+    const date = new Date(year, monthIndex, day);
+    if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
+    return date;
+  };
+
   const singleDate = normalized.match(/^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/);
   if (singleDate) {
     const [, month, day, year] = singleDate;
-    const date = new Date(`${month} ${day}, ${year}`);
-    return Number.isNaN(date.getTime()) ? [] : [dateKeyFromDate(date)];
+    const date = parseNamedDate(month, day, year);
+    return date ? [dateKeyFromDate(date)] : [];
   }
 
-  const [, startMonth, startDay, endMonthOptional, endDay, year] =
-    normalized.match(/^([A-Za-z]+)\s+(\d{1,2})\s+-\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),\s+(\d{4})$/) || [];
+  const explicitYears = normalized.match(
+    /^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})\s+-\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/
+  );
+  let start;
+  let end;
+  if (explicitYears) {
+    const [, startMonth, startDay, startYear, endMonth, endDay, endYear] = explicitYears;
+    start = parseNamedDate(startMonth, startDay, startYear);
+    end = parseNamedDate(endMonth, endDay, endYear);
+  } else {
+    const [, startMonth, startDay, endMonthOptional, endDay, endYear] =
+      normalized.match(/^([A-Za-z]+)\s+(\d{1,2})\s+-\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),\s+(\d{4})$/) || [];
 
-  if (!startMonth || !startDay || !endDay || !year) return [];
+    if (!startMonth || !startDay || !endDay || !endYear) return [];
 
-  const endMonth = endMonthOptional || startMonth;
-  const start = new Date(`${startMonth} ${startDay}, ${year}`);
-  const end = new Date(`${endMonth} ${endDay}, ${year}`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+    const endMonth = endMonthOptional || startMonth;
+    const startMonthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(startMonth.toLowerCase()));
+    const endMonthIndex = monthNames.findIndex((month) => month.toLowerCase().startsWith(endMonth.toLowerCase()));
+    const inferredStartYear = Number(endYear) - (startMonthIndex > endMonthIndex ? 1 : 0);
+    start = parseNamedDate(startMonth, startDay, inferredStartYear);
+    end = parseNamedDate(endMonth, endDay, endYear);
+  }
+
+  if (!start || !end || start > end) return [];
 
   const keys = [];
   const cursor = new Date(start);
@@ -3138,9 +3332,17 @@ function leaveSlotBucketForBidAs(bidAs) {
   return null;
 }
 
-function removeInitialsFromLeaveRange(range, initials) {
+function leaveSlotDataKey(area, date) {
+  return `${area || "Area A"}:${date}`;
+}
+
+function extraLeaveSlotDetails(date, area = currentUser.area) {
+  return extraLeaveSlotData[leaveSlotDataKey(area, date)] || (area === "Area A" ? extraLeaveSlotData[date] : null);
+}
+
+function removeInitialsFromLeaveRange(range, initials, area = currentUser.area) {
   datesInLeaveRange(range).forEach((key) => {
-    const details = extraLeaveSlotData[key];
+    const details = extraLeaveSlotDetails(key, area);
     if (!details) return;
     details.cpc = (details.cpc || []).filter((value) => value !== initials);
     details.dev = (details.dev || []).filter((value) => value !== initials);
@@ -3154,14 +3356,16 @@ function syncApprovedLeaveItem(item) {
   if (!bucket) return;
 
   leaveApprovalDates(item).forEach((key) => {
-    const details = extraLeaveSlotData[key] || { cpc: [], dev: [] };
+    const storageKey = leaveSlotDataKey(item.area, key);
+    const details = extraLeaveSlotDetails(key, item.area) || { area: item.area, date: key, cpc: [], dev: [] };
     const values = details[bucket] || [];
-    const capacity = bucket === "cpc" ? leaveSlotCapacity.cpc : leaveSlotCapacity.dev;
-    if (!values.includes(item.initials) && values.length < capacity) {
+    if (!values.includes(item.initials)) {
       values.push(item.initials);
     }
     details[bucket] = values;
-    extraLeaveSlotData[key] = details;
+    details.area = item.area;
+    details.date = key;
+    extraLeaveSlotData[storageKey] = details;
   });
 }
 
@@ -3175,9 +3379,9 @@ function leaveApprovalConflicts(item) {
   const capacity = bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
 
   return leaveApprovalDates(item).filter((key) => {
-    const details = leaveSlotsForDate(key);
+    const details = leaveSlotsForDate(key, item.area);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (values.length >= capacity && !values.includes(item.initials));
+    return (item.area === "Area A" && fullLeaveDates.has(key)) || (values.length >= capacity && !values.includes(item.initials));
   });
 }
 
@@ -3217,12 +3421,60 @@ function captureIntakeOverrideFields(item) {
   item.summary = `${item.range} · ${item.days} days`;
 }
 
-function approveIntakeItem(id) {
+function intakeOverridePayload(item) {
+  if (item.type === "RDO Line") {
+    return {
+      line: item.line,
+      fatigueGroup: item.fatigueGroup,
+      flex: item.flex === "Yes",
+      aws: item.aws === "Yes",
+      mid: item.mid,
+    };
+  }
+  return { leaveCapacityOverride: Boolean(item.leaveCapacityOverride) };
+}
+
+async function approveIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
+  const persistedRange = item.range;
+  const persistedDays = item.days;
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (supabaseClient() && item.type === "Leave" && (item.range !== persistedRange || item.days !== persistedDays)) {
+    item.range = persistedRange;
+    item.days = persistedDays;
+    item.summary = `${persistedRange} · ${persistedDays} ${persistedDays === 1 ? "day" : "days"}`;
+    item.reviewNote = "Leave dates cannot be rewritten during review. Deny this request and submit corrected dates.";
+    renderIntakeQueue();
+    return;
+  }
+  const persistsToSupabase = Boolean(supabaseClient());
+  if (persistsToSupabase) {
+    try {
+      await callBiddingRpc("review_bidding_submission", {
+        submission_to_review: id,
+        decision: "approved",
+        denial_reason_text: null,
+        override_payload: intakeOverridePayload(item),
+      });
+    } catch (error) {
+      item.reviewNote = friendlyAuthFailure(error);
+      activeOverrideId = item.id;
+      renderIntakeQueue();
+      return;
+    }
+    queueBidVerifiedEmail(item);
+    logHistory(item.area, `${item.type} approved`, `${currentUser.initials} approved ${item.initials}'s ${item.type} submission.`);
+    activeOverrideId = null;
+    activeDenialId = null;
+    await loadSupabaseReferenceData();
+    await loadSupabaseBidState();
+    renderApp();
+    setPage("intake");
+    return;
+  }
   let approved = true;
-  if (item.type === "RDO Line") applyRdoApproval(item);
+  if (item.type === "RDO Line") approved = applyRdoApproval(item);
   if (item.type === "Leave") approved = applyLeaveApproval(item);
   if (!approved) {
     renderApp();
@@ -3235,7 +3487,7 @@ function approveIntakeItem(id) {
   setPage("intake");
 }
 
-function denyIntakeItem(id) {
+async function denyIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
 
@@ -3247,6 +3499,21 @@ function denyIntakeItem(id) {
     renderApp();
     setPage("intake");
     return;
+  }
+
+  if (supabaseClient()) {
+    try {
+      await callBiddingRpc("review_bidding_submission", {
+        submission_to_review: id,
+        decision: "denied",
+        denial_reason_text: reason,
+        override_payload: {},
+      });
+    } catch (error) {
+      item.reviewNote = friendlyAuthFailure(error);
+      renderIntakeQueue();
+      return;
+    }
   }
 
   item.status = "Denied";
@@ -3268,18 +3535,65 @@ function denyIntakeItem(id) {
   queueBidDeniedEmail(item);
   activeDenialId = null;
   activeOverrideId = null;
+  if (supabaseClient()) await loadSupabaseBidState();
   renderApp();
   setPage("intake");
 }
 
-function saveIntakeOverride(id) {
+async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
 
   const original = item.summary;
   const originalLine = item.line;
   const originalRange = item.range;
+  const originalDays = item.days;
   captureIntakeOverrideFields(item);
+
+  if (supabaseClient() && item.status === "Approved") {
+    item.line = originalLine;
+    item.range = originalRange;
+    item.days = originalDays;
+    item.summary = original;
+    alert("Approved bids are immutable. Deny/cancel the existing record and submit a replacement so the audit history remains accurate.");
+    return;
+  }
+
+  if (supabaseClient() && item.type === "Leave") {
+    item.range = originalRange;
+    item.days = originalDays;
+    item.summary = original;
+    alert("Leave dates cannot be rewritten during review. Deny this request and have the corrected dates resubmitted; use the capacity override only when approving.");
+    return;
+  }
+
+  if (item.type === "RDO Line" && item.bidAs !== "GL") {
+    const targetLine = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
+    if (targetLine?.status === "Taken" && targetLine.cpc && targetLine.cpc !== item.initials) {
+      item.line = originalLine;
+      item.summary = original;
+      alert(`Line ${targetLine.line} is already assigned to ${targetLine.cpc}. Choose another open line.`);
+      return;
+    }
+  }
+
+  if (supabaseClient() && item.type === "RDO Line") {
+    try {
+      await callBiddingRpc("update_pending_rdo_submission", {
+        submission_to_update: item.id,
+        requested_line_code: item.line,
+        requested_fatigue_group: item.fatigueGroup,
+        requested_flex: item.flex === "Yes",
+        requested_aws: item.aws === "Yes",
+        requested_mid: item.mid,
+      });
+    } catch (error) {
+      item.line = originalLine;
+      item.summary = original;
+      alert(friendlyAuthFailure(error));
+      return;
+    }
+  }
 
   if (item.status === "Approved") {
     if (item.type === "RDO Line") {
@@ -3294,7 +3608,7 @@ function saveIntakeOverride(id) {
       item.appliedLine = item.bidAs === "GL" ? null : item.line;
     }
     if (item.type === "Leave") {
-      removeInitialsFromLeaveRange(originalRange, item.initials);
+      removeInitialsFromLeaveRange(originalRange, item.initials, item.area);
       syncApprovedLeaveItem(item);
     }
   }
@@ -3670,7 +3984,8 @@ function leaveSlotMap(area = currentUser.area) {
     });
   });
 
-  Object.entries(extraLeaveSlotData).forEach(([date, day]) => {
+  Object.entries(extraLeaveSlotData).forEach(([storageKey, day]) => {
+    const date = day.date || storageKey;
     if (!slotMatchesArea(day, area)) return;
     entries[date] = {
       date,
@@ -3718,7 +4033,7 @@ function isLeaveSlotsFull(key, area = currentUser.area) {
 }
 
 function slotRows(type, initials, capacity) {
-  return Array.from({ length: capacity }, (_, index) => {
+  return Array.from({ length: Math.max(capacity, initials.length) }, (_, index) => {
     const value = initials[index] || "";
     return `
       <div class="slot-row ${value ? "filled" : "empty"}">
@@ -3971,6 +4286,92 @@ function supabaseClient() {
   return supabaseState.client;
 }
 
+async function callBiddingRpc(functionName, parameters) {
+  const client = supabaseClient();
+  if (!client) return null;
+
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    throw new Error("Sign in with your email account before changing bidding data.");
+  }
+
+  const { data, error } = await client.rpc(functionName, parameters);
+  if (error) throw error;
+  return data;
+}
+
+function biddingSubmissionFromSupabase(row) {
+  const payload = row.payload || {};
+  const item = {
+    id: row.id,
+    type: row.type,
+    area: row.area,
+    name: row.name,
+    initials: row.initials,
+    bidAs: row.bidAs,
+    seniority: row.seniority,
+    status: row.status,
+    submittedAt: row.submittedAt ? formatDateTime(new Date(row.submittedAt)) : "",
+    approvedAt: row.status === "Approved" && row.reviewedAt ? formatDateTime(new Date(row.reviewedAt)) : "",
+    approvedBy: row.reviewedBy || "",
+    denialReason: row.denialReason || "",
+    round: row.round,
+    priority: row.priority,
+    payload,
+    line: row.line || payload.line,
+    fatigueGroup: payload.fatigueGroup,
+    flex: typeof payload.flex === "boolean" ? (payload.flex ? "Yes" : "No") : payload.flex,
+    aws: typeof payload.aws === "boolean" ? (payload.aws ? "Yes" : "No") : payload.aws,
+    mid: payload.mid,
+    range: row.range,
+    days: Number(row.days || payload.days || 0),
+  };
+  item.summary = item.type === "RDO Line"
+    ? `Line ${item.line} · Group ${item.fatigueGroup} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`
+    : `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
+  return item;
+}
+
+function leavePriorityFromSubmission(item, fallbackIndex) {
+  const priority = Number(item.priority);
+  return Number.isInteger(priority) && priority > 0 ? priority : fallbackIndex + 1;
+}
+
+function leaveSubmissionsForReload(submissions, initials = currentUser.initials) {
+  return submissions
+    .filter((item) => item.type === "Leave" && item.initials === initials)
+    .map((item, index) => ({
+      priority: leavePriorityFromSubmission(item, index),
+      range: item.range,
+      days: item.days,
+      status: item.status,
+      notes: item.payload?.notes || "",
+      initials: item.initials,
+      area: item.area,
+      round: item.round,
+    }))
+    .sort((first, second) => Number(first.round) - Number(second.round) || first.priority - second.priority);
+}
+
+async function loadSupabaseBidState() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.authUserId) return false;
+
+  const { data, error } = await client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR });
+  if (error) {
+    if (/read_bidding_state|Could not find the function/i.test(error.message || "")) {
+      supabaseState.message = "Transactional bidding migration has not been applied yet.";
+      return false;
+    }
+    throw error;
+  }
+
+  const submissions = (data?.submissions || []).map(biddingSubmissionFromSupabase);
+  intakeQueue = submissions;
+  leaveBids.splice(0, leaveBids.length, ...leaveSubmissionsForReload(submissions));
+  return true;
+}
+
 function setAuthStatus(message, status = "info") {
   const target = document.querySelector("[data-auth-status]");
   if (!target) return;
@@ -4195,6 +4596,7 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
         return false;
       }
       currentUser = profile;
+      await loadSupabaseBidState();
       setAuthStatus("Signed in.", "success");
       showLoggedInApp(page);
       return true;
@@ -4309,6 +4711,7 @@ async function loginWithSupabasePassword(email, password) {
       return;
     }
     currentUser = profile;
+    await loadSupabaseBidState();
     setAuthStatus("Signed in.", "success");
     showLoggedInApp(requestedLandingPage());
   } catch (error) {
@@ -4524,7 +4927,7 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       pattern: row.pattern,
       line: row.line_code,
       lineType: row.line_type,
-      cpc: "",
+      cpc: row.assigned_initials || "",
       week: days.length === 7 ? days : ["RDO", "RDO", "600", "700", "1300", "1430", "1500"],
       group: row.fatigue_group || "C",
       mid: row.mid || "No",
@@ -4544,6 +4947,10 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
 
 function upsertLeaveSlotsFromDatabase(rows, areaById) {
   const grouped = new Map();
+
+  Object.entries(extraLeaveSlotData).forEach(([key, details]) => {
+    if (details.databaseSource) delete extraLeaveSlotData[key];
+  });
 
   rows.forEach((row) => {
     const area = areaNameForRow(row, areaById);
@@ -4571,14 +4978,26 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
     const sortSlots = (items) => items
       .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
       .map((item) => item.initials);
-    const existing = extraLeaveSlotData[details.date] || {};
-    extraLeaveSlotData[details.date] = {
+    const storageKey = leaveSlotDataKey(details.area, details.date);
+    const existing = extraLeaveSlotDetails(details.date, details.area) || {};
+    extraLeaveSlotData[storageKey] = {
       ...existing,
       ...details,
+      databaseSource: true,
       cpc: sortSlots(details.cpc),
       dev: sortSlots(details.dev),
     };
   });
+}
+
+async function fetchAllSupabaseRows(queryPage, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await queryPage(from, from + pageSize - 1);
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) return { data: rows, error: null };
+  }
 }
 
 function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
@@ -4774,7 +5193,7 @@ async function loadSupabaseReferenceData() {
       .single();
     if (bidYearError) throw bidYearError;
 
-    const [
+    let [
       areasResult,
       holidaysResult,
       rdoLinesResult,
@@ -4784,11 +5203,24 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
-      client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
-      client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
+      fetchAllSupabaseRows((from, to) => client.from("rdo_lines")
+        .select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_initials")
+        .eq("bid_year_id", bidYear.id).range(from, to)),
+      fetchAllSupabaseRows((from, to) => client.from("rdo_line_days")
+        .select("rdo_line_id,weekday,shift_code").range(from, to)),
+      fetchAllSupabaseRows((from, to) => client.from("leave_slots")
+        .select("area_id,slot_date,slot_group,slot_code,status,slot_initials")
+        .eq("bid_year_id", bidYear.id)
+        .in("status", ["approved", "pending", "held", "unavailable"])
+        .range(from, to)),
       client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
     ]);
+
+    if (rdoLinesResult.error && /assigned_initials/i.test(rdoLinesResult.error.message || "")) {
+      rdoLinesResult = await fetchAllSupabaseRows((from, to) => client.from("rdo_lines")
+        .select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status")
+        .eq("bid_year_id", bidYear.id).range(from, to));
+    }
 
     const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult].find((result) => result.error)?.error;
     if (firstError) throw firstError;
@@ -4858,14 +5290,15 @@ function formatDateRange(start, end) {
   return `${dateFormatter.format(start)} · ${timeFormatter.format(start)} - ${timeFormatter.format(end)}`;
 }
 
-function latestAreaRound(date = new Date()) {
-  const roundState = areaBidRoundState(date);
+function latestAreaRound(date = new Date(), area = currentViewArea()) {
+  const roundState = areaBidRoundState(date, area);
   if (roundState) return roundState.round;
 
-  const activePerson = seniority.find((person) => person.openRound);
+  const areaSeniority = area === currentViewArea() ? seniority : buildSeniority(area);
+  const activePerson = areaSeniority.find((person) => person.openRound);
   if (activePerson) return activePerson.openRound;
 
-  return Math.max(1, ...seniority.flatMap((person) => person.completed));
+  return Math.max(1, ...areaSeniority.flatMap((person) => person.completed));
 }
 
 function setText(selector, text) {
@@ -5349,7 +5782,7 @@ function updateBidWindow() {
   const currentRound = personalBidWindow?.round || latestAreaRound(now);
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
-  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
+  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isAdmin = hasIntakeAccess();
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -5603,13 +6036,16 @@ function renderRdoLines() {
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
+  const eligibleLines = isViewingHomeArea()
+    ? areaLines.filter((line) => rdoLineEligibleForBidAs(line, currentUserBidAs(), viewArea))
+    : areaLines;
   const countTarget = document.querySelector("[data-rdo-filter-count]");
 
   if (countTarget) {
     const lineLabel = filteredLines.length === 1 ? "line" : "lines";
     countTarget.textContent = isRdoFilterActive()
       ? `${filteredLines.length} matching ${lineLabel}`
-      : `${areaLines.filter((line) => line.status !== "Taken").length} open ${lineLabel}`;
+      : `${eligibleLines.filter((line) => line.status !== "Taken").length} eligible open ${lineLabel}`;
   }
 
   filteredLines.forEach((line) => {
@@ -5621,11 +6057,13 @@ function renderRdoLines() {
     const isSelected = line.line === selectedLineId;
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
+    const isEligible = !isViewingHomeArea() || rdoLineEligibleForBidAs(line, currentUserBidAs(), viewArea);
+    const isSelectable = isViewingHomeArea() && isEligible && !isOccupied;
     const groupValue = isSelected ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>` : "";
     const midValue = lineMidReferenceValue(line);
 
     rows.push(`
-      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isSelected && isSelectable ? "selected-row" : ""} ${isSelectable ? "selectable-row" : "occupied-row"}" ${isSelectable ? `data-line-id="${line.line}"` : ""} ${!isEligible ? `title="Not eligible for the ${escapeHtml(currentUserBidAs())} bid role"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
@@ -5642,8 +6080,12 @@ function renderRdoLines() {
 
 function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const selectableLines = isViewingHomeArea()
+    ? areaLines.filter((item) => rdoLineEligibleForBidAs(item, currentUserBidAs(), currentViewArea()))
+    : areaLines;
+  const line = selectableLines.find((item) => item.line === selectedLineId) || selectableLines[0] || rdoLines[0];
   if (!line) return;
+  if (isViewingHomeArea()) selectedLineId = line.line;
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
@@ -5675,10 +6117,13 @@ function updateSelectedLine() {
           ${fatigueCapacity.map((item) => {
             const isSelected = selectedFatigueGroup === item.group;
             const available = canChooseGroup(item, isSelected);
+            const capacityLabel = item.enforced
+              ? `Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}`
+              : "No CPC capacity limit";
             return `
-              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="${capacityLabel}">
                 <strong>${item.group}</strong>
-                <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
+                <small>${capacityLabel}</small>
               </button>
             `;
           }).join("")}
@@ -5771,7 +6216,10 @@ function updateLineFourTenStatus(value) {
 
 function renderFatigueCapacity() {
   const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const selectableLines = isViewingHomeArea()
+    ? areaLines.filter((item) => rdoLineEligibleForBidAs(item, currentUserBidAs(), currentViewArea()))
+    : areaLines;
+  const line = selectableLines.find((item) => item.line === selectedLineId) || selectableLines[0] || rdoLines[0];
   if (!line) return;
   const fatigueCapacity = fatigueCapacityForLine(line);
 
@@ -5779,11 +6227,13 @@ function renderFatigueCapacity() {
     target.innerHTML = fatigueCapacity.map((item) => {
       const isSelected = selectedFatigueGroup === item.group;
       const available = canChooseGroup(item, isSelected);
+      const capacityDetails = item.enforced
+        ? `<span>Area ${item.areaUsed}/${item.areaMax}</span><span>Crew ${item.crewUsed}/${item.crewMax}</span>`
+        : "<span>No CPC capacity limit</span>";
       return `
         <button class="${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
           <strong>${item.group}</strong>
-          <span>Area ${item.areaUsed}/${item.areaMax}</span>
-          <span>Crew ${item.crewUsed}/${item.crewMax}</span>
+          ${capacityDetails}
         </button>
       `;
     }).join("");
@@ -8805,7 +9255,7 @@ document.addEventListener("click", async (event) => {
   }
 
   const leavePickerMonthButton = event.target.closest("[data-leave-picker-month]");
-  if (leavePickerMonthButton) {
+  if (leavePickerMonthButton && !leavePickerMonthButton.disabled) {
     const direction = leavePickerMonthButton.dataset.leavePickerMonth === "next" ? 1 : -1;
     const nextMonth = new Date(leavePickerYear, leavePickerMonthIndex + direction, 1);
     leavePickerYear = nextMonth.getFullYear();
@@ -8815,7 +9265,7 @@ document.addEventListener("click", async (event) => {
   }
 
   const leavePickerDateButton = event.target.closest("[data-leave-picker-date]");
-  if (leavePickerDateButton) {
+  if (leavePickerDateButton && !leavePickerDateButton.disabled) {
     selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
     selectLeaveBuilderDate(selectedLeaveDateKey);
     renderCalendars({ includePublic: false });
@@ -9033,13 +9483,13 @@ document.addEventListener("click", async (event) => {
   const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
-    if (panel) submitManualBidEntry(panel);
+    if (panel) void submitManualBidEntry(panel);
     return;
   }
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    void approveIntakeItem(intakeApprove.dataset.intakeApprove);
     return;
   }
 
@@ -9053,7 +9503,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    void denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
@@ -9073,7 +9523,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
-    saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
+    void saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
     return;
   }
 
@@ -9130,7 +9580,7 @@ document.addEventListener("click", async (event) => {
   if (selectLineButton && !selectLineButton.hidden) {
     const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
-      addOrUpdateRdoSubmission();
+      void addOrUpdateRdoSubmission();
     }
 
     renderApp();
