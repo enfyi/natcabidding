@@ -73,6 +73,9 @@
           </details>
           <button class="public-nav-item" type="button" data-public-area="Previous Years">Previous Years</button>
         </nav>
+        <div class="public-footer side-footer">
+          <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
+        </div>
       </aside>
 
       <main class="public-main">
@@ -216,7 +219,7 @@
         </nav>
 
         <div class="side-footer">
-          <button class="ghost-link" type="button" data-help-toggle>Help</button>
+          <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
           <button class="ghost-link" type="button" data-log-out>Log Out</button>
         </div>
       </aside>
@@ -229,11 +232,6 @@
           </div>
           <div class="topbar-user-context" data-user-context>Michael Schoelen · Area A</div>
           <div class="topbar-controls">
-            <div class="view-mode-switch" aria-label="Change app view" data-view-mode-switcher>
-              <button class="active" type="button" data-view-mode="bue">BUE View</button>
-              <button type="button" data-view-mode="intake" data-intake-view-option hidden>Intake View</button>
-              <button type="button" data-view-mode="admin" data-admin-view-option hidden>Admin View</button>
-            </div>
             <label class="view-area-control">
               <span>Change View Area</span>
               <select data-view-area-select aria-label="Change view area">
@@ -292,32 +290,6 @@
               <button class="secondary-action small" type="button" data-alert-close>Close</button>
             </div>
             <div class="alert-list" data-alert-list></div>
-          </div>
-        </section>
-        <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
-          <div class="panel">
-            <div class="panel-header compact">
-              <div>
-                <h2>Help Messages</h2>
-                <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
-              </div>
-              <button class="secondary-action small" type="button" data-help-close>Close</button>
-            </div>
-            <div class="help-layout">
-              <div class="help-thread-list" data-help-thread-list></div>
-              <div class="help-conversation">
-                <div class="help-message-list" data-help-message-list></div>
-                <label class="help-composer">
-                  Message
-                  <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
-                </label>
-                <div class="button-row">
-                  <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
-                  <button class="primary-action" type="button" data-help-send>Send Message</button>
-                </div>
-                <p class="help-status" data-help-status aria-live="polite"></p>
-              </div>
-            </div>
           </div>
         </section>
         <section class="account-menu" aria-label="Account settings" hidden data-account-menu>
@@ -624,6 +596,11 @@
                   <button class="active" type="button" data-calendar-mode="combined">Combined</button>
                 </div>
               </div>
+              <div class="calendar-layout-tabs" role="tablist" aria-label="Leave calendar detail">
+                <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="leave">Minimal</button>
+                <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
+              </div>
+              <p class="calendar-layout-description" data-calendar-layout-description="leave">Hover or focus a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong data-calendar-year-label>2027</strong>
@@ -734,12 +711,7 @@
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
                   <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
                 </div>
-                <dl>
-                  <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
-                  <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
-                  <div><dt>Round 3 Maximum</dt><dd>10 days</dd></div>
-                  <div><dt>Round 4 Maximum</dt><dd>5 days</dd></div>
-                </dl>
+                <dl data-round-rules-summary></dl>
               </section>
               <section class="panel">
                 <h3>Round Validation</h3>
@@ -802,10 +774,68 @@
                   <h2>Intake Queue</h2>
                   <p>Review submitted bids before they are applied to bid lines or leave slots.</p>
                 </div>
+                <div class="intake-search-tools" aria-label="Search intake queue">
+                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
+                  <div class="intake-filter-row">
+                    <select data-intake-filter="status" aria-label="Filter intake by status">
+                      <option value="all">All Statuses</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Denied">Denied</option>
+                    </select>
+                    <select data-intake-filter="type" aria-label="Filter intake by bid type">
+                      <option value="all">All Types</option>
+                      <option value="RDO Line">RDO</option>
+                      <option value="Leave">Leave</option>
+                    </select>
+                    <select data-intake-filter="area" aria-label="Filter intake by area">
+                      <option value="all">All Areas</option>
+                    </select>
+                    <select data-intake-filter="round" aria-label="Filter intake by round">
+                      <option value="all">All Rounds</option>
+                      <option value="1">Round 1</option>
+                      <option value="2">Round 2</option>
+                      <option value="3">Round 3</option>
+                      <option value="4">Round 4</option>
+                      <option value="5">Round 5</option>
+                      <option value="6">Round 6</option>
+                    </select>
+                  </div>
+                </div>
                 <span class="pill open"><b data-intake-count>0</b> pending</span>
               </div>
+              <div class="intake-detail-panel" data-intake-detail-panel hidden></div>
               <div class="intake-queue" id="intake-queue"></div>
             </section>
+            <aside class="intake-info-stack">
+              <section class="panel editable-rule-card">
+                <h3 data-round-rule-heading>Round 1 Rules</h3>
+                <div class="current-round-rule">
+                  <strong data-round-rule-limit>1 or 2 weeks</strong>
+                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
+                </div>
+                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
+              </section>
+              <section class="panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Current intake guidance set by Admin.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list" data-approval-rule-summary></ul>
+              </section>
+              <section class="panel help-summary-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Help Messages</h3>
+                    <p>Saved BUE conversations for intake follow-up.</p>
+                  </div>
+                  <span class="pill open"><b data-help-thread-count>0</b> open</span>
+                </div>
+                <div class="help-thread-summary" data-help-thread-summary></div>
+              </section>
+            </aside>
             <aside class="right-stack">
               <section class="panel" id="override-panel" hidden>
                 <div class="panel-header compact">
@@ -861,6 +891,10 @@
                         <option value="C">Group C</option>
                       </select>
                     </label>
+                    <label class="manual-override-check wide">
+                      <input type="checkbox" data-manual-fatigue-override />
+                      Override full fatigue group
+                    </label>
                     <label>
                       Flex
                       <select data-manual-flex>
@@ -896,6 +930,8 @@
                         <option value="2">Round 2</option>
                         <option value="3">Round 3</option>
                         <option value="4">Round 4</option>
+                        <option value="5">Round 5</option>
+                        <option value="6">Round 6</option>
                       </select>
                     </label>
                     <label class="wide">
@@ -907,25 +943,57 @@
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
-              <section class="panel help-summary-card">
+              <section class="panel manual-leave-request-card" data-manual-bid-panel>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Help Messages</h3>
-                    <p>Saved BUE conversations for intake follow-up.</p>
+                    <h3>Requested Leave Dates</h3>
+                    <p>Submit requested leave dates on behalf of any controller.</p>
                   </div>
-                  <span class="pill open"><b data-help-thread-count>0</b> open</span>
                 </div>
-                <div class="help-thread-summary" data-help-thread-summary></div>
-              </section>
-              <section class="panel">
-                <h3>Approval Rules</h3>
-                <ul class="plain-list success-list">
-                  <li>Approve applies the BUE initials automatically.</li>
-                  <li>Filled leave days require an explicit override before approval.</li>
-                  <li>Overrides require an intake user and are logged.</li>
-                  <li>GL bidders do not populate public floor templates.</li>
-                  <li>Developmentals bid against developmental slots.</li>
-                </ul>
+                <div class="schedule-form manual-bid-form">
+                  <label>
+                    Controller
+                    <select data-manual-bid-controller></select>
+                  </label>
+                  <select data-manual-bid-type hidden aria-hidden="true">
+                    <option value="Leave" selected>Leave</option>
+                  </select>
+                  <label>
+                    Bid Area
+                    <select data-manual-bid-area></select>
+                  </label>
+                  <div class="manual-bid-fields" data-manual-leave-fields>
+                    <label>
+                      Start Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
+                    </label>
+                    <label>
+                      End Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
+                    </label>
+                    <label>
+                      Days
+                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
+                    </label>
+                    <label>
+                      Round
+                      <select data-manual-leave-round>
+                        <option value="1">Round 1</option>
+                        <option value="2">Round 2</option>
+                        <option value="3">Round 3</option>
+                        <option value="4">Round 4</option>
+                        <option value="5">Round 5</option>
+                        <option value="6">Round 6</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      Notes
+                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
+                    </label>
+                  </div>
+                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  <p class="form-status" data-manual-bid-status></p>
+                </div>
               </section>
               <section class="panel">
                 <h3>Data Export</h3>
@@ -941,11 +1009,23 @@
 
         <section class="page" id="intake-schedule-page" data-page-panel="intake-schedule">
           <div class="workspace-grid intake-schedule-workspace">
-            <section class="panel calendar-panel full">
+            <section class="panel calendar-panel full schedule-panel">
               <div class="panel-header">
                 <div>
                   <h2>Intake Schedule</h2>
                   <p>Review scheduled intake coverage. Your scheduled dates are highlighted.</p>
+                </div>
+                <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
+                  <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Year</button>
+                    <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Month</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Week</button>
+                  </div>
+                  <div class="schedule-period-controls" aria-label="Intake schedule period">
+                    <button type="button" data-schedule-period-action="previous" aria-label="Previous schedule period">‹</button>
+                    <strong data-schedule-period-label>January 2027</strong>
+                    <button type="button" data-schedule-period-action="next" aria-label="Next schedule period">›</button>
+                  </div>
                 </div>
               </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
@@ -1092,6 +1172,28 @@
               <div class="admin-user-list" data-admin-user-list></div>
             </section>
             <aside class="right-stack">
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Round Rules</h3>
+                    <p>Edit the wording shown for each bidding round.</p>
+                  </div>
+                </div>
+                <div class="round-rule-editor" data-round-rule-editor></div>
+              </section>
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Add, edit, remove, or drag intake guidance into order.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list editable-rule-list" data-approval-rule-list></ul>
+                <div class="rule-editor-row">
+                  <input type="text" data-approval-rule-input placeholder="Add approval rule">
+                  <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
+                </div>
+              </section>
               <section class="panel">
                 <h3>Schedule Intake Rep</h3>
                 <p>Access opens 15 minutes before the shift starts.</p>
@@ -1148,6 +1250,10 @@
                         <option value="C">Group C</option>
                       </select>
                     </label>
+                    <label class="manual-override-check wide">
+                      <input type="checkbox" data-manual-fatigue-override />
+                      Override full fatigue group
+                    </label>
                     <label>
                       Flex
                       <select data-manual-flex>
@@ -1183,6 +1289,8 @@
                         <option value="2">Round 2</option>
                         <option value="3">Round 3</option>
                         <option value="4">Round 4</option>
+                        <option value="5">Round 5</option>
+                        <option value="6">Round 6</option>
                       </select>
                     </label>
                     <label class="wide">
@@ -1191,6 +1299,58 @@
                     </label>
                   </div>
                   <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
+                  <p class="form-status" data-manual-bid-status></p>
+                </div>
+              </section>
+              <section class="panel manual-leave-request-card" data-manual-bid-panel>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Requested Leave Dates</h3>
+                    <p>Submit requested leave dates on behalf of any controller.</p>
+                  </div>
+                </div>
+                <div class="schedule-form manual-bid-form">
+                  <label>
+                    Controller
+                    <select data-manual-bid-controller></select>
+                  </label>
+                  <select data-manual-bid-type hidden aria-hidden="true">
+                    <option value="Leave" selected>Leave</option>
+                  </select>
+                  <label>
+                    Bid Area
+                    <select data-manual-bid-area></select>
+                  </label>
+                  <div class="manual-bid-fields" data-manual-leave-fields>
+                    <label>
+                      Start Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
+                    </label>
+                    <label>
+                      End Date
+                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
+                    </label>
+                    <label>
+                      Days
+                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
+                    </label>
+                    <label>
+                      Round
+                      <select data-manual-leave-round>
+                        <option value="1">Round 1</option>
+                        <option value="2">Round 2</option>
+                        <option value="3">Round 3</option>
+                        <option value="4">Round 4</option>
+                        <option value="5">Round 5</option>
+                        <option value="6">Round 6</option>
+                      </select>
+                    </label>
+                    <label class="wide">
+                      Notes
+                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
+                    </label>
+                  </div>
+                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
@@ -1301,6 +1461,32 @@
         </section>
       </main>
     </div>
+    <section class="help-menu" aria-label="Help messages" hidden data-help-menu>
+      <div class="panel">
+        <div class="panel-header compact">
+          <div>
+            <h2>Help Messages</h2>
+            <p data-help-panel-subtitle>Messages are saved for bidding intake review.</p>
+          </div>
+          <button class="secondary-action small" type="button" data-help-close>Close</button>
+        </div>
+        <div class="help-layout">
+          <div class="help-thread-list" data-help-thread-list></div>
+          <div class="help-conversation">
+            <div class="help-message-list" data-help-message-list></div>
+            <label class="help-composer">
+              Message
+              <textarea rows="3" data-help-message-input placeholder="Type your message to bidding intake..."></textarea>
+            </label>
+            <div class="button-row">
+              <button class="secondary-action" type="button" data-help-resolve>Mark Resolved</button>
+              <button class="primary-action" type="button" data-help-send>Send Message</button>
+            </div>
+            <p class="help-status" data-help-status aria-live="polite"></p>
+          </div>
+        </div>
+      </div>
+    </section>
     <div class="leave-slot-modal" data-leave-slot-modal hidden role="dialog" aria-modal="true" aria-labelledby="leave-slot-modal-title">
       <div class="leave-slot-modal-panel">
         <div class="panel-header compact">
