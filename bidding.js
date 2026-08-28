@@ -1972,6 +1972,11 @@ function submitManualRdoBid(panel, person, area) {
 }
 
 function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
+  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, person.initials));
+  if (rdoConflicts.length) {
+    return `Leave cannot include ${person.initials}'s RDO: ${formatLeaveConflictDates(rdoConflicts)}.`;
+  }
+
   if (round === 1) {
     const usedWeeks = roundOneWeekKeySetForItems([
       ...leaveRoundUsageForInitials(person.initials, 1),
@@ -1982,11 +1987,6 @@ function manualLeaveValidationMessage({ person, area, range, dateKeys, round, da
       return `Round 1 can include up to ${roundOneWeekLimit()} bid weeks for ${person.initials}. This request counts as ${weekKeys.length} and would bring ${person.initials} to ${usedWeeks.size}.`;
     }
     return "";
-  }
-
-  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, person.initials));
-  if (rdoConflicts.length) {
-    return `Round ${round} leave cannot include ${person.initials}'s RDO: ${formatLeaveConflictDates(rdoConflicts)}.`;
   }
 
   const roundLimit = leaveDayLimitForRound(round);
@@ -2552,7 +2552,7 @@ function leaveDisplayDatesForItem(item, initials = currentUser.initials) {
 
 function showInitialsInVisibleSlot(visible, bucket, initials) {
   if (!bucket || !initials) return;
-  const capacity = bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
+  const capacity = leaveSlotCapacityForDetails(visible, bucket);
   const values = visible[bucket] || [];
   if (values.includes(initials)) return;
 
@@ -2667,6 +2667,12 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
+  if (rdoConflicts.length) {
+    setLeaveBuilderStatus(`You cannot bid your own RDO: ${formatLeaveConflictDates(rdoConflicts)}.`, "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const weekUnits = weekKeys.length;
@@ -2690,11 +2696,6 @@ function addOrUpdateLeaveSubmission() {
       return;
     }
 
-    const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
-    if (rdoConflicts.length) {
-      setLeaveBuilderStatus(`You cannot bid your own RDO: ${formatLeaveConflictDates(rdoConflicts)}.`, "error");
-      return;
-    }
   }
 
   const projectedChargedDays = leaveProjectedChargedDays([{ range, days, round, weekUnits, weekKeys }]);
@@ -2766,6 +2767,12 @@ function previewLeaveSubmission() {
     return;
   }
 
+  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
+  if (rdoConflicts.length) {
+    setLeaveBuilderStatus(`You cannot bid your own RDO: ${formatLeaveConflictDates(rdoConflicts)}.`, "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
   if (Number.isFinite(days) && days > 0 && chargeableDates.length !== days) {
@@ -2796,6 +2803,41 @@ function removeLeaveDraft(id) {
   setLeaveBuilderStatus("Removed from the preview batch.", "info");
 }
 
+function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
+  const requestedDates = new Map();
+  const overlappingDates = new Set();
+
+  drafts.forEach((draft) => {
+    datesInLeaveRange(draft.range).forEach((key) => {
+      if (requestedDates.has(key)) overlappingDates.add(key);
+      requestedDates.set(key, Number(draft.round || currentRoundNumber()));
+    });
+  });
+
+  if (overlappingDates.size) {
+    return `This batch contains overlapping leave dates: ${formatLeaveConflictDates([...overlappingDates].sort())}. Remove the duplicate dates before submitting.`;
+  }
+
+  const previousRoundDates = new Set();
+  activeLeaveItemsForInitials(currentUser.initials).forEach((item) => {
+    const priorRound = leaveRoundForItem(item);
+    datesInLeaveRange(item.range).forEach((key) => {
+      const requestedRound = requestedDates.get(key);
+      if (requestedRound && priorRound < requestedRound) previousRoundDates.add(key);
+    });
+  });
+  if (previousRoundDates.size) {
+    return `You already bid these dates in a previous round: ${formatLeaveConflictDates([...previousRoundDates].sort())}. Each date may be bid only once across rounds.`;
+  }
+
+  const rdoDates = [...requestedDates.keys()].filter((key) => isRdoDateForInitials(key, currentUser.initials));
+  if (rdoDates.length) {
+    return `You cannot bid dates that are RDOs on your approved bid line: ${formatLeaveConflictDates(rdoDates)}.`;
+  }
+
+  return "";
+}
+
 async function submitLeaveDraftBatch() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit leave bids");
@@ -2804,6 +2846,12 @@ async function submitLeaveDraftBatch() {
 
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
+    return;
+  }
+
+  const preSubmissionMessage = leaveDraftPreSubmissionMessage();
+  if (preSubmissionMessage) {
+    setLeaveBuilderStatus(preSubmissionMessage, "error");
     return;
   }
 
@@ -2848,6 +2896,8 @@ async function submitLeaveDraftBatch() {
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
   let savedToSupabase = false;
   try {
+    const slotLabel = leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "DEV" : "CPC";
+    setLeaveBuilderStatus(`Checking ${slotLabel} slots, prior-round dates, and bid-line RDOs before submission...`, "info");
     savedToSupabase = await saveSupabaseLeaveRequests(newRequests, draftsByRange);
   } catch (error) {
     setLeaveBuilderStatus(error.message || "Leave batch could not be saved to Supabase. Please try again before leaving this page.", "error");
@@ -3156,7 +3206,7 @@ function syncApprovedLeaveItem(item) {
   leaveApprovalDates(item).forEach((key) => {
     const details = extraLeaveSlotData[key] || { cpc: [], dev: [] };
     const values = details[bucket] || [];
-    const capacity = bucket === "cpc" ? leaveSlotCapacity.cpc : leaveSlotCapacity.dev;
+    const capacity = leaveSlotCapacityForDetails(details, bucket);
     if (!values.includes(item.initials) && values.length < capacity) {
       values.push(item.initials);
     }
@@ -3172,12 +3222,11 @@ function leaveApprovalBucket(item) {
 function leaveApprovalConflicts(item) {
   if (item.type !== "Leave") return [];
   const bucket = leaveApprovalBucket(item);
-  const capacity = bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
 
   return leaveApprovalDates(item).filter((key) => {
     const details = leaveSlotsForDate(key);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (values.length >= capacity && !values.includes(item.initials));
+    return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
 }
 
@@ -3331,6 +3380,7 @@ function rdoLineForInitials(initials = currentUser.initials) {
   if (populatedLine) return populatedLine;
 
   if (initials === currentUser.initials) {
+    if (supabaseState.connected) return null;
     return rdoLinesForArea(currentUser.area).find((line) => line.line === selectedLineId) || null;
   }
 
@@ -3561,7 +3611,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const detailArea = context?.area || options.area || currentUser.area;
   const isClosed = canShowLeaveState && (
     baseSlotDetails
-      ? baseSlotDetails.cpc.length >= leaveSlotCapacity.cpc || (detailArea === "Area A" && fullLeaveDates.has(key))
+      ? leaveSlotOpenCountForDetails(baseSlotDetails, "cpc") === 0 || (detailArea === "Area A" && fullLeaveDates.has(key))
       : isLeaveSlotsFull(key, options.area)
   );
   const expandedSlots = Boolean(options.expandedSlots);
@@ -3708,13 +3758,25 @@ function leaveSlotsForDate(key, area = currentUser.area) {
   return leaveSlotsForDateFromMap(key, area);
 }
 
+function leaveSlotCapacityForDetails(details, bucket) {
+  const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
+  if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
+  return bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
+}
+
+function leaveSlotOpenCountForDetails(details, bucket) {
+  const configuredOpenCount = Number(details?.[`${bucket}Open`]);
+  if (Number.isFinite(configuredOpenCount) && configuredOpenCount >= 0) return configuredOpenCount;
+  return Math.max(0, leaveSlotCapacityForDetails(details, bucket) - (details?.[bucket] || []).length);
+}
+
 function hasLeaveSlotDetails(key, area = currentUser.area) {
   return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
 function isLeaveSlotsFull(key, area = currentUser.area) {
   const details = leaveSlotsForDate(key, area);
-  return details.cpc.length >= leaveSlotCapacity.cpc || (area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotOpenCountForDetails(details, "cpc") === 0 || (area === "Area A" && fullLeaveDates.has(key));
 }
 
 function slotRows(type, initials, capacity) {
@@ -3731,8 +3793,10 @@ function slotRows(type, initials, capacity) {
 
 function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
-  const cpcSlots = Array.from({ length: leaveSlotCapacity.cpc }, (_, index) => details.cpc[index] || "");
-  const devSlots = Array.from({ length: leaveSlotCapacity.dev }, (_, index) => details.dev[index] || "");
+  const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
+  const devCapacity = leaveSlotCapacityForDetails(details, "dev");
+  const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
+  const devSlots = Array.from({ length: devCapacity }, (_, index) => details.dev[index] || "");
   const renderSlotRow = (prefix, value, index) => {
     const slotLabel = `${prefix}${index + 1}`;
     const displayValue = value ? escapeHtml(value) : "Open";
@@ -3764,8 +3828,10 @@ function renderLeaveSlotBoard() {
   if (!target) return;
 
   const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
-  const cpcFull = details.cpc.length >= leaveSlotCapacity.cpc;
-  const devFull = details.dev.length >= leaveSlotCapacity.dev;
+  const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
+  const devCapacity = leaveSlotCapacityForDetails(details, "dev");
+  const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
+  const devFull = leaveSlotOpenCountForDetails(details, "dev") === 0;
   const statusText = cpcFull ? "CPC Full" : "CPC Open";
   const statusClass = cpcFull ? "closed" : "open";
 
@@ -3779,8 +3845,8 @@ function renderLeaveSlotBoard() {
         <strong class="${statusClass}">${statusText}</strong>
       </div>
       <div class="leave-slot-summary">
-        <span><b>${details.cpc.length}</b> / ${leaveSlotCapacity.cpc} CPC slots filled</span>
-        <span><b>${details.dev.length}</b> / ${leaveSlotCapacity.dev} developmental slots filled</span>
+        <span><b>${details.cpc.length}</b> / ${cpcCapacity} CPC slots filled</span>
+        <span><b>${details.dev.length}</b> / ${devCapacity} developmental slots filled</span>
         ${details.holidayInLieu ? "<span><b>Holiday In-Lieu</b> observed for your RDO line</span>" : ""}
         ${details.holiday && !details.holidayInLieu ? "<span><b>Holiday</b> Federal holiday</span>" : ""}
       </div>
@@ -3790,14 +3856,14 @@ function renderLeaveSlotBoard() {
             <h4>CPC Slots</h4>
             <small>${cpcFull ? "Not available for CPC leave" : "Still available for CPC leave"}</small>
           </div>
-          ${slotRows("Slot", details.cpc, leaveSlotCapacity.cpc)}
+          ${slotRows("Slot", details.cpc, cpcCapacity)}
         </section>
         <section class="daily-slot-card dev">
           <div>
             <h4>Developmental Slots</h4>
             <small>${devFull ? "Developmental slots full" : "Developmental slots still open"}</small>
           </div>
-          ${slotRows("Dev", details.dev, leaveSlotCapacity.dev)}
+          ${slotRows("Dev", details.dev, devCapacity)}
         </section>
       </div>
       ${details.unavailable ? '<p class="unavailable-note">This day is blocked or manually unavailable for additional bidding.</p>' : ""}
@@ -4524,7 +4590,7 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       pattern: row.pattern,
       line: row.line_code,
       lineType: row.line_type,
-      cpc: "",
+      cpc: row.assigned_initials || (row.assigned_bidder_id === currentUser.supabaseProfileId ? currentUser.initials : ""),
       week: days.length === 7 ? days : ["RDO", "RDO", "600", "700", "1300", "1430", "1500"],
       group: row.fatigue_group || "C",
       mid: row.mid || "No",
@@ -4554,11 +4620,19 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
       label: formatCalendarDate(row.slot_date),
       cpc: [],
       dev: [],
+      cpcCapacity: 0,
+      devCapacity: 0,
+      cpcOpen: 0,
+      devOpen: 0,
       unavailable: false,
     };
     const bucket = row.slot_group === "dev" ? "dev" : "cpc";
     const value = row.slot_initials || "";
 
+    details[`${bucket}Capacity`] += 1;
+    if (row.status === "open" && !row.bidder_id && !row.source_leave_request_id) {
+      details[`${bucket}Open`] += 1;
+    }
     if (row.status === "unavailable") details.unavailable = true;
     if (["approved", "pending", "held"].includes(row.status) && value) {
       details[bucket].push({ code: row.slot_code, initials: value });
@@ -4680,81 +4754,38 @@ async function ensureSupabaseBidYearId() {
   return data.id;
 }
 
-function leaveRequestRowForSupabase(request, notes = "") {
-  const dateKeys = datesInLeaveRange(request.range);
-  return {
-    bid_year_id: supabaseState.bidYearId,
-    bidder_id: currentUser.supabaseProfileId,
-    round_number: request.round,
-    priority: request.priority,
-    leave_type: "Annual Leave",
-    status: databaseStatusFromUi(request.status),
-    requested_start_date: dateKeys[0],
-    requested_end_date: dateKeys[dateKeys.length - 1],
-    charged_days: request.days,
-    notes,
-    submitted_at: new Date().toISOString(),
-  };
-}
-
-function leaveDateRowsForSupabase(request, leaveRequestId) {
-  const chargedDates = new Set(chargeableLeaveDatesForInitials(request.range, request.initials, request.round));
-  return datesInLeaveRange(request.range).map((key) => ({
-    leave_request_id: leaveRequestId,
-    leave_date: key,
-    charged: chargedDates.has(key),
-    is_rdo: isRdoDateForInitials(key, request.initials),
-    is_holiday: isLegalHolidayDate(key),
-    is_holiday_in_lieu: isHolidayInLieuDate(key),
-  }));
-}
-
-function leaveWeekBucketRowsForSupabase(request, leaveRequestId) {
-  return (request.weekKeys || []).map((weekKey) => {
-    const end = dateFromKey(weekKey);
-    end.setDate(end.getDate() + 6);
-    return {
-      leave_request_id: leaveRequestId,
-      bucket_start_date: weekKey,
-      bucket_end_date: dateKeyFromDate(end),
-    };
-  });
-}
-
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
 
-  await ensureSupabaseBidYearId();
-  const requestRows = newRequests.map((request) =>
-    leaveRequestRowForSupabase(request, draftsByRange.get(request.range)?.notes || "")
-  );
-
-  const { data: savedRequests, error } = await client
-    .from("leave_requests")
-    .insert(requestRows)
-    .select("id,bidder_id,round_number,priority,leave_type,status,requested_start_date,requested_end_date,charged_days,notes,submitted_at,reviewed_at,denial_reason,created_at,bidders(first_name,last_name,initials,bid_role,seniority_rank,area_id)");
-  if (error) throw error;
-
-  const dateRows = [];
-  const weekRows = [];
-  (savedRequests || []).forEach((row, index) => {
-    const request = newRequests[index];
-    dateRows.push(...leaveDateRowsForSupabase(request, row.id));
-    weekRows.push(...leaveWeekBucketRowsForSupabase(request, row.id));
+  const requestedItems = newRequests.map((request) => {
+    const dateKeys = datesInLeaveRange(request.range);
+    return {
+      start_date: dateKeys[0],
+      end_date: dateKeys[dateKeys.length - 1],
+      round: request.round,
+      notes: draftsByRange.get(request.range)?.notes || "",
+    };
   });
 
-  if (weekRows.length) {
-    const { error: weekError } = await client.from("leave_request_week_buckets").insert(weekRows);
-    if (weekError) throw weekError;
-  }
-  if (dateRows.length) {
-    const { error: dateError } = await client.from("leave_request_dates").insert(dateRows);
-    if (dateError) throw dateError;
+  const { error } = await client.rpc("submit_leave_bid_batch", {
+    requested_bid_year: BID_YEAR,
+    requested_items: requestedItems,
+    target_initials: null,
+    target_area_name: null,
+    manual_entry: false,
+  });
+  if (error) throw error;
+
+  const { data: savedRequests, error: refreshError } = await client.rpc("read_leave_intake_queue", {
+    queue_bid_year: BID_YEAR,
+  });
+  if (refreshError) {
+    console.warn(`Leave batch was saved, but the intake queue could not be refreshed. ${refreshError.message || refreshError}`);
+  } else {
+    upsertLeaveRequestsFromDatabase(savedRequests || [], new Map());
   }
 
-  const areaById = new Map();
-  upsertLeaveRequestsFromDatabase(savedRequests || [], areaById);
   return true;
 }
 
@@ -4784,9 +4815,9 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
+      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
-      client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
+      client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
     ]);
 
@@ -6121,8 +6152,8 @@ function areaLeaveSlotTotals() {
   return Object.values(leaveSlotMap()).reduce((totals, day) => {
     const cpcFilled = (day.cpc || []).length;
     const devFilled = (day.dev || []).length;
-    const cpcCapacity = day.unavailable ? cpcFilled : leaveSlotCapacity.cpc;
-    const devCapacity = day.unavailable ? devFilled : leaveSlotCapacity.dev;
+    const cpcCapacity = day.unavailable ? cpcFilled : leaveSlotCapacityForDetails(day, "cpc");
+    const devCapacity = day.unavailable ? devFilled : leaveSlotCapacityForDetails(day, "dev");
 
     totals.cpcTotal += cpcCapacity;
     totals.devTotal += devCapacity;
