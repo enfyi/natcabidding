@@ -588,12 +588,13 @@ const supabaseState = {
   loading: false,
   authInitialized: false,
   authRestorePromise: null,
-  message: "Using built-in prototype data.",
+  message: "Waiting for Supabase data.",
   loadedAt: null,
   bidYearId: "",
   authEmail: "",
   authUserId: "",
   pendingAuthEmail: "",
+  placeholdersCleared: false,
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
@@ -4125,6 +4126,7 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       }
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
+      await loadSupabaseReferenceData();
       showLoggedInApp(page);
       return true;
     } catch (error) {
@@ -4239,6 +4241,7 @@ async function loginWithSupabasePassword(email, password) {
     }
     currentUser = profile;
     setAuthStatus("Signed in.", "success");
+    await loadSupabaseReferenceData();
     showLoggedInApp(requestedLandingPage());
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
@@ -4418,7 +4421,7 @@ function resetProfileForm() {
 }
 
 function areaNameForRow(row, areaById = new Map()) {
-  return areaById.get(row.area_id) || AREA_NAME_BY_CODE[row.area_code] || row.area_name || "Area A";
+  return areaById.get(row.area_id) || row.areas?.name || AREA_NAME_BY_CODE[row.area_code] || row.area_name || "Area A";
 }
 
 function lineForArea(line, area = currentUser.area) {
@@ -4453,8 +4456,8 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       pattern: row.pattern,
       line: row.line_code,
       lineType: row.line_type,
-      cpc: "",
-      week: days.length === 7 ? days : ["RDO", "RDO", "600", "700", "1300", "1430", "1500"],
+      cpc: row.bidders?.initials || "",
+      week: days.length === 7 ? days : Array.from({ length: 7 }, () => ""),
       group: row.fatigue_group || "C",
       mid: row.mid || "No",
       aws: row.aws ? "Yes" : "No",
@@ -4469,6 +4472,10 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       rdoLines.push(nextLine);
     }
   });
+
+  if (!selectedLineId && rdoLines.length) {
+    selectedLineId = rdoLinesForArea(currentUser?.area || "Area A")[0]?.line || rdoLines[0].line;
+  }
 }
 
 function upsertLeaveSlotsFromDatabase(rows, areaById) {
@@ -4594,6 +4601,100 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
   });
 }
 
+function resetSupabaseBackedData() {
+  if (supabaseState.placeholdersCleared) return;
+  rdoLines.splice(0, rdoLines.length);
+  leaveBids.splice(0, leaveBids.length);
+  leaveSlotWeeks.splice(0, leaveSlotWeeks.length);
+  Object.keys(extraLeaveSlotData).forEach((key) => delete extraLeaveSlotData[key]);
+  senioritySource.splice(0, senioritySource.length);
+  seniority = [];
+  intakeQueue = [];
+  helpThreads = [];
+  intakeSchedules.splice(0, intakeSchedules.length);
+  intakeTeamInitials.clear();
+  holidayOverrides.clear();
+  fullLeaveDates.clear();
+  selectedLineId = "";
+  supabaseState.placeholdersCleared = true;
+}
+
+function bidderRowArea(row, areaById = new Map()) {
+  return row.area_name || row.areas?.name || areaById.get(row.area_id) || "Area A";
+}
+
+function bidderRowToSeniorityEntry(row, areaById = new Map()) {
+  return [
+    row.last_name || "",
+    row.first_name || "",
+    row.bid_role || "CPC",
+    row.initials || "",
+    bidderRowArea(row, areaById),
+    row.email || "",
+    row.phone || "",
+    row.active !== false,
+    normalizeLeaveSlotAllowance(row.leave_slot_allowance),
+    row.profile_id || row.id || "",
+  ];
+}
+
+function seniorityEntryProfileId(entry) {
+  return entry?.[9] || "";
+}
+
+function applyRosterFromDatabase(rows, areaById = new Map()) {
+  senioritySource.splice(0, senioritySource.length);
+  (rows || []).forEach((row) => {
+    senioritySource.push(bidderRowToSeniorityEntry(row, areaById));
+  });
+
+  if (currentUser.supabaseProfileId) {
+    const currentEntry = senioritySource.find((entry) => seniorityEntryProfileId(entry) === currentUser.supabaseProfileId);
+    if (currentEntry) {
+      const person = rosterEntryToPerson(currentEntry);
+      currentUser = {
+        ...currentUser,
+        firstName: person.firstName,
+        lastName: person.lastName,
+        initials: person.initials,
+        email: person.email,
+        phone: person.phone,
+        area: person.area,
+        bidAs: person.bidAs,
+        seniorityRank: person.rank,
+        leaveSlotAllowance: person.leaveSlotAllowance,
+      };
+      selectedViewArea = person.area;
+    }
+  }
+
+  seniority = buildSeniority();
+}
+
+function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
+  intakeSchedules.splice(0, intakeSchedules.length);
+  intakeTeamInitials.clear();
+
+  (rows || []).forEach((row) => {
+    const bidder = row.bidders || {};
+    const initials = bidder.initials || row.initials || "";
+    if (!initials) return;
+
+    intakeTeamInitials.add(initials);
+    intakeSchedules.push({
+      id: row.id,
+      initials,
+      name: controllerName({
+        firstName: bidder.first_name || row.first_name || "",
+        lastName: bidder.last_name || row.last_name || "",
+      }).trim() || initials,
+      area: row.scope || row.area_name || areaById.get(row.area_id) || INTAKE_SCHEDULE_AREA,
+      start: new Date(row.starts_at),
+      end: new Date(row.ends_at),
+    });
+  });
+}
+
 async function ensureSupabaseBidYearId() {
   if (supabaseState.bidYearId) return supabaseState.bidYearId;
   const client = supabaseClient();
@@ -4688,8 +4789,15 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
 }
 
 async function loadSupabaseReferenceData() {
+  resetSupabaseBackedData();
   const client = supabaseClient();
-  if (!client || supabaseState.loading) return;
+  if (!client) {
+    supabaseState.enabled = false;
+    supabaseState.connected = false;
+    supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
+    return;
+  }
+  if (supabaseState.loading) return;
 
   supabaseState.enabled = true;
   supabaseState.loading = true;
@@ -4706,25 +4814,30 @@ async function loadSupabaseReferenceData() {
     const [
       areasResult,
       holidaysResult,
+      rosterResult,
       rdoLinesResult,
       rdoLineDaysResult,
       leaveSlotsResult,
       leaveRequestsResult,
+      intakeSchedulesResult,
     ] = await Promise.all([
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status").eq("bid_year_id", bidYear.id),
+      client.rpc("read_bidding_roster"),
+      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials").eq("bid_year_id", bidYear.id),
-      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
+      supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
+      supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
     ]);
 
-    const firstError = [areasResult, holidaysResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult].find((result) => result.error)?.error;
+    const firstError = [areasResult, holidaysResult, rosterResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult, intakeSchedulesResult].find((result) => result.error)?.error;
     if (firstError) throw firstError;
 
     supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
 
+    applyRosterFromDatabase(rosterResult.data || [], areaById);
     (holidaysResult.data || []).forEach((holiday) => {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
@@ -4732,14 +4845,15 @@ async function loadSupabaseReferenceData() {
     upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
     upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, and ${(leaveRequestsResult.data || []).length} leave requests.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, ${(leaveRequestsResult.data || []).length} leave requests, and ${(intakeSchedulesResult.data || []).length} intake schedules.`;
   } catch (error) {
     supabaseState.connected = false;
-    supabaseState.message = `Supabase data unavailable, using prototype fallback. ${error.message || error}`;
+    supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
     supabaseState.loading = false;
@@ -9133,9 +9247,9 @@ document.addEventListener("change", (event) => {
   renderApp();
 });
 
+resetSupabaseBackedData();
 renderPublicPage();
-initializeSupabaseAuth();
-loadSupabaseReferenceData().then(() => {
+initializeSupabaseAuth().finally(() => loadSupabaseReferenceData()).then(() => {
   if (isMemberAppVisible()) {
     renderApp();
   } else {
