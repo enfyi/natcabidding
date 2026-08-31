@@ -2760,6 +2760,7 @@ function previewLeaveSubmission() {
   const { range, days } = leaveBuilderValues();
   const round = currentRoundNumber();
   const dateKeys = datesInLeaveRange(range);
+  const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
 
   if (!dateKeys.length) {
     setLeaveBuilderStatus("Enter a date range before previewing leave.", "error");
@@ -2789,11 +2790,18 @@ function previewLeaveSubmission() {
     return;
   }
 
+  const previewYear = dateFromKey(dateKeys[0]).getFullYear();
+  const calendarYearChanged = displayedCalendarYear !== previewYear;
   leaveRangePreviewActive = true;
   selectedLeaveDateKey = dateKeys[0];
-  displayedCalendarYear = dateFromKey(dateKeys[0]).getFullYear();
-  renderApp();
-  setPage("leave");
+  displayedCalendarYear = previewYear;
+  if (calendarYearChanged) {
+    updateCalendarYearLabels();
+    makeCalendar("leave-calendar");
+  } else {
+    syncMemberCalendarSelection([...previousPreviewKeys, ...dateKeys]);
+  }
+  renderLeaveSlotBoard();
   const previewMessage = round === 1
     ? `Previewing ${weekUnits} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.`
     : "Previewing this range on the calendar. Use Add to Batch when you want to stage it.";
