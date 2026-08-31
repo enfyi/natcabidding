@@ -34,6 +34,7 @@ create table if not exists bidders (
   role text not null default 'controller' check (role in ('controller', 'intake', 'admin')),
   bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV')),
   seniority_rank integer,
+  leave_slot_allowance integer not null default 4 check (leave_slot_allowance >= 0),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
