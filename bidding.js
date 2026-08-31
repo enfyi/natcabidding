@@ -2728,7 +2728,8 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  leaveDraftQueue.push({
+  const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
+  const draft = {
     id: `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     range,
     days,
@@ -2736,14 +2737,17 @@ function addOrUpdateLeaveSubmission() {
     round,
     weekUnits,
     weekKeys,
-  });
+  };
+  leaveDraftQueue.push(draft);
   const leaveNotesInput = document.querySelector("[data-leave-notes-input]");
   if (leaveNotesInput) leaveNotesInput.value = "";
   leaveRangeSelectionComplete = true;
   leaveRangePreviewActive = false;
 
-  renderApp();
-  setPage("leave");
+  refreshLeaveDraftUi([
+    ...previousPreviewKeys,
+    ...leaveDisplayDatesForItem(draft, currentUser.initials),
+  ]);
   const roundOneSuffix = isRoundOne
     ? newRoundOneWeeks
       ? ` using ${newRoundOneWeeks} new bid ${newRoundOneWeeks === 1 ? "week" : "weeks"} and charging ${days} ${days === 1 ? "day" : "days"}`
@@ -2797,10 +2801,16 @@ function previewLeaveSubmission() {
 }
 
 function removeLeaveDraft(id) {
+  const removedDraft = leaveDraftQueue.find((item) => item.id === id);
   leaveDraftQueue = leaveDraftQueue.filter((item) => item.id !== id);
-  renderApp();
-  setPage("leave");
+  refreshLeaveDraftUi(removedDraft ? leaveDisplayDatesForItem(removedDraft, currentUser.initials) : []);
   setLeaveBuilderStatus("Removed from the preview batch.", "info");
+}
+
+function refreshLeaveDraftUi(affectedDateKeys = []) {
+  syncMemberCalendarSelection(affectedDateKeys);
+  renderLeaveDraftQueue();
+  renderLeaveAllowanceSummary();
 }
 
 function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
