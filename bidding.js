@@ -3190,7 +3190,6 @@ function denyIntakeItem(id) {
     const bid = leaveBidForItem(item);
     if (bid) {
       bid.status = "Denied";
-      bid.notes = reason;
     }
   }
 
