@@ -83,6 +83,8 @@ button.seniority-pill {
 .public-rail {
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   padding: 24px 16px;
   background:
@@ -105,6 +107,10 @@ button.seniority-pill {
   display: grid;
   gap: 8px;
   margin-top: 34px;
+}
+
+.public-footer {
+  margin-top: auto;
 }
 
 .public-nav-item,
@@ -3707,9 +3713,28 @@ tr.occupied-row .rdo-tag {
   margin-bottom: 0;
 }
 
+.round-rule-summary-list {
+  margin-top: 12px;
+}
+
+.round-rule-summary-list dd,
 .rule-editor-heading {
   display: grid;
   gap: 3px;
+}
+
+.round-rule-summary-list dd strong {
+  color: #0f172a;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.round-rule-summary-list dd small {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .rule-editor-heading strong,
@@ -3740,6 +3765,11 @@ tr.occupied-row .rdo-tag {
   padding-top: 10px;
 }
 
+.round-rule-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .round-rule-row label {
   display: grid;
   gap: 5px;
@@ -3760,8 +3790,8 @@ tr.occupied-row .rdo-tag {
 }
 
 .round-rule-row textarea {
+  min-height: 78px;
   resize: vertical;
-  min-height: 64px;
 }
 
 .editable-rule-list {
@@ -3772,7 +3802,8 @@ tr.occupied-row .rdo-tag {
 
 .editable-rule-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto 28px minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   border-top: 1px solid #dce6f0;
   padding: 10px 0;
@@ -3783,8 +3814,12 @@ tr.occupied-row .rdo-tag {
   padding-top: 0;
 }
 
-.editable-rule-item > span {
-  grid-column: 2;
+.editable-rule-item.dragging {
+  opacity: 0.45;
+}
+
+.editable-rule-copy {
+  grid-column: 3;
   color: #496681;
   font-size: 0.8rem;
   font-weight: 800;
@@ -3802,15 +3837,36 @@ tr.occupied-row .rdo-tag {
   content: "";
 }
 
-.rule-actions {
+.rule-drag-handle {
   grid-column: 2;
+  width: 24px;
+  height: 28px;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle, #496681 1.4px, transparent 1.6px) 6px 6px / 7px 7px,
+    #ffffff;
+  cursor: grab;
+}
+
+.rule-drag-handle:active {
+  cursor: grabbing;
+}
+
+.rule-drag-handle:focus-visible {
+  outline: 2px solid #2b7f86;
+  outline-offset: 2px;
+}
+
+.rule-actions {
+  grid-column: 3;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.rule-actions .secondary-action.small,
 .round-rule-row .secondary-action.small,
+.rule-actions .secondary-action.small,
 .rule-editor-row .secondary-action.small {
   min-height: 31px;
   padding: 0 10px;
@@ -3822,7 +3878,6 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
-
 #leave-page .allowance-card dl div {
   gap: 8px;
   padding: 7px 0;
@@ -4439,6 +4494,20 @@ tr.occupied-row .rdo-tag {
   min-height: calc(100vh - 122px);
 }
 
+.schedule-panel.calendar-panel.full {
+  min-height: auto;
+}
+
+.schedule-panel {
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
+}
+
+.schedule-panel .panel-header {
+  align-items: flex-start;
+}
+
 .calendar-panel.full .month-grid span,
 .calendar-panel.full .month-grid button {
   min-height: 26px;
@@ -4600,8 +4669,155 @@ tr.occupied-row .rdo-tag {
   grid-template-columns: minmax(0, 1fr) 260px;
 }
 
+.schedule-view-controls {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.schedule-view-tabs button {
+  min-width: 82px;
+}
+
+.schedule-period-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.schedule-period-controls button {
+  min-width: 30px;
+  min-height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #2b7f86;
+  background: #ffffff;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.schedule-period-controls strong {
+  min-width: 156px;
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+}
+
 .schedule-calendar {
+  align-items: start;
   margin-top: 14px;
+  max-width: 740px;
+}
+
+.schedule-calendar.year-view {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-calendar.month-view {
+  grid-template-columns: minmax(0, 520px);
+  max-width: 520px;
+}
+
+.schedule-calendar.week-view {
+  grid-template-columns: minmax(0, 660px);
+  max-width: 660px;
+}
+
+.schedule-calendar .month-card {
+  padding: 8px;
+}
+
+.schedule-calendar .month-card h3 {
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+}
+
+.schedule-calendar.year-view .month-grid {
+  gap: 2px;
+}
+
+.calendar-panel.full .schedule-calendar .month-grid span,
+.calendar-panel.full .schedule-calendar .month-grid button {
+  min-height: 18px;
+  font-size: 0.58rem;
+}
+
+.calendar-panel.full .schedule-calendar.month-view .month-grid span,
+.calendar-panel.full .schedule-calendar.month-view .month-grid button {
+  min-height: 70px;
+  font-size: 0.72rem;
+}
+
+.schedule-calendar.week-view .week-calendar-grid {
+  gap: 6px;
+}
+
+.schedule-calendar.week-view .week-day-column button {
+  min-height: 104px;
+  font-size: 0.72rem;
+}
+
+.schedule-day.show-assignments {
+  display: flex !important;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 5px;
+  text-align: left;
+}
+
+.schedule-day.show-assignments > .date-number {
+  align-self: flex-start;
+  min-height: auto;
+  color: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.schedule-day-assignments,
+.month-grid .schedule-day-assignments {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.schedule-day-assignment,
+.month-grid .schedule-day-assignment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  min-height: 14px;
+  color: inherit;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.schedule-day-assignment b {
+  min-width: 18px;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.52rem;
+  font-weight: 900;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.schedule-day-assignment small {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.5rem;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .schedule-day.has-schedule {
@@ -4688,11 +4904,52 @@ tr.occupied-row .rdo-tag {
   font-weight: 800;
 }
 
+@media (max-width: 1100px) {
+  .intake-schedule-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-view-controls {
+    justify-items: stretch;
+  }
+
+  .schedule-period-controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .schedule-view-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .schedule-view-tabs button {
+    min-width: 0;
+  }
+
+  .schedule-period-controls {
+    width: 100%;
+  }
+
+  .schedule-period-controls strong {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .schedule-calendar.year-view {
+    grid-template-columns: 1fr;
+    max-width: 440px;
+  }
+}
+
 .intake-schedule-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
+  max-width: 740px;
 }
 
 .schedule-list-section {
@@ -6723,6 +6980,7 @@ body {
   .public-rail {
     display: flex;
     align-items: center;
+    flex-direction: row;
     gap: 14px;
     min-width: 0;
   }
@@ -6825,6 +7083,12 @@ body {
   .nav-item,
   .ghost-link {
     flex: 0 0 auto;
+  }
+
+  .public-footer {
+    flex: 0 0 auto;
+    margin-top: 0;
+    margin-left: auto;
   }
 
   .public-area {
@@ -7244,6 +7508,10 @@ video {
     max-width: 100vw;
     overflow: hidden;
     padding: 12px;
+  }
+
+  .public-footer {
+    margin: 0;
   }
 
   .public-rail .brand-block {

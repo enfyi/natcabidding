@@ -73,6 +73,9 @@
           </details>
           <button class="public-nav-item" type="button" data-public-area="Previous Years">Previous Years</button>
         </nav>
+        <div class="public-footer side-footer">
+          <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
+        </div>
       </aside>
 
       <main class="public-main">
@@ -82,7 +85,6 @@
             <h1 data-public-heading>Area A Annual Leave Calendar</h1>
           </div>
           <div class="public-login">
-            <button class="secondary-action small" type="button" data-help-toggle>Chat with Intake</button>
             <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
@@ -814,20 +816,16 @@
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
                   <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
                 </div>
-                <div class="round-rule-editor" data-round-rule-editor></div>
+                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
               </section>
-              <section class="panel editable-rule-card">
+              <section class="panel">
                 <div class="panel-header compact">
                   <div>
                     <h3>Approval Rules</h3>
-                    <p>Add, edit, remove, or reorder intake guidance.</p>
+                    <p>Current intake guidance set by Admin.</p>
                   </div>
                 </div>
-                <ul class="plain-list success-list editable-rule-list" data-approval-rule-list></ul>
-                <div class="rule-editor-row">
-                  <input type="text" data-approval-rule-input placeholder="Add approval rule">
-                  <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
-                </div>
+                <ul class="plain-list success-list" data-approval-rule-summary></ul>
               </section>
               <section class="panel help-summary-card">
                 <div class="panel-header compact">
@@ -1013,11 +1011,23 @@
 
         <section class="page" id="intake-schedule-page" data-page-panel="intake-schedule">
           <div class="workspace-grid intake-schedule-workspace">
-            <section class="panel calendar-panel full">
+            <section class="panel calendar-panel full schedule-panel">
               <div class="panel-header">
                 <div>
                   <h2>Intake Schedule</h2>
                   <p>Review scheduled intake coverage. Your scheduled dates are highlighted.</p>
+                </div>
+                <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
+                  <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Year</button>
+                    <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Month</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Week</button>
+                  </div>
+                  <div class="schedule-period-controls" aria-label="Intake schedule period">
+                    <button type="button" data-schedule-period-action="previous" aria-label="Previous schedule period">‹</button>
+                    <strong data-schedule-period-label>January 2027</strong>
+                    <button type="button" data-schedule-period-action="next" aria-label="Next schedule period">›</button>
+                  </div>
                 </div>
               </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
@@ -1164,6 +1174,28 @@
               <div class="admin-user-list" data-admin-user-list></div>
             </section>
             <aside class="right-stack">
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Round Rules</h3>
+                    <p>Edit the wording shown for each bidding round.</p>
+                  </div>
+                </div>
+                <div class="round-rule-editor" data-round-rule-editor></div>
+              </section>
+              <section class="panel editable-rule-card">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Approval Rules</h3>
+                    <p>Add, edit, remove, or drag intake guidance into order.</p>
+                  </div>
+                </div>
+                <ul class="plain-list success-list editable-rule-list" data-approval-rule-list></ul>
+                <div class="rule-editor-row">
+                  <input type="text" data-approval-rule-input placeholder="Add approval rule">
+                  <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
+                </div>
+              </section>
               <section class="panel">
                 <h3>Schedule Intake Rep</h3>
                 <p>Access opens 15 minutes before the shift starts.</p>
