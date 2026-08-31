@@ -3326,7 +3326,7 @@ function denyIntakeItem(id) {
   if (item.type === "Leave") {
     const bid = leaveBidForItem(item);
     if (bid) {
-      bid.status = "Declined";
+      bid.status = "Denied";
       bid.notes = reason;
     }
   }
