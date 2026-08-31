@@ -3706,6 +3706,58 @@ function renderCalendars({ includePublic = true, includeMember = true } = {}) {
   }
 }
 
+function refreshMemberCalendarDates(dateKeys = []) {
+  const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
+  if (!uniqueKeys.length) return;
+
+  document.querySelectorAll(".app-shell .year-calendar[id]").forEach((calendar) => {
+    const ownerPage = calendar.closest(".page");
+    if (ownerPage && !ownerPage.classList.contains("active")) return;
+
+    const area = currentViewArea();
+    const showPersonalState = area === currentUser.area;
+    const calendarScopes = {
+      "dashboard-calendar": "dashboard",
+      "leave-calendar": "leave",
+      "full-calendar": "member",
+    };
+    const scope = calendarScopes[calendar.id];
+    const expandedSlots = Boolean(scope && calendarLayouts[scope] === "full");
+    const context = makeCalendarRenderContext({
+      area,
+      showRdo: showPersonalState,
+      showPersonalLeave: showPersonalState,
+      deferSlotTooltip: false,
+    });
+
+    uniqueKeys.forEach((key) => {
+      const button = calendar.querySelector(`[data-leave-date="${key}"]`);
+      if (!button) return;
+      const date = dateFromKey(key);
+      button.outerHTML = renderCalendarDay(date.getMonth(), date.getDate(), false, date.getFullYear(), {
+        showRdo: showPersonalState,
+        showPersonalLeave: showPersonalState,
+        area,
+        deferSlotTooltip: false,
+        expandedSlots,
+        context,
+      });
+    });
+  });
+}
+
+function syncMemberCalendarSelection(previousPreviewKeys = []) {
+  refreshMemberCalendarDates(previousPreviewKeys);
+
+  const draftDates = leaveDraftDateSet();
+  const previewDates = leaveRangePreviewActive ? new Set(leaveBuilderDateKeys()) : new Set();
+  document.querySelectorAll(".app-shell [data-leave-date]").forEach((button) => {
+    const key = button.dataset.leaveDate;
+    button.classList.toggle("selected-date", key === selectedLeaveDateKey);
+    button.classList.toggle("draft-leave-day", draftDates.has(key) || previewDates.has(key));
+  });
+}
+
 function leaveSlotMap(area = currentUser.area) {
   const entries = {};
 
@@ -8847,10 +8899,10 @@ document.addEventListener("click", async (event) => {
 
   const leavePickerDateButton = event.target.closest("[data-leave-picker-date]");
   if (leavePickerDateButton) {
+    const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
     selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
     selectLeaveBuilderDate(selectedLeaveDateKey);
-    renderCalendars({ includePublic: false });
-    renderLeaveSlotBoard();
+    syncMemberCalendarSelection(previousPreviewKeys);
     renderLeaveDatePicker();
     return;
   }
@@ -9180,14 +9232,16 @@ document.addEventListener("click", async (event) => {
 
   const leaveDateButton = event.target.closest("[data-leave-date]");
   if (leaveDateButton) {
+    const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
     selectedLeaveDateKey = leaveDateButton.dataset.leaveDate;
     const isAppCalendar = Boolean(event.target.closest(".app-shell"));
     if (isAppCalendar) {
       selectLeaveBuilderDate(selectedLeaveDateKey);
     }
-    renderVisibleCalendars();
+    syncMemberCalendarSelection(previousPreviewKeys);
     if (!isAppCalendar) return;
     syncLeaveBuilderInputs();
+    renderLeaveDatePicker();
     openLeaveSlotModal();
     return;
   }
