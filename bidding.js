@@ -2472,6 +2472,11 @@ function formatEstimatedLeaveDays(days) {
   return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
 }
 
+function formatRoundedUpLeaveDays(days) {
+  const value = Number(days);
+  return Number.isFinite(value) ? Math.ceil(value).toLocaleString("en-US") : "0";
+}
+
 function formatLeaveDaysLabel(days) {
   const value = Number(days);
   const label = Math.abs(value - 1) < 0.05 ? "day" : "days";
@@ -6068,10 +6073,10 @@ function renderLeaveBucketCards() {
   const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
   const devLeft = Math.max(0, devTotalDays - devUsedDays);
 
-  setText("[data-cpc-leave-remaining]", formatEstimatedLeaveDays(cpcLeft));
-  setText("[data-dev-leave-remaining]", formatEstimatedLeaveDays(devLeft));
-  setText("[data-cpc-leave-detail]", `${formatEstimatedLeaveDays(cpcUsedDays)} used of ${formatEstimatedLeaveDays(cpcTotalDays)} estimated days`);
-  setText("[data-dev-leave-detail]", `${formatEstimatedLeaveDays(devUsedDays)} used of ${formatEstimatedLeaveDays(devTotalDays)} estimated days`);
+  setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDays(cpcLeft));
+  setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDays(devLeft));
+  setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} used of ${formatRoundedUpLeaveDays(cpcTotalDays)} estimated days`);
+  setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
 }
 
 function syncAdminScheduleFormDefaults() {
