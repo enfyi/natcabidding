@@ -5597,6 +5597,7 @@ function renderCurrentUser() {
   const rdoAssignmentRequest = rdoAssignment?.request;
   setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line ? `Line ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}` : "No line selected");
   setText("[data-dashboard-rdo-summary]", rdoAssignmentRequest?.summary || "Your selected RDO line will appear after you bid.");
+  renderDashboardSelectedLineCard(rdoAssignment);
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !canOpenIntake;
@@ -5971,8 +5972,11 @@ function renderRdoLines() {
 function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
   const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
-  if (!line) return;
   const dashboardAssignment = currentUserRdoAssignment();
+  if (!line) {
+    renderDashboardSelectedLineCard(dashboardAssignment);
+    return;
+  }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
