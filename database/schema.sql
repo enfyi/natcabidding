@@ -126,6 +126,28 @@ create table if not exists holiday_in_lieu_days (
   unique (bid_year_id, bidder_id, holiday_id)
 );
 
+create table if not exists leave_slot_capacities (
+  id uuid primary key default gen_random_uuid(),
+  bid_year_id uuid not null references bid_years(id) on delete cascade,
+  area_id uuid not null references areas(id) on delete cascade,
+  slot_date date not null,
+  cpc_capacity integer not null default 3 check (cpc_capacity between 0 and 99),
+  dev_capacity integer not null default 2 check (dev_capacity between 0 and 99),
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (bid_year_id, area_id, slot_date)
+);
+
+create index if not exists leave_slot_capacities_date_idx
+  on leave_slot_capacities(bid_year_id, area_id, slot_date);
+
+create index if not exists leave_slot_capacities_area_idx
+  on leave_slot_capacities(area_id);
+
+create index if not exists leave_slot_capacities_updated_by_idx
+  on leave_slot_capacities(updated_by);
+
 create table if not exists leave_slots (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
