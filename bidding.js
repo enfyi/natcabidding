@@ -4570,6 +4570,7 @@ async function loginWithUsernamePassword(username, password) {
   currentUser = profileFromSupabase(profile);
   clearSupabaseAccountState();
   setAuthStatus("Signed in.", "success");
+  await loadSupabaseReferenceData();
   showLoggedInApp(requestedLandingPage());
 }
 
@@ -4966,7 +4967,7 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
     senioritySource.push(bidderRowToSeniorityEntry(row, areaById));
   });
 
-  if (currentUser.supabaseProfileId) {
+  if (currentUser?.supabaseProfileId) {
     const currentEntry = senioritySource.find((entry) => seniorityEntryProfileId(entry) === currentUser.supabaseProfileId);
     if (currentEntry) {
       const person = rosterEntryToPerson(currentEntry);
@@ -4987,6 +4988,16 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
   }
 
   seniority = buildSeniority();
+}
+
+function supabaseLoadWarning(label, result) {
+  if (!result?.error) return "";
+  const message = result.error.message || String(result.error);
+  return `${label}: ${message}`;
+}
+
+function supabaseRows(result) {
+  return result?.error ? [] : result?.data || [];
 }
 
 function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
@@ -5071,15 +5082,16 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
 }
 
 async function loadSupabaseReferenceData() {
-  resetSupabaseBackedData();
   const client = supabaseClient();
   if (!client) {
+    resetSupabaseBackedData();
     supabaseState.enabled = false;
     supabaseState.connected = false;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
     return;
   }
   if (supabaseState.loading) return;
+  resetSupabaseBackedData();
 
   supabaseState.enabled = true;
   supabaseState.loading = true;
@@ -5093,19 +5105,26 @@ async function loadSupabaseReferenceData() {
       .single();
     if (bidYearError) throw bidYearError;
 
+    const [areasResult, rosterResult] = await Promise.all([
+      client.from("areas").select("id,code,name,display_order").order("display_order"),
+      client.rpc("read_bidding_roster"),
+    ]);
+    const requiredError = [areasResult, rosterResult].find((result) => result.error)?.error;
+    if (requiredError) throw requiredError;
+
+    supabaseState.bidYearId = bidYear.id;
+    const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
+    applyRosterFromDatabase(rosterResult.data || [], areaById);
+
     const [
-      areasResult,
       holidaysResult,
-      rosterResult,
       rdoLinesResult,
       rdoLineDaysResult,
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
     ] = await Promise.all([
-      client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.rpc("read_bidding_roster"),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
@@ -5113,26 +5132,34 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
     ]);
 
-    const firstError = [areasResult, holidaysResult, rosterResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult, intakeSchedulesResult].find((result) => result.error)?.error;
-    if (firstError) throw firstError;
+    const loadWarnings = [
+      supabaseLoadWarning("holidays", holidaysResult),
+      supabaseLoadWarning("RDO lines", rdoLinesResult),
+      supabaseLoadWarning("RDO line days", rdoLineDaysResult),
+      supabaseLoadWarning("leave slots", leaveSlotsResult),
+      supabaseLoadWarning("leave requests", leaveRequestsResult),
+      supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+    ].filter(Boolean);
 
-    supabaseState.bidYearId = bidYear.id;
-    const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-
-    applyRosterFromDatabase(rosterResult.data || [], areaById);
-    (holidaysResult.data || []).forEach((holiday) => {
+    supabaseRows(holidaysResult).forEach((holiday) => {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
-    upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
-    upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
-    applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!rdoLinesResult.error && !rdoLineDaysResult.error) {
+      upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
+    }
+    if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+    if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, ${(leaveRequestsResult.data || []).length} leave requests, and ${(intakeSchedulesResult.data || []).length} intake schedules.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
+    if (loadWarnings.length) {
+      supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
+      console.warn(supabaseState.message);
+    }
   } catch (error) {
     supabaseState.connected = false;
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
