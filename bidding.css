@@ -4007,45 +4007,33 @@ tr.occupied-row .rdo-tag {
 }
 
 .seniority-list-wrap {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .seniority-time-table {
-  min-width: 1040px;
+  min-width: 980px;
   table-layout: fixed;
 }
 
 .seniority-time-table th,
 .seniority-time-table td {
-  padding: 7px 8px;
+  padding: 9px 8px;
   vertical-align: middle;
+  white-space: normal;
 }
 
 .seniority-time-table th:nth-child(1),
 .seniority-time-table td:nth-child(1) {
-  width: 48px;
-  text-align: center;
+  width: 42px;
 }
 
-.seniority-time-table th:nth-child(2),
 .seniority-time-table th:nth-child(3),
-.seniority-time-table td:nth-child(2),
-.seniority-time-table td:nth-child(3) {
-  width: 128px;
-}
-
+.seniority-time-table td:nth-child(3),
 .seniority-time-table th:nth-child(4),
-.seniority-time-table td:nth-child(4),
-.seniority-time-table th:nth-child(5),
-.seniority-time-table td:nth-child(5) {
-  width: 82px;
-  text-align: center;
-}
-
-.seniority-time-table tbody tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.035);
+.seniority-time-table td:nth-child(4) {
+  width: 70px;
 }
 
 .seniority-time-table .bid-as {
@@ -4080,22 +4068,29 @@ tr.occupied-row .rdo-tag {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  color: inherit;
   font-weight: 900;
+}
+
+.seniority-table-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.seniority-table-person .calendar-download {
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 0.62rem;
+  line-height: 1;
 }
 
 .seniority-time-table .open-now {
   width: 10px;
   height: 10px;
   box-shadow: 0 0 0 4px rgba(91, 212, 138, 0.14), 0 0 14px rgba(91, 212, 138, 0.64);
-}
-
-.seniority-time-table .current-user-row {
-  outline: 1px solid rgba(122, 189, 194, 0.42);
-  background: rgba(122, 189, 194, 0.12);
-}
-
-.seniority-time-table .active-bidder-row {
-  background: rgba(91, 212, 138, 0.1);
 }
 
 .seniority-time-table .open-round-cell {
@@ -6763,13 +6758,12 @@ body {
 }
 
 .app-main .seniority-list-wrap {
-  border-color: #dbe4ef;
-  background: #ffffff;
+  background: transparent;
 }
 
 .app-main .seniority-time-table th {
-  color: #ffffff;
-  background: #3f4b86;
+  color: #2b7f86;
+  background: #f2f8f9;
 }
 
 .app-main .seniority-time-table td {
@@ -6777,17 +6771,33 @@ body {
   border-bottom-color: #dbe4ef;
 }
 
-.app-main .seniority-time-table tbody tr:nth-child(even) {
-  background: #eef1f5;
+.app-main .seniority-time-table .bid-as {
+  color: #0d0818;
+  background: #7abdc2;
+}
+
+.app-main .seniority-time-table .bid-as.gl {
+  color: #241707;
+  background: #ffdc86;
+}
+
+.app-main .seniority-time-table .bid-as.r-dev {
+  color: #ffffff;
+  background: #8b1c62;
+}
+
+.app-main .seniority-time-table .bid-as.d-dev {
+  color: #ffffff;
+  background: #c0569d;
 }
 
 .app-main .seniority-time-table .current-user-row {
-  outline-color: rgba(43, 127, 134, 0.42);
-  background: #e8f6f5;
+  outline: 1px solid rgba(43, 127, 134, 0.32);
+  background: rgba(122, 189, 194, 0.08);
 }
 
 .app-main .seniority-time-table .active-bidder-row {
-  background: #eaf8ee;
+  background: rgba(91, 212, 138, 0.08);
 }
 
 .app-main .seniority-time-table .open-round-cell {
