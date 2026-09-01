@@ -1212,10 +1212,6 @@ function publicBidTimeLabel(roundLabel) {
   return `${weekdayNames[round.weekday] || round.weekday}, ${round.month}/${String(round.day).padStart(2, "0")} · ${round.start}`;
 }
 
-function bidStartTimeLabel(roundLabel) {
-  return parseRoundWindow(roundLabel)?.start || roundLabel;
-}
-
 function escapeIcsText(value) {
   return String(value)
     .replace(/\\/g, "\\\\")
@@ -7742,7 +7738,7 @@ function seniorityCardMarkup() {
             return `
               <div class="round-time ${isOpen ? "open" : ""}">
                 <span>R${round}</span>
-                <b>${bidStartTimeLabel(time)}</b>
+                <b>${publicBidTimeLabel(time)}</b>
                 <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
               </div>
             `;
