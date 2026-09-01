@@ -77,6 +77,8 @@ The current seniority workbook does not include reliable BUE initials. The clean
 
 The live `bidders.initials` field can start blank. The app should let a BUE update it in their profile and mark `initials_verified` once it has been reviewed.
 
+Known name differences between source spreadsheets and Supabase profiles are tracked in `database/imports/bue_name_aliases.json`. Check that file before treating an unmatched BUE as missing.
+
 ## Email Login
 
 The current Next.js application uses Supabase email/password authentication. The
