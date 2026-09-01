@@ -5203,6 +5203,27 @@ tr.occupied-row .rdo-tag {
   gap: 12px;
 }
 
+.bid-window-testing-card {
+  gap: 14px;
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
+}
+
 .roster-manager {
   display: grid;
   gap: 14px;
