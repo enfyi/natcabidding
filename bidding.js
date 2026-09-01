@@ -23,6 +23,7 @@ const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
 const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
+const BID_LEAVE_YEAR_CONTINUATION_DAYS = Number(BID_LEAVE_YEAR_END_KEY.slice(-2));
 const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -3578,7 +3579,14 @@ function makeCalendar(targetId) {
       expandedSlots,
       context,
     }))
-    .join("");
+    .join("") + renderLeaveYearContinuation(displayedCalendarYear, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip: false,
+      expandedSlots,
+      context,
+    });
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -3608,6 +3616,34 @@ function renderMonthCard(monthIndex, year, options = {}) {
       <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
+  `;
+}
+
+function renderLeaveYearContinuation(year, options = {}) {
+  if (year !== BID_YEAR || !options.expandedSlots) return "";
+  const { showRdo = true, showPersonalLeave = true, area, deferSlotTooltip = false, context = null } = options;
+  const continuationYear = BID_YEAR + 1;
+  const cells = [];
+
+  for (let day = 1; day <= BID_LEAVE_YEAR_CONTINUATION_DAYS; day += 1) {
+    cells.push(renderCalendarDay(0, day, true, continuationYear, {
+      showRdo,
+      showPersonalLeave,
+      area,
+      deferSlotTooltip,
+      expandedSlots: true,
+      context,
+    }));
+  }
+
+  return `
+    <section class="leave-year-continuation" aria-label="${BID_YEAR} leave year continues through January 8, ${continuationYear}">
+      <div class="leave-year-continuation-copy">
+        <strong>January ${continuationYear}</strong>
+        <span>Two bid weeks · leave year ends January 8</span>
+      </div>
+      <div class="month-grid leave-year-continuation-days">${cells.join("")}</div>
+    </section>
   `;
 }
 
