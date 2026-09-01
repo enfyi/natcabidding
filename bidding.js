@@ -5564,30 +5564,27 @@ function updateBidWindow() {
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
-  const isAdmin = hasIntakeAccess();
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
   const statusText = areaRoundOpen ? "Open" : "Closed";
   const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isAdmin
-    ? isValidationPeriod ? "Validation Period" : areaRoundOpen ? "Bidding Now" : "Bid Window"
-    : isValidationPeriod ? "Validation Period" : isOpen ? "Your Turn" : isBefore ? "Opens In" : showCurrentBidder ? "Bidding Now" : "Window Closed";
-  const countdownText = isValidationPeriod
-    ? formatDuration(roundState.validationEndsAt - now)
-    : isOpen
+  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const countdownText = isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
+      : isValidationPeriod
+        ? formatDuration(roundState.validationEndsAt - now)
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
-  const countdownLabel = isValidationPeriod
-    ? "Validation Ends In"
-    : isOpen
+  const countdownLabel = isOpen
       ? "Window Closes In"
       : isBefore
-      ? "Window Opens In"
+      ? "Next Window In"
+      : isValidationPeriod
+        ? "Validation Ends In"
       : showCurrentBidder
         ? "Currently Bidding"
         : "Window Status";
@@ -5605,8 +5602,11 @@ function updateBidWindow() {
 
   const clock = document.getElementById("bid-window-clock");
   if (clock) {
+    clock.classList.toggle("closed", !isOpen);
     clock.querySelector("span").textContent = clockLabel;
     clock.querySelector("strong").textContent = countdownText;
+    const detail = clock.querySelector("small");
+    if (detail) detail.textContent = countdownLabel;
     clock.title = showCurrentBidder && activePerson
       ? `Currently bidding: Seniority #${activePerson.rank} (${activePerson.initials})`
       : "";
