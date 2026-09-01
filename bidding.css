@@ -231,22 +231,10 @@ button.seniority-pill {
   color: #111827;
 }
 
-.email-login-form,
-.credential-login-form {
+.email-login-form {
   display: grid;
   gap: 10px;
   margin-top: 12px;
-  margin-bottom: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.credential-login-form {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.credential-login-form button {
-  grid-column: 1 / -1;
 }
 
 .login-button-row {
@@ -255,8 +243,7 @@ button.seniority-pill {
   gap: 8px;
 }
 
-.email-login-form label,
-.credential-login-form label {
+.email-login-form label {
   display: grid;
   gap: 6px;
   color: #64748b;
@@ -265,16 +252,14 @@ button.seniority-pill {
   text-transform: uppercase;
 }
 
-.email-login-form input,
-.credential-login-form input {
+.email-login-form input {
   width: 100%;
   color: #111827;
   background: white;
   font-weight: 500;
 }
 
-.email-login-form input::placeholder,
-.credential-login-form input::placeholder {
+.email-login-form input::placeholder {
   color: #64748b;
   font-weight: 500;
 }
@@ -8094,7 +8079,6 @@ video {
     padding: 14px;
   }
 
-  .credential-login-form,
   .login-button-row {
     grid-template-columns: 1fr;
   }
