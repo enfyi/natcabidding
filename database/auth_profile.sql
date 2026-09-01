@@ -25,6 +25,55 @@ $$;
 
 grant execute on function public.can_request_login_link(text) to anon, authenticated;
 
+create or replace function public.hook_allow_rostered_bue_signup(event jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  login_email text := lower(trim(event->'user'->>'email'));
+  roster_match boolean := false;
+begin
+  if login_email is null or login_email = '' then
+    return jsonb_build_object(
+      'error', jsonb_build_object(
+        'http_code', 400,
+        'message', 'Use the email address listed for you in the BUE roster.'
+      )
+    );
+  end if;
+
+  select exists (
+    select 1
+    from public.bidders b
+    where b.active
+      and b.email is not null
+      and lower(b.email) = login_email
+  )
+  into roster_match;
+
+  if roster_match then
+    return '{}'::jsonb;
+  end if;
+
+  return jsonb_build_object(
+    'error', jsonb_build_object(
+      'http_code', 403,
+      'message', 'Use the email address listed for you in the BUE roster.'
+    )
+  );
+end;
+$$;
+
+grant execute
+  on function public.hook_allow_rostered_bue_signup(jsonb)
+  to supabase_auth_admin;
+
+revoke execute
+  on function public.hook_allow_rostered_bue_signup(jsonb)
+  from authenticated, anon, public;
+
 create or replace function public.claim_current_bidder_profile()
 returns table (
   profile_id uuid,
