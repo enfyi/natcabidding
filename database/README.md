@@ -14,6 +14,10 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
+For the admin daily CPC/DEV capacity control, also run
+`database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
+the admin-only database operation that safely resizes each day's slot inventory.
+
 If a future server-only admin workflow requires a Supabase secret key, keep it in
 a non-`NEXT_PUBLIC_` variable and never expose it to browser code.
 

@@ -16,7 +16,9 @@ const monthNames = [
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BID_YEAR = 2027;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
-const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = 4;
+const LEAVE_SLOT_HOURS_PER_DAY = 8;
+const CWS_LEAVE_HOURS_PER_DAY = 10;
+const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
@@ -63,6 +65,7 @@ const DEFAULT_APPROVAL_RULES = [
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
 const BID_WINDOW_LOCK_STORAGE_KEY = "natca-zla-enforce-bid-windows";
+const LEAVE_SLOT_CAPACITY_STORAGE_KEY = "natca-zla-leave-slot-capacities";
 
 function storedJsonValue(key, fallback) {
   try {
@@ -89,6 +92,10 @@ let roundRules = {
 };
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
+const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
+let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
+  ? storedLeaveSlotCapacities
+  : {};
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -846,6 +853,14 @@ const extraLeaveSlotData = {
   "2027-12-27": { cpc: ["CZ", "NO", "GM"], dev: ["KE", "AW"] },
 };
 
+function extraLeaveSlotStorageKey(key, area = "Area A") {
+  return area === "Area A" ? key : `${area}|${key}`;
+}
+
+function extraLeaveSlotDetails(key, area = "Area A") {
+  return extraLeaveSlotData[extraLeaveSlotStorageKey(key, area)];
+}
+
 let selectedLeaveDateKey = "2027-01-18";
 
 const senioritySource = [
@@ -1212,10 +1227,6 @@ function publicBidTimeLabel(roundLabel) {
   };
 
   return `${weekdayNames[round.weekday] || round.weekday}, ${round.month}/${String(round.day).padStart(2, "0")} · ${round.start}`;
-}
-
-function bidStartTimeLabel(roundLabel) {
-  return parseRoundWindow(roundLabel)?.start || roundLabel;
 }
 
 function escapeIcsText(value) {
@@ -2547,6 +2558,67 @@ function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems 
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
+function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
+  return [...leaveCommittedItems(), ...extraItems]
+    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+}
+
+function estimatedLeaveDaysFromHours(hours, hoursPerDay = LEAVE_SLOT_HOURS_PER_DAY) {
+  const value = Number(hours);
+  const divisor = Number(hoursPerDay);
+  return Number.isFinite(value) && Number.isFinite(divisor) && divisor > 0 ? value / divisor : 0;
+}
+
+function formatEstimatedLeaveDays(days) {
+  const value = Number(days);
+  if (!Number.isFinite(value)) return "0";
+  if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function formatRoundedUpLeaveDays(days) {
+  const value = Number(days);
+  return Number.isFinite(value) ? Math.ceil(value).toLocaleString("en-US") : "0";
+}
+
+function formatLeaveDaysLabel(days) {
+  const value = Number(days);
+  const label = Math.abs(value - 1) < 0.05 ? "day" : "days";
+  return `${formatEstimatedLeaveDays(value)} ${label}`;
+}
+
+function submittedRdoLineForInitials(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  const person = bueByInitials(normalized);
+  const area = request?.area || person?.area || currentUser.area;
+
+  if (request?.line) {
+    return rdoLines.find((line) => line.line === request.line && lineForArea(line, area)) || null;
+  }
+
+  return rdoLines.find((line) => line.cpc === normalized && line.status === "Taken" && lineForArea(line, area)) || null;
+}
+
+function leaveHoursPerDayForInitials(initials = currentUser.initials) {
+  const line = submittedRdoLineForInitials(initials);
+  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+}
+
+function currentUserLeaveAllowanceHours() {
+  const hours = normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance);
+  return hours > 0 ? hours : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
+}
+
+function currentUserBaseLeaveAllowanceDays() {
+  return estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials());
+}
+
 function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
   return {
     cpcTotal: areaLeaveSlotBudget(area, "cpc"),
@@ -2593,7 +2665,7 @@ function leaveHolidayCreditsForRound(round) {
 }
 
 function leaveAllowanceLimitForRound(round) {
-  return ANNUAL_LEAVE_ALLOWANCE_DAYS + leaveHolidayCreditsForRound(round);
+  return currentUserBaseLeaveAllowanceDays() + leaveHolidayCreditsForRound(round);
 }
 
 function leaveProjectedChargedDays(extraItems = []) {
@@ -2797,7 +2869,7 @@ function addOrUpdateLeaveSubmission() {
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
     const creditText = credits ? ` including ${credits} holiday ${credits === 1 ? "credit" : "credits"}` : "";
-    setLeaveBuilderStatus(`This would exceed the ${allowanceLimit}-day leave allowance${creditText} for Round ${round}.`, "error");
+    setLeaveBuilderStatus(`This would exceed the ${formatLeaveDaysLabel(allowanceLimit)} leave allowance${creditText} for Round ${round}.`, "error");
     return;
   }
 
@@ -3308,7 +3380,8 @@ function leaveSlotBucketForBidAs(bidAs) {
 
 function removeInitialsFromLeaveRange(range, initials) {
   datesInLeaveRange(range).forEach((key) => {
-    const details = extraLeaveSlotData[key];
+    const area = bueByInitials(initials)?.area || currentUser.area;
+    const details = extraLeaveSlotDetails(key, area);
     if (!details) return;
     details.cpc = (details.cpc || []).filter((value) => value !== initials);
     details.dev = (details.dev || []).filter((value) => value !== initials);
@@ -3322,14 +3395,16 @@ function syncApprovedLeaveItem(item) {
   if (!bucket) return;
 
   leaveApprovalDates(item).forEach((key) => {
-    const details = extraLeaveSlotData[key] || { cpc: [], dev: [] };
+    const area = item.area || currentUser.area;
+    const storageKey = extraLeaveSlotStorageKey(key, area);
+    const details = extraLeaveSlotData[storageKey] || { area, date: key, cpc: [], dev: [] };
     const values = details[bucket] || [];
     const capacity = leaveSlotCapacityForDetails(details, bucket);
     if (!values.includes(item.initials) && values.length < capacity) {
       values.push(item.initials);
     }
     details[bucket] = values;
-    extraLeaveSlotData[key] = details;
+    extraLeaveSlotData[storageKey] = details;
   });
 }
 
@@ -3342,7 +3417,7 @@ function leaveApprovalConflicts(item) {
   const bucket = leaveApprovalBucket(item);
 
   return leaveApprovalDates(item).filter((key) => {
-    const details = leaveSlotsForDate(key);
+    const details = leaveSlotsForDate(key, item.area || currentUser.area);
     const values = details[bucket] || [];
     return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
@@ -3790,8 +3865,7 @@ function setSelectedDateYear(year) {
 }
 
 function updateCalendarYearLabels() {
-  const label = displayedCalendarYear === BID_YEAR ? `${displayedCalendarYear} Leave Year` : displayedCalendarYear;
-  setText("[data-calendar-year-label]", label);
+  setText("[data-calendar-year-label]", displayedCalendarYear);
 }
 
 function updateCalendarViewControls() {
@@ -3889,8 +3963,9 @@ function leaveSlotMap(area = currentUser.area) {
     });
   });
 
-  Object.entries(extraLeaveSlotData).forEach(([date, day]) => {
+  Object.entries(extraLeaveSlotData).forEach(([storageKey, day]) => {
     if (!slotMatchesArea(day, area)) return;
+    const date = day.date || storageKey;
     entries[date] = {
       date,
       label: formatCalendarDate(date),
@@ -3914,13 +3989,24 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
   };
   const holidayInLieu = details.holidayInLieu || isHolidayInLieuDate(key);
 
-  return {
+  const override = leaveSlotCapacityOverride(area, key);
+  const result = {
     ...details,
+    area: details.area || area,
     cpc: details.cpc || [],
     dev: details.dev || [],
     holiday: details.holiday || isHolidayDate(key),
     holidayInLieu,
   };
+
+  if (override) {
+    result.cpcCapacity = override.cpc;
+    result.devCapacity = override.dev;
+    result.cpcOpen = Math.max(0, override.cpc - result.cpc.length);
+    result.devOpen = Math.max(0, override.dev - result.dev.length);
+  }
+
+  return result;
 }
 
 function leaveSlotsForDate(key, area = currentUser.area) {
@@ -3930,7 +4016,30 @@ function leaveSlotsForDate(key, area = currentUser.area) {
 function leaveSlotCapacityForDetails(details, bucket) {
   const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
   if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
-  return bucket === "dev" ? leaveSlotCapacity.dev : leaveSlotCapacity.cpc;
+  return standardLeaveSlotCapacity(details?.area || currentViewArea(), bucket);
+}
+
+function standardLeaveSlotCapacity(area, bucket) {
+  if (bucket === "dev") return leaveSlotCapacity.dev;
+  return area === "TMU" ? 2 : leaveSlotCapacity.cpc;
+}
+
+function leaveSlotCapacityOverrideKey(area, key) {
+  return `${area}|${key}`;
+}
+
+function leaveSlotCapacityOverride(area, key) {
+  const value = leaveSlotCapacityOverrides[leaveSlotCapacityOverrideKey(area, key)];
+  if (!value || typeof value !== "object") return null;
+  const cpc = Number(value.cpc);
+  const dev = Number(value.dev);
+  if (!Number.isInteger(cpc) || cpc < 0 || !Number.isInteger(dev) || dev < 0) return null;
+  return { cpc, dev };
+}
+
+function setLeaveSlotCapacityOverride(area, key, cpc, dev, persist = true) {
+  leaveSlotCapacityOverrides[leaveSlotCapacityOverrideKey(area, key)] = { cpc, dev };
+  if (persist) storeJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, leaveSlotCapacityOverrides);
 }
 
 function leaveSlotOpenCountForDetails(details, bucket) {
@@ -4781,10 +4890,19 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
       devCapacity: 0,
       cpcOpen: 0,
       devOpen: 0,
+      cpcConfiguredCapacity: null,
+      devConfiguredCapacity: null,
       unavailable: false,
     };
     const bucket = row.slot_group === "dev" ? "dev" : "cpc";
     const value = row.slot_initials || "";
+
+    const capacityMarker = String(row.slot_code || "").match(/^CAPACITY-(\d+)$/);
+    if (capacityMarker) {
+      details[`${bucket}ConfiguredCapacity`] = Number(capacityMarker[1]);
+      grouped.set(key, details);
+      return;
+    }
 
     details[`${bucket}Capacity`] += 1;
     if (row.status === "open" && !row.bidder_id && !row.source_leave_request_id) {
@@ -4802,13 +4920,26 @@ function upsertLeaveSlotsFromDatabase(rows, areaById) {
     const sortSlots = (items) => items
       .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
       .map((item) => item.initials);
-    const existing = extraLeaveSlotData[details.date] || {};
-    extraLeaveSlotData[details.date] = {
+    const storageKey = extraLeaveSlotStorageKey(details.date, details.area);
+    const existing = extraLeaveSlotData[storageKey] || {};
+    const cpcCapacity = Number.isInteger(details.cpcConfiguredCapacity)
+      ? details.cpcConfiguredCapacity
+      : Math.max(details.cpcCapacity, standardLeaveSlotCapacity(details.area, "cpc"));
+    const devCapacity = Number.isInteger(details.devConfiguredCapacity)
+      ? details.devConfiguredCapacity
+      : Math.max(details.devCapacity, standardLeaveSlotCapacity(details.area, "dev"));
+    extraLeaveSlotData[storageKey] = {
       ...existing,
       ...details,
       cpc: sortSlots(details.cpc),
       dev: sortSlots(details.dev),
+      cpcCapacity,
+      devCapacity,
+      cpcOpen: Math.max(0, cpcCapacity - details.cpc.length),
+      devOpen: Math.max(0, devCapacity - details.dev.length),
     };
+    delete extraLeaveSlotData[storageKey].cpcConfiguredCapacity;
+    delete extraLeaveSlotData[storageKey].devConfiguredCapacity;
   });
 }
 
@@ -6256,6 +6387,10 @@ function renderLeaveAllowanceSummary() {
   const round = currentRoundNumber();
   const credits = leaveHolidayCreditsForRound(round);
   const totalAllowance = leaveAllowanceLimitForRound(round);
+  const baseAllowance = currentUserBaseLeaveAllowanceDays();
+  const allowanceHours = currentUserLeaveAllowanceHours();
+  const hoursPerDay = leaveHoursPerDayForInitials();
+  const scheduleText = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour CWS days" : "8-hour days";
   const bidDays = leaveCommittedChargedDays();
   const leftDays = Math.max(0, totalAllowance - bidDays);
   const approvedDays = leaveCommittedItems()
@@ -6265,12 +6400,12 @@ function renderLeaveAllowanceSummary() {
     .filter((item) => (!item.initials || item.initials === currentUser.initials) && item.status === "Pending")
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 
-  setText("[data-leave-already-detail]", `Approved: ${approvedDays} days · Pending: ${pendingDays} days · ${holidayText}`);
-  setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
-  setText("[data-leave-total-allowance]", `${totalAllowance} days`);
-  setText("[data-leave-left-days]", `${leftDays} days`);
-  setText("[data-leave-bid-days]", `${bidDays} days`);
-  setText("[data-leave-balance-summary]", `${totalAllowance} total · ${holidayText}`);
+  setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
+  setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(allowanceHours)} hours / ${scheduleText})`);
+  setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
+  setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
+  setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
+  setText("[data-leave-balance-summary]", `${formatLeaveDaysLabel(baseAllowance)} base · ${scheduleText} · ${holidayText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
@@ -6536,14 +6671,18 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveBucketTotals();
-  const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
-  const devLeft = Math.max(0, devTotal - devUsed);
+  const { cpcTotal, devTotal } = areaLeaveBucketTotals();
+  const cpcTotalDays = estimatedLeaveDaysFromHours(cpcTotal);
+  const devTotalDays = estimatedLeaveDaysFromHours(devTotal);
+  const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
+  const devUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "dev");
+  const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
+  const devLeft = Math.max(0, devTotalDays - devUsedDays);
 
-  setText("[data-cpc-leave-remaining]", cpcLeft);
-  setText("[data-dev-leave-remaining]", devLeft);
-  setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal} area slots`);
-  setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal} area slots`);
+  setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDays(cpcLeft));
+  setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDays(devLeft));
+  setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} used of ${formatRoundedUpLeaveDays(cpcTotalDays)} estimated days`);
+  setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
 }
 
 function syncAdminScheduleFormDefaults() {
@@ -7475,6 +7614,8 @@ function renderEmailLog() {
 function renderAdminConsole() {
   syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
+  syncSlotCapacityForm();
+  renderSlotCapacitySummary();
   renderRosterManager();
   renderEmailLog();
 
@@ -7519,6 +7660,248 @@ function renderAdminConsole() {
     </section>
   `;
   syncIntakeTeamControls();
+}
+
+function setSlotCapacityStatus(message, status = "info") {
+  const target = document.querySelector("[data-slot-capacity-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function slotCapacityFormSelection() {
+  const area = document.querySelector("[data-slot-capacity-area]")?.value || currentViewArea();
+  const startKey = document.querySelector("[data-slot-capacity-start]")?.value || BID_LEAVE_YEAR_START_KEY;
+  const endKey = document.querySelector("[data-slot-capacity-end]")?.value || startKey;
+  return { area, startKey, endKey };
+}
+
+function slotCapacityRangeDetails(area, startKey, endKey) {
+  const keys = datesBetweenKeys(startKey, endKey);
+  return keys.reduce((summary, key) => {
+    const details = leaveSlotsForDate(key, area);
+    summary.maxCpcCapacity = Math.max(summary.maxCpcCapacity, leaveSlotCapacityForDetails(details, "cpc"));
+    summary.maxDevCapacity = Math.max(summary.maxDevCapacity, leaveSlotCapacityForDetails(details, "dev"));
+    if (details.cpc.length > summary.maxCpcFilled) {
+      summary.maxCpcFilled = details.cpc.length;
+      summary.maxCpcDate = key;
+    }
+    if (details.dev.length > summary.maxDevFilled) {
+      summary.maxDevFilled = details.dev.length;
+      summary.maxDevDate = key;
+    }
+    return summary;
+  }, {
+    keys,
+    maxCpcCapacity: 0,
+    maxDevCapacity: 0,
+    maxCpcFilled: 0,
+    maxDevFilled: 0,
+    maxCpcDate: startKey,
+    maxDevDate: startKey,
+  });
+}
+
+function slotCapacitySummaryEntries() {
+  const capacityByAreaAndDate = new Map();
+
+  Object.values(extraLeaveSlotData).forEach((details) => {
+    const area = details?.area;
+    const key = details?.date;
+    if (!ZLA_AREAS.includes(area) || !/^\d{4}-\d{2}-\d{2}$/.test(key || "")) return;
+    if (key < BID_LEAVE_YEAR_START_KEY || key > BID_LEAVE_YEAR_END_KEY) return;
+
+    capacityByAreaAndDate.set(leaveSlotCapacityOverrideKey(area, key), {
+      area,
+      key,
+      cpc: leaveSlotCapacityForDetails(details, "cpc"),
+      dev: leaveSlotCapacityForDetails(details, "dev"),
+    });
+  });
+
+  Object.entries(leaveSlotCapacityOverrides).forEach(([storageKey, value]) => {
+    const separatorIndex = storageKey.lastIndexOf("|");
+    if (separatorIndex < 0 || !value || typeof value !== "object") return;
+    const area = storageKey.slice(0, separatorIndex);
+    const key = storageKey.slice(separatorIndex + 1);
+    const cpc = Number(value.cpc);
+    const dev = Number(value.dev);
+    if (!ZLA_AREAS.includes(area) || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+    if (key < BID_LEAVE_YEAR_START_KEY || key > BID_LEAVE_YEAR_END_KEY) return;
+    if (!Number.isInteger(cpc) || cpc < 0 || !Number.isInteger(dev) || dev < 0) return;
+    capacityByAreaAndDate.set(storageKey, { area, key, cpc, dev });
+  });
+
+  return [...capacityByAreaAndDate.values()]
+    .filter((entry) => (
+      entry.cpc !== standardLeaveSlotCapacity(entry.area, "cpc")
+      || entry.dev !== standardLeaveSlotCapacity(entry.area, "dev")
+    ))
+    .sort((a, b) => ZLA_AREAS.indexOf(a.area) - ZLA_AREAS.indexOf(b.area) || a.key.localeCompare(b.key));
+}
+
+function nextCalendarDateKey(key) {
+  const date = dateFromKey(key);
+  date.setDate(date.getDate() + 1);
+  return dateKeyFromDate(date);
+}
+
+function groupedSlotCapacitySummaryRanges(entries) {
+  return entries.reduce((ranges, entry) => {
+    const previous = ranges[ranges.length - 1];
+    const continuesPrevious = previous
+      && previous.area === entry.area
+      && previous.cpc === entry.cpc
+      && previous.dev === entry.dev
+      && nextCalendarDateKey(previous.endKey) === entry.key;
+
+    if (continuesPrevious) {
+      previous.endKey = entry.key;
+      previous.dayCount += 1;
+    } else {
+      ranges.push({
+        area: entry.area,
+        startKey: entry.key,
+        endKey: entry.key,
+        cpc: entry.cpc,
+        dev: entry.dev,
+        dayCount: 1,
+      });
+    }
+    return ranges;
+  }, []);
+}
+
+function slotCapacitySummaryRangeLabel(range) {
+  return range.startKey === range.endKey
+    ? formatCalendarDate(range.startKey)
+    : `${formatCalendarDate(range.startKey)} – ${formatCalendarDate(range.endKey)}`;
+}
+
+function renderSlotCapacitySummary() {
+  const target = document.querySelector("[data-slot-capacity-changes]");
+  const countTarget = document.querySelector("[data-slot-capacity-change-count]");
+  if (!target || !countTarget) return;
+
+  const entries = slotCapacitySummaryEntries();
+  const ranges = groupedSlotCapacitySummaryRanges(entries);
+  countTarget.textContent = `${entries.length} changed ${entries.length === 1 ? "date" : "dates"}`;
+
+  target.innerHTML = ZLA_AREAS.map((area) => {
+    const areaRanges = ranges.filter((range) => range.area === area);
+    const standardCpc = standardLeaveSlotCapacity(area, "cpc");
+    const standardDev = standardLeaveSlotCapacity(area, "dev");
+    return `
+      <article class="slot-capacity-area-card">
+        <header>
+          <h4>${escapeHtml(area)}</h4>
+          <span>Standard: ${standardCpc} CPC · ${standardDev} DEV</span>
+        </header>
+        ${areaRanges.length ? `
+          <div class="slot-capacity-change-list">
+            ${areaRanges.map((range) => `
+              <div class="slot-capacity-change-row">
+                <div>
+                  <strong>${escapeHtml(slotCapacitySummaryRangeLabel(range))}</strong>
+                  <small>${range.dayCount} ${range.dayCount === 1 ? "day" : "days"}</small>
+                </div>
+                <span class="slot-capacity-values">${range.cpc} CPC · ${range.dev} DEV</span>
+              </div>
+            `).join("")}
+          </div>
+        ` : '<p class="slot-capacity-no-changes">No nonstandard dates.</p>'}
+      </article>
+    `;
+  }).join("");
+}
+
+function syncSlotCapacityForm() {
+  const areaInput = document.querySelector("[data-slot-capacity-area]");
+  const startInput = document.querySelector("[data-slot-capacity-start]");
+  const endInput = document.querySelector("[data-slot-capacity-end]");
+  const cpcInput = document.querySelector("[data-slot-capacity-cpc]");
+  const devInput = document.querySelector("[data-slot-capacity-dev]");
+  if (!areaInput || !startInput || !endInput || !cpcInput || !devInput) return;
+
+  if (!startInput.value) startInput.value = BID_LEAVE_YEAR_START_KEY;
+  endInput.min = startInput.value;
+  if (!endInput.value || endInput.value < startInput.value) endInput.value = startInput.value;
+  if (!ZLA_AREAS.includes(areaInput.value)) areaInput.value = currentViewArea();
+
+  const { area, startKey, endKey } = slotCapacityFormSelection();
+  const range = slotCapacityRangeDetails(area, startKey, endKey);
+  const cpcCapacity = range.maxCpcCapacity;
+  const devCapacity = range.maxDevCapacity;
+  cpcInput.value = String(cpcCapacity);
+  devInput.value = String(devCapacity);
+  cpcInput.min = String(range.maxCpcFilled);
+  devInput.min = String(range.maxDevFilled);
+
+  const dayLabel = range.keys.length === 1 ? "day" : "days";
+  setText("[data-slot-capacity-summary]", `${cpcCapacity} CPC · ${devCapacity} DEV × ${range.keys.length} ${dayLabel}`);
+  setText(
+    "[data-slot-capacity-usage]",
+    range.keys.length
+      ? `${formatCalendarDate(startKey)} through ${formatCalendarDate(endKey)} includes ${range.keys.length} ${dayLabel}. Highest filled day: ${range.maxCpcFilled} CPC and ${range.maxDevFilled} DEV.`
+      : "Choose a valid start and end date."
+  );
+}
+
+async function saveSlotCapacity(event) {
+  event?.preventDefault();
+  if (!hasSystemAdminAccess()) {
+    setSlotCapacityStatus("Only system admins can change daily slot capacity.", "error");
+    return;
+  }
+
+  const { area, startKey, endKey } = slotCapacityFormSelection();
+  const cpc = Number(document.querySelector("[data-slot-capacity-cpc]")?.value);
+  const dev = Number(document.querySelector("[data-slot-capacity-dev]")?.value);
+  const range = slotCapacityRangeDetails(area, startKey, endKey);
+
+  if (!ZLA_AREAS.includes(area) || !/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || !range.keys.length) {
+    setSlotCapacityStatus("Choose a valid area, start date, and end date.", "error");
+    return;
+  }
+  if (!Number.isInteger(cpc) || cpc < 0 || cpc > 99 || !Number.isInteger(dev) || dev < 0 || dev > 99) {
+    setSlotCapacityStatus("Enter whole-number capacities from 0 through 99.", "error");
+    return;
+  }
+  if (cpc < range.maxCpcFilled || dev < range.maxDevFilled) {
+    const conflicts = [];
+    if (cpc < range.maxCpcFilled) conflicts.push(`${range.maxCpcFilled} CPC on ${formatCalendarDate(range.maxCpcDate)}`);
+    if (dev < range.maxDevFilled) conflicts.push(`${range.maxDevFilled} DEV on ${formatCalendarDate(range.maxDevDate)}`);
+    setSlotCapacityStatus(`Capacity cannot be lower than filled slots in this range (${conflicts.join("; ")}).`, "error");
+    return;
+  }
+
+  const client = supabaseClient();
+  if (supabaseState.connected && client) {
+    setSlotCapacityStatus("Saving daily capacity...");
+    const { error } = await client.rpc("set_leave_slot_capacity_range", {
+      requested_bid_year: BID_YEAR,
+      requested_area_name: area,
+      requested_start_date: startKey,
+      requested_end_date: endKey,
+      requested_cpc_capacity: cpc,
+      requested_dev_capacity: dev,
+    });
+    if (error) {
+      setSlotCapacityStatus(
+        isMissingSupabaseRoutine(error)
+          ? "The database range-capacity update has not been installed yet. Run database/leave_slot_capacity_admin.sql."
+          : error.message || "Daily capacity could not be saved.",
+        "error"
+      );
+      return;
+    }
+  }
+
+  range.keys.forEach((key) => setLeaveSlotCapacityOverride(area, key, cpc, dev, false));
+  storeJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, leaveSlotCapacityOverrides);
+  logHistory(area, "Leave capacity range updated", `${currentUser.initials} set ${formatCalendarDate(startKey)} through ${formatCalendarDate(endKey)} to ${cpc} CPC and ${dev} DEV slots per day.`);
+  renderApp();
+  setSlotCapacityStatus(`${range.keys.length} ${range.keys.length === 1 ? "day" : "days"} saved for ${area}: ${cpc} CPC and ${dev} DEV slots per day.`, "success");
 }
 
 function addAdminScheduleFromForm() {
@@ -7858,7 +8241,7 @@ function seniorityCardMarkup() {
             return `
               <div class="round-time ${isOpen ? "open" : ""}">
                 <span>R${round}</span>
-                <b>${bidStartTimeLabel(time)}</b>
+                <b>${publicBidTimeLabel(time)}</b>
                 <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
               </div>
             `;
@@ -9749,6 +10132,7 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 });
 
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
+document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -9791,6 +10175,12 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.closest("[data-slot-capacity-area], [data-slot-capacity-start], [data-slot-capacity-end]")) {
+    syncSlotCapacityForm();
+    setSlotCapacityStatus("");
+    return;
+  }
+
   const intakeFilter = event.target.closest("[data-intake-filter]");
   if (intakeFilter) {
     const filterName = intakeFilter.dataset.intakeFilter;

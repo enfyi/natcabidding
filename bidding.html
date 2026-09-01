@@ -339,9 +339,9 @@
             <article class="metric-card allowance-summary-metric">
               <span>Leave Allowance Summary</span>
               <dl>
-                <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
-                <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
-                <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
+                <div><dt>Total Allowance</dt><dd data-leave-total-allowance>--</dd></div>
+                <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>--</dd></div>
+                <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>--</dd></div>
                 <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
               </dl>
             </article>
@@ -415,6 +415,7 @@
 
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
+                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
                   <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
@@ -649,9 +650,9 @@
               <section class="panel allowance-card">
                 <h2>Leave Allowance Summary</h2>
                 <dl>
-                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
-                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
-                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
+                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>--</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>--</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>--</dd></div>
                   <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
                 </dl>
               </section>
@@ -699,6 +700,7 @@
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
+                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <div class="current-round-rule">
                   <span data-round-rule-heading>Round 1 Rules</span>
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
@@ -1063,6 +1065,58 @@
                 </div>
                 <span class="pill open">System Admin</span>
               </div>
+              <section class="slot-capacity-manager" aria-label="Daily leave slot capacity">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Daily Bid Slot Capacity</h3>
+                    <p>Set the CPC and DEV leave slots available for a date range in each area.</p>
+                  </div>
+                  <span class="status open" data-slot-capacity-summary>3 CPC · 2 DEV</span>
+                </div>
+                <form class="slot-capacity-form" data-slot-capacity-form>
+                  <label>
+                    Area
+                    <select data-slot-capacity-area>
+                      <option>Area A</option>
+                      <option>Area B</option>
+                      <option>Area C</option>
+                      <option>Area D</option>
+                      <option>Area E</option>
+                      <option>Area F</option>
+                      <option>TMU</option>
+                    </select>
+                  </label>
+                  <label>
+                    Start date
+                    <input type="date" min="2027-01-10" max="2028-01-08" data-slot-capacity-start />
+                  </label>
+                  <label>
+                    End date
+                    <input type="date" min="2027-01-10" max="2028-01-08" data-slot-capacity-end />
+                  </label>
+                  <label>
+                    CPC slots
+                    <input type="number" min="0" max="99" step="1" inputmode="numeric" data-slot-capacity-cpc />
+                  </label>
+                  <label>
+                    DEV slots
+                    <input type="number" min="0" max="99" step="1" inputmode="numeric" data-slot-capacity-dev />
+                  </label>
+                  <button class="primary-action small" type="submit">Save Capacity</button>
+                  <p class="slot-capacity-usage" data-slot-capacity-usage></p>
+                  <p class="form-status" data-slot-capacity-status aria-live="polite"></p>
+                </form>
+              </section>
+              <section class="slot-capacity-change-summary" aria-label="Bid year capacity changes">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Bid Year Capacity Changes</h3>
+                    <p>Review every date that differs from the standard slots, grouped by area.</p>
+                  </div>
+                  <span class="status open" data-slot-capacity-change-count>0 changed dates</span>
+                </div>
+                <div class="slot-capacity-change-grid" data-slot-capacity-changes></div>
+              </section>
               <section class="roster-manager" aria-label="BUE roster manager">
                 <div class="panel-header compact">
                   <div>
