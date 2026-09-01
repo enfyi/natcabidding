@@ -50,6 +50,9 @@ declare
   target_bucket text;
   target_area text;
   target_rdo_line_id uuid;
+  submitted_rdo_line_id uuid;
+  submitted_rdo_line_code text;
+  open_bid_window_id uuid;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
   rdo_conflict_dates date[];
@@ -166,6 +169,42 @@ begin
     )
   ) then
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
+  end if;
+
+  if not manual_entry then
+    select bw.id
+    into open_bid_window_id
+    from public.bid_windows bw
+    where bw.bid_year_id = year_row.id
+      and bw.bidder_id = target.id
+      and bw.round_number = batch_round
+      and now() >= bw.opens_at
+      and now() <= bw.closes_at
+    order by bw.opens_at desc
+    limit 1;
+
+    if open_bid_window_id is null then
+      error_messages := array_append(
+        error_messages,
+        format('Leave can only be submitted during your allotted Round %s bid window.', batch_round)
+      );
+    end if;
+  end if;
+
+  select nullif(requested.item ->> 'rdo_line_code', '')
+  into submitted_rdo_line_code
+  from jsonb_array_elements(requested_items) requested(item)
+  where nullif(requested.item ->> 'rdo_line_code', '') is not null
+  limit 1;
+
+  if submitted_rdo_line_code is not null
+     and exists (
+       select 1
+       from jsonb_array_elements(requested_items) requested(item)
+       where nullif(requested.item ->> 'rdo_line_code', '') is not null
+         and nullif(requested.item ->> 'rdo_line_code', '') <> submitted_rdo_line_code
+     ) then
+    raise exception 'A leave batch must use one RDO line.';
   end if;
 
   -- Serialize submissions that compete for the same role/area/date. The first
@@ -302,8 +341,9 @@ begin
     );
   end if;
 
-  -- Prefer the populated line; GL bidders retain the approved ghost-line choice
-  -- on their RDO intake submission even though no public line is populated.
+  -- Prefer an already populated line. Otherwise use the line submitted with
+  -- the leave batch or the latest pending/approved RDO intake payload and
+  -- atomically stamp it as assigned if it is still available.
   select rl.id
   into target_rdo_line_id
   from public.rdo_lines rl
@@ -314,23 +354,71 @@ begin
   order by rl.updated_at desc, rl.id
   limit 1;
 
-  if target_rdo_line_id is null then
-    select submission.rdo_line_id
-    into target_rdo_line_id
+  if target_rdo_line_id is null and submitted_rdo_line_code is null then
+    select coalesce(
+      nullif(submission.payload ->> 'rdo_line_code', ''),
+      nullif(submission.payload ->> 'line', '')
+    )
+    into submitted_rdo_line_code
     from public.intake_submissions submission
     where submission.bid_year_id = year_row.id
       and submission.bidder_id = target.id
       and submission.submission_type = 'rdo'
-      and submission.status = 'approved'
-      and submission.rdo_line_id is not null
-    order by submission.reviewed_at desc nulls last, submission.created_at desc
+      and submission.status in ('pending', 'approved')
+      and coalesce(
+        nullif(submission.payload ->> 'rdo_line_code', ''),
+        nullif(submission.payload ->> 'line', '')
+      ) is not null
+    order by submission.reviewed_at desc nulls last, submission.submitted_at desc nulls last, submission.created_at desc
     limit 1;
+  end if;
+
+  if target_rdo_line_id is null and submitted_rdo_line_code is not null then
+    select rl.id
+    into submitted_rdo_line_id
+    from public.rdo_lines rl
+    where rl.bid_year_id = year_row.id
+      and rl.area_id = target.area_id
+      and rl.line_code = submitted_rdo_line_code
+    for update;
+
+    if submitted_rdo_line_id is null then
+      error_messages := array_append(
+        error_messages,
+        format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
+      );
+    elsif exists (
+      select 1
+      from public.rdo_lines rl
+      where rl.id = submitted_rdo_line_id
+        and not (
+          rl.status = 'open'
+          or (rl.status = 'taken' and rl.assigned_bidder_id = target.id)
+        )
+    ) then
+      error_messages := array_append(
+        error_messages,
+        format('RDO Line %s is no longer available.', submitted_rdo_line_code)
+      );
+    else
+      update public.rdo_lines
+      set status = 'taken',
+          assigned_bidder_id = target.id,
+          updated_at = now()
+      where id = submitted_rdo_line_id
+        and (
+          status = 'open'
+          or (status = 'taken' and assigned_bidder_id = target.id)
+        );
+
+      target_rdo_line_id := submitted_rdo_line_id;
+    end if;
   end if;
 
   if target_rdo_line_id is null then
     error_messages := array_append(
       error_messages,
-      'Your bid line has not been assigned. Intake must approve your RDO line before leave dates can be checked.'
+      'Choose an available RDO line before submitting leave so the system can check RDO conflicts.'
     );
   else
     with requested_dates as (
@@ -382,4 +470,4 @@ grant execute on function public.submit_leave_bid_batch(integer, jsonb, text, te
   to authenticated;
 
 comment on function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean) is
-  'Atomically validates role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
+  'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
