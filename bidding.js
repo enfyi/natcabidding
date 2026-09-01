@@ -1648,6 +1648,24 @@ function canSubmitBueBid() {
   return isConfirmedHelpUser();
 }
 
+function currentUserBidWindowStatus(date = new Date()) {
+  const window = currentUserBidWindow(date);
+  const inHomeArea = isViewingHomeArea();
+  return {
+    window,
+    isOpen: Boolean(inHomeArea && window && date >= window.start && date <= window.end),
+  };
+}
+
+function leaveBidWindowErrorMessage(date = new Date()) {
+  const { window, isOpen } = currentUserBidWindowStatus(date);
+  if (isOpen) return "";
+  if (!isViewingHomeArea()) return "Leave bids can only be submitted from your home area view.";
+  if (!window) return "Leave bids can only be submitted during your allotted bid window.";
+  if (date < window.start) return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
+  return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+}
+
 function addOrUpdateRdoSubmission() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit an RDO bid");
@@ -1682,8 +1700,10 @@ function addOrUpdateRdoSubmission() {
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
-    status: "Pending",
+    status: "Approved",
     submittedAt: formatDateTime(new Date()),
+    approvedBy: "System",
+    approvedAt: formatDateTime(new Date()),
     line: line.line,
     fatigueGroup: selectedFatigueGroup,
     flex: selectedFlexPreference,
@@ -1698,8 +1718,10 @@ function addOrUpdateRdoSubmission() {
     intakeQueue.unshift(request);
   }
 
-  logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is required before the line is populated.`);
-  queueBidSubmittedEmail(request);
+  syncApprovedRdoItem(request);
+  logHistory(currentUser.area, "RDO bid approved", `${currentUser.initials} submitted ${request.summary}. The system approved the open line and applied it for leave validation.`);
+  queueBidVerifiedEmail(request);
+  renderApp();
 }
 
 function controllerName(person) {
@@ -1934,7 +1956,7 @@ function submitManualRdoBid(panel, person, area) {
   const existing = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === person.initials &&
-    item.status === "Pending"
+    ["Pending", "Approved"].includes(item.status)
   );
   const request = {
     id: existing?.id || `manual-rdo-${person.initials.toLowerCase()}-${Date.now()}`,
@@ -1944,8 +1966,10 @@ function submitManualRdoBid(panel, person, area) {
     initials: person.initials,
     bidAs: person.bidAs,
     seniority: person.rank,
-    status: "Pending",
+    status: "Approved",
     submittedAt,
+    approvedBy: "System",
+    approvedAt: submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
     line: line.line,
@@ -1964,12 +1988,13 @@ function submitManualRdoBid(panel, person, area) {
     intakeQueue.unshift(request);
   }
 
-  logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is required before the line is populated.`);
-  queueBidSubmittedEmail(request);
+  syncApprovedRdoItem(request);
+  logHistory(area, "Manual RDO bid approved", `${currentUser.initials} entered ${request.summary} for ${person.initials}. The system approved the open line and applied it for leave validation.`);
+  queueBidVerifiedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
-  setManualBidStatus(panel, `${person.initials}'s RDO bid was added to the intake queue.`, "success");
+  setManualBidStatus(panel, `${person.initials}'s RDO bid was approved and applied.`, "success");
 }
 
 function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
@@ -2860,6 +2885,12 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
 async function submitLeaveDraftBatch() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit leave bids");
+    return;
+  }
+
+  const windowError = leaveBidWindowErrorMessage();
+  if (windowError) {
+    setLeaveBuilderStatus(windowError, "error");
     return;
   }
 
@@ -4927,6 +4958,8 @@ async function ensureSupabaseBidYearId() {
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
+  const rdoRequest = currentUserRdoRequest();
+  const rdoLine = rdoLineForInitials(currentUser.initials);
 
   const requestedItems = newRequests.map((request) => {
     const dateKeys = datesInLeaveRange(request.range);
@@ -4934,6 +4967,11 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
       start_date: dateKeys[0],
       end_date: dateKeys[dateKeys.length - 1],
       round: request.round,
+      rdo_line_code: rdoRequest?.line || rdoLine?.line || null,
+      fatigue_group: rdoRequest?.fatigueGroup || rdoLine?.group || null,
+      flex: rdoRequest?.flex || rdoLine?.flex || null,
+      aws: rdoRequest?.aws || rdoLine?.aws || null,
+      mid: rdoRequest?.mid || rdoLine?.mid || null,
       notes: draftsByRange.get(request.range)?.notes || "",
     };
   });
@@ -5564,30 +5602,27 @@ function updateBidWindow() {
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
-  const isAdmin = hasIntakeAccess();
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
   const statusText = areaRoundOpen ? "Open" : "Closed";
   const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isAdmin
-    ? isValidationPeriod ? "Validation Period" : areaRoundOpen ? "Bidding Now" : "Bid Window"
-    : isValidationPeriod ? "Validation Period" : isOpen ? "Your Turn" : isBefore ? "Opens In" : showCurrentBidder ? "Bidding Now" : "Window Closed";
-  const countdownText = isValidationPeriod
-    ? formatDuration(roundState.validationEndsAt - now)
-    : isOpen
+  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const countdownText = isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
+      : isValidationPeriod
+        ? formatDuration(roundState.validationEndsAt - now)
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
-  const countdownLabel = isValidationPeriod
-    ? "Validation Ends In"
-    : isOpen
+  const countdownLabel = isOpen
       ? "Window Closes In"
       : isBefore
-      ? "Window Opens In"
+      ? "Next Window In"
+      : isValidationPeriod
+        ? "Validation Ends In"
       : showCurrentBidder
         ? "Currently Bidding"
         : "Window Status";
@@ -5605,8 +5640,11 @@ function updateBidWindow() {
 
   const clock = document.getElementById("bid-window-clock");
   if (clock) {
+    clock.classList.toggle("closed", !isOpen);
     clock.querySelector("span").textContent = clockLabel;
     clock.querySelector("strong").textContent = countdownText;
+    const detail = clock.querySelector("small");
+    if (detail) detail.textContent = countdownLabel;
     clock.title = showCurrentBidder && activePerson
       ? `Currently bidding: Seniority #${activePerson.rank} (${activePerson.initials})`
       : "";
@@ -6049,7 +6087,9 @@ function renderLeaveDraftQueue() {
     ? `${usedWeeks} / ${roundOneWeekLimit()} weeks · ${usedDays} ${usedDays === 1 ? "day" : "days"}`
     : `${usedDays} / ${currentRoundLeaveLimit()} days`;
   panel.classList.toggle("is-empty", leaveDraftQueue.length === 0);
-  submitButton.disabled = leaveDraftQueue.length === 0;
+  const windowError = leaveBidWindowErrorMessage();
+  submitButton.disabled = leaveDraftQueue.length === 0 || Boolean(windowError);
+  submitButton.title = windowError;
 
   list.innerHTML = leaveDraftQueue.length
     ? leaveDraftQueue.map((item, index) => `

@@ -1249,14 +1249,25 @@ input {
 }
 
 .clock-card span,
+.clock-card small,
 .profile-pill span,
 .seniority-pill span {
   color: var(--muted);
   font-size: 0.7rem;
 }
 
+.clock-card small {
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .clock-card strong {
   color: var(--gold);
+}
+
+.clock-card.closed strong {
+  color: var(--red);
 }
 
 .profile-pill strong,
@@ -5878,6 +5889,7 @@ body {
 .app-main .plain-list,
 .app-main dt,
 .app-main .clock-card span,
+.app-main .clock-card small,
 .app-main .profile-pill span,
 .app-main .seniority-pill span,
 .app-main .topbar label,
@@ -5998,6 +6010,10 @@ body {
 
 .app-main .clock-card strong {
   color: #0f766e;
+}
+
+.app-main .clock-card.closed strong {
+  color: #dc2626;
 }
 
 .app-main .profile-pill strong,
