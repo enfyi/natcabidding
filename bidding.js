@@ -114,6 +114,7 @@ const testAccounts = {
 
 let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
+let seniorityViewMode = "cards";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let leaveDraftQueue = [];
@@ -150,15 +151,7 @@ const intakeSchedules = [
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
   if (roundState?.phase === "open") return roundState.activeRank;
-  if (roundState?.phase === "validation") return null;
-  if (area !== currentUser.area) return null;
-  const rank = currentUserSeniorityRank(area);
-  const window = currentUserBidWindow(date, area);
-  if (!Number.isFinite(rank) || !window) return null;
-  if (date >= window.start && date <= window.end) return rank;
-  if (date < window.start) return Math.max(1, rank - 1);
-  const nextRank = rank + 1;
-  return nextRank <= currentUserBidderCount(area) ? nextRank : null;
+  return null;
 }
 
 const holidayOverrides = new Set();
@@ -1219,6 +1212,10 @@ function publicBidTimeLabel(roundLabel) {
   return `${weekdayNames[round.weekday] || round.weekday}, ${round.month}/${String(round.day).padStart(2, "0")} · ${round.start}`;
 }
 
+function bidStartTimeLabel(roundLabel) {
+  return parseRoundWindow(roundLabel)?.start || roundLabel;
+}
+
 function escapeIcsText(value) {
   return String(value)
     .replace(/\\/g, "\\\\")
@@ -1491,7 +1488,9 @@ function rosterEntryToPerson(entry, rank = null, options = {}) {
 }
 
 function buildSeniority(area = currentViewArea()) {
-  const openRank = activeBidderRank(new Date(), area);
+  const roundState = areaBidRoundState(new Date(), area);
+  const openRank = roundState?.phase === "open" ? roundState.activeRank : null;
+  const openRound = roundState?.phase === "open" ? roundState.round : null;
   const areaDateBlocks = roundDateBlocksForArea(area);
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
@@ -1516,7 +1515,7 @@ function buildSeniority(area = currentViewArea()) {
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: (areaDateBlocks[rowBlock] || []).map((date) => bidWindowLabel(date, start)),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
-      openRound: isCurrentBidder ? 1 : undefined,
+      openRound: isCurrentBidder ? openRound : undefined,
     };
   });
 }
@@ -5567,7 +5566,9 @@ function renderCurrentUser() {
   setText("[data-bidder-count]", `${displayedBidderCount} bidders`);
   setText(
     "[data-seniority-summary]",
-    canOpenIntake ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
+    canOpenIntake
+      ? `Temporary bidding intake access for ${userFullName()}. Each BUE bid window is 2 hours. Actions are logged under ${currentUser.initials}.`
+      : `Current bidding order for ${viewArea}. Each BUE bid window is 2 hours. Your position is highlighted in your home area.`
   );
   setText("[data-admin-grant-status]", activeAdminGrant() ? "Active" : "Not Assigned");
   setText("[data-admin-grant-window]", adminGrantWindowText());
@@ -7715,6 +7716,85 @@ function addIntakeScheduleFromForm() {
   setScheduleFormStatus(`${name} is scheduled for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
 }
 
+function seniorityCardMarkup() {
+  return seniority
+    .map((person) => {
+      const isBiddingNow = Boolean(person.openRound);
+      const isCurrentUser = personMatchesCurrentUser(person);
+      return `
+      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
+        <div class="seniority-card-head">
+          <span>#${person.rank}</span>
+        </div>
+        <div class="seniority-card-name">
+          <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
+          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+        </div>
+        <div class="seniority-card-meta">
+          <small class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</small>
+          ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
+        </div>
+        <div class="round-times">
+          ${person.rounds.map((time, index) => {
+            const round = index + 1;
+            const isComplete = person.completed.includes(round);
+            const isOpen = person.openRound === round;
+            return `
+              <div class="round-time ${isOpen ? "open" : ""}">
+                <span>R${round}</span>
+                <b>${bidStartTimeLabel(time)}</b>
+                <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </article>
+    `;
+    })
+    .join("");
+}
+
+function seniorityTableMarkup() {
+  return `
+    <table class="seniority-time-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Last Name</th>
+          <th>First Name</th>
+          <th>Initials</th>
+          <th>Bid As</th>
+          <th>Round 1</th>
+          <th>Round 2</th>
+          <th>Round 3</th>
+          <th>Round 4</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${seniority.map((person) => {
+          const isBiddingNow = Boolean(person.openRound);
+          const isCurrentUser = personMatchesCurrentUser(person);
+          return `
+            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}">
+              <td>${person.rank}</td>
+              <td>${escapeHtml(person.lastName)}</td>
+              <td>
+                <span class="seniority-table-name">
+                  ${escapeHtml(person.firstName)}${isCurrentUser ? " · You" : ""}
+                  ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+                </span>
+              </td>
+              <td>${escapeHtml(person.initials)}</td>
+              <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+              ${person.rounds.map((round, index) => `<td class="${person.openRound === index + 1 ? "open-round-cell" : ""}">${bidStartTimeLabel(round)}</td>`).join("")}
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 function renderSeniority() {
   const compactTarget = document.getElementById("seniority-list");
   if (compactTarget) {
@@ -7733,42 +7813,22 @@ function renderSeniority() {
       .join("");
   }
 
-  const pageTarget = document.getElementById("seniority-page-list");
-  if (!pageTarget) return;
+  document.querySelectorAll("[data-seniority-view]").forEach((button) => {
+    const isActive = button.dataset.seniorityView === seniorityViewMode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
 
-  pageTarget.innerHTML = seniority
-    .map((person) => {
-      const isBiddingNow = Boolean(person.openRound);
-      const isCurrentUser = personMatchesCurrentUser(person);
-      return `
-      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
-        <div class="seniority-card-head">
-          <span>#${person.rank}</span>
-          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
-        </div>
-        <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
-        <div class="seniority-card-meta">
-          <small class="bid-as ${person.bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${person.bidAs}</small>
-          ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
-        </div>
-        <div class="round-times">
-          ${person.rounds.map((time, index) => {
-            const round = index + 1;
-            const isComplete = person.completed.includes(round);
-            const isOpen = person.openRound === round;
-            return `
-              <div class="round-time ${isOpen ? "open" : ""}">
-                <span>R${round}</span>
-                <b>${time}</b>
-                <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </article>
-    `;
-    })
-    .join("");
+  const cardTarget = document.getElementById("seniority-page-list");
+  const tableTarget = document.getElementById("seniority-page-table");
+  if (!cardTarget || !tableTarget) return;
+
+  const isListView = seniorityViewMode === "list";
+  cardTarget.hidden = isListView;
+  tableTarget.hidden = !isListView;
+
+  cardTarget.innerHTML = seniorityCardMarkup();
+  tableTarget.innerHTML = isListView ? seniorityTableMarkup() : "";
 }
 
 function renderHistory() {
@@ -9308,6 +9368,13 @@ document.addEventListener("click", async (event) => {
   const viewModeButton = event.target.closest("[data-view-mode]");
   if (viewModeButton) {
     setPage(pageForViewMode(viewModeButton.dataset.viewMode));
+    return;
+  }
+
+  const seniorityViewButton = event.target.closest("[data-seniority-view]");
+  if (seniorityViewButton) {
+    seniorityViewMode = seniorityViewButton.dataset.seniorityView === "list" ? "list" : "cards";
+    renderSeniority();
     return;
   }
 

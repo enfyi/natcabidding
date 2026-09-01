@@ -484,14 +484,21 @@
               <div class="panel-header">
                 <div>
                   <h2>Seniority List</h2>
-                  <p data-seniority-summary>Current bidding order for Area A. Your position is highlighted.</p>
+                  <p data-seniority-summary>Current bidding order for Area A. Each BUE bid window is 2 hours. Your position is highlighted.</p>
                 </div>
-                <div class="status-chip">
-                  <span class="live-dot"></span>
-                  <span data-bidder-count>45 bidders</span>
+                <div class="seniority-header-actions">
+                  <div class="segmented seniority-view-toggle" aria-label="Seniority list view">
+                    <button class="active" type="button" aria-pressed="true" data-seniority-view="cards">Cards</button>
+                    <button type="button" aria-pressed="false" data-seniority-view="list">List</button>
+                  </div>
+                  <div class="status-chip">
+                    <span class="live-dot"></span>
+                    <span data-bidder-count>45 bidders</span>
+                  </div>
                 </div>
               </div>
               <div class="seniority-board" id="seniority-page-list"></div>
+              <div class="table-wrap seniority-list-wrap" id="seniority-page-table" hidden></div>
             </section>
           </div>
         </section>
