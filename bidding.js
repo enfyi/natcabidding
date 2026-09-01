@@ -16,7 +16,9 @@ const monthNames = [
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BID_YEAR = 2027;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
-const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = 4;
+const LEAVE_SLOT_HOURS_PER_DAY = 8;
+const CWS_LEAVE_HOURS_PER_DAY = 10;
+const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
@@ -2491,6 +2493,62 @@ function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems 
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
+function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
+  return [...leaveCommittedItems(), ...extraItems]
+    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+}
+
+function estimatedLeaveDaysFromHours(hours, hoursPerDay = LEAVE_SLOT_HOURS_PER_DAY) {
+  const value = Number(hours);
+  const divisor = Number(hoursPerDay);
+  return Number.isFinite(value) && Number.isFinite(divisor) && divisor > 0 ? value / divisor : 0;
+}
+
+function formatEstimatedLeaveDays(days) {
+  const value = Number(days);
+  if (!Number.isFinite(value)) return "0";
+  if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function formatLeaveDaysLabel(days) {
+  const value = Number(days);
+  const label = Math.abs(value - 1) < 0.05 ? "day" : "days";
+  return `${formatEstimatedLeaveDays(value)} ${label}`;
+}
+
+function submittedRdoLineForInitials(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  const person = bueByInitials(normalized);
+  const area = request?.area || person?.area || currentUser.area;
+
+  if (request?.line) {
+    return rdoLines.find((line) => line.line === request.line && lineForArea(line, area)) || null;
+  }
+
+  return rdoLines.find((line) => line.cpc === normalized && line.status === "Taken" && lineForArea(line, area)) || null;
+}
+
+function leaveHoursPerDayForInitials(initials = currentUser.initials) {
+  const line = submittedRdoLineForInitials(initials);
+  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+}
+
+function currentUserLeaveAllowanceHours() {
+  const hours = normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance);
+  return hours > 0 ? hours : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
+}
+
+function currentUserBaseLeaveAllowanceDays() {
+  return estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials());
+}
+
 function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
   return {
     cpcTotal: areaLeaveSlotBudget(area, "cpc"),
@@ -2537,7 +2595,7 @@ function leaveHolidayCreditsForRound(round) {
 }
 
 function leaveAllowanceLimitForRound(round) {
-  return ANNUAL_LEAVE_ALLOWANCE_DAYS + leaveHolidayCreditsForRound(round);
+  return currentUserBaseLeaveAllowanceDays() + leaveHolidayCreditsForRound(round);
 }
 
 function leaveProjectedChargedDays(extraItems = []) {
@@ -2741,7 +2799,7 @@ function addOrUpdateLeaveSubmission() {
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
     const creditText = credits ? ` including ${credits} holiday ${credits === 1 ? "credit" : "credits"}` : "";
-    setLeaveBuilderStatus(`This would exceed the ${allowanceLimit}-day leave allowance${creditText} for Round ${round}.`, "error");
+    setLeaveBuilderStatus(`This would exceed the ${formatLeaveDaysLabel(allowanceLimit)} leave allowance${creditText} for Round ${round}.`, "error");
     return;
   }
 
@@ -6195,6 +6253,10 @@ function renderLeaveAllowanceSummary() {
   const round = currentRoundNumber();
   const credits = leaveHolidayCreditsForRound(round);
   const totalAllowance = leaveAllowanceLimitForRound(round);
+  const baseAllowance = currentUserBaseLeaveAllowanceDays();
+  const allowanceHours = currentUserLeaveAllowanceHours();
+  const hoursPerDay = leaveHoursPerDayForInitials();
+  const scheduleText = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour CWS days" : "8-hour days";
   const bidDays = leaveCommittedChargedDays();
   const leftDays = Math.max(0, totalAllowance - bidDays);
   const approvedDays = leaveCommittedItems()
@@ -6204,12 +6266,12 @@ function renderLeaveAllowanceSummary() {
     .filter((item) => (!item.initials || item.initials === currentUser.initials) && item.status === "Pending")
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 
-  setText("[data-leave-already-detail]", `Approved: ${approvedDays} days · Pending: ${pendingDays} days · ${holidayText}`);
-  setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
-  setText("[data-leave-total-allowance]", `${totalAllowance} days`);
-  setText("[data-leave-left-days]", `${leftDays} days`);
-  setText("[data-leave-bid-days]", `${bidDays} days`);
-  setText("[data-leave-balance-summary]", `${totalAllowance} total · ${holidayText}`);
+  setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
+  setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(allowanceHours)} hours / ${scheduleText})`);
+  setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
+  setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
+  setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
+  setText("[data-leave-balance-summary]", `${formatLeaveDaysLabel(baseAllowance)} base · ${scheduleText} · ${holidayText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
@@ -6475,14 +6537,18 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveBucketTotals();
-  const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
-  const devLeft = Math.max(0, devTotal - devUsed);
+  const { cpcTotal, devTotal } = areaLeaveBucketTotals();
+  const cpcTotalDays = estimatedLeaveDaysFromHours(cpcTotal);
+  const devTotalDays = estimatedLeaveDaysFromHours(devTotal);
+  const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
+  const devUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "dev");
+  const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
+  const devLeft = Math.max(0, devTotalDays - devUsedDays);
 
-  setText("[data-cpc-leave-remaining]", cpcLeft);
-  setText("[data-dev-leave-remaining]", devLeft);
-  setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal} area slots`);
-  setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal} area slots`);
+  setText("[data-cpc-leave-remaining]", formatEstimatedLeaveDays(cpcLeft));
+  setText("[data-dev-leave-remaining]", formatEstimatedLeaveDays(devLeft));
+  setText("[data-cpc-leave-detail]", `${formatEstimatedLeaveDays(cpcUsedDays)} used of ${formatEstimatedLeaveDays(cpcTotalDays)} estimated days`);
+  setText("[data-dev-leave-detail]", `${formatEstimatedLeaveDays(devUsedDays)} used of ${formatEstimatedLeaveDays(devTotalDays)} estimated days`);
 }
 
 function syncAdminScheduleFormDefaults() {
