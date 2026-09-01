@@ -545,7 +545,7 @@ let selectedLineId = "15";
 let selectedFatigueGroup = "";
 let selectedMidPreference = "";
 let selectedAwsPreference = "";
-let selectedFlexPreference = "Yes";
+let selectedFlexPreference = "";
 let calendarMode = "combined";
 const calendarLayouts = {
   public: "minimal",
@@ -1612,6 +1612,23 @@ function currentUserRdoRequest() {
     item.initials === currentUser.initials &&
     ["Pending", "Approved"].includes(item.status)
   );
+}
+
+function currentUserRdoAssignment() {
+  const request = currentUserRdoRequest();
+  if (request) {
+    return {
+      request,
+      line: rdoLines.find((line) => line.line === request.line && lineForArea(line, request.area || currentUser.area)) || null,
+    };
+  }
+
+  const approvedLine = rdoLines.find((line) =>
+    lineForArea(line, currentUser.area) &&
+    line.status === "Taken" &&
+    line.cpc === currentUser.initials
+  );
+  return approvedLine ? { request: null, line: approvedLine } : null;
 }
 
 function selectedLineRequest(line) {
@@ -4676,11 +4693,11 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       lineType: row.line_type,
       cpc: row.assigned_initials || row.bidders?.initials || (row.assigned_bidder_id === currentUser?.supabaseProfileId ? currentUser.initials : ""),
       week: days.length === 7 ? days : Array.from({ length: 7 }, () => ""),
-      group: row.fatigue_group || "C",
-      mid: row.mid || "No",
-      aws: row.aws ? "Yes" : "No",
+      group: row.fatigue_group || "",
+      mid: row.mid || "",
+      aws: typeof row.aws === "boolean" ? (row.aws ? "Yes" : "No") : "",
       fourTen: row.four_ten ? "Yes" : "No",
-      flex: row.flex ? "Yes" : "No",
+      flex: typeof row.flex === "boolean" ? (row.flex ? "Yes" : "No") : "",
       status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
     };
     const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
@@ -5575,10 +5592,11 @@ function renderCurrentUser() {
     button.title = hasSeniority ? "View seniority list" : "Admin accounts are not in the area seniority order.";
   });
 
-  const selectedHomeLine = rdoLinesForArea(currentUser.area).find((line) => line.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0];
-  const rdoRequest = currentUserRdoRequest();
-  setText("[data-dashboard-rdo-line]", selectedHomeLine ? `Line ${selectedHomeLine.line}` : "No line selected");
-  setText("[data-dashboard-rdo-summary]", rdoRequest?.summary || "Choose fatigue group, AWS, Flex, and Mid when you bid.");
+  const rdoAssignment = currentUserRdoAssignment();
+  const rdoAssignmentLine = rdoAssignment?.line;
+  const rdoAssignmentRequest = rdoAssignment?.request;
+  setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line ? `Line ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}` : "No line selected");
+  setText("[data-dashboard-rdo-summary]", rdoAssignmentRequest?.summary || "Your selected RDO line will appear after you bid.");
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !canOpenIntake;
@@ -5789,6 +5807,54 @@ function selectedLineStatus(line) {
   return "Open";
 }
 
+function rdoAssignmentValue(assignment, key) {
+  const requestValue = assignment?.request?.[key];
+  if (requestValue) return requestValue;
+  if (assignment?.line?.[key]) return assignment.line[key];
+  return "";
+}
+
+function renderDashboardSelectedLineCard(assignment) {
+  const line = assignment?.line;
+  const request = assignment?.request;
+  const lineCode = request?.line || line?.line || "";
+  const status = request?.status || (line?.status === "Taken" ? "Approved" : "");
+
+  document.querySelectorAll("#dashboard-page [data-selected-initials]").forEach((element) => {
+    element.textContent = currentUser.initials || "";
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-line]").forEach((element) => {
+    element.textContent = lineCode ? `Line ${lineCode}` : "No line selected";
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-status]").forEach((element) => {
+    element.innerHTML = `<em>Status</em><b>${status || "Not Bid"}</b>`;
+    element.classList.toggle("closed", !status);
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-attributes]").forEach((element) => {
+    const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
+    const flex = rdoAssignmentValue(assignment, "flex");
+    const aws = rdoAssignmentValue(assignment, "aws");
+    const mid = rdoAssignmentValue(assignment, "mid");
+    const values = [
+      ["Group", group],
+      ["Flex", flex],
+      ["AWS", aws],
+      ["Mid", mid],
+    ].filter(([, value]) => value);
+
+    element.innerHTML = values.length
+      ? values.map(([label, value]) => `<span>${label} <b${label === "Group" ? ` class="group ${groupClass(value)}"` : ""}>${value}</b></span>`).join("")
+      : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
+  });
+
+  const weekTarget = document.getElementById("selected-week");
+  if (weekTarget && line) {
+    renderWeek("selected-week", line.week);
+  } else if (weekTarget) {
+    weekTarget.innerHTML = "";
+  }
+}
+
 function selectedLineReadinessItems(line) {
   const existingRequest = currentUserRdoRequest();
   const requestMatchesLine = existingRequest?.line === line.line;
@@ -5906,6 +5972,7 @@ function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
   const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
   if (!line) return;
+  const dashboardAssignment = currentUserRdoAssignment();
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
@@ -5915,7 +5982,8 @@ function updateSelectedLine() {
     element.textContent = `Line ${line.line}`;
   });
   document.querySelectorAll("[data-selected-initials]").forEach((element) => {
-    element.textContent = line.status === "Taken" ? line.cpc || currentUser.initials : currentUser.initials;
+    if (element.closest("#dashboard-page")) return;
+    element.textContent = currentUser.initials || "";
   });
   document.querySelectorAll("[data-selected-helper]").forEach((element) => {
     const request = selectedLineRequest(line);
@@ -5926,10 +5994,12 @@ function updateSelectedLine() {
         : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
+    if (element.closest("#dashboard-page")) return;
     element.innerHTML = `<em>Status</em><b>${selectedLineStatus(line)}</b>`;
     element.classList.toggle("closed", line.status === "Taken");
   });
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
+    if (element.closest("#dashboard-page")) return;
     element.innerHTML = `
       <span class="fatigue-picker">
         <em>Fatigue Group</em>
@@ -6003,6 +6073,7 @@ function updateSelectedLine() {
 
   renderWeek("selected-week", line.week);
   renderWeek("rdo-week", line.week);
+  renderDashboardSelectedLineCard(dashboardAssignment);
   renderFatigueCapacity();
 }
 
