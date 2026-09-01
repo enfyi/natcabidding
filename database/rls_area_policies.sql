@@ -157,6 +157,7 @@ alter table rdo_lines enable row level security;
 alter table rdo_line_days enable row level security;
 alter table bid_windows enable row level security;
 alter table holiday_in_lieu_days enable row level security;
+alter table leave_slot_capacities enable row level security;
 alter table leave_slots enable row level security;
 alter table leave_requests enable row level security;
 alter table leave_request_week_buckets enable row level security;
@@ -232,6 +233,12 @@ on leave_slots for select
 to anon
 using (true);
 
+drop policy if exists "public can read leave slot capacities" on leave_slot_capacities;
+create policy "public can read leave slot capacities"
+on leave_slot_capacities for select
+to anon
+using (true);
+
 drop policy if exists "users can read own area" on areas;
 create policy "users can read own area"
 on areas for select
@@ -271,6 +278,12 @@ using (public.is_bidder_in_current_area(bidder_id));
 drop policy if exists "users can read leave slots in own area" on leave_slots;
 create policy "users can read leave slots in own area"
 on leave_slots for select
+to authenticated
+using (true);
+
+drop policy if exists "users can read leave slot capacities" on leave_slot_capacities;
+create policy "users can read leave slot capacities"
+on leave_slot_capacities for select
 to authenticated
 using (true);
 
