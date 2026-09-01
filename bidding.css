@@ -3404,7 +3404,7 @@ tr.occupied-row .rdo-tag {
   color: var(--teal);
   font-family: Montserrat, Arial, sans-serif;
   font-size: 0.82rem;
-  font-weight: 900;
+  font-weight: 500;
   line-height: 1.35;
 }
 
