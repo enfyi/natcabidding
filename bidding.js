@@ -7760,8 +7760,7 @@ function seniorityTableMarkup() {
       <thead>
         <tr>
           <th>#</th>
-          <th>Last Name</th>
-          <th>First Name</th>
+          <th>Name</th>
           <th>Initials</th>
           <th>Bid As</th>
           <th>Round 1</th>
@@ -7777,16 +7776,18 @@ function seniorityTableMarkup() {
           return `
             <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}">
               <td>${person.rank}</td>
-              <td>${escapeHtml(person.lastName)}</td>
               <td>
-                <span class="seniority-table-name">
-                  ${escapeHtml(person.firstName)}${isCurrentUser ? " · You" : ""}
-                  ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
-                </span>
+                <div class="seniority-table-person">
+                  <span class="seniority-table-name">
+                    ${escapeHtml(`${person.firstName} ${person.lastName}`)}${isCurrentUser ? " · You" : ""}
+                    ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+                  </span>
+                  ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
+                </div>
               </td>
               <td>${escapeHtml(person.initials)}</td>
               <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-              ${person.rounds.map((round, index) => `<td class="${person.openRound === index + 1 ? "open-round-cell" : ""}">${bidStartTimeLabel(round)}</td>`).join("")}
+              ${person.rounds.map((round, index) => `<td class="${person.openRound === index + 1 ? "open-round-cell" : ""}">${publicBidTimeLabel(round)}</td>`).join("")}
             </tr>
           `;
         }).join("")}
