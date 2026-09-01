@@ -64,6 +64,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const BID_WINDOW_LOCK_STORAGE_KEY = "natca-zla-enforce-bid-windows";
 const LEAVE_SLOT_CAPACITY_STORAGE_KEY = "natca-zla-leave-slot-capacities";
 
 function storedJsonValue(key, fallback) {
@@ -90,6 +91,7 @@ let roundRules = {
   ...(storedRoundRules && typeof storedRoundRules === "object" ? storedRoundRules : {}),
 };
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
+let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
 const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
 let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
   ? storedLeaveSlotCapacities
@@ -1675,27 +1677,77 @@ function canSubmitBueBid() {
   return isConfirmedHelpUser();
 }
 
+function shouldEnforceBidWindows() {
+  return enforceBidWindows;
+}
+
+function bidWindowLockIsBypassed() {
+  return !shouldEnforceBidWindows();
+}
+
 function currentUserBidWindowStatus(date = new Date()) {
   const window = currentUserBidWindow(date);
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && window && date >= window.start && date <= window.end),
+    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date <= window.end))),
   };
 }
 
-function leaveBidWindowErrorMessage(date = new Date()) {
+function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
-  if (!isViewingHomeArea()) return "Leave bids can only be submitted from your home area view.";
-  if (!window) return "Leave bids can only be submitted during your allotted bid window.";
-  if (date < window.start) return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+  if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+  if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
+  if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
+  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+}
+
+function leaveBidWindowErrorMessage(date = new Date()) {
+  return bidWindowErrorMessage("Leave bids", date);
+}
+
+function rdoBidWindowErrorMessage(date = new Date()) {
+  return bidWindowErrorMessage("RDO bids", date);
+}
+
+function setBidWindowEnforcement(enabled) {
+  if (!hasSystemAdminAccess()) return;
+  enforceBidWindows = Boolean(enabled);
+  storeJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, enforceBidWindows);
+  logHistory(
+    "All Areas",
+    enforceBidWindows ? "Bid-window lock enabled" : "Bid-window lock disabled",
+    `${currentUser.initials} ${enforceBidWindows ? "required BUEs to submit inside their assigned bid windows" : "allowed BUE self-service bids outside assigned bid windows for testing"}.`
+  );
+  renderApp();
+}
+
+function syncBidWindowTestingControls() {
+  document.querySelectorAll("[data-bid-window-enforcement-toggle]").forEach((input) => {
+    input.checked = shouldEnforceBidWindows();
+    input.disabled = !hasSystemAdminAccess();
+  });
+
+  const enabled = shouldEnforceBidWindows();
+  setText("[data-bid-window-enforcement-state]", enabled ? "Strict Windows On" : "Testing Mode");
+  setText(
+    "[data-bid-window-enforcement-copy]",
+    enabled
+      ? "BUEs can submit only during their assigned bid window."
+      : "BUE self-service bids can be submitted outside the assigned bid window."
+  );
 }
 
 function addOrUpdateRdoSubmission() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit an RDO bid");
+    return;
+  }
+
+  const windowError = rdoBidWindowErrorMessage();
+  if (windowError) {
+    alert(windowError);
     return;
   }
 
@@ -5728,6 +5780,7 @@ function renderCurrentUser() {
   const rdoAssignmentRequest = rdoAssignment?.request;
   setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line ? `Line ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}` : "No line selected");
   setText("[data-dashboard-rdo-summary]", rdoAssignmentRequest?.summary || "Your selected RDO line will appear after you bid.");
+  renderDashboardSelectedLineCard(rdoAssignment);
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !canOpenIntake;
@@ -5745,6 +5798,7 @@ function renderCurrentUser() {
     element.hidden = !canOpenIntake;
   });
 
+  syncBidWindowTestingControls();
   syncViewModeSwitcher();
 }
 
@@ -5761,14 +5815,18 @@ function updateBidWindow() {
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
+  const isTestingBypass = bidWindowLockIsBypassed();
+  const canUseBidActions = viewingHomeArea && !isValidationPeriod && (isOpen || isTestingBypass);
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
   const statusText = areaRoundOpen ? "Open" : "Closed";
   const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const clockLabel = isTestingBypass && viewingHomeArea ? "Testing Mode" : isOpen ? "Bid Window Open" : "Bid Window Closed";
   const countdownText = isOpen
       ? formatDuration(personalBidWindow.end - now)
+      : isTestingBypass && viewingHomeArea
+      ? "Unlocked"
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
       : isValidationPeriod
@@ -5778,6 +5836,8 @@ function updateBidWindow() {
         : "Closed";
   const countdownLabel = isOpen
       ? "Window Closes In"
+      : isTestingBypass && viewingHomeArea
+      ? "Bid Window Lock"
       : isBefore
       ? "Next Window In"
       : isValidationPeriod
@@ -5799,7 +5859,7 @@ function updateBidWindow() {
 
   const clock = document.getElementById("bid-window-clock");
   if (clock) {
-    clock.classList.toggle("closed", !isOpen);
+    clock.classList.toggle("closed", !(isOpen || (isTestingBypass && viewingHomeArea)));
     clock.querySelector("span").textContent = clockLabel;
     clock.querySelector("strong").textContent = countdownText;
     const detail = clock.querySelector("small");
@@ -5833,7 +5893,7 @@ function updateBidWindow() {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = isValidationPeriod || !isOpen || !isViewingHomeArea();
+    const disabled = !canUseBidActions;
     button.disabled = disabled;
     button.classList.toggle("disabled", disabled);
   });
@@ -5843,12 +5903,12 @@ function updateBidWindow() {
       button.textContent = "Round Closed";
       return;
     }
-    if (!isOpen) {
-      button.textContent = "Bid Closed";
-      return;
-    }
     if (!isViewingHomeArea()) {
       button.textContent = "Viewing Only";
+      return;
+    }
+    if (!isOpen) {
+      button.textContent = isTestingBypass && viewingHomeArea ? "Testing Bid" : "Bid Closed";
       return;
     }
 
@@ -6102,8 +6162,11 @@ function renderRdoLines() {
 function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
   const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
-  if (!line) return;
   const dashboardAssignment = currentUserRdoAssignment();
+  if (!line) {
+    renderDashboardSelectedLineCard(dashboardAssignment);
+    return;
+  }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
@@ -9527,6 +9590,12 @@ document.addEventListener("click", async (event) => {
   const roundRuleSave = event.target.closest("[data-save-round-rule]");
   if (roundRuleSave) {
     saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule));
+    return;
+  }
+
+  const bidWindowToggle = event.target.closest("[data-bid-window-enforcement-toggle]");
+  if (bidWindowToggle) {
+    setBidWindowEnforcement(bidWindowToggle.checked);
     return;
   }
 
