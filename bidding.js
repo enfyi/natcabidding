@@ -4530,7 +4530,7 @@ async function sendSupabaseLoginLink(email) {
     email,
     options: {
       emailRedirectTo: supabaseAuthRedirectUrl(),
-      shouldCreateUser: false,
+      shouldCreateUser: true,
     },
   });
 
