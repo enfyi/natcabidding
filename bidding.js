@@ -4153,7 +4153,24 @@ function friendlyAuthFailure(error) {
 }
 
 function requestedLandingPage() {
-  return new URLSearchParams(window.location.search).get("page") === "admin" ? "admin" : "dashboard";
+  const requestedPage = new URLSearchParams(window.location.search).get("page");
+  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+}
+
+function defaultLandingPageForRole() {
+  if (hasSystemAdminAccess()) return "admin";
+  if (canUseIntakeView()) return "intake";
+  return "dashboard";
+}
+
+function intendedLandingPage(requestedPage = requestedLandingPage()) {
+  const defaultPage = defaultLandingPageForRole();
+  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "intake" || requestedPage === "intake-schedule") {
+    return canUseIntakeView() ? requestedPage : defaultPage;
+  }
+  if (requestedPage === "dashboard") return "dashboard";
+  return defaultPage;
 }
 
 function supabaseAuthRedirectUrl() {
@@ -4162,7 +4179,8 @@ function supabaseAuthRedirectUrl() {
 
   const url = new URL(window.location.href);
   url.hash = "";
-  url.search = requestedLandingPage() === "admin" ? "?page=admin" : "";
+  const requestedPage = requestedLandingPage();
+  url.search = requestedPage ? `?page=${encodeURIComponent(requestedPage)}` : "";
   return url.toString();
 }
 
@@ -4249,6 +4267,7 @@ async function requireSupabaseAccountSession() {
 
 function profileFromSupabase(row) {
   const fallbackInitials = [row.first_name?.[0], row.last_name?.[0]].filter(Boolean).join("").toUpperCase();
+  const role = row.role || "controller";
   return {
     firstName: row.first_name || "",
     lastName: row.last_name || "",
@@ -4257,11 +4276,11 @@ function profileFromSupabase(row) {
     seniorityRank: row.seniority_rank,
     bidderCount: Number(row.bidder_count || 0),
     area: row.area_name || "Area A",
-    role: row.role || "controller",
-    roleLabel: row.role === "admin" ? "Bidding Admin" : "BUE Controller",
+    role,
+    roleLabel: role === "admin" ? "Bidding Admin" : role === "intake" ? "Bidding Intake" : "BUE Controller",
     bidAs: normalizeBidRoleForArea(row.bid_role || "CPC", row.area_name || "Area A"),
     leaveSlotAllowance: normalizeLeaveSlotAllowance(row.leave_slot_allowance),
-    systemAdmin: row.role === "admin",
+    systemAdmin: role === "admin",
     phone: row.phone || "",
     email: row.email || "",
     supabaseProfileId: row.profile_id,
@@ -4294,7 +4313,7 @@ async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no
   setAuthStatus(message, "error");
 }
 
-function showLoggedInApp(page = "dashboard") {
+function showLoggedInApp(page = requestedLandingPage()) {
   selectedViewArea = currentUser.area;
   document.querySelector(".login-screen")?.setAttribute("hidden", "");
   document.querySelector(".app-shell")?.removeAttribute("hidden");
@@ -4306,7 +4325,7 @@ function showLoggedInApp(page = "dashboard") {
   document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
-  setPage(page);
+  setPage(intendedLandingPage(page));
   void loadSupabaseHelpThreads().then(() => {
     renderHelpSummary();
     renderHelpPanel();
@@ -4482,44 +4501,6 @@ async function loginWithSupabasePassword(email, password) {
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
-}
-
-async function loginWithUsernamePassword(username, password) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
-
-  let loginResult;
-  try {
-    loginResult = await client.rpc("app_login_with_password", {
-      login_username: username,
-      login_password: password,
-    });
-  } catch (error) {
-    setAuthStatus(friendlyAuthFailure(error), "error");
-    return;
-  }
-
-  const { data, error } = loginResult;
-
-  if (error) {
-    setAuthStatus(friendlyAuthFailure(error) || "Could not check that login.", "error");
-    return;
-  }
-
-  const profile = Array.isArray(data) ? data[0] : data;
-  if (!profile) {
-    setAuthStatus("That username or password did not match.", "error");
-    return;
-  }
-
-  currentUser = profileFromSupabase(profile);
-  clearSupabaseAccountState();
-  setAuthStatus("Signed in.", "success");
-  await loadSupabaseReferenceData();
-  showLoggedInApp(requestedLandingPage());
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -5453,6 +5434,7 @@ function activeScheduledIntakeWindow() {
 
 function hasIntakeAccess() {
   return hasSystemAdminAccess()
+    || currentUser?.role === "intake"
     || Boolean(activeAdminGrant())
     || Boolean(activeScheduledIntakeWindow());
 }
@@ -9614,18 +9596,6 @@ document.querySelector("[data-reset-login-password]")?.addEventListener("click",
   }
   setAuthStatus("Sending password email...");
   sendSupabasePasswordReset(email);
-});
-
-document.querySelector("[data-admin-login-form]")?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const username = document.querySelector("[data-admin-username-input]")?.value.trim();
-  const password = document.querySelector("[data-admin-password-input]")?.value || "";
-  if (!username || !password) {
-    setAuthStatus("Enter the admin username and password.", "error");
-    return;
-  }
-  setAuthStatus("Checking admin login...");
-  loginWithUsernamePassword(username, password);
 });
 
 document.querySelector("[data-account-email-form]")?.addEventListener("submit", (event) => {

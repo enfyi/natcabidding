@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { dashboardPathForRole } from '@/lib/auth-landing'
 import { getSiteUrl } from '@/lib/env'
 import { createClient } from '@/lib/supabase/server'
 
@@ -31,6 +32,24 @@ async function requireRecognizedEmail(
   }
 }
 
+async function landingPathForAuthenticatedBidder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+) {
+  const { data, error } = await supabase.rpc('claim_current_bidder_profile')
+
+  if (error) {
+    redirect('/login?error=Could+not+load+your+BUE+profile.')
+  }
+
+  const profile = Array.isArray(data) ? data[0] : data
+  if (!profile || typeof profile !== 'object') {
+    redirect('/login?error=No+BUE+profile+matches+that+login+email+yet.')
+  }
+
+  const role = (profile as { role?: unknown }).role
+  return dashboardPathForRole(typeof role === 'string' ? role : null)
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithPassword(credentials(formData))
@@ -39,8 +58,10 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`)
   }
 
+  const landingPath = await landingPathForAuthenticatedBidder(supabase)
+
   revalidatePath('/', 'layout')
-  redirect('/dashboard')
+  redirect(landingPath)
 }
 
 export async function signup(formData: FormData) {
@@ -61,7 +82,8 @@ export async function signup(formData: FormData) {
   revalidatePath('/', 'layout')
 
   if (data.session) {
-    redirect('/dashboard')
+    const landingPath = await landingPathForAuthenticatedBidder(supabase)
+    redirect(landingPath)
   }
 
   redirect('/login?message=Check+your+email+to+confirm+your+account.')
