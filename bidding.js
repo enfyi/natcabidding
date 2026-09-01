@@ -3615,8 +3615,7 @@ function setSelectedDateYear(year) {
 }
 
 function updateCalendarYearLabels() {
-  const label = displayedCalendarYear === BID_YEAR ? `${displayedCalendarYear} Leave Year` : displayedCalendarYear;
-  setText("[data-calendar-year-label]", label);
+  setText("[data-calendar-year-label]", displayedCalendarYear);
 }
 
 function updateCalendarViewControls() {
