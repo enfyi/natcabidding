@@ -3401,6 +3401,15 @@ tr.occupied-row .rdo-tag {
   margin-bottom: 10px;
 }
 
+.round-rule-subheader {
+  margin: -2px 0 10px;
+  color: var(--teal);
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
 .plain-list {
   display: grid;
   gap: 8px;
