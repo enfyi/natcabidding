@@ -88,7 +88,7 @@
             <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
-              <h2>Member Login</h2>
+              <h2>Login</h2>
               <form class="email-login-form" data-email-login-form>
                 <label>
                   Email
@@ -104,17 +104,6 @@
                 </div>
                 <button class="auth-link-action" type="button" data-reset-login-password>Set or reset password</button>
                 <p class="auth-status" data-auth-status aria-live="polite"></p>
-              </form>
-              <form class="credential-login-form" data-admin-login-form>
-                <label>
-                  Username
-                  <input type="text" autocomplete="username" data-admin-username-input />
-                </label>
-                <label>
-                  Password
-                  <input type="password" autocomplete="current-password" data-admin-password-input />
-                </label>
-                <button class="primary-action small" type="submit">Admin Login</button>
               </form>
             </div>
           </div>
@@ -326,8 +315,8 @@
             </article>
             <article class="metric-card selected">
               <span>RDO Line</span>
-              <strong data-dashboard-rdo-line>Line 15</strong>
-              <small data-dashboard-rdo-summary>Choose fatigue group, AWS, Flex, and Mid when you bid.</small>
+              <strong data-dashboard-rdo-line>No line selected</strong>
+              <small data-dashboard-rdo-summary>Your selected RDO line will appear after you bid.</small>
             </article>
             <article class="metric-card bid-window-metric">
               <span>Your Next Bid Window</span>
@@ -350,9 +339,9 @@
             <article class="metric-card allowance-summary-metric">
               <span>Leave Allowance Summary</span>
               <dl>
-                <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
-                <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
-                <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
+                <div><dt>Total Allowance</dt><dd data-leave-total-allowance>--</dd></div>
+                <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>--</dd></div>
+                <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>--</dd></div>
                 <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
               </dl>
             </article>
@@ -411,15 +400,12 @@
                   </span>
                 </div>
                 <div class="line-title">
-                  <strong data-selected-initials>OC</strong>
-                  <span data-selected-line>Line 15</span>
+                  <strong data-selected-initials></strong>
+                  <span data-selected-line>No line selected</span>
                 </div>
                 <div class="week-preview" id="selected-week"></div>
                 <div class="attribute-grid" data-selected-attributes>
-                  <span>Group <b class="group c">C</b></span>
-                  <span>Flex <b>Yes</b></span>
-                  <span>AWS <b>No</b></span>
-                  <span>Mid <b>No</b></span>
+                  <span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>
                 </div>
                 <div class="button-row">
                   <button class="primary-action window-action" type="button" data-page="rdos" data-bid-entry-action>Bid</button>
@@ -429,6 +415,7 @@
 
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
+                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
                   <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
@@ -484,14 +471,21 @@
               <div class="panel-header">
                 <div>
                   <h2>Seniority List</h2>
-                  <p data-seniority-summary>Current bidding order for Area A. Your position is highlighted.</p>
+                  <p data-seniority-summary>Current bidding order for Area A. Each BUE bid window is 2 hours. Your position is highlighted.</p>
                 </div>
-                <div class="status-chip">
-                  <span class="live-dot"></span>
-                  <span data-bidder-count>45 bidders</span>
+                <div class="seniority-header-actions">
+                  <div class="segmented seniority-view-toggle" aria-label="Seniority list view">
+                    <button class="active" type="button" aria-pressed="true" data-seniority-view="cards">Cards</button>
+                    <button type="button" aria-pressed="false" data-seniority-view="list">List</button>
+                  </div>
+                  <div class="status-chip">
+                    <span class="live-dot"></span>
+                    <span data-bidder-count>45 bidders</span>
+                  </div>
                 </div>
               </div>
               <div class="seniority-board" id="seniority-page-list"></div>
+              <div class="table-wrap seniority-list-wrap" id="seniority-page-table" hidden></div>
             </section>
           </div>
         </section>
@@ -554,15 +548,12 @@
                   </span>
                 </div>
                 <div class="line-title">
-                  <strong data-selected-initials>OC</strong>
-                  <span data-selected-line>Line 15</span>
+                  <strong data-selected-initials></strong>
+                  <span data-selected-line>No line selected</span>
                 </div>
                 <div class="week-preview" id="rdo-week"></div>
                 <div class="attribute-grid" data-selected-attributes>
-                  <span>Group <b class="group c">C</b></span>
-                  <span>Flex <b>Yes</b></span>
-                  <span>AWS <b>No</b></span>
-                  <span>Mid <b>No</b></span>
+                  <span class="empty-attribute-message">Choose a line to enter RDO details.</span>
                 </div>
                 <ul class="bid-readiness-list" data-bid-readiness-list aria-label="Bid readiness checklist">
                   <li class="checked">Selected line open</li>
@@ -659,9 +650,9 @@
               <section class="panel allowance-card">
                 <h2>Leave Allowance Summary</h2>
                 <dl>
-                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>36 days</dd></div>
-                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>12 days</dd></div>
-                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>18 days</dd></div>
+                  <div><dt>Total Allowance</dt><dd data-leave-total-allowance>--</dd></div>
+                  <div><dt>Leave Already Bid</dt><dd data-leave-bid-days>--</dd></div>
+                  <div><dt>Leave Left to Bid</dt><dd data-leave-left-days>--</dd></div>
                   <div><dt>Holidays Bid</dt><dd data-leave-holidays-bid>0</dd></div>
                 </dl>
               </section>
@@ -709,6 +700,7 @@
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
+                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <div class="current-round-rule">
                   <span data-round-rule-heading>Round 1 Rules</span>
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
@@ -1227,6 +1219,19 @@
               <div class="admin-user-list" data-admin-user-list></div>
             </section>
             <aside class="right-stack">
+              <section class="panel bid-window-testing-card" data-system-admin-only hidden>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Bid Window Testing</h3>
+                    <p data-bid-window-enforcement-copy>BUEs can submit only during their assigned bid window.</p>
+                  </div>
+                  <span class="pill open" data-bid-window-enforcement-state>Strict Windows On</span>
+                </div>
+                <label class="toggle-row">
+                  <input type="checkbox" data-bid-window-enforcement-toggle checked />
+                  <span>Require assigned bid window for BUE submissions</span>
+                </label>
+              </section>
               <section class="panel editable-rule-card">
                 <div class="panel-header compact">
                   <div>
@@ -1615,16 +1620,6 @@
 
         document.querySelector("[data-reset-login-password]")?.addEventListener(
           "click",
-          (event) => {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            showAuthFallback();
-          },
-          true
-        );
-
-        document.querySelector("[data-admin-login-form]")?.addEventListener(
-          "submit",
           (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();

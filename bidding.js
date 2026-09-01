@@ -16,7 +16,9 @@ const monthNames = [
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BID_YEAR = 2027;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
-const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = 4;
+const LEAVE_SLOT_HOURS_PER_DAY = 8;
+const CWS_LEAVE_HOURS_PER_DAY = 10;
+const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
@@ -63,6 +65,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const BID_WINDOW_LOCK_STORAGE_KEY = "natca-zla-enforce-bid-windows";
 const LEAVE_SLOT_CAPACITY_STORAGE_KEY = "natca-zla-leave-slot-capacities";
 
 function storedJsonValue(key, fallback) {
@@ -89,6 +92,7 @@ let roundRules = {
   ...(storedRoundRules && typeof storedRoundRules === "object" ? storedRoundRules : {}),
 };
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
+let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
 const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
 let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
   ? storedLeaveSlotCapacities
@@ -120,6 +124,7 @@ const testAccounts = {
 
 let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
+let seniorityViewMode = "cards";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let leaveDraftQueue = [];
@@ -156,15 +161,7 @@ const intakeSchedules = [
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
   if (roundState?.phase === "open") return roundState.activeRank;
-  if (roundState?.phase === "validation") return null;
-  if (area !== currentUser.area) return null;
-  const rank = currentUserSeniorityRank(area);
-  const window = currentUserBidWindow(date, area);
-  if (!Number.isFinite(rank) || !window) return null;
-  if (date >= window.start && date <= window.end) return rank;
-  if (date < window.start) return Math.max(1, rank - 1);
-  const nextRank = rank + 1;
-  return nextRank <= currentUserBidderCount(area) ? nextRank : null;
+  return null;
 }
 
 const holidayOverrides = new Set();
@@ -558,7 +555,7 @@ let selectedLineId = "15";
 let selectedFatigueGroup = "";
 let selectedMidPreference = "";
 let selectedAwsPreference = "";
-let selectedFlexPreference = "Yes";
+let selectedFlexPreference = "";
 let calendarMode = "combined";
 const calendarLayouts = {
   public: "minimal",
@@ -1505,7 +1502,9 @@ function rosterEntryToPerson(entry, rank = null, options = {}) {
 }
 
 function buildSeniority(area = currentViewArea()) {
-  const openRank = activeBidderRank(new Date(), area);
+  const roundState = areaBidRoundState(new Date(), area);
+  const openRank = roundState?.phase === "open" ? roundState.activeRank : null;
+  const openRound = roundState?.phase === "open" ? roundState.round : null;
   const areaDateBlocks = roundDateBlocksForArea(area);
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
@@ -1530,7 +1529,7 @@ function buildSeniority(area = currentViewArea()) {
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: (areaDateBlocks[rowBlock] || []).map((date) => bidWindowLabel(date, start)),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
-      openRound: isCurrentBidder ? 1 : undefined,
+      openRound: isCurrentBidder ? openRound : undefined,
     };
   });
 }
@@ -1629,6 +1628,23 @@ function currentUserRdoRequest() {
   );
 }
 
+function currentUserRdoAssignment() {
+  const request = currentUserRdoRequest();
+  if (request) {
+    return {
+      request,
+      line: rdoLines.find((line) => line.line === request.line && lineForArea(line, request.area || currentUser.area)) || null,
+    };
+  }
+
+  const approvedLine = rdoLines.find((line) =>
+    lineForArea(line, currentUser.area) &&
+    line.status === "Taken" &&
+    line.cpc === currentUser.initials
+  );
+  return approvedLine ? { request: null, line: approvedLine } : null;
+}
+
 function selectedLineRequest(line) {
   return intakeQueue.find((item) =>
     item.type === "RDO Line" &&
@@ -1662,27 +1678,77 @@ function canSubmitBueBid() {
   return isConfirmedHelpUser();
 }
 
+function shouldEnforceBidWindows() {
+  return enforceBidWindows;
+}
+
+function bidWindowLockIsBypassed() {
+  return !shouldEnforceBidWindows();
+}
+
 function currentUserBidWindowStatus(date = new Date()) {
   const window = currentUserBidWindow(date);
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && window && date >= window.start && date <= window.end),
+    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date <= window.end))),
   };
 }
 
-function leaveBidWindowErrorMessage(date = new Date()) {
+function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
-  if (!isViewingHomeArea()) return "Leave bids can only be submitted from your home area view.";
-  if (!window) return "Leave bids can only be submitted during your allotted bid window.";
-  if (date < window.start) return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `Leave bids can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+  if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+  if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
+  if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
+  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+}
+
+function leaveBidWindowErrorMessage(date = new Date()) {
+  return bidWindowErrorMessage("Leave bids", date);
+}
+
+function rdoBidWindowErrorMessage(date = new Date()) {
+  return bidWindowErrorMessage("RDO bids", date);
+}
+
+function setBidWindowEnforcement(enabled) {
+  if (!hasSystemAdminAccess()) return;
+  enforceBidWindows = Boolean(enabled);
+  storeJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, enforceBidWindows);
+  logHistory(
+    "All Areas",
+    enforceBidWindows ? "Bid-window lock enabled" : "Bid-window lock disabled",
+    `${currentUser.initials} ${enforceBidWindows ? "required BUEs to submit inside their assigned bid windows" : "allowed BUE self-service bids outside assigned bid windows for testing"}.`
+  );
+  renderApp();
+}
+
+function syncBidWindowTestingControls() {
+  document.querySelectorAll("[data-bid-window-enforcement-toggle]").forEach((input) => {
+    input.checked = shouldEnforceBidWindows();
+    input.disabled = !hasSystemAdminAccess();
+  });
+
+  const enabled = shouldEnforceBidWindows();
+  setText("[data-bid-window-enforcement-state]", enabled ? "Strict Windows On" : "Testing Mode");
+  setText(
+    "[data-bid-window-enforcement-copy]",
+    enabled
+      ? "BUEs can submit only during their assigned bid window."
+      : "BUE self-service bids can be submitted outside the assigned bid window."
+  );
 }
 
 function addOrUpdateRdoSubmission() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit an RDO bid");
+    return;
+  }
+
+  const windowError = rdoBidWindowErrorMessage();
+  if (windowError) {
+    alert(windowError);
     return;
   }
 
@@ -2493,6 +2559,67 @@ function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems 
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
+function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
+  return [...leaveCommittedItems(), ...extraItems]
+    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+}
+
+function estimatedLeaveDaysFromHours(hours, hoursPerDay = LEAVE_SLOT_HOURS_PER_DAY) {
+  const value = Number(hours);
+  const divisor = Number(hoursPerDay);
+  return Number.isFinite(value) && Number.isFinite(divisor) && divisor > 0 ? value / divisor : 0;
+}
+
+function formatEstimatedLeaveDays(days) {
+  const value = Number(days);
+  if (!Number.isFinite(value)) return "0";
+  if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+function formatRoundedUpLeaveDays(days) {
+  const value = Number(days);
+  return Number.isFinite(value) ? Math.ceil(value).toLocaleString("en-US") : "0";
+}
+
+function formatLeaveDaysLabel(days) {
+  const value = Number(days);
+  const label = Math.abs(value - 1) < 0.05 ? "day" : "days";
+  return `${formatEstimatedLeaveDays(value)} ${label}`;
+}
+
+function submittedRdoLineForInitials(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  const person = bueByInitials(normalized);
+  const area = request?.area || person?.area || currentUser.area;
+
+  if (request?.line) {
+    return rdoLines.find((line) => line.line === request.line && lineForArea(line, area)) || null;
+  }
+
+  return rdoLines.find((line) => line.cpc === normalized && line.status === "Taken" && lineForArea(line, area)) || null;
+}
+
+function leaveHoursPerDayForInitials(initials = currentUser.initials) {
+  const line = submittedRdoLineForInitials(initials);
+  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+}
+
+function currentUserLeaveAllowanceHours() {
+  const hours = normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance);
+  return hours > 0 ? hours : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
+}
+
+function currentUserBaseLeaveAllowanceDays() {
+  return estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials());
+}
+
 function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
   return {
     cpcTotal: areaLeaveSlotBudget(area, "cpc"),
@@ -2539,7 +2666,7 @@ function leaveHolidayCreditsForRound(round) {
 }
 
 function leaveAllowanceLimitForRound(round) {
-  return ANNUAL_LEAVE_ALLOWANCE_DAYS + leaveHolidayCreditsForRound(round);
+  return currentUserBaseLeaveAllowanceDays() + leaveHolidayCreditsForRound(round);
 }
 
 function leaveProjectedChargedDays(extraItems = []) {
@@ -2743,7 +2870,7 @@ function addOrUpdateLeaveSubmission() {
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
     const creditText = credits ? ` including ${credits} holiday ${credits === 1 ? "credit" : "credits"}` : "";
-    setLeaveBuilderStatus(`This would exceed the ${allowanceLimit}-day leave allowance${creditText} for Round ${round}.`, "error");
+    setLeaveBuilderStatus(`This would exceed the ${formatLeaveDaysLabel(allowanceLimit)} leave allowance${creditText} for Round ${round}.`, "error");
     return;
   }
 
@@ -3774,8 +3901,7 @@ function setSelectedDateYear(year) {
 }
 
 function updateCalendarYearLabels() {
-  const label = displayedCalendarYear === BID_YEAR ? `${displayedCalendarYear} Leave Year` : displayedCalendarYear;
-  setText("[data-calendar-year-label]", label);
+  setText("[data-calendar-year-label]", displayedCalendarYear);
 }
 
 function updateCalendarViewControls() {
@@ -4241,7 +4367,24 @@ function friendlyAuthFailure(error) {
 }
 
 function requestedLandingPage() {
-  return new URLSearchParams(window.location.search).get("page") === "admin" ? "admin" : "dashboard";
+  const requestedPage = new URLSearchParams(window.location.search).get("page");
+  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+}
+
+function defaultLandingPageForRole() {
+  if (hasSystemAdminAccess()) return "admin";
+  if (canUseIntakeView()) return "intake";
+  return "dashboard";
+}
+
+function intendedLandingPage(requestedPage = requestedLandingPage()) {
+  const defaultPage = defaultLandingPageForRole();
+  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "intake" || requestedPage === "intake-schedule") {
+    return canUseIntakeView() ? requestedPage : defaultPage;
+  }
+  if (requestedPage === "dashboard") return "dashboard";
+  return defaultPage;
 }
 
 function supabaseAuthRedirectUrl() {
@@ -4250,7 +4393,8 @@ function supabaseAuthRedirectUrl() {
 
   const url = new URL(window.location.href);
   url.hash = "";
-  url.search = requestedLandingPage() === "admin" ? "?page=admin" : "";
+  const requestedPage = requestedLandingPage();
+  url.search = requestedPage ? `?page=${encodeURIComponent(requestedPage)}` : "";
   return url.toString();
 }
 
@@ -4337,6 +4481,7 @@ async function requireSupabaseAccountSession() {
 
 function profileFromSupabase(row) {
   const fallbackInitials = [row.first_name?.[0], row.last_name?.[0]].filter(Boolean).join("").toUpperCase();
+  const role = row.role || "controller";
   return {
     firstName: row.first_name || "",
     lastName: row.last_name || "",
@@ -4345,11 +4490,11 @@ function profileFromSupabase(row) {
     seniorityRank: row.seniority_rank,
     bidderCount: Number(row.bidder_count || 0),
     area: row.area_name || "Area A",
-    role: row.role || "controller",
-    roleLabel: row.role === "admin" ? "Bidding Admin" : "BUE Controller",
+    role,
+    roleLabel: role === "admin" ? "Bidding Admin" : role === "intake" ? "Bidding Intake" : "BUE Controller",
     bidAs: normalizeBidRoleForArea(row.bid_role || "CPC", row.area_name || "Area A"),
     leaveSlotAllowance: normalizeLeaveSlotAllowance(row.leave_slot_allowance),
-    systemAdmin: row.role === "admin",
+    systemAdmin: role === "admin",
     phone: row.phone || "",
     email: row.email || "",
     supabaseProfileId: row.profile_id,
@@ -4382,7 +4527,7 @@ async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no
   setAuthStatus(message, "error");
 }
 
-function showLoggedInApp(page = "dashboard") {
+function showLoggedInApp(page = requestedLandingPage()) {
   selectedViewArea = currentUser.area;
   document.querySelector(".login-screen")?.setAttribute("hidden", "");
   document.querySelector(".app-shell")?.removeAttribute("hidden");
@@ -4394,7 +4539,7 @@ function showLoggedInApp(page = "dashboard") {
   document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
-  setPage(page);
+  setPage(intendedLandingPage(page));
   void loadSupabaseHelpThreads().then(() => {
     renderHelpSummary();
     renderHelpPanel();
@@ -4490,7 +4635,7 @@ async function sendSupabaseLoginLink(email) {
     email,
     options: {
       emailRedirectTo: supabaseAuthRedirectUrl(),
-      shouldCreateUser: false,
+      shouldCreateUser: true,
     },
   });
 
@@ -4570,43 +4715,6 @@ async function loginWithSupabasePassword(email, password) {
   } catch (error) {
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
-}
-
-async function loginWithUsernamePassword(username, password) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
-
-  let loginResult;
-  try {
-    loginResult = await client.rpc("app_login_with_password", {
-      login_username: username,
-      login_password: password,
-    });
-  } catch (error) {
-    setAuthStatus(friendlyAuthFailure(error), "error");
-    return;
-  }
-
-  const { data, error } = loginResult;
-
-  if (error) {
-    setAuthStatus(friendlyAuthFailure(error) || "Could not check that login.", "error");
-    return;
-  }
-
-  const profile = Array.isArray(data) ? data[0] : data;
-  if (!profile) {
-    setAuthStatus("That username or password did not match.", "error");
-    return;
-  }
-
-  currentUser = profileFromSupabase(profile);
-  clearSupabaseAccountState();
-  setAuthStatus("Signed in.", "success");
-  showLoggedInApp(requestedLandingPage());
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -4782,11 +4890,11 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
       lineType: row.line_type,
       cpc: row.assigned_initials || row.bidders?.initials || (row.assigned_bidder_id === currentUser?.supabaseProfileId ? currentUser.initials : ""),
       week: days.length === 7 ? days : Array.from({ length: 7 }, () => ""),
-      group: row.fatigue_group || "C",
-      mid: row.mid || "No",
-      aws: row.aws ? "Yes" : "No",
+      group: row.fatigue_group || "",
+      mid: row.mid || "",
+      aws: typeof row.aws === "boolean" ? (row.aws ? "Yes" : "No") : "",
       fourTen: row.four_ten ? "Yes" : "No",
-      flex: row.flex ? "Yes" : "No",
+      flex: typeof row.flex === "boolean" ? (row.flex ? "Yes" : "No") : "",
       status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
     };
     const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
@@ -5002,7 +5110,7 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
     senioritySource.push(bidderRowToSeniorityEntry(row, areaById));
   });
 
-  if (currentUser.supabaseProfileId) {
+  if (currentUser?.supabaseProfileId) {
     const currentEntry = senioritySource.find((entry) => seniorityEntryProfileId(entry) === currentUser.supabaseProfileId);
     if (currentEntry) {
       const person = rosterEntryToPerson(currentEntry);
@@ -5023,6 +5131,16 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
   }
 
   seniority = buildSeniority();
+}
+
+function supabaseLoadWarning(label, result) {
+  if (!result?.error) return "";
+  const message = result.error.message || String(result.error);
+  return `${label}: ${message}`;
+}
+
+function supabaseRows(result) {
+  return result?.error ? [] : result?.data || [];
 }
 
 function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
@@ -5107,15 +5225,16 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
 }
 
 async function loadSupabaseReferenceData() {
-  resetSupabaseBackedData();
   const client = supabaseClient();
   if (!client) {
+    resetSupabaseBackedData();
     supabaseState.enabled = false;
     supabaseState.connected = false;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
     return;
   }
   if (supabaseState.loading) return;
+  resetSupabaseBackedData();
 
   supabaseState.enabled = true;
   supabaseState.loading = true;
@@ -5129,19 +5248,26 @@ async function loadSupabaseReferenceData() {
       .single();
     if (bidYearError) throw bidYearError;
 
+    const [areasResult, rosterResult] = await Promise.all([
+      client.from("areas").select("id,code,name,display_order").order("display_order"),
+      client.rpc("read_bidding_roster"),
+    ]);
+    const requiredError = [areasResult, rosterResult].find((result) => result.error)?.error;
+    if (requiredError) throw requiredError;
+
+    supabaseState.bidYearId = bidYear.id;
+    const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
+    applyRosterFromDatabase(rosterResult.data || [], areaById);
+
     const [
-      areasResult,
       holidaysResult,
-      rosterResult,
       rdoLinesResult,
       rdoLineDaysResult,
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
     ] = await Promise.all([
-      client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.rpc("read_bidding_roster"),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
@@ -5149,26 +5275,34 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
     ]);
 
-    const firstError = [areasResult, holidaysResult, rosterResult, rdoLinesResult, rdoLineDaysResult, leaveSlotsResult, leaveRequestsResult, intakeSchedulesResult].find((result) => result.error)?.error;
-    if (firstError) throw firstError;
+    const loadWarnings = [
+      supabaseLoadWarning("holidays", holidaysResult),
+      supabaseLoadWarning("RDO lines", rdoLinesResult),
+      supabaseLoadWarning("RDO line days", rdoLineDaysResult),
+      supabaseLoadWarning("leave slots", leaveSlotsResult),
+      supabaseLoadWarning("leave requests", leaveRequestsResult),
+      supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+    ].filter(Boolean);
 
-    supabaseState.bidYearId = bidYear.id;
-    const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-
-    applyRosterFromDatabase(rosterResult.data || [], areaById);
-    (holidaysResult.data || []).forEach((holiday) => {
+    supabaseRows(holidaysResult).forEach((holiday) => {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
-    upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
-    upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
-    applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!rdoLinesResult.error && !rdoLineDaysResult.error) {
+      upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
+    }
+    if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+    if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${(holidaysResult.data || []).length} holidays, ${(rdoLinesResult.data || []).length} RDO lines, ${(leaveSlotsResult.data || []).length} leave slots, ${(leaveRequestsResult.data || []).length} leave requests, and ${(intakeSchedulesResult.data || []).length} intake schedules.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
+    if (loadWarnings.length) {
+      supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
+      console.warn(supabaseState.message);
+    }
   } catch (error) {
     supabaseState.connected = false;
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
@@ -5536,6 +5670,7 @@ function activeScheduledIntakeWindow() {
 
 function hasIntakeAccess() {
   return hasSystemAdminAccess()
+    || currentUser?.role === "intake"
     || Boolean(activeAdminGrant())
     || Boolean(activeScheduledIntakeWindow());
 }
@@ -5649,7 +5784,9 @@ function renderCurrentUser() {
   setText("[data-bidder-count]", `${displayedBidderCount} bidders`);
   setText(
     "[data-seniority-summary]",
-    canOpenIntake ? `Temporary bidding intake access for ${userFullName()}. Actions are logged under ${currentUser.initials}.` : `Current bidding order for ${viewArea}. Your position is highlighted in your home area.`
+    canOpenIntake
+      ? `Temporary bidding intake access for ${userFullName()}. Each BUE bid window is 2 hours. Actions are logged under ${currentUser.initials}.`
+      : `Current bidding order for ${viewArea}. Each BUE bid window is 2 hours. Your position is highlighted in your home area.`
   );
   setText("[data-admin-grant-status]", activeAdminGrant() ? "Active" : "Not Assigned");
   setText("[data-admin-grant-window]", adminGrantWindowText());
@@ -5674,10 +5811,12 @@ function renderCurrentUser() {
     button.title = hasSeniority ? "View seniority list" : "Admin accounts are not in the area seniority order.";
   });
 
-  const selectedHomeLine = rdoLinesForArea(currentUser.area).find((line) => line.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0];
-  const rdoRequest = currentUserRdoRequest();
-  setText("[data-dashboard-rdo-line]", selectedHomeLine ? `Line ${selectedHomeLine.line}` : "No line selected");
-  setText("[data-dashboard-rdo-summary]", rdoRequest?.summary || "Choose fatigue group, AWS, Flex, and Mid when you bid.");
+  const rdoAssignment = currentUserRdoAssignment();
+  const rdoAssignmentLine = rdoAssignment?.line;
+  const rdoAssignmentRequest = rdoAssignment?.request;
+  setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line ? `Line ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}` : "No line selected");
+  setText("[data-dashboard-rdo-summary]", rdoAssignmentRequest?.summary || "Your selected RDO line will appear after you bid.");
+  renderDashboardSelectedLineCard(rdoAssignment);
 
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !canOpenIntake;
@@ -5695,6 +5834,7 @@ function renderCurrentUser() {
     element.hidden = !canOpenIntake;
   });
 
+  syncBidWindowTestingControls();
   syncViewModeSwitcher();
 }
 
@@ -5711,14 +5851,18 @@ function updateBidWindow() {
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
+  const isTestingBypass = bidWindowLockIsBypassed();
+  const canUseBidActions = viewingHomeArea && !isValidationPeriod && (isOpen || isTestingBypass);
   const activeRank = activeBidderRank(now);
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
   const statusText = areaRoundOpen ? "Open" : "Closed";
   const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const clockLabel = isTestingBypass && viewingHomeArea ? "Testing Mode" : isOpen ? "Bid Window Open" : "Bid Window Closed";
   const countdownText = isOpen
       ? formatDuration(personalBidWindow.end - now)
+      : isTestingBypass && viewingHomeArea
+      ? "Unlocked"
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
       : isValidationPeriod
@@ -5728,6 +5872,8 @@ function updateBidWindow() {
         : "Closed";
   const countdownLabel = isOpen
       ? "Window Closes In"
+      : isTestingBypass && viewingHomeArea
+      ? "Bid Window Lock"
       : isBefore
       ? "Next Window In"
       : isValidationPeriod
@@ -5749,7 +5895,7 @@ function updateBidWindow() {
 
   const clock = document.getElementById("bid-window-clock");
   if (clock) {
-    clock.classList.toggle("closed", !isOpen);
+    clock.classList.toggle("closed", !(isOpen || (isTestingBypass && viewingHomeArea)));
     clock.querySelector("span").textContent = clockLabel;
     clock.querySelector("strong").textContent = countdownText;
     const detail = clock.querySelector("small");
@@ -5783,7 +5929,7 @@ function updateBidWindow() {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = isValidationPeriod || !isOpen || !isViewingHomeArea();
+    const disabled = !canUseBidActions;
     button.disabled = disabled;
     button.classList.toggle("disabled", disabled);
   });
@@ -5793,12 +5939,12 @@ function updateBidWindow() {
       button.textContent = "Round Closed";
       return;
     }
-    if (!isOpen) {
-      button.textContent = "Bid Closed";
-      return;
-    }
     if (!isViewingHomeArea()) {
       button.textContent = "Viewing Only";
+      return;
+    }
+    if (!isOpen) {
+      button.textContent = isTestingBypass && viewingHomeArea ? "Testing Bid" : "Bid Closed";
       return;
     }
 
@@ -5886,6 +6032,54 @@ function selectedLineStatus(line) {
   if (line.status === "Taken") return "Taken";
   if (line.status === "Selected") return "Selected";
   return "Open";
+}
+
+function rdoAssignmentValue(assignment, key) {
+  const requestValue = assignment?.request?.[key];
+  if (requestValue) return requestValue;
+  if (assignment?.line?.[key]) return assignment.line[key];
+  return "";
+}
+
+function renderDashboardSelectedLineCard(assignment) {
+  const line = assignment?.line;
+  const request = assignment?.request;
+  const lineCode = request?.line || line?.line || "";
+  const status = request?.status || (line?.status === "Taken" ? "Approved" : "");
+
+  document.querySelectorAll("#dashboard-page [data-selected-initials]").forEach((element) => {
+    element.textContent = currentUser.initials || "";
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-line]").forEach((element) => {
+    element.textContent = lineCode ? `Line ${lineCode}` : "No line selected";
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-status]").forEach((element) => {
+    element.innerHTML = `<em>Status</em><b>${status || "Not Bid"}</b>`;
+    element.classList.toggle("closed", !status);
+  });
+  document.querySelectorAll("#dashboard-page [data-selected-attributes]").forEach((element) => {
+    const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
+    const flex = rdoAssignmentValue(assignment, "flex");
+    const aws = rdoAssignmentValue(assignment, "aws");
+    const mid = rdoAssignmentValue(assignment, "mid");
+    const values = [
+      ["Group", group],
+      ["Flex", flex],
+      ["AWS", aws],
+      ["Mid", mid],
+    ].filter(([, value]) => value);
+
+    element.innerHTML = values.length
+      ? values.map(([label, value]) => `<span>${label} <b${label === "Group" ? ` class="group ${groupClass(value)}"` : ""}>${value}</b></span>`).join("")
+      : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
+  });
+
+  const weekTarget = document.getElementById("selected-week");
+  if (weekTarget && line) {
+    renderWeek("selected-week", line.week);
+  } else if (weekTarget) {
+    weekTarget.innerHTML = "";
+  }
 }
 
 function selectedLineReadinessItems(line) {
@@ -6004,7 +6198,11 @@ function renderRdoLines() {
 function updateSelectedLine() {
   const areaLines = rdoLinesForArea(currentViewArea());
   const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
-  if (!line) return;
+  const dashboardAssignment = currentUserRdoAssignment();
+  if (!line) {
+    renderDashboardSelectedLineCard(dashboardAssignment);
+    return;
+  }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
@@ -6014,7 +6212,8 @@ function updateSelectedLine() {
     element.textContent = `Line ${line.line}`;
   });
   document.querySelectorAll("[data-selected-initials]").forEach((element) => {
-    element.textContent = line.status === "Taken" ? line.cpc || currentUser.initials : currentUser.initials;
+    if (element.closest("#dashboard-page")) return;
+    element.textContent = currentUser.initials || "";
   });
   document.querySelectorAll("[data-selected-helper]").forEach((element) => {
     const request = selectedLineRequest(line);
@@ -6025,10 +6224,12 @@ function updateSelectedLine() {
         : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
+    if (element.closest("#dashboard-page")) return;
     element.innerHTML = `<em>Status</em><b>${selectedLineStatus(line)}</b>`;
     element.classList.toggle("closed", line.status === "Taken");
   });
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
+    if (element.closest("#dashboard-page")) return;
     element.innerHTML = `
       <span class="fatigue-picker">
         <em>Fatigue Group</em>
@@ -6102,6 +6303,7 @@ function updateSelectedLine() {
 
   renderWeek("selected-week", line.week);
   renderWeek("rdo-week", line.week);
+  renderDashboardSelectedLineCard(dashboardAssignment);
   renderFatigueCapacity();
 }
 
@@ -6221,6 +6423,10 @@ function renderLeaveAllowanceSummary() {
   const round = currentRoundNumber();
   const credits = leaveHolidayCreditsForRound(round);
   const totalAllowance = leaveAllowanceLimitForRound(round);
+  const baseAllowance = currentUserBaseLeaveAllowanceDays();
+  const allowanceHours = currentUserLeaveAllowanceHours();
+  const hoursPerDay = leaveHoursPerDayForInitials();
+  const scheduleText = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour CWS days" : "8-hour days";
   const bidDays = leaveCommittedChargedDays();
   const leftDays = Math.max(0, totalAllowance - bidDays);
   const approvedDays = leaveCommittedItems()
@@ -6230,12 +6436,12 @@ function renderLeaveAllowanceSummary() {
     .filter((item) => (!item.initials || item.initials === currentUser.initials) && item.status === "Pending")
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 
-  setText("[data-leave-already-detail]", `Approved: ${approvedDays} days · Pending: ${pendingDays} days · ${holidayText}`);
-  setText("[data-leave-balance-heading]", `Leave Balance (Starting Balance ${ANNUAL_LEAVE_ALLOWANCE_DAYS} days)`);
-  setText("[data-leave-total-allowance]", `${totalAllowance} days`);
-  setText("[data-leave-left-days]", `${leftDays} days`);
-  setText("[data-leave-bid-days]", `${bidDays} days`);
-  setText("[data-leave-balance-summary]", `${totalAllowance} total · ${holidayText}`);
+  setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
+  setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(allowanceHours)} hours / ${scheduleText})`);
+  setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
+  setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
+  setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
+  setText("[data-leave-balance-summary]", `${formatLeaveDaysLabel(baseAllowance)} base · ${scheduleText} · ${holidayText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
@@ -6501,14 +6707,18 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal, cpcUsed, devUsed } = areaLeaveBucketTotals();
-  const cpcLeft = Math.max(0, cpcTotal - cpcUsed);
-  const devLeft = Math.max(0, devTotal - devUsed);
+  const { cpcTotal, devTotal } = areaLeaveBucketTotals();
+  const cpcTotalDays = estimatedLeaveDaysFromHours(cpcTotal);
+  const devTotalDays = estimatedLeaveDaysFromHours(devTotal);
+  const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
+  const devUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "dev");
+  const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
+  const devLeft = Math.max(0, devTotalDays - devUsedDays);
 
-  setText("[data-cpc-leave-remaining]", cpcLeft);
-  setText("[data-dev-leave-remaining]", devLeft);
-  setText("[data-cpc-leave-detail]", `${cpcUsed} used of ${cpcTotal} area slots`);
-  setText("[data-dev-leave-detail]", `${devUsed} used of ${devTotal} area slots`);
+  setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDays(cpcLeft));
+  setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDays(devLeft));
+  setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} used of ${formatRoundedUpLeaveDays(cpcTotalDays)} estimated days`);
+  setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
 }
 
 function syncAdminScheduleFormDefaults() {
@@ -8041,6 +8251,86 @@ function addIntakeScheduleFromForm() {
   setScheduleFormStatus(`${name} is scheduled for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
 }
 
+function seniorityCardMarkup() {
+  return seniority
+    .map((person) => {
+      const isBiddingNow = Boolean(person.openRound);
+      const isCurrentUser = personMatchesCurrentUser(person);
+      return `
+      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
+        <div class="seniority-card-head">
+          <span>#${person.rank}</span>
+        </div>
+        <div class="seniority-card-name">
+          <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
+          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+        </div>
+        <div class="seniority-card-meta">
+          <small class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</small>
+          ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
+        </div>
+        <div class="round-times">
+          ${person.rounds.map((time, index) => {
+            const round = index + 1;
+            const isComplete = person.completed.includes(round);
+            const isOpen = person.openRound === round;
+            return `
+              <div class="round-time ${isOpen ? "open" : ""}">
+                <span>R${round}</span>
+                <b>${publicBidTimeLabel(time)}</b>
+                <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </article>
+    `;
+    })
+    .join("");
+}
+
+function seniorityTableMarkup() {
+  return `
+    <table class="seniority-time-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Initials</th>
+          <th>Bid As</th>
+          <th>Round 1</th>
+          <th>Round 2</th>
+          <th>Round 3</th>
+          <th>Round 4</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${seniority.map((person) => {
+          const isBiddingNow = Boolean(person.openRound);
+          const isCurrentUser = personMatchesCurrentUser(person);
+          return `
+            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}">
+              <td>${person.rank}</td>
+              <td>
+                <div class="seniority-table-person">
+                  <span class="seniority-table-name">
+                    ${escapeHtml(`${person.firstName} ${person.lastName}`)}${isCurrentUser ? " · You" : ""}
+                    ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+                  </span>
+                  ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
+                </div>
+              </td>
+              <td>${escapeHtml(person.initials)}</td>
+              <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+              ${person.rounds.map((round, index) => `<td class="${person.openRound === index + 1 ? "open-round-cell" : ""}">${publicBidTimeLabel(round)}</td>`).join("")}
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 function renderSeniority() {
   const compactTarget = document.getElementById("seniority-list");
   if (compactTarget) {
@@ -8059,42 +8349,22 @@ function renderSeniority() {
       .join("");
   }
 
-  const pageTarget = document.getElementById("seniority-page-list");
-  if (!pageTarget) return;
+  document.querySelectorAll("[data-seniority-view]").forEach((button) => {
+    const isActive = button.dataset.seniorityView === seniorityViewMode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
 
-  pageTarget.innerHTML = seniority
-    .map((person) => {
-      const isBiddingNow = Boolean(person.openRound);
-      const isCurrentUser = personMatchesCurrentUser(person);
-      return `
-      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
-        <div class="seniority-card-head">
-          <span>#${person.rank}</span>
-          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
-        </div>
-        <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
-        <div class="seniority-card-meta">
-          <small class="bid-as ${person.bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${person.bidAs}</small>
-          ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
-        </div>
-        <div class="round-times">
-          ${person.rounds.map((time, index) => {
-            const round = index + 1;
-            const isComplete = person.completed.includes(round);
-            const isOpen = person.openRound === round;
-            return `
-              <div class="round-time ${isOpen ? "open" : ""}">
-                <span>R${round}</span>
-                <b>${time}</b>
-                <em>${isComplete ? "✓" : isOpen ? "●" : "—"}</em>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </article>
-    `;
-    })
-    .join("");
+  const cardTarget = document.getElementById("seniority-page-list");
+  const tableTarget = document.getElementById("seniority-page-table");
+  if (!cardTarget || !tableTarget) return;
+
+  const isListView = seniorityViewMode === "list";
+  cardTarget.hidden = isListView;
+  tableTarget.hidden = !isListView;
+
+  cardTarget.innerHTML = seniorityCardMarkup();
+  tableTarget.innerHTML = isListView ? seniorityTableMarkup() : "";
 }
 
 function renderHistory() {
@@ -9359,6 +9629,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const bidWindowToggle = event.target.closest("[data-bid-window-enforcement-toggle]");
+  if (bidWindowToggle) {
+    setBidWindowEnforcement(bidWindowToggle.checked);
+    return;
+  }
+
   const publicLoginToggle = event.target.closest("[data-public-login-toggle]");
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
@@ -9637,6 +9913,13 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const seniorityViewButton = event.target.closest("[data-seniority-view]");
+  if (seniorityViewButton) {
+    seniorityViewMode = seniorityViewButton.dataset.seniorityView === "list" ? "list" : "cards";
+    renderSeniority();
+    return;
+  }
+
   const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
@@ -9872,18 +10155,6 @@ document.querySelector("[data-reset-login-password]")?.addEventListener("click",
   }
   setAuthStatus("Sending password email...");
   sendSupabasePasswordReset(email);
-});
-
-document.querySelector("[data-admin-login-form]")?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const username = document.querySelector("[data-admin-username-input]")?.value.trim();
-  const password = document.querySelector("[data-admin-password-input]")?.value || "";
-  if (!username || !password) {
-    setAuthStatus("Enter the admin username and password.", "error");
-    return;
-  }
-  setAuthStatus("Checking admin login...");
-  loginWithUsernamePassword(username, password);
 });
 
 document.querySelector("[data-account-email-form]")?.addEventListener("submit", (event) => {

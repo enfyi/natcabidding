@@ -1,0 +1,42 @@
+[
+  {
+    "source_name": "Felipe Gonzalez Padilla",
+    "supabase_name": "Felipe Padilla",
+    "area": "Area A",
+    "email": "felipe.gonzalez0507@hotmail.com",
+    "leave_slot_allowance_hours_2027": 104,
+    "notes": "Leave accrual and election email source use the longer name."
+  },
+  {
+    "source_name": "Timothy Lowther",
+    "supabase_name": "Timothy (Scott) Lowther",
+    "area": "Area A",
+    "email": "tslowther2@gmail.com",
+    "leave_slot_allowance_hours_2027": 160,
+    "notes": "Supabase profile includes preferred/middle-name qualifier."
+  },
+  {
+    "source_name": "Geoffrey Klein",
+    "supabase_name": "Geoffery Klein",
+    "area": "Area B",
+    "email": "zlanatcacomm@gmail.com",
+    "leave_slot_allowance_hours_2027": 208,
+    "notes": "Supabase spelling differs from source workbook spelling."
+  },
+  {
+    "source_name": "John Tison",
+    "supabase_name": "Dalton Tison",
+    "area": "Area B",
+    "email": "dt0038@yahoo.com",
+    "leave_slot_allowance_hours_2027": 160,
+    "notes": "Source workbook and election email list use first name John."
+  },
+  {
+    "source_name": "Trenton Mauldin",
+    "supabase_name": "Trent Mauldin",
+    "area": "TMU",
+    "email": "trentonmauldin@hotmail.com",
+    "leave_slot_allowance_hours_2027": 208,
+    "notes": "Source workbook uses formal first name."
+  }
+]
