@@ -5561,6 +5561,12 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   min-width: 130px;
 }
 
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .email-log {
   display: grid;
   gap: 8px;

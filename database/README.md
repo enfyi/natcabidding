@@ -45,6 +45,8 @@ a non-`NEXT_PUBLIC_` variable and never expose it to browser code.
 
 Run `database/rls_area_policies.sql` after `database/schema.sql`.
 
+Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line importer. The import RPC validates every row, adds or updates `rdo_lines` and `rdo_line_days` atomically without deleting omitted lines, preserves existing assignments and status, and records an audit event.
+
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 
 Private data stays protected by Supabase Row Level Security. Leave requests, intake submissions, help threads, bid windows, holiday in-lieu records, credit events, and audit history remain limited to the user's own area or their own account.
