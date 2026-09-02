@@ -52,6 +52,14 @@ create unique index if not exists bidders_area_seniority_unique
   on bidders(area_id, seniority_rank)
   where active and seniority_rank is not null;
 
+create table if not exists bid_year_settings (
+  bid_year_id uuid primary key references bid_years(id) on delete cascade,
+  enforce_bid_windows boolean not null default true,
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists rdo_lines (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,

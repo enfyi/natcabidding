@@ -269,6 +269,20 @@ on bid_windows for select
 to authenticated
 using (public.is_bidder_in_current_area(bidder_id));
 
+alter table bid_year_settings enable row level security;
+
+drop policy if exists "public can read bid year settings" on bid_year_settings;
+create policy "public can read bid year settings"
+on bid_year_settings for select
+to anon
+using (true);
+
+drop policy if exists "users can read bid year settings" on bid_year_settings;
+create policy "users can read bid year settings"
+on bid_year_settings for select
+to authenticated
+using (true);
+
 drop policy if exists "users can read holiday in lieu days in own area" on holiday_in_lieu_days;
 create policy "users can read holiday in lieu days in own area"
 on holiday_in_lieu_days for select

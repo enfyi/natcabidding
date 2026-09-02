@@ -92,6 +92,7 @@ let roundRules = {
 };
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
+let bidWindowSettingsFallbackMessage = "";
 const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
 let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
   ? storedLeaveSlotCapacities
@@ -1711,10 +1712,27 @@ function rdoBidWindowErrorMessage(date = new Date()) {
   return bidWindowErrorMessage("RDO bids", date);
 }
 
-function setBidWindowEnforcement(enabled) {
+async function setBidWindowEnforcement(enabled) {
   if (!hasSystemAdminAccess()) return;
   enforceBidWindows = Boolean(enabled);
   storeJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, enforceBidWindows);
+  syncBidWindowTestingControls();
+
+  try {
+    const result = await saveSupabaseBidWindowEnforcement(enforceBidWindows);
+    if (result.missingRoutine) {
+      bidWindowSettingsFallbackMessage = "Testing mode changed for this browser. Install database/bid_window_testing_admin.sql to share it with all BUEs.";
+    } else {
+      bidWindowSettingsFallbackMessage = "";
+    }
+  } catch (error) {
+    enforceBidWindows = !enforceBidWindows;
+    storeJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, enforceBidWindows);
+    syncBidWindowTestingControls();
+    window.alert(error.message || "Bid-window testing mode could not be saved.");
+    return;
+  }
+
   logHistory(
     "All Areas",
     enforceBidWindows ? "Bid-window lock enabled" : "Bid-window lock disabled",
@@ -1733,10 +1751,36 @@ function syncBidWindowTestingControls() {
   setText("[data-bid-window-enforcement-state]", enabled ? "Strict Windows On" : "Testing Mode");
   setText(
     "[data-bid-window-enforcement-copy]",
-    enabled
+    bidWindowSettingsFallbackMessage || (enabled
       ? "BUEs can submit only during their assigned bid window."
-      : "BUE self-service bids can be submitted outside the assigned bid window."
+      : "BUE self-service bids can be submitted outside the assigned bid window.")
   );
+}
+
+function applyBidYearSettings(settings) {
+  if (!settings || typeof settings !== "object") return;
+  if (typeof settings.enforce_bid_windows === "boolean") {
+    enforceBidWindows = settings.enforce_bid_windows;
+    bidWindowSettingsFallbackMessage = "";
+    storeJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, enforceBidWindows);
+  }
+}
+
+async function saveSupabaseBidWindowEnforcement(enabled) {
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) return { saved: false, missingRoutine: false };
+
+  const { error } = await client.rpc("set_bid_window_enforcement", {
+    requested_bid_year: BID_YEAR,
+    should_enforce: Boolean(enabled),
+  });
+
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) return { saved: false, missingRoutine: true };
+    throw error;
+  }
+
+  return { saved: true, missingRoutine: false };
 }
 
 function addOrUpdateRdoSubmission() {
@@ -5230,6 +5274,7 @@ async function loadSupabaseReferenceData() {
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
+      bidYearSettingsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
@@ -5237,6 +5282,7 @@ async function loadSupabaseReferenceData() {
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
+      client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
     ]);
 
     const loadWarnings = [
@@ -5246,6 +5292,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
     ].filter(Boolean);
 
     supabaseRows(holidaysResult).forEach((holiday) => {
@@ -5258,6 +5305,7 @@ async function loadSupabaseReferenceData() {
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
@@ -9595,7 +9643,7 @@ document.addEventListener("click", async (event) => {
 
   const bidWindowToggle = event.target.closest("[data-bid-window-enforcement-toggle]");
   if (bidWindowToggle) {
-    setBidWindowEnforcement(bidWindowToggle.checked);
+    await setBidWindowEnforcement(bidWindowToggle.checked);
     return;
   }
 
