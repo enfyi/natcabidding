@@ -55,6 +55,7 @@ create unique index if not exists bidders_area_seniority_unique
 create table if not exists bid_year_settings (
   bid_year_id uuid primary key references bid_years(id) on delete cascade,
   enforce_bid_windows boolean not null default true,
+  test_bid_round integer check (test_bid_round between 1 and 4),
   updated_by uuid references bidders(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

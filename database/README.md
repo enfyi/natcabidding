@@ -21,7 +21,8 @@ the admin-only database operation that safely resizes each day's slot inventory.
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
 `database/leave_submission_preflight.sql`. The testing switch lets admins allow
-all logged-in BUEs to submit outside their assigned bid windows while testing.
+all logged-in BUEs to submit outside their assigned bid windows while testing,
+with an optional shared test round for checking Round 1-4 rules individually.
 
 If a future server-only admin workflow requires a Supabase secret key, keep it in
 a non-`NEXT_PUBLIC_` variable and never expose it to browser code.
