@@ -1630,6 +1630,17 @@ function currentUserRdoRequest() {
   );
 }
 
+function currentUserHasRdoRequestForLeave() {
+  return Boolean(currentUserRdoRequest()) ||
+    rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials);
+}
+
+function leaveRdoRequestErrorMessage() {
+  return currentUserHasRdoRequestForLeave()
+    ? ""
+    : "Submit your RDO request before submitting leave. Intake approval is not required first.";
+}
+
 function currentUserRdoAssignment() {
   const request = currentUserRdoRequest();
   if (request) {
@@ -1841,7 +1852,7 @@ async function saveSupabaseBidWindowEnforcement(_enabled) {
   return saveSupabaseBidWindowTestingSettings();
 }
 
-function addOrUpdateRdoSubmission() {
+async function addOrUpdateRdoSubmission() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit an RDO bid");
     return;
@@ -1882,11 +1893,11 @@ function addOrUpdateRdoSubmission() {
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
-    status: "Approved",
+    status: "Pending",
     round,
     submittedAt: formatDateTime(new Date()),
-    approvedBy: "System",
-    approvedAt: formatDateTime(new Date()),
+    approvedBy: "",
+    approvedAt: "",
     line: line.line,
     fatigueGroup: selectedFatigueGroup,
     flex: selectedFlexPreference,
@@ -1895,15 +1906,21 @@ function addOrUpdateRdoSubmission() {
     summary: `Round ${round} · Line ${line.line} · Group ${selectedFatigueGroup} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
+  try {
+    await saveSupabaseRdoRequest(request);
+  } catch (error) {
+    alert(error.message || "Your RDO request could not be saved. Please try again before submitting leave.");
+    return;
+  }
+
   if (existing) {
     Object.assign(existing, request);
   } else {
     intakeQueue.unshift(request);
   }
 
-  syncApprovedRdoItem(request);
-  logHistory(currentUser.area, "RDO bid approved", `${currentUser.initials} submitted ${request.summary}. The system approved the open line and applied it for leave validation.`);
-  queueBidVerifiedEmail(request);
+  logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is still required before the line is populated.`);
+  queueBidSubmittedEmail(request);
   renderApp();
 }
 
@@ -2149,10 +2166,10 @@ function submitManualRdoBid(panel, person, area) {
     initials: person.initials,
     bidAs: person.bidAs,
     seniority: person.rank,
-    status: "Approved",
+    status: "Pending",
     submittedAt,
-    approvedBy: "System",
-    approvedAt: submittedAt,
+    approvedBy: "",
+    approvedAt: "",
     manualEntry: true,
     enteredBy: currentUser.initials,
     line: line.line,
@@ -2171,13 +2188,12 @@ function submitManualRdoBid(panel, person, area) {
     intakeQueue.unshift(request);
   }
 
-  syncApprovedRdoItem(request);
-  logHistory(area, "Manual RDO bid approved", `${currentUser.initials} entered ${request.summary} for ${person.initials}. The system approved the open line and applied it for leave validation.`);
-  queueBidVerifiedEmail(request);
+  logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is still required before the line is populated.`);
+  queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
-  setManualBidStatus(panel, `${person.initials}'s RDO bid was approved and applied.`, "success");
+  setManualBidStatus(panel, `${person.initials}'s RDO bid was added to the intake queue.`, "success");
 }
 
 function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
@@ -3138,6 +3154,12 @@ async function submitLeaveDraftBatch() {
     return;
   }
 
+  const rdoRequestError = leaveRdoRequestErrorMessage();
+  if (rdoRequestError) {
+    setLeaveBuilderStatus(rdoRequestError, "error");
+    return;
+  }
+
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
     return;
@@ -3386,12 +3408,12 @@ function applyRdoApproval(item) {
   const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
   if (!line) return;
 
-  syncApprovedRdoItem(item);
-
   item.status = "Approved";
   item.approvedBy = currentUser.initials;
   item.approvedAt = formatDateTime(new Date());
   item.appliedLine = item.bidAs === "GL" ? null : item.line;
+  syncApprovedRdoItem(item);
+  reconcilePendingLeaveForRdo(item.initials, item.area);
   logHistory(
     item.area,
     "RDO bid approved",
@@ -3400,6 +3422,36 @@ function applyRdoApproval(item) {
       : `${currentUser.initials} approved ${item.initials}'s ${item.summary}. The system applied ${item.initials} to Line ${item.line}.`
   );
   queueBidVerifiedEmail(item);
+}
+
+function refreshLeaveItemCharge(item) {
+  if (item.type && item.type !== "Leave") return false;
+  const originalDays = Number(item.days || 0);
+  const round = leaveRoundForItem(item);
+  const dateKeys = datesInLeaveRange(item.range);
+  const chargeableDates = chargeableLeaveDatesForInitials(item.range, item.initials || currentUser.initials, round);
+  item.days = chargeableDates.length;
+  if (round === 1) {
+    item.weekKeys = roundOneWeekKeysForDateKeys(dateKeys);
+    item.weekUnits = item.weekKeys.length;
+  }
+  item.summary = `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}${item.weekUnits ? ` · ${item.weekUnits} bid week${item.weekUnits === 1 ? "" : "s"}` : ""}`;
+  return originalDays !== item.days;
+}
+
+function reconcilePendingLeaveForRdo(initials, area = currentUser.area) {
+  let adjusted = 0;
+  intakeQueue.forEach((item) => {
+    if (item.type !== "Leave" || item.initials !== initials || item.area !== area || item.status !== "Pending") return;
+    if (refreshLeaveItemCharge(item)) adjusted += 1;
+  });
+  leaveBids.forEach((item) => {
+    if (item.initials !== initials || item.area !== area || item.status !== "Pending") return;
+    refreshLeaveItemCharge(item);
+  });
+  if (adjusted) {
+    logHistory(area, "Pending leave adjusted", `${initials}'s pending leave was recalculated after RDO approval.`);
+  }
 }
 
 function syncApprovedRdoItem(item) {
@@ -3668,7 +3720,7 @@ function rdoLineForInitials(initials = currentUser.initials) {
   const request = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === initials &&
-    ["Pending", "Approved"].includes(item.status)
+    item.status === "Approved"
   );
   if (request?.line) return rdoLines.find((line) => line.line === request.line && lineForArea(line, request.area || currentUser.area)) || null;
 
@@ -4978,6 +5030,51 @@ function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
   }
 }
 
+function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
+  const bidder = row.bidders || {};
+  const payload = row.payload || {};
+  const line = payload.rdo_line_code || payload.line || "";
+  const area = row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
+  const flex = payload.flex || "";
+  const aws = payload.aws || "";
+  const mid = payload.mid || "";
+  const round = Number(row.round_number || currentRoundNumber());
+
+  return {
+    id: `supabase-rdo-${row.id}`,
+    supabaseSubmissionId: row.id,
+    type: "RDO Line",
+    area,
+    name: controllerName({
+      firstName: bidder.first_name || "",
+      lastName: bidder.last_name || "",
+    }).trim() || bidder.initials || "",
+    initials: bidder.initials || "",
+    bidAs: normalizeBidRoleForArea(bidder.bid_role || payload.bid_as || "CPC", area),
+    seniority: bidder.seniority_rank,
+    status: uiStatusFromDatabase(row.status),
+    submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
+    approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    denialReason: row.denial_reason || "",
+    round,
+    line,
+    fatigueGroup,
+    flex,
+    aws,
+    mid,
+    summary: payload.summary || `Round ${round} · Line ${line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+  };
+}
+
+function upsertRdoSubmissionsFromDatabase(rows, areaById) {
+  const items = (rows || []).map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+  const ids = new Set(items.map((item) => item.supabaseSubmissionId));
+  intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId || !ids.has(item.supabaseSubmissionId));
+  intakeQueue.unshift(...items);
+}
+
 function upsertLeaveSlotsFromDatabase(rows, areaById) {
   const grouped = new Map();
 
@@ -5250,6 +5347,39 @@ async function ensureSupabaseBidYearId() {
   return data.id;
 }
 
+async function saveSupabaseRdoRequest(request) {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return false;
+  const bidYearId = await ensureSupabaseBidYearId();
+  if (!bidYearId) return false;
+
+  const payload = {
+    line: request.line,
+    rdo_line_code: request.line,
+    fatigue_group: request.fatigueGroup,
+    flex: request.flex,
+    aws: request.aws,
+    mid: request.mid,
+    bid_as: request.bidAs,
+    summary: request.summary,
+  };
+
+  const { error } = await client
+    .from("intake_submissions")
+    .insert({
+      bid_year_id: bidYearId,
+      area_id: null,
+      bidder_id: currentUser.supabaseProfileId,
+      round_number: request.round,
+      submission_type: "rdo",
+      status: "pending",
+      payload,
+      submitted_at: new Date().toISOString(),
+    });
+  if (error) throw error;
+  return true;
+}
+
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
@@ -5331,6 +5461,7 @@ async function loadSupabaseReferenceData() {
       holidaysResult,
       rdoLinesResult,
       rdoLineDaysResult,
+      rdoSubmissionsResult,
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
@@ -5339,6 +5470,7 @@ async function loadSupabaseReferenceData() {
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
       client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
+      supabaseState.authUserId ? client.from("intake_submissions").select("id,area_id,bidder_id,round_number,status,payload,submitted_at,reviewed_at,denial_reason,created_at,bidders:bidder_id(first_name,last_name,initials,bid_role,seniority_rank,area_id),areas(name)").eq("bid_year_id", bidYear.id).eq("submission_type", "rdo").in("status", ["pending", "approved"]).order("submitted_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
@@ -5349,6 +5481,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
       supabaseLoadWarning("RDO line days", rdoLineDaysResult),
+      supabaseLoadWarning("RDO submissions", rdoSubmissionsResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
@@ -5362,6 +5495,7 @@ async function loadSupabaseReferenceData() {
     if (!rdoLinesResult.error && !rdoLineDaysResult.error) {
       upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
     }
+    if (!rdoSubmissionsResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionsResult.data || [], areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
@@ -5370,7 +5504,7 @@ async function loadSupabaseReferenceData() {
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(rdoSubmissionsResult).length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
@@ -5911,7 +6045,7 @@ function renderCurrentUser() {
 }
 
 function hasSubmittedRdoBid() {
-  return Boolean(currentUserRdoRequest()) || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials);
+  return currentUserHasRdoRequestForLeave();
 }
 
 function updateBidWindow() {
@@ -6474,8 +6608,10 @@ function renderLeaveDraftQueue() {
     : `${usedDays} / ${currentRoundLeaveLimit()} days`;
   panel.classList.toggle("is-empty", leaveDraftQueue.length === 0);
   const windowError = leaveBidWindowErrorMessage();
-  submitButton.disabled = leaveDraftQueue.length === 0 || Boolean(windowError);
-  submitButton.title = windowError;
+  const rdoRequestError = leaveRdoRequestErrorMessage();
+  const submitError = rdoRequestError || windowError;
+  submitButton.disabled = leaveDraftQueue.length === 0 || Boolean(submitError);
+  submitButton.title = submitError;
 
   list.innerHTML = leaveDraftQueue.length
     ? leaveDraftQueue.map((item, index) => `
@@ -10098,10 +10234,8 @@ document.addEventListener("click", async (event) => {
   if (selectLineButton && !selectLineButton.hidden) {
     const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
-      addOrUpdateRdoSubmission();
+      void addOrUpdateRdoSubmission();
     }
-
-    renderApp();
     return;
   }
 
