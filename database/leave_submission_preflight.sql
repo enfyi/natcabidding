@@ -66,6 +66,7 @@ declare
   target_rdo_line_id uuid;
   submitted_rdo_line_id uuid;
   submitted_rdo_line_code text;
+  rdo_request_line_code text;
   open_bid_window_id uuid;
   enforce_bid_windows boolean := true;
   configured_test_round integer;
@@ -374,9 +375,9 @@ begin
     );
   end if;
 
-  -- Prefer an already populated line. Otherwise use the line submitted with
-  -- the leave batch or the latest pending/approved RDO intake payload and
-  -- atomically stamp it as assigned if it is still available.
+  -- A bidder must have requested an RDO line before leave can be submitted,
+  -- but intake approval is not required yet. Only an already assigned line is
+  -- used for RDO date conflicts; pending RDO choices are reconciled later.
   select rl.id
   into target_rdo_line_id
   from public.rdo_lines rl
@@ -387,12 +388,12 @@ begin
   order by rl.updated_at desc, rl.id
   limit 1;
 
-  if target_rdo_line_id is null and submitted_rdo_line_code is null then
+  if target_rdo_line_id is null then
     select coalesce(
       nullif(submission.payload ->> 'rdo_line_code', ''),
       nullif(submission.payload ->> 'line', '')
     )
-    into submitted_rdo_line_code
+    into rdo_request_line_code
     from public.intake_submissions submission
     where submission.bid_year_id = year_row.id
       and submission.bidder_id = target.id
@@ -405,6 +406,18 @@ begin
     order by submission.reviewed_at desc nulls last, submission.submitted_at desc nulls last, submission.created_at desc
     limit 1;
   end if;
+
+  if target_rdo_line_id is null
+     and submitted_rdo_line_code is not null
+     and rdo_request_line_code is not null
+     and submitted_rdo_line_code <> rdo_request_line_code then
+    error_messages := array_append(
+      error_messages,
+      'Submit leave with the same RDO line that is pending intake review.'
+    );
+  end if;
+
+  submitted_rdo_line_code := coalesce(submitted_rdo_line_code, rdo_request_line_code);
 
   if target_rdo_line_id is null and submitted_rdo_line_code is not null then
     select rl.id
@@ -433,27 +446,15 @@ begin
         error_messages,
         format('RDO Line %s is no longer available.', submitted_rdo_line_code)
       );
-    else
-      update public.rdo_lines
-      set status = 'taken',
-          assigned_bidder_id = target.id,
-          updated_at = now()
-      where id = submitted_rdo_line_id
-        and (
-          status = 'open'
-          or (status = 'taken' and assigned_bidder_id = target.id)
-        );
-
-      target_rdo_line_id := submitted_rdo_line_id;
     end if;
   end if;
 
-  if target_rdo_line_id is null then
+  if target_rdo_line_id is null and rdo_request_line_code is null then
     error_messages := array_append(
       error_messages,
-      'Choose an available RDO line before submitting leave so the system can check RDO conflicts.'
+      'Submit your RDO request before submitting leave. Intake approval is not required first.'
     );
-  else
+  elsif target_rdo_line_id is not null then
     with requested_dates as (
       select distinct gs::date as leave_date
       from jsonb_array_elements(requested_items) requested(item)
@@ -504,3 +505,75 @@ grant execute on function public.submit_leave_bid_batch(integer, jsonb, text, te
 
 comment on function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean) is
   'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
+
+create or replace function private.recalculate_pending_leave_after_rdo_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+begin
+  if new.status <> 'taken' or new.assigned_bidder_id is null then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.status = new.status
+       and old.assigned_bidder_id is not distinct from new.assigned_bidder_id then
+      return new;
+    end if;
+  end if;
+
+  update public.leave_request_dates lrd
+  set is_rdo = exists (
+        select 1
+        from public.rdo_line_days line_day
+        where line_day.rdo_line_id = new.id
+          and line_day.is_rdo
+          and line_day.weekday = extract(dow from lrd.leave_date)::smallint
+      ),
+      charged = not lrd.is_holiday
+        and not lrd.is_holiday_in_lieu
+        and not (
+          lr.round_number = 1
+          and exists (
+            select 1
+            from public.rdo_line_days line_day
+            where line_day.rdo_line_id = new.id
+              and line_day.is_rdo
+              and line_day.weekday = extract(dow from lrd.leave_date)::smallint
+          )
+        )
+  from public.leave_requests lr
+  where lrd.leave_request_id = lr.id
+    and lr.bid_year_id = new.bid_year_id
+    and lr.bidder_id = new.assigned_bidder_id
+    and lr.status = 'pending';
+
+  update public.leave_requests lr
+  set charged_days = coalesce((
+        select count(*)::integer
+        from public.leave_request_dates lrd
+        where lrd.leave_request_id = lr.id
+          and lrd.charged
+      ), 0),
+      updated_at = now()
+  where lr.bid_year_id = new.bid_year_id
+    and lr.bidder_id = new.assigned_bidder_id
+    and lr.status = 'pending';
+
+  return new;
+end
+$function$;
+
+drop trigger if exists recalculate_pending_leave_after_rdo_assignment on public.rdo_lines;
+create trigger recalculate_pending_leave_after_rdo_assignment
+after insert or update of status, assigned_bidder_id on public.rdo_lines
+for each row
+execute function private.recalculate_pending_leave_after_rdo_assignment();
+
+comment on function private.recalculate_pending_leave_after_rdo_assignment() is
+  'Recalculates pending leave charge dates when an RDO line is assigned to a bidder.';
+
+revoke all on function private.recalculate_pending_leave_after_rdo_assignment()
+  from public, anon, authenticated;
