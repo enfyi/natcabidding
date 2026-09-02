@@ -256,6 +256,7 @@ h1 {
 .import-warnings { border-radius: 12px; margin: 20px 0; padding: 12px 14px 12px 34px; color: #6e5611; background: #fff8db; }
 .import-table-wrap { overflow: auto; max-height: 560px; margin: 26px -10px 0; border: 1px solid var(--line); border-radius: 14px; }
 .import-table-wrap table { width: 100%; min-width: 1320px; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; }
+.bid-time-import-table table { min-width: 980px; }
 .import-table-wrap th { position: sticky; top: 0; z-index: 1; padding: 12px 10px; color: #fff; background: #244c38; text-align: left; }
 .import-table-wrap td { border-top: 1px solid #e7eae5; padding: 10px; white-space: nowrap; background: #fff; }
 .import-table-wrap tbody tr:nth-child(even) td { background: #f8faf7; }

@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
+import type { BidLineImportPreview, BidLineImportRow } from './bid-line-import-types'
 
 const MAX_IMPORT_ROWS = 500
 const DAY_HEADERS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
@@ -146,7 +146,7 @@ function normalizedWorksheetPath(target: string) {
   return `xl/${withoutLeadingSlash.replace(/^\.\//, '')}`
 }
 
-async function workbookRows(file: File) {
+export async function readSpreadsheetRows(file: File, preferredSheetName = 'Bid Lines') {
   const extension = file.name.split('.').pop()?.toLowerCase()
 
   if (extension === 'csv') {
@@ -173,7 +173,7 @@ async function workbookRows(file: File) {
     name: xmlAttribute(match[1], 'name'),
     relationshipId: xmlAttribute(match[1], 'r:id'),
   }))
-  const selectedSheet = sheets.find((sheet) => sheet.name.toLowerCase() === 'bid lines') || sheets[0]
+  const selectedSheet = sheets.find((sheet) => sheet.name.toLowerCase() === preferredSheetName.toLowerCase()) || sheets[0]
   const target = selectedSheet ? relationships.get(selectedSheet.relationshipId) : ''
   if (!target) throw new BidLineImportError(['The workbook does not contain a readable worksheet.'])
 
@@ -204,7 +204,7 @@ function normalizedFatigueGroup(rawValue: string, rowNumber: number, issues: str
 }
 
 export async function parseBidLineImport(file: File): Promise<BidLineImportPreview> {
-  const rows = await workbookRows(file)
+  const rows = await readSpreadsheetRows(file)
   const issues: string[] = []
   const warnings: string[] = []
 
