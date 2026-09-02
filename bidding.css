@@ -5233,6 +5233,31 @@ tr.occupied-row .rdo-tag {
   accent-color: var(--brand);
 }
 
+.testing-select-row {
+  display: grid;
+  gap: 6px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.testing-select-row select {
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.testing-select-row select:disabled {
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
 .roster-manager {
   display: grid;
   gap: 14px;

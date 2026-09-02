@@ -7,6 +7,20 @@
 
 create schema if not exists private;
 
+create table if not exists public.bid_year_settings (
+  bid_year_id uuid primary key references public.bid_years(id) on delete cascade,
+  enforce_bid_windows boolean not null default true,
+  test_bid_round integer check (test_bid_round between 1 and 4),
+  updated_by uuid references public.bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.bid_year_settings
+  add column if not exists test_bid_round integer;
+
+alter table public.bid_year_settings enable row level security;
+
 do $migration$
 begin
   if to_regprocedure('private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)') is null then
@@ -53,6 +67,8 @@ declare
   submitted_rdo_line_id uuid;
   submitted_rdo_line_code text;
   open_bid_window_id uuid;
+  enforce_bid_windows boolean := true;
+  configured_test_round integer;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
   rdo_conflict_dates date[];
@@ -75,6 +91,13 @@ begin
   into strict year_row
   from public.bid_years bys
   where bys.bid_year = requested_bid_year;
+
+  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
+  into enforce_bid_windows, configured_test_round
+  from public.bid_year_settings settings
+  where settings.bid_year_id = year_row.id;
+
+  enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if requested_items is null
      or jsonb_typeof(requested_items) <> 'array'
@@ -171,7 +194,17 @@ begin
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
   end if;
 
-  if not manual_entry then
+  if not manual_entry
+     and not enforce_bid_windows
+     and configured_test_round is not null
+     and batch_round <> configured_test_round then
+    error_messages := array_append(
+      error_messages,
+      format('Testing mode is currently set to Round %s.', configured_test_round)
+    );
+  end if;
+
+  if not manual_entry and enforce_bid_windows then
     select bw.id
     into open_bid_window_id
     from public.bid_windows bw
