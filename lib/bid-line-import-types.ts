@@ -3,11 +3,11 @@ export type BidLineImportRow = {
   line_code: string
   line_type: 'CPC' | 'DEV'
   pattern: string
-  fatigue_group: 'A' | 'B' | 'C' | 'C only'
+  fatigue_group: 'A' | 'B' | 'C' | 'C only' | null
   mid: 'No' | 'BID'
-  aws: boolean
+  aws: boolean | null
   four_ten: boolean
-  flex: boolean
+  flex: boolean | null
   days: [string, string, string, string, string, string, string]
 }
 

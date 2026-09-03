@@ -240,7 +240,7 @@ export function BidLineImporter() {
           </label>
         </div>
 
-        <p className="import-safety-note"><strong>Safe add/update:</strong> Matching line codes are updated and new codes are added. Lines omitted from the workbook are never deleted.</p>
+        <p className="import-safety-note"><strong>Safe add/update:</strong> Matching line codes are updated and new codes are added. Blank Fatigue, AWS, and Flex cells preserve existing values; new lines use C, No, and Yes. Lines omitted from the workbook are never deleted.</p>
 
         <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>
           {busy && !preview ? 'Validating…' : 'Preview import'}
@@ -281,8 +281,8 @@ export function BidLineImporter() {
               <tbody>
                 {preview.lines.map((line) => (
                   <tr key={`${line.sourceRow}-${line.line_code}`}>
-                    <td>{line.sourceRow}</td><td><strong>{line.line_code}</strong></td><td>{line.line_type}</td><td>{line.pattern}</td><td>{line.fatigue_group}</td><td>{line.mid}</td>
-                    <td>{line.aws ? 'Yes' : 'No'}</td><td>{line.four_ten ? 'Yes' : 'No'}</td><td>{line.flex ? 'Yes' : 'No'}</td>
+                    <td>{line.sourceRow}</td><td><strong>{line.line_code}</strong></td><td>{line.line_type}</td><td>{line.pattern}</td><td>{line.fatigue_group || 'Default / unchanged'}</td><td>{line.mid}</td>
+                    <td>{line.aws === null ? 'Default / unchanged' : line.aws ? 'Yes' : 'No'}</td><td>{line.four_ten ? 'Yes' : 'No'}</td><td>{line.flex === null ? 'Yes / unchanged' : line.flex ? 'Yes' : 'No'}</td>
                     {line.days.map((day, index) => <td className={day === 'RDO' ? 'rdo' : ''} key={`${line.line_code}-${index}`}>{day}</td>)}
                   </tr>
                 ))}

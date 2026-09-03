@@ -114,9 +114,9 @@ function worksheetRows(xml: string, sharedStrings: string[]) {
   for (const rowMatch of xml.matchAll(/<(?:\w+:)?row\b[^>]*>([\s\S]*?)<\/(?:\w+:)?row>/gi)) {
     const values: string[] = []
 
-    for (const cellMatch of rowMatch[1].matchAll(/<((?:\w+:)?c)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
+    for (const cellMatch of rowMatch[1].matchAll(/<((?:\w+:)?c)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/gi)) {
       const attributes = cellMatch[2]
-      const contents = cellMatch[3]
+      const contents = cellMatch[3] || ''
       const reference = xmlAttribute(attributes, 'r')
       const type = xmlAttribute(attributes, 't')
       const index = columnIndex(reference)
@@ -193,14 +193,25 @@ function booleanValue(rawValue: string, label: string, rowNumber: number, issues
   return false
 }
 
+function optionalBooleanValue(rawValue: string, label: string, rowNumber: number, issues: string[]) {
+  if (!rawValue.trim()) return null
+  return booleanValue(rawValue, label, rowNumber, issues)
+}
+
 function normalizedFatigueGroup(rawValue: string, rowNumber: number, issues: string[]) {
-  const normalized = (rawValue || 'C').trim().toLowerCase()
+  const normalized = rawValue.trim().toLowerCase()
+  if (!normalized) return null
   if (normalized === 'a') return 'A' as const
   if (normalized === 'b') return 'B' as const
   if (normalized === 'c') return 'C' as const
   if (normalized === 'c only' || normalized === 'c-only') return 'C only' as const
   issues.push(`Row ${rowNumber}: fatigue_group must be A, B, C, or C only.`)
   return 'C' as const
+}
+
+function normalizedShiftValue(rawValue: string) {
+  const normalized = rawValue.normalize('NFKC').replace(/\u00a0/g, ' ').trim().toUpperCase()
+  return normalized.replace(/[^A-Z0-9]/g, '') === 'RDO' ? 'RDO' : normalized
 }
 
 export async function parseBidLineImport(file: File): Promise<BidLineImportPreview> {
@@ -240,10 +251,7 @@ export async function parseBidLineImport(file: File): Promise<BidLineImportPrevi
     const pattern = valueFor(row, 'pattern').toUpperCase()
     const lineTypeRaw = (valueFor(row, 'line_type') || 'CPC').toUpperCase()
     const midRaw = (valueFor(row, 'mid') || 'No').toUpperCase()
-    const days = DAY_HEADERS.map((day) => {
-      const value = valueFor(row, day).toUpperCase()
-      return value === 'R.D.O.' || value === 'RDO.' ? 'RDO' : value
-    }) as BidLineImportRow['days']
+    const days = DAY_HEADERS.map((day) => normalizedShiftValue(valueFor(row, day))) as BidLineImportRow['days']
 
     if (!lineCode || lineCode.length > 40) issues.push(`Row ${sourceRow}: line_code is required and must be 40 characters or fewer.`)
     if (!pattern || pattern.length > 40) issues.push(`Row ${sourceRow}: pattern is required and must be 40 characters or fewer.`)
@@ -262,9 +270,9 @@ export async function parseBidLineImport(file: File): Promise<BidLineImportPrevi
       pattern,
       fatigue_group: normalizedFatigueGroup(valueFor(row, 'fatigue_group'), sourceRow, issues),
       mid: midRaw === 'BID' ? 'BID' : 'No',
-      aws: booleanValue(valueFor(row, 'aws'), 'aws', sourceRow, issues),
+      aws: optionalBooleanValue(valueFor(row, 'aws'), 'aws', sourceRow, issues),
       four_ten: booleanValue(valueFor(row, 'four_ten'), 'four_ten', sourceRow, issues),
-      flex: booleanValue(valueFor(row, 'flex'), 'flex', sourceRow, issues),
+      flex: optionalBooleanValue(valueFor(row, 'flex'), 'flex', sourceRow, issues),
       days,
     })
   })
@@ -273,7 +281,9 @@ export async function parseBidLineImport(file: File): Promise<BidLineImportPrevi
   if (lines.length > MAX_IMPORT_ROWS) issues.push(`The file contains ${lines.length} rows; the maximum is ${MAX_IMPORT_ROWS}.`)
 
   if (!headerMap.has('line_type')) warnings.push('line_type was not included, so CPC was used.')
-  if (!headerMap.has('fatigue_group')) warnings.push('fatigue_group was not included, so C was used.')
+  if (!headerMap.has('fatigue_group')) warnings.push('fatigue_group was not included; existing values stay unchanged and new lines default to C.')
+  if (!headerMap.has('aws')) warnings.push('aws was not included; existing values stay unchanged and new lines default to No.')
+  if (!headerMap.has('flex')) warnings.push('flex was not included; existing values stay unchanged and new lines default to Yes.')
   if (!headerMap.has('mid')) warnings.push('mid was not included, so No was used.')
 
   if (issues.length) throw new BidLineImportError(issues.slice(0, 100))

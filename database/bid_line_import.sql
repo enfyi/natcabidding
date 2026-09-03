@@ -122,7 +122,8 @@ begin
     line_code_value := trim(line_item ->> 'line_code');
     line_type_value := upper(trim(coalesce(line_item ->> 'line_type', 'CPC')));
     pattern_value := trim(line_item ->> 'pattern');
-    fatigue_group_value := case lower(trim(coalesce(line_item ->> 'fatigue_group', 'C')))
+    fatigue_group_value := case lower(trim(coalesce(line_item ->> 'fatigue_group', '')))
+      when '' then null
       when 'a' then 'A'
       when 'b' then 'B'
       when 'c' then 'C'
@@ -148,24 +149,26 @@ begin
     if pattern_value is null or pattern_value = '' or length(pattern_value) > 40 then
       raise exception 'Row % has an invalid pattern.', row_number;
     end if;
-    if fatigue_group_value is null then
+    if nullif(trim(coalesce(line_item ->> 'fatigue_group', '')), '') is not null and fatigue_group_value is null then
       raise exception 'Row % fatigue_group must be A, B, C, or C only.', row_number;
     end if;
     if mid_value is null then
       raise exception 'Row % mid must be No or BID.', row_number;
     end if;
-    if jsonb_typeof(line_item -> 'aws') <> 'boolean'
-      or jsonb_typeof(line_item -> 'four_ten') <> 'boolean'
-      or jsonb_typeof(line_item -> 'flex') <> 'boolean' then
-      raise exception 'Row % AWS, four_ten, and flex values must be booleans.', row_number;
+    if coalesce(jsonb_typeof(line_item -> 'aws'), 'null') not in ('boolean', 'null')
+      or coalesce(jsonb_typeof(line_item -> 'flex'), 'null') not in ('boolean', 'null') then
+      raise exception 'Row % AWS and flex values must be booleans or blank.', row_number;
+    end if;
+    if jsonb_typeof(line_item -> 'four_ten') <> 'boolean' then
+      raise exception 'Row % four_ten must be a boolean.', row_number;
     end if;
     if jsonb_typeof(line_days) <> 'array' or jsonb_array_length(line_days) <> 7 then
       raise exception 'Row % must contain exactly seven day values, Sunday through Saturday.', row_number;
     end if;
 
-    aws_value := (line_item ->> 'aws')::boolean;
+    aws_value := case when jsonb_typeof(line_item -> 'aws') = 'boolean' then (line_item ->> 'aws')::boolean else null end;
     four_ten_value := (line_item ->> 'four_ten')::boolean;
-    flex_value := (line_item ->> 'flex')::boolean;
+    flex_value := case when jsonb_typeof(line_item -> 'flex') = 'boolean' then (line_item ->> 'flex')::boolean else null end;
     imported_codes := array_append(imported_codes, line_code_value);
 
     select rl.id
@@ -194,11 +197,11 @@ begin
         line_code_value,
         line_type_value,
         pattern_value,
-        fatigue_group_value,
+        coalesce(fatigue_group_value, 'C'),
         mid_value,
-        aws_value,
+        coalesce(aws_value, false),
         four_ten_value,
-        flex_value,
+        coalesce(flex_value, true),
         'open'
       )
       returning id into line_id;
@@ -207,11 +210,11 @@ begin
       update public.rdo_lines rl
       set line_type = line_type_value,
           pattern = pattern_value,
-          fatigue_group = fatigue_group_value,
+          fatigue_group = coalesce(fatigue_group_value, rl.fatigue_group),
           mid = mid_value,
-          aws = aws_value,
+          aws = coalesce(aws_value, rl.aws),
           four_ten = four_ten_value,
-          flex = flex_value,
+          flex = coalesce(flex_value, rl.flex),
           updated_at = now()
       where rl.id = line_id;
       updated_count := updated_count + 1;
