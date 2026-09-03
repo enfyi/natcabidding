@@ -146,11 +146,13 @@ function normalizedWorksheetPath(target: string) {
   return `xl/${withoutLeadingSlash.replace(/^\.\//, '')}`
 }
 
-export async function readSpreadsheetRows(file: File, preferredSheetName = 'Bid Lines') {
+type SpreadsheetSheet = { name: string; rows: string[][] }
+
+export async function readSpreadsheetSheets(file: File): Promise<SpreadsheetSheet[]> {
   const extension = file.name.split('.').pop()?.toLowerCase()
 
   if (extension === 'csv') {
-    return csvRows(await file.text())
+    return [{ name: 'Bid Lines', rows: csvRows(await file.text()) }]
   }
 
   if (extension !== 'xlsx') {
@@ -173,39 +175,53 @@ export async function readSpreadsheetRows(file: File, preferredSheetName = 'Bid 
     name: xmlAttribute(match[1], 'name'),
     relationshipId: xmlAttribute(match[1], 'r:id'),
   }))
-  const selectedSheet = sheets.find((sheet) => sheet.name.toLowerCase() === preferredSheetName.toLowerCase()) || sheets[0]
-  const target = selectedSheet ? relationships.get(selectedSheet.relationshipId) : ''
-  if (!target) throw new BidLineImportError(['The workbook does not contain a readable worksheet.'])
-
-  const worksheetXml = await zip.file(normalizedWorksheetPath(target))?.async('string')
-  if (!worksheetXml) throw new BidLineImportError([`The ${selectedSheet.name} worksheet could not be read.`])
-
   const sharedStringsXml = await zip.file('xl/sharedStrings.xml')?.async('string')
-  return worksheetRows(worksheetXml, sharedStringsXml ? sharedStringValues(sharedStringsXml) : [])
+  const sharedStrings = sharedStringsXml ? sharedStringValues(sharedStringsXml) : []
+  const readableSheets: SpreadsheetSheet[] = []
+
+  for (const sheet of sheets) {
+    const target = relationships.get(sheet.relationshipId)
+    if (!target) continue
+    const worksheetXml = await zip.file(normalizedWorksheetPath(target))?.async('string')
+    if (!worksheetXml) continue
+    readableSheets.push({ name: sheet.name, rows: worksheetRows(worksheetXml, sharedStrings) })
+  }
+
+  if (!readableSheets.length) throw new BidLineImportError(['The workbook does not contain a readable worksheet.'])
+  return readableSheets
 }
 
-function booleanValue(rawValue: string, label: string, rowNumber: number, issues: string[]) {
+export async function readSpreadsheetRows(file: File, preferredSheetName = 'Bid Lines') {
+  const sheets = await readSpreadsheetSheets(file)
+  return sheets.find((sheet) => sheet.name.toLowerCase() === preferredSheetName.toLowerCase())?.rows || sheets[0].rows
+}
+
+function rowReference(row: number | string) {
+  return typeof row === 'number' ? `Row ${row}` : row
+}
+
+function booleanValue(rawValue: string, label: string, row: number | string, issues: string[]) {
   const normalized = rawValue.trim().toLowerCase()
   if (!normalized) return false
   if (['yes', 'y', 'true', '1'].includes(normalized)) return true
   if (['no', 'n', 'false', '0'].includes(normalized)) return false
-  issues.push(`Row ${rowNumber}: ${label} must be Yes or No.`)
+  issues.push(`${rowReference(row)}: ${label} must be Yes or No.`)
   return false
 }
 
-function optionalBooleanValue(rawValue: string, label: string, rowNumber: number, issues: string[]) {
+function optionalBooleanValue(rawValue: string, label: string, row: number | string, issues: string[]) {
   if (!rawValue.trim()) return null
-  return booleanValue(rawValue, label, rowNumber, issues)
+  return booleanValue(rawValue, label, row, issues)
 }
 
-function normalizedFatigueGroup(rawValue: string, rowNumber: number, issues: string[]) {
+function normalizedFatigueGroup(rawValue: string, row: number | string, issues: string[]) {
   const normalized = rawValue.trim().toLowerCase()
   if (!normalized) return null
   if (normalized === 'a') return 'A' as const
   if (normalized === 'b') return 'B' as const
   if (normalized === 'c') return 'C' as const
   if (normalized === 'c only' || normalized === 'c-only') return 'C only' as const
-  issues.push(`Row ${rowNumber}: fatigue_group must be A, B, C, or C only.`)
+  issues.push(`${rowReference(row)}: fatigue_group must be A, B, C, or C only.`)
   return 'C' as const
 }
 
@@ -215,76 +231,90 @@ function normalizedShiftValue(rawValue: string) {
 }
 
 export async function parseBidLineImport(file: File): Promise<BidLineImportPreview> {
-  const rows = await readSpreadsheetRows(file)
+  const workbookSheets = await readSpreadsheetSheets(file)
   const issues: string[] = []
   const warnings: string[] = []
-
-  if (!rows.length) throw new BidLineImportError(['The uploaded file is empty.'])
-
-  const headerIndex = rows.findIndex((row) => row.map(normalizeHeader).includes('line_code'))
-  if (headerIndex < 0) {
-    throw new BidLineImportError(['A header row containing line_code (or Line) could not be found.'])
-  }
-
-  const headers = rows[headerIndex].map(normalizeHeader)
-  const headerMap = new Map(headers.map((header, index) => [header, index]))
-  const requiredHeaders = ['line_code', 'pattern', ...DAY_HEADERS]
-  const missingHeaders = requiredHeaders.filter((header) => !headerMap.has(header))
-
-  if (missingHeaders.length) {
-    throw new BidLineImportError([`Missing required columns: ${missingHeaders.join(', ')}.`])
-  }
-
-  const valueFor = (row: string[], header: string) => {
-    const index = headerMap.get(header)
-    return index === undefined ? '' : String(row[index] ?? '').trim()
-  }
-
   const lines: BidLineImportRow[] = []
   const seenLineCodes = new Set<string>()
 
-  rows.slice(headerIndex + 1).forEach((row, offset) => {
-    const sourceRow = headerIndex + offset + 2
-    if (!row.some((value) => String(value ?? '').trim())) return
+  const normalizedSheetName = (name: string) => name.trim().toUpperCase().replace(/[\s_]+/g, '-')
+  const separatedSheets = ['CPC', 'R-DEV', 'D-DEV'].map((name) => ({
+    group: name,
+    sheet: workbookSheets.find((sheet) => normalizedSheetName(sheet.name) === name),
+  })).filter((entry) => entry.sheet)
+  const sheetsToParse = separatedSheets.length
+    ? separatedSheets.map(({ group, sheet }) => ({ group, sheet: sheet as SpreadsheetSheet }))
+    : [{ group: 'LEGACY', sheet: workbookSheets.find((sheet) => sheet.name.toLowerCase() === 'bid lines') || workbookSheets[0] }]
 
-    const lineCode = valueFor(row, 'line_code')
-    const pattern = valueFor(row, 'pattern').toUpperCase()
-    const lineTypeRaw = (valueFor(row, 'line_type') || 'CPC').toUpperCase()
-    const midRaw = (valueFor(row, 'mid') || 'No').toUpperCase()
-    const days = DAY_HEADERS.map((day) => normalizedShiftValue(valueFor(row, day))) as BidLineImportRow['days']
+  for (const { group, sheet } of sheetsToParse) {
+    const rows = sheet.rows
+    if (!rows.length) continue
 
-    if (!lineCode || lineCode.length > 40) issues.push(`Row ${sourceRow}: line_code is required and must be 40 characters or fewer.`)
-    if (!pattern || pattern.length > 40) issues.push(`Row ${sourceRow}: pattern is required and must be 40 characters or fewer.`)
-    if (lineTypeRaw !== 'CPC' && lineTypeRaw !== 'DEV') issues.push(`Row ${sourceRow}: line_type must be CPC or DEV.`)
-    if (midRaw !== 'NO' && midRaw !== 'BID') issues.push(`Row ${sourceRow}: mid must be No or BID.`)
-    if (seenLineCodes.has(lineCode.toLowerCase())) issues.push(`Row ${sourceRow}: line code ${lineCode} appears more than once.`)
-    days.forEach((shift, weekday) => {
-      if (!shift || shift.length > 20) issues.push(`Row ${sourceRow}: ${DAY_HEADERS[weekday]} must contain a shift code or RDO.`)
+    const headerIndex = rows.findIndex((row) => row.map(normalizeHeader).includes('line_code'))
+    if (headerIndex < 0) {
+      issues.push(`${sheet.name}: a header row containing line_code (or Line) could not be found.`)
+      continue
+    }
+
+    const headers = rows[headerIndex].map(normalizeHeader)
+    const headerMap = new Map(headers.map((header, index) => [header, index]))
+    const requiredHeaders = ['line_code', ...(group === 'CPC' || group === 'LEGACY' ? ['pattern'] : []), ...DAY_HEADERS]
+    const missingHeaders = requiredHeaders.filter((header) => !headerMap.has(header))
+    if (missingHeaders.length) {
+      issues.push(`${sheet.name}: missing required columns: ${missingHeaders.join(', ')}.`)
+      continue
+    }
+
+    const valueFor = (row: string[], header: string) => {
+      const index = headerMap.get(header)
+      return index === undefined ? '' : String(row[index] ?? '').trim()
+    }
+
+    rows.slice(headerIndex + 1).forEach((row, offset) => {
+      const sourceRow = headerIndex + offset + 2
+      if (!row.some((value) => String(value ?? '').trim())) return
+
+      const rowLabel = `${sheet.name} row ${sourceRow}`
+      const lineCode = valueFor(row, 'line_code')
+      const lineTypeRaw = group === 'CPC' ? 'CPC' : group === 'R-DEV' || group === 'D-DEV' ? 'DEV' : (valueFor(row, 'line_type') || 'CPC').toUpperCase()
+      const pattern = group === 'R-DEV' || group === 'D-DEV' ? group : valueFor(row, 'pattern').toUpperCase()
+      const midRaw = (valueFor(row, 'mid') || 'No').toUpperCase()
+      const days = DAY_HEADERS.map((day) => normalizedShiftValue(valueFor(row, day))) as BidLineImportRow['days']
+
+      if (!lineCode || lineCode.length > 40) issues.push(`${rowLabel}: line_code is required and must be 40 characters or fewer.`)
+      if (!pattern || pattern.length > 40) issues.push(`${rowLabel}: pattern is required and must be 40 characters or fewer.`)
+      if (lineTypeRaw !== 'CPC' && lineTypeRaw !== 'DEV') issues.push(`${rowLabel}: line_type must be CPC or DEV.`)
+      if (midRaw !== 'NO' && midRaw !== 'BID') issues.push(`${rowLabel}: mid must be No or BID.`)
+      if (seenLineCodes.has(lineCode.toLowerCase())) issues.push(`${rowLabel}: line code ${lineCode} appears more than once in the workbook.`)
+      days.forEach((shift, weekday) => {
+        if (!shift || shift.length > 20) issues.push(`${rowLabel}: ${DAY_HEADERS[weekday]} must contain a shift code or RDO.`)
+      })
+
+      seenLineCodes.add(lineCode.toLowerCase())
+      lines.push({
+        sourceSheet: sheet.name,
+        sourceRow,
+        line_code: lineCode,
+        line_type: lineTypeRaw === 'DEV' ? 'DEV' : 'CPC',
+        pattern,
+        fatigue_group: normalizedFatigueGroup(valueFor(row, 'fatigue_group'), rowLabel, issues),
+        mid: midRaw === 'BID' ? 'BID' : 'No',
+        aws: optionalBooleanValue(valueFor(row, 'aws'), 'aws', rowLabel, issues),
+        four_ten: booleanValue(valueFor(row, 'four_ten'), 'four_ten', rowLabel, issues),
+        flex: optionalBooleanValue(valueFor(row, 'flex'), 'flex', rowLabel, issues),
+        days,
+      })
     })
 
-    seenLineCodes.add(lineCode.toLowerCase())
-    lines.push({
-      sourceRow,
-      line_code: lineCode,
-      line_type: lineTypeRaw === 'DEV' ? 'DEV' : 'CPC',
-      pattern,
-      fatigue_group: normalizedFatigueGroup(valueFor(row, 'fatigue_group'), sourceRow, issues),
-      mid: midRaw === 'BID' ? 'BID' : 'No',
-      aws: optionalBooleanValue(valueFor(row, 'aws'), 'aws', sourceRow, issues),
-      four_ten: booleanValue(valueFor(row, 'four_ten'), 'four_ten', sourceRow, issues),
-      flex: optionalBooleanValue(valueFor(row, 'flex'), 'flex', sourceRow, issues),
-      days,
-    })
-  })
+    if (group === 'LEGACY' && !headerMap.has('line_type')) warnings.push('line_type was not included, so CPC was used.')
+    if (!headerMap.has('fatigue_group')) warnings.push(`${sheet.name}: fatigue_group was not included; existing values stay unchanged and new lines default to C.`)
+    if (!headerMap.has('aws')) warnings.push(`${sheet.name}: aws was not included; existing values stay unchanged and new lines default to No.`)
+    if (!headerMap.has('flex')) warnings.push(`${sheet.name}: flex was not included; existing values stay unchanged and new lines default to Yes.`)
+    if (!headerMap.has('mid')) warnings.push(`${sheet.name}: mid was not included, so No was used.`)
+  }
 
   if (!lines.length) issues.push('The file does not contain any bid-line rows below the header.')
   if (lines.length > MAX_IMPORT_ROWS) issues.push(`The file contains ${lines.length} rows; the maximum is ${MAX_IMPORT_ROWS}.`)
-
-  if (!headerMap.has('line_type')) warnings.push('line_type was not included, so CPC was used.')
-  if (!headerMap.has('fatigue_group')) warnings.push('fatigue_group was not included; existing values stay unchanged and new lines default to C.')
-  if (!headerMap.has('aws')) warnings.push('aws was not included; existing values stay unchanged and new lines default to No.')
-  if (!headerMap.has('flex')) warnings.push('flex was not included; existing values stay unchanged and new lines default to Yes.')
-  if (!headerMap.has('mid')) warnings.push('mid was not included, so No was used.')
 
   if (issues.length) throw new BidLineImportError(issues.slice(0, 100))
 

@@ -1,4 +1,5 @@
 export type BidLineImportRow = {
+  sourceSheet: string
   sourceRow: number
   line_code: string
   line_type: 'CPC' | 'DEV'

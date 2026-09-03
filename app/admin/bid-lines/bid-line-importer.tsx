@@ -30,7 +30,12 @@ function browserClient() {
 }
 
 function importPayload(lines: BidLineImportRow[]) {
-  return lines.map(({ sourceRow: _sourceRow, ...line }) => line)
+  return lines.map(({ sourceRow: _sourceRow, sourceSheet: _sourceSheet, ...line }) => line)
+}
+
+function bidLineSection(line: BidLineImportRow) {
+  if (line.line_type === 'CPC') return 'CPC'
+  return line.pattern === 'D-DEV' ? 'D-Dev' : 'R-Dev'
 }
 
 export function BidLineImporter() {
@@ -202,7 +207,7 @@ export function BidLineImporter() {
         <div>
           <p className="eyebrow">System administration</p>
           <h1>Import bid lines.</h1>
-          <p className="import-lede">Upload one area at a time, review every schedule, then save the complete batch to Supabase.</p>
+          <p className="import-lede">Upload one area at a time. The workbook keeps CPC, R-Dev, and D-Dev lines on separate tabs.</p>
         </div>
         <a className="button secondary" href="/templates/zla-bid-line-import-template.xlsx" download>
           Download Excel template
@@ -236,7 +241,7 @@ export function BidLineImporter() {
           <label className="import-file-field">
             Excel or CSV file
             <input type="file" accept=".xlsx,.csv" onChange={(event) => resetPreview(event.target.files?.[0] || null)} />
-            <small>{file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : 'Use the template or a file with matching column names.'}</small>
+            <small>{file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : 'Use the template with CPC, R-Dev, and D-Dev tabs. Legacy one-sheet files still work.'}</small>
           </label>
         </div>
 
@@ -274,14 +279,14 @@ export function BidLineImporter() {
             <table>
               <thead>
                 <tr>
-                  <th>Row</th><th>Line</th><th>Type</th><th>Pattern</th><th>Fatigue</th><th>Mid</th><th>AWS</th><th>4/10</th><th>Flex</th>
+                  <th>Sheet</th><th>Row</th><th>Line</th><th>Section</th><th>Pattern</th><th>Fatigue</th><th>Mid</th><th>AWS</th><th>4/10</th><th>Flex</th>
                   {DAY_LABELS.map((day) => <th key={day}>{day}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {preview.lines.map((line) => (
                   <tr key={`${line.sourceRow}-${line.line_code}`}>
-                    <td>{line.sourceRow}</td><td><strong>{line.line_code}</strong></td><td>{line.line_type}</td><td>{line.pattern}</td><td>{line.fatigue_group || 'Default / unchanged'}</td><td>{line.mid}</td>
+                    <td>{line.sourceSheet}</td><td>{line.sourceRow}</td><td><strong>{line.line_code}</strong></td><td>{bidLineSection(line)}</td><td>{line.pattern}</td><td>{line.fatigue_group || 'Default / unchanged'}</td><td>{line.mid}</td>
                     <td>{line.aws === null ? 'Default / unchanged' : line.aws ? 'Yes' : 'No'}</td><td>{line.four_ten ? 'Yes' : 'No'}</td><td>{line.flex === null ? 'Yes / unchanged' : line.flex ? 'Yes' : 'No'}</td>
                     {line.days.map((day, index) => <td className={day === 'RDO' ? 'rdo' : ''} key={`${line.line_code}-${index}`}>{day}</td>)}
                   </tr>

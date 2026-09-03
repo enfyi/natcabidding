@@ -5732,14 +5732,21 @@ function publicRdoFilteredLines(area) {
   return rdoLinesForArea(area).filter((line) => rdoLineMatchesFilterSet(line, publicRdoFilters));
 }
 
-function publicRdoRowsMarkup(area, lines = publicRdoFilteredLines(area)) {
+const PUBLIC_RDO_LINE_SECTIONS = ["CPC", "R-Dev", "D-Dev"];
+
+function publicRdoLineSection(line) {
+  if (line.lineType !== "DEV") return "CPC";
+  return /D[-\s]?DEV/i.test(line.pattern) ? "D-Dev" : "R-Dev";
+}
+
+function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
   if (!lines.length) return `<tr><td colspan="11">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
   const rows = [];
 
   lines.forEach((line) => {
-    if (line.pattern !== lastPattern) {
+    if (showPatternGroups && line.pattern !== lastPattern) {
       rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
@@ -5758,13 +5765,46 @@ function publicRdoRowsMarkup(area, lines = publicRdoFilteredLines(area)) {
   return rows.join("");
 }
 
+function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
+  if (!lines.length) return `<div class="public-rdo-empty">No RDO lines match those filters for ${area}.</div>`;
+
+  return PUBLIC_RDO_LINE_SECTIONS.map((section) => {
+    const sectionLines = lines.filter((line) => publicRdoLineSection(line) === section);
+    if (!sectionLines.length) return "";
+    const lineLabel = sectionLines.length === 1 ? "line" : "lines";
+
+    return `
+      <section class="public-rdo-line-section" aria-labelledby="public-rdo-${bidAsClass(section)}">
+        <div class="public-rdo-line-section-heading">
+          <h3 id="public-rdo-${bidAsClass(section)}">${section}</h3>
+          <span>${sectionLines.length} ${lineLabel}</span>
+        </div>
+        <div class="table-wrap rdo-page-table-wrap">
+          <table class="line-table public-rdo-table">
+            <thead>
+              <tr>
+                <th>Line #</th>
+                <th>Bidder</th>
+                ${dayNames.map((day) => `<th>${day}</th>`).join("")}
+                <th>Group</th>
+                <th>Mid</th>
+              </tr>
+            </thead>
+            <tbody>${publicRdoRowsMarkup(area, sectionLines, section === "CPC")}</tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }).join("");
+}
+
 function updatePublicRdoResults() {
-  const rowsTarget = document.querySelector("[data-public-rdo-rows]");
-  if (!rowsTarget) return;
+  const sectionsTarget = document.querySelector("[data-public-rdo-sections]");
+  if (!sectionsTarget) return;
 
   const lines = publicRdoFilteredLines(publicState.area);
   const lineLabel = lines.length === 1 ? "line" : "lines";
-  rowsTarget.innerHTML = publicRdoRowsMarkup(publicState.area, lines);
+  sectionsTarget.innerHTML = publicRdoSectionsMarkup(publicState.area, lines);
   setText("[data-public-rdo-filter-count]", `${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}`);
 }
 
@@ -5783,7 +5823,7 @@ function renderPublicRdoTable(area) {
         <span class="pill open" data-public-rdo-filter-count>${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}</span>
       </div>
       <div class="filter-bar">
-        <input type="search" value="${escapeHtml(publicRdoFilters.search)}" placeholder="Search line or CPC..." aria-label="Search public RDO lines" data-public-rdo-filter="search" />
+        <input type="search" value="${escapeHtml(publicRdoFilters.search)}" placeholder="Search line or bidder..." aria-label="Search public RDO lines" data-public-rdo-filter="search" />
         <label><input type="checkbox" ${publicRdoFilters.openOnly ? "checked" : ""} data-public-rdo-filter="open" /> Open Only</label>
         <select data-public-rdo-filter="mid" aria-label="Filter public lines by mid preference">
           <option value="all" ${publicRdoFilters.mid === "all" ? "selected" : ""}>Mid: All</option>
@@ -5796,21 +5836,8 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <div class="table-wrap tall rdo-page-table-wrap">
-        <table class="line-table public-rdo-table">
-          <thead>
-            <tr>
-              <th>Line #</th>
-              <th>CPC</th>
-              ${dayNames.map((day) => `<th>${day}</th>`).join("")}
-              <th>Group</th>
-              <th>Mid</th>
-            </tr>
-          </thead>
-          <tbody data-public-rdo-rows>
-            ${publicRdoRowsMarkup(area, lines)}
-          </tbody>
-        </table>
+      <div class="public-rdo-sections" data-public-rdo-sections>
+        ${publicRdoSectionsMarkup(area, lines)}
       </div>
     </section>
   `;

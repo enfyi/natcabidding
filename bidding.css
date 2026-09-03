@@ -558,6 +558,56 @@ button.seniority-pill {
   overflow: hidden;
 }
 
+.public-main .public-rdo-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.public-main .public-rdo-line-section {
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.public-main .public-rdo-line-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  color: #ffffff;
+  background: #14335f;
+}
+
+.public-main .public-rdo-line-section-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-main .public-rdo-line-section-heading span {
+  color: #dbe7ff;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.public-main .public-rdo-line-section .table-wrap {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.public-main .public-rdo-empty {
+  padding: 28px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+}
+
 .public-main .public-rdo-panel .panel-header p,
 .public-main .public-rdo-panel .filter-bar label {
   color: #64748b;
