@@ -5062,10 +5062,9 @@ function slotMatchesArea(details, area = currentUser.area) {
   return (details.area || "Area A") === area;
 }
 
-function upsertRdoLinesFromDatabase(rows, lineDays, areaById) {
+function upsertRdoLinesFromDatabase(rows, areaById) {
   rows.forEach((row) => {
-    const days = lineDays
-      .filter((day) => day.rdo_line_id === row.id)
+    const days = (row.rdo_line_days || [])
       .sort((a, b) => a.weekday - b.weekday)
       .map((day) => day.shift_code);
     const area = areaNameForRow(row, areaById);
@@ -5546,7 +5545,6 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
-      rdoLineDaysResult,
       rdoSubmissionsResult,
       leaveSlotsResult,
       leaveRequestsResult,
@@ -5555,8 +5553,7 @@ async function loadSupabaseReferenceData() {
       bidWindowsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials").eq("bid_year_id", bidYear.id),
-      client.from("rdo_line_days").select("rdo_line_id,weekday,shift_code"),
+      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.from("intake_submissions").select("id,area_id,bidder_id,round_number,status,payload,submitted_at,reviewed_at,denial_reason,created_at,bidders:bidder_id(first_name,last_name,initials,bid_role,seniority_rank,area_id),areas(name)").eq("bid_year_id", bidYear.id).eq("submission_type", "rdo").in("status", ["pending", "approved"]).order("submitted_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
@@ -5570,7 +5567,6 @@ async function loadSupabaseReferenceData() {
     const loadWarnings = [
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
-      supabaseLoadWarning("RDO line days", rdoLineDaysResult),
       supabaseLoadWarning("RDO submissions", rdoSubmissionsResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
@@ -5583,9 +5579,7 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    if (!rdoLinesResult.error && !rdoLineDaysResult.error) {
-      upsertRdoLinesFromDatabase(rdoLinesResult.data || [], rdoLineDaysResult.data || [], areaById);
-    }
+    if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!rdoSubmissionsResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionsResult.data || [], areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
