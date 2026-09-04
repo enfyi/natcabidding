@@ -3723,14 +3723,87 @@ function denyIntakeItem(id) {
   setPage("intake");
 }
 
-function saveIntakeOverride(id) {
+async function saveSupabaseApprovedLeaveEdit(item) {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase is not configured on this page.");
+  if (!item?.supabaseRequestId) throw new Error("This approved leave request has not been saved to Supabase.");
+
+  const dateKeys = datesInLeaveRange(item.range);
+  if (!dateKeys.length) throw new Error("Choose a valid replacement date range.");
+
+  const { data, error } = await client.rpc("replace_approved_leave_request_dates", {
+    requested_leave_request_id: item.supabaseRequestId,
+    requested_start_date: dateKeys[0],
+    requested_end_date: dateKeys[dateKeys.length - 1],
+    allow_capacity_override: Boolean(item.leaveCapacityOverride),
+  });
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) {
+      throw new Error("Approved-date replacement is not installed. Run database/admin_leave_request_edit.sql in Supabase.");
+    }
+    throw error;
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (result?.charged_days !== undefined) {
+    item.days = Number(result.charged_days);
+    item.summary = `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
+  }
+
+  await loadSupabaseReferenceData();
+  return true;
+}
+
+async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
 
   const original = item.summary;
   const originalLine = item.line;
   const originalRange = item.range;
+  const originalDays = item.days;
+  const originalCapacityOverride = item.leaveCapacityOverride;
   captureIntakeOverrideFields(item);
+
+  if (item.status === "Approved" && item.type === "Leave" && supabaseState.connected && !item.supabaseRequestId) {
+    item.range = originalRange;
+    item.days = originalDays;
+    item.leaveCapacityOverride = originalCapacityOverride;
+    item.summary = original;
+    item.reviewNote = "This approved leave request has not been saved to Supabase, so its dates cannot be replaced durably.";
+    activeOverrideId = id;
+    renderApp();
+    setPage("intake");
+    return;
+  }
+
+  if (item.status === "Approved" && item.type === "Leave" && item.supabaseRequestId) {
+    try {
+      item.reviewNote = "Saving replacement dates...";
+      renderIntakeQueue();
+      await saveSupabaseApprovedLeaveEdit(item);
+      logHistory(
+        item.area,
+        "Approved leave dates replaced",
+        `${currentUser.initials} replaced ${item.initials}'s approved leave dates from "${originalRange}" to "${item.range}".`
+      );
+      activeOverrideId = null;
+      activeDenialId = null;
+      renderApp();
+      setPage("intake");
+      return;
+    } catch (error) {
+      item.range = originalRange;
+      item.days = originalDays;
+      item.leaveCapacityOverride = originalCapacityOverride;
+      item.summary = original;
+      item.reviewNote = error.message || "The approved leave dates could not be replaced.";
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+      return;
+    }
+  }
 
   if (item.status === "Approved") {
     if (item.type === "RDO Line") {
@@ -9310,14 +9383,15 @@ function renderOverrideEditor(item) {
   return `
     ${rdoConflictNote}
     ${conflictNote}
-    <label>Date Range <input type="text" value="${item.range}" data-override-range /></label>
-    <label>Days <input type="number" value="${item.days}" data-override-days /></label>
+    <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
+    <label>Days <input type="number" value="${item.days}" data-override-days ${pending ? "" : "readonly"} /></label>
+    ${pending ? "" : "<small>Charged days are recalculated from the replacement range.</small>"}
     <label class="override-check">
       <input type="checkbox" data-override-capacity ${item.leaveCapacityOverride ? "checked" : ""} />
       Approve even though one or more dates are full
     </label>
     <div class="button-row">
-      <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Save Admin Edit"}</button>
+      <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Replace Approved Dates"}</button>
       ${pending ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">${approveLabel}</button>` : ""}
       ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
     </div>
@@ -10309,7 +10383,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
-    saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
+    await saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
     return;
   }
 

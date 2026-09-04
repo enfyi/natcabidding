@@ -18,6 +18,12 @@ For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
 the admin-only database operation that safely resizes each day's slot inventory.
 
+For durable intake/admin replacement of dates on an approved leave request, also
+run `database/admin_leave_request_edit.sql` after the leave submission preflight.
+The operation releases the request's old slots, validates and reserves its new
+dates, rebuilds Round 1 buckets and charged-date details, and writes an audit
+event in one transaction.
+
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
 `database/leave_submission_preflight.sql`. The testing switch lets admins allow
@@ -67,7 +73,7 @@ That lets the app support cases like:
 - June 9 through June 16 spans more than 7 calendar days, so it needs 2 Round 1 buckets.
 - A BUE can use up to 2 Round 1 buckets, even if those buckets only spend a few charged leave days.
 
-## Next Build Step
+## Browser Adapter
 
 The website now has a browser-side Supabase adapter:
 
@@ -76,12 +82,13 @@ The website now has a browser-side Supabase adapter:
 3. `bidding.js` reads bid year, areas, holidays, RDO lines, RDO line days, and leave slots from Supabase.
 4. If Supabase is unavailable, the page keeps using the built-in prototype data.
 
-The next practical step is write support:
+The remaining write-support work includes:
 
 1. Add real Supabase login.
 2. Link each logged-in Supabase auth user to a row in `bidders.auth_user_id`.
 3. Save preview/add-to-batch/submit actions into `leave_requests`, `leave_request_dates`, and `leave_request_week_buckets`.
-4. Save intake approvals/denials back to Supabase and write `audit_events`.
+4. Save intake approvals/denials back to Supabase. Approved leave date
+   replacements are already persisted by `admin_leave_request_edit.sql`.
 
 ## Seniority Imports
 
