@@ -5733,10 +5733,26 @@ function publicRdoFilteredLines(area) {
 }
 
 const PUBLIC_RDO_LINE_SECTIONS = ["CPC", "R-Dev", "D-Dev"];
+const PUBLIC_RDO_LINE_COLLATOR = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
 
 function publicRdoLineSection(line) {
   if (line.lineType !== "DEV") return "CPC";
   return /D[-\s]?DEV/i.test(line.pattern) ? "D-Dev" : "R-Dev";
+}
+
+function comparePublicRdoLines(left, right) {
+  const leftCode = String(left.line || "").trim();
+  const rightCode = String(right.line || "").trim();
+  const leftNumber = /^\d+$/.test(leftCode) ? Number(leftCode) : null;
+  const rightNumber = /^\d+$/.test(rightCode) ? Number(rightCode) : null;
+
+  if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber;
+  if (leftNumber !== null) return -1;
+  if (rightNumber !== null) return 1;
+  return PUBLIC_RDO_LINE_COLLATOR.compare(leftCode, rightCode);
 }
 
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
@@ -5769,7 +5785,9 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
   if (!lines.length) return `<div class="public-rdo-empty">No RDO lines match those filters for ${area}.</div>`;
 
   return PUBLIC_RDO_LINE_SECTIONS.map((section) => {
-    const sectionLines = lines.filter((line) => publicRdoLineSection(line) === section);
+    const sectionLines = lines
+      .filter((line) => publicRdoLineSection(line) === section)
+      .sort(comparePublicRdoLines);
     if (!sectionLines.length) return "";
     const lineLabel = sectionLines.length === 1 ? "line" : "lines";
 
