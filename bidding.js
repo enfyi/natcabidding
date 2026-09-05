@@ -137,6 +137,7 @@ let leaveRangePreviewActive = false;
 let leavePickerOpen = false;
 let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
+let leaveManagementPendingId = "";
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
@@ -1784,6 +1785,34 @@ function leaveBidWindowErrorMessage(date = new Date()) {
   return bidWindowErrorMessage("Leave bids", date);
 }
 
+function editableLeaveRound(date = new Date()) {
+  if (bidWindowLockIsBypassed()) return activeTestBidRound() || currentRoundNumber();
+  const { window, isOpen } = currentUserBidWindowStatus(date);
+  return isOpen ? Number(window?.round || 0) || null : null;
+}
+
+function syncLeaveBidWindowControls(date = new Date()) {
+  const windowError = leaveBidWindowErrorMessage(date);
+  const disabled = Boolean(windowError);
+
+  document.querySelectorAll("[data-add-leave-request], [data-preview-leave-request], [data-leave-range-input]").forEach((control) => {
+    control.disabled = disabled;
+    control.title = windowError;
+  });
+
+  const addMoreButton = document.querySelector("[data-add-more-leave-dates]");
+  if (addMoreButton) {
+    const constraintError = addMoreButton.dataset.constraintError || "";
+    const addMoreError = windowError || constraintError;
+    addMoreButton.disabled = Boolean(addMoreError) || Boolean(leaveManagementPendingId);
+    addMoreButton.title = addMoreError;
+  }
+
+  if (disabled && !document.querySelector("[data-leave-date-picker]")?.hidden) {
+    setLeavePickerOpen(false);
+  }
+}
+
 function rdoBidWindowErrorMessage(date = new Date()) {
   return bidWindowErrorMessage("RDO bids", date);
 }
@@ -2983,6 +3012,12 @@ function draftRangeExists(range) {
 }
 
 function addOrUpdateLeaveSubmission() {
+  const windowError = leaveBidWindowErrorMessage();
+  if (windowError) {
+    setLeaveBuilderStatus(windowError, "error");
+    return;
+  }
+
   const { range, days, notes } = leaveBuilderValues();
   const round = currentRoundNumber();
   const isRoundOne = round === 1;
@@ -3022,15 +3057,19 @@ function addOrUpdateLeaveSubmission() {
   }
 
   if (isRoundOne) {
-    const existingWeeks = roundOneDraftWeekKeySet();
-    const combinedWeeks = roundOneDraftWeekKeySet([{ range, round, weekKeys }]).size;
+    const committedWeeks = leaveRoundUsageForInitials(currentUser.initials, 1)
+      .reduce((total, item) => total + Math.max(1, Number(item.weekUnits || 0)), 0);
+    const existingWeeks = committedWeeks + leaveDraftTotalWeeks();
+    const combinedWeeks = existingWeeks + weekUnits;
     if (combinedWeeks > roundOneWeekLimit()) {
       setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This would use ${combinedWeeks}.`, "error");
       return;
     }
-    var newRoundOneWeeks = Math.max(0, combinedWeeks - existingWeeks.size);
+    var newRoundOneWeeks = weekUnits;
   } else {
-    const currentTotal = leaveDraftTotalDays();
+    const committedRoundDays = leaveRoundUsageForInitials(currentUser.initials, round)
+      .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+    const currentTotal = committedRoundDays + leaveDraftTotalDays();
     if (currentTotal + days > currentRoundLeaveLimit()) {
       setLeaveBuilderStatus(`Round ${round} can include up to ${currentRoundLeaveLimit()} total days. This batch would be ${currentTotal + days}.`, "error");
       return;
@@ -3097,6 +3136,12 @@ function addOrUpdateLeaveSubmission() {
 }
 
 function previewLeaveSubmission() {
+  const windowError = leaveBidWindowErrorMessage();
+  if (windowError) {
+    setLeaveBuilderStatus(windowError, "error");
+    return;
+  }
+
   const { range, days } = leaveBuilderValues();
   const round = currentRoundNumber();
   const dateKeys = datesInLeaveRange(range);
@@ -3181,11 +3226,11 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
     const priorRound = leaveRoundForItem(item);
     datesInLeaveRange(item.range).forEach((key) => {
       const requestedRound = requestedDates.get(key);
-      if (requestedRound && priorRound < requestedRound) previousRoundDates.add(key);
+      if (requestedRound && priorRound <= requestedRound) previousRoundDates.add(key);
     });
   });
   if (previousRoundDates.size) {
-    return `You already bid these dates in a previous round: ${formatLeaveConflictDates([...previousRoundDates].sort())}. Each date may be bid only once across rounds.`;
+    return `You already bid these dates: ${formatLeaveConflictDates([...previousRoundDates].sort())}. Each date may be bid only once.`;
   }
 
   const rdoDates = [...requestedDates.keys()].filter((key) => isRdoDateForInitials(key, currentUser.initials));
@@ -6348,6 +6393,8 @@ function updateBidWindow() {
     button.classList.toggle("disabled", disabled);
   });
 
+  syncLeaveBidWindowControls(now);
+
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
     if (isValidationPeriod && !isTestingBypass) {
       button.textContent = "Round Closed";
@@ -6831,6 +6878,170 @@ function renderLeaveDraftQueue() {
       </article>
     `).join("")
     : '<p class="empty-state small">Add leave requests here first. Nothing is sent to intake until you submit the batch.</p>';
+}
+
+function submittedLeaveItemsForCurrentRound(date = new Date()) {
+  const round = editableLeaveRound(date) || currentRoundNumber();
+  const byRequest = new Map();
+
+  leaveBids.forEach((item) => {
+    if (!["Pending", "Approved"].includes(item.status)) return;
+    if (leaveRoundForItem(item) !== round) return;
+    if (item.initials && item.initials !== currentUser.initials) return;
+    const key = item.supabaseRequestId || item.id || `${round}|${item.priority}|${item.range}`;
+    byRequest.set(key, item);
+  });
+
+  return [...byRequest.values()].sort((left, right) =>
+    Number(left.priority || 0) - Number(right.priority || 0)
+  );
+}
+
+function submittedLeaveItemKey(item) {
+  return item.supabaseRequestId || item.id || `${leaveRoundForItem(item)}|${item.priority}|${item.range}`;
+}
+
+function setSubmittedLeaveStatus(message, status = "info") {
+  const target = document.querySelector("[data-submitted-leave-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function renderSubmittedLeaveManager() {
+  const panel = document.querySelector("[data-submitted-leave-manager]");
+  const list = document.querySelector("[data-submitted-leave-list]");
+  const usage = document.querySelector("[data-submitted-leave-usage]");
+  const roundLabel = document.querySelector("[data-submitted-leave-round]");
+  const addButton = document.querySelector("[data-add-more-leave-dates]");
+  if (!panel || !list || !usage || !roundLabel || !addButton) return;
+
+  const now = new Date();
+  const round = editableLeaveRound(now) || currentRoundNumber();
+  const items = submittedLeaveItemsForCurrentRound(now);
+  const hasSubmittedThisRound = leaveBids.some((item) =>
+    leaveRoundForItem(item) === round &&
+    (!item.initials || item.initials === currentUser.initials) &&
+    !["Draft", "Preview"].includes(item.status)
+  );
+  panel.hidden = !hasSubmittedThisRound;
+  if (!hasSubmittedThisRound) return;
+
+  const hoursPerDay = leaveHoursPerDayForInitials();
+  const maximumHours = leaveAllowanceLimitForRound(round) * hoursPerDay;
+  const usedHours = leaveCommittedChargedDays() * hoursPerDay;
+  const remainingHours = Math.max(0, maximumHours - usedHours);
+  const roundDays = items.reduce((total, item) => total + leaveItemChargedDays(item), 0);
+  const roundWeeks = items.reduce((total, item) => total + Math.max(1, Number(item.weekUnits || 0)), 0);
+  const windowError = leaveBidWindowErrorMessage(now);
+  const roundLimitReached = round === 1
+    ? roundWeeks >= roundOneWeekLimit()
+    : roundDays >= leaveDayLimitForRound(round);
+  const constraintError = remainingHours <= 0
+    ? `You have used your ${formatEstimatedLeaveDays(maximumHours)} allotted leave hours.`
+    : roundLimitReached
+      ? `You have reached the Round ${round} limit.`
+      : "";
+  const addError = windowError || constraintError;
+
+  roundLabel.textContent = `Round ${round}`;
+  addButton.dataset.constraintError = constraintError;
+  addButton.disabled = Boolean(addError) || Boolean(leaveManagementPendingId);
+  addButton.title = addError;
+  usage.innerHTML = `
+    <div><span>This round</span><strong>${round === 1 ? `${roundWeeks} / ${roundOneWeekLimit()} bid weeks` : `${roundDays} / ${leaveDayLimitForRound(round)} days`}</strong></div>
+    <div><span>Allotted hours left</span><strong>${formatEstimatedLeaveDays(remainingHours)} / ${formatEstimatedLeaveDays(maximumHours)} hours</strong></div>
+  `;
+
+  list.innerHTML = items.length ? items.map((item) => {
+    const itemKey = submittedLeaveItemKey(item);
+    const isSaving = leaveManagementPendingId === itemKey;
+    return `
+      <article class="submitted-leave-item">
+        <div>
+          <span class="status ${item.status.toLowerCase()}">${escapeHtml(item.status)}</span>
+          <strong>${escapeHtml(item.range)}</strong>
+          <small>${formatEstimatedLeaveDays(leaveItemChargedDays(item) * hoursPerDay)} leave hours · Priority ${Number(item.priority || 0)}</small>
+        </div>
+        <button class="secondary-action danger small" type="button" data-remove-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId ? "disabled" : ""} title="${escapeHtml(windowError)}">${isSaving ? "Removing…" : "Remove"}</button>
+      </article>
+    `;
+  }).join("") : '<p class="empty-state small">You do not currently have active leave dates in this round. Use Add More Dates to submit another range.</p>';
+
+  if (windowError) setSubmittedLeaveStatus(windowError, "error");
+}
+
+function openLeaveBuilderForMoreDates() {
+  const windowError = leaveBidWindowErrorMessage();
+  if (windowError) {
+    setSubmittedLeaveStatus(windowError, "error");
+    return;
+  }
+
+  const rangeInput = document.querySelector("[data-leave-range-input]");
+  rangeInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+  rangeInput?.focus({ preventScroll: true });
+  syncLeavePickerMonthToRange();
+  setLeavePickerOpen(true);
+  setLeaveBuilderStatus("Select another date range, add it to the batch, and submit it before your window closes.", "info");
+}
+
+async function removeSubmittedLeaveRequest(itemKey) {
+  const now = new Date();
+  const item = submittedLeaveItemsForCurrentRound(now).find((entry) => submittedLeaveItemKey(entry) === itemKey);
+  if (!item) return;
+
+  const windowError = leaveBidWindowErrorMessage(now);
+  if (windowError) {
+    setSubmittedLeaveStatus(windowError, "error");
+    return;
+  }
+
+  const openRound = editableLeaveRound(now);
+  const itemRound = leaveRoundForItem(item);
+  if (!openRound || itemRound !== openRound) {
+    setSubmittedLeaveStatus(`Only leave ranges bid in your currently open round can be removed. Round ${itemRound} is locked.`, "error");
+    return;
+  }
+
+  if (!window.confirm(`Remove ${item.range} from your Round ${itemRound} leave bid?`)) return;
+
+  leaveManagementPendingId = itemKey;
+  renderSubmittedLeaveManager();
+  setSubmittedLeaveStatus(`Removing ${item.range}…`, "info");
+
+  try {
+    const client = supabaseClient();
+    if (client && item.supabaseRequestId) {
+      const { error } = await client.rpc("cancel_own_leave_request", {
+        requested_leave_request_id: item.supabaseRequestId,
+      });
+      if (error) {
+        if (isMissingSupabaseRoutine(error)) {
+          throw new Error("Member leave editing is not installed. Run database/member_leave_request_management.sql in Supabase.");
+        }
+        throw error;
+      }
+      await loadSupabaseReferenceData();
+    } else if (supabaseState.connected) {
+      throw new Error("This leave request is not linked to a saved database record.");
+    } else {
+      item.status = "Cancelled";
+      intakeQueue.forEach((entry) => {
+        if (entry.type === "Leave" && entry.initials === currentUser.initials && entry.range === item.range && leaveRoundForItem(entry) === leaveRoundForItem(item)) {
+          entry.status = "Cancelled";
+        }
+      });
+    }
+
+    leaveManagementPendingId = "";
+    renderApp();
+    setSubmittedLeaveStatus(`${item.range} was removed. You may add different or additional dates while your window remains open.`, "success");
+  } catch (error) {
+    leaveManagementPendingId = "";
+    renderApp();
+    setSubmittedLeaveStatus(error.message || "The submitted leave dates could not be removed.", "error");
+  }
 }
 
 function renderLeaveAllowanceSummary() {
@@ -9993,6 +10204,7 @@ function renderApp() {
   renderLeaveRows("dashboard-leave-rows");
   renderLeaveRows("leave-page-rows");
   renderLeaveDraftQueue();
+  renderSubmittedLeaveManager();
   renderLeaveAllowanceSummary();
   renderRoundRuleSummary();
   renderRuleEditors();
@@ -10102,6 +10314,11 @@ document.addEventListener("click", async (event) => {
 
   const leaveRangeInput = event.target.closest("[data-leave-range-input]");
   if (leaveRangeInput) {
+    const windowError = leaveBidWindowErrorMessage();
+    if (windowError) {
+      setLeaveBuilderStatus(windowError, "error");
+      return;
+    }
     syncLeavePickerMonthToRange();
     setLeavePickerOpen(true);
     return;
@@ -10119,6 +10336,12 @@ document.addEventListener("click", async (event) => {
 
   const leavePickerDateButton = event.target.closest("[data-leave-picker-date]");
   if (leavePickerDateButton) {
+    const windowError = leaveBidWindowErrorMessage();
+    if (windowError) {
+      setLeavePickerOpen(false);
+      setLeaveBuilderStatus(windowError, "error");
+      return;
+    }
     const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
     selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
     selectLeaveBuilderDate(selectedLeaveDateKey);
@@ -10258,6 +10481,17 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-submit-leave-batch]")) {
     await submitLeaveDraftBatch();
+    return;
+  }
+
+  if (event.target.closest("[data-add-more-leave-dates]")) {
+    openLeaveBuilderForMoreDates();
+    return;
+  }
+
+  const removeSubmittedLeave = event.target.closest("[data-remove-submitted-leave]");
+  if (removeSubmittedLeave) {
+    await removeSubmittedLeaveRequest(removeSubmittedLeave.dataset.removeSubmittedLeave);
     return;
   }
 

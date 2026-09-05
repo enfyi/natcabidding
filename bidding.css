@@ -4540,6 +4540,109 @@ tr.occupied-row .rdo-tag {
   font-weight: 900;
 }
 
+.submitted-leave-manager {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.26);
+  border-radius: 10px;
+  padding: 14px;
+  background: linear-gradient(145deg, rgba(236, 253, 245, 0.92), rgba(240, 249, 255, 0.92));
+}
+
+.submitted-leave-manager[hidden] {
+  display: none;
+}
+
+.submitted-leave-manager-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.submitted-leave-manager-head h3,
+.submitted-leave-manager-head p {
+  margin: 0;
+}
+
+.submitted-leave-manager-head h3 {
+  margin-top: 3px;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.submitted-leave-manager-head p {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.submitted-leave-usage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.submitted-leave-usage > div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.submitted-leave-usage span,
+.submitted-leave-item small {
+  color: #64748b;
+  font-size: 0.71rem;
+  font-weight: 800;
+}
+
+.submitted-leave-usage strong {
+  color: #0f766e;
+  font-size: 0.8rem;
+}
+
+.submitted-leave-list {
+  display: grid;
+  gap: 8px;
+}
+
+.submitted-leave-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #d7e3ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.submitted-leave-item > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+}
+
+.submitted-leave-item strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.submitted-leave-item small {
+  grid-column: 1 / -1;
+}
+
+.submitted-leave-item button {
+  flex: 0 0 auto;
+}
+
 .export-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7869,11 +7972,22 @@ body {
   }
 
   .leave-draft-head,
+  .submitted-leave-manager-head,
+  .submitted-leave-item,
   .slot-day-card,
   .admin-schedule-form,
   .schedule-card,
   .history-item,
   .profile-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .submitted-leave-manager-head,
+  .submitted-leave-item {
+    display: grid;
+  }
+
+  .submitted-leave-usage {
     grid-template-columns: 1fr;
   }
 
