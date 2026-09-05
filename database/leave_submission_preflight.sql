@@ -70,6 +70,15 @@ declare
   open_bid_window_id uuid;
   enforce_bid_windows boolean := true;
   configured_test_round integer;
+  requested_charged_days integer := 0;
+  existing_charged_days integer := 0;
+  leave_hours_per_day integer := 8;
+  available_credit_days integer := 0;
+  maximum_leave_hours integer := 0;
+  projected_leave_hours integer := 0;
+  requested_week_count integer := 0;
+  existing_round_usage integer := 0;
+  round_leave_limit integer := 0;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
   rdo_conflict_dates date[];
@@ -344,7 +353,8 @@ begin
     );
   end if;
 
-  -- A date already submitted in an earlier round cannot consume another slot.
+  -- A date already submitted in this or an earlier round cannot consume
+  -- another slot.
   with requested_dates as (
     select distinct gs::date as leave_date
     from jsonb_array_elements(requested_items) requested(item)
@@ -361,7 +371,7 @@ begin
   join requested_dates requested on requested.leave_date = d.leave_date
   where lr.bid_year_id = year_row.id
     and lr.bidder_id = target.id
-    and lr.round_number < batch_round
+    and lr.round_number <= batch_round
     and lr.status in ('pending', 'approved');
 
   if cardinality(duplicate_conflict_dates) > 0 then
@@ -371,7 +381,7 @@ begin
 
     error_messages := array_append(
       error_messages,
-      format('You already bid the same date in a previous round: %s. Each date may be bid only once across rounds.', conflict_date_labels)
+      format('You already bid one or more of these dates: %s. Each date may be bid only once.', conflict_date_labels)
     );
   end if;
 
@@ -484,6 +494,117 @@ begin
     end if;
   end if;
 
+  -- Enforce the bidder's configured leave allowance on the server. The browser
+  -- shows the same projection, but this is the authoritative protection against
+  -- submitting additional ranges beyond the member's allotted hours.
+  select case when coalesce(line.four_ten, false) then 10 else 8 end
+  into leave_hours_per_day
+  from public.rdo_lines line
+  where line.id = coalesce(target_rdo_line_id, submitted_rdo_line_id);
+
+  leave_hours_per_day := coalesce(leave_hours_per_day, 8);
+
+  select count(*)::integer
+  into requested_charged_days
+  from jsonb_array_elements(requested_items) requested(item)
+  cross join lateral pg_catalog.generate_series(
+    (requested.item ->> 'start_date')::date::timestamp,
+    (requested.item ->> 'end_date')::date::timestamp,
+    interval '1 day'
+  ) generated_date
+  where not exists (
+      select 1
+      from public.holidays holiday
+      where holiday.bid_year_id = year_row.id
+        and holiday.holiday_date = generated_date::date
+    )
+    and not exists (
+      select 1
+      from public.holiday_in_lieu_days in_lieu
+      where in_lieu.bid_year_id = year_row.id
+        and in_lieu.bidder_id = target.id
+        and in_lieu.in_lieu_date = generated_date::date
+    );
+
+  select coalesce(sum(request.charged_days), 0)::integer
+  into existing_charged_days
+  from public.leave_requests request
+  where request.bid_year_id = year_row.id
+    and request.bidder_id = target.id
+    and request.status in ('pending', 'approved');
+
+  if batch_round = 1 then
+    select coalesce(sum(pg_catalog.ceil(
+      ((requested.item ->> 'end_date')::date - (requested.item ->> 'start_date')::date + 1)::numeric / 7
+    )), 0)::integer
+    into requested_week_count
+    from jsonb_array_elements(requested_items) requested(item);
+
+    select count(*)::integer
+    into existing_round_usage
+    from public.leave_request_week_buckets bucket
+    join public.leave_requests request on request.id = bucket.leave_request_id
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number = 1
+      and request.status in ('pending', 'approved');
+
+    if existing_round_usage + requested_week_count > 2 then
+      error_messages := array_append(
+        error_messages,
+        format(
+          'Round 1 can include no more than 2 bid weeks. This batch would bring you to %s.',
+          existing_round_usage + requested_week_count
+        )
+      );
+    end if;
+  else
+    round_leave_limit := case when batch_round in (2, 3) then 10 else 5 end;
+
+    select coalesce(sum(request.charged_days), 0)::integer
+    into existing_round_usage
+    from public.leave_requests request
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number = batch_round
+      and request.status in ('pending', 'approved');
+
+    if existing_round_usage + requested_charged_days > round_leave_limit then
+      error_messages := array_append(
+        error_messages,
+        format(
+          'Round %s can include no more than %s charged leave days. This batch would bring you to %s.',
+          batch_round,
+          round_leave_limit,
+          existing_round_usage + requested_charged_days
+        )
+      );
+    end if;
+  end if;
+
+  if batch_round >= 4 then
+    select coalesce(sum(credit.credit_days), 0)::integer
+    into available_credit_days
+    from public.leave_credit_events credit
+    where credit.bid_year_id = year_row.id
+      and credit.bidder_id = target.id
+      and credit.round_number <= batch_round;
+  end if;
+
+  maximum_leave_hours := target.leave_slot_allowance + (available_credit_days * leave_hours_per_day);
+  projected_leave_hours := (existing_charged_days + requested_charged_days) * leave_hours_per_day;
+
+  if projected_leave_hours > maximum_leave_hours then
+    error_messages := array_append(
+      error_messages,
+      format(
+        'This batch would use %s leave hours, above your %s-hour allowance.',
+        projected_leave_hours,
+        maximum_leave_hours
+      )
+    );
+  end if;
+
   if cardinality(error_messages) > 0 then
     raise exception 'Your batch could not be submitted for review. %', array_to_string(error_messages, ' ');
   end if;
@@ -504,7 +625,7 @@ grant execute on function public.submit_leave_bid_batch(integer, jsonb, text, te
   to authenticated;
 
 comment on function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean) is
-  'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
+  'Atomically validates bid windows, leave-hour allowance, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
 
 create or replace function private.recalculate_pending_leave_after_rdo_assignment()
 returns trigger

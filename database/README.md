@@ -24,6 +24,14 @@ The operation releases the request's old slots, validates and reserves its new
 dates, rebuilds Round 1 buckets and charged-date details, and writes an audit
 event in one transaction.
 
+For member self-service changes after submission, run
+`database/member_leave_request_management.sql` after the leave submission
+preflight. It lets the authenticated bidder remove their own pending or approved
+request only while that request's round bid window is open, releases any assigned
+slots, and records the change in the audit log. Re-run
+`database/leave_submission_preflight.sql` as part of this update so added ranges
+are checked against the member's allotted leave hours and current-round limits.
+
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
 `database/leave_submission_preflight.sql`. The testing switch lets admins allow

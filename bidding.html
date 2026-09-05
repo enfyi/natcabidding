@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager" />
   </head>
   <body>
     <section class="login-screen public-shell" aria-label="Public bidding website">
@@ -697,6 +697,19 @@
                   <div class="leave-draft-list" data-leave-draft-list></div>
                   <button class="primary-action" type="button" data-submit-leave-batch disabled>Submit Leave Batch</button>
                 </div>
+                <section class="submitted-leave-manager" data-submitted-leave-manager hidden>
+                  <div class="submitted-leave-manager-head">
+                    <div>
+                      <span class="eyebrow" data-submitted-leave-round>Round 1</span>
+                      <h3>Manage Submitted Bid Dates</h3>
+                      <p>Add more dates or remove a submitted range while your bid window is open.</p>
+                    </div>
+                    <button class="secondary-action small" type="button" data-add-more-leave-dates>Add More Dates</button>
+                  </div>
+                  <div class="submitted-leave-usage" data-submitted-leave-usage></div>
+                  <div class="submitted-leave-list" data-submitted-leave-list></div>
+                  <p class="leave-builder-status" data-submitted-leave-status aria-live="polite"></p>
+                </section>
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
@@ -1583,7 +1596,7 @@
 
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
