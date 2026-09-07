@@ -4703,6 +4703,14 @@ function supabaseAuthRedirectUrl() {
 }
 
 function clearSupabaseAccountState() {
+  bidderEditor.generation += 1;
+  bidderEditor.record = null;
+  bidderEditor.person = null;
+  bidderEditor.results = [];
+  bidderEditor.validated = '';
+  clearTimeout(bidderEditorSearchTimer);
+  document.querySelector('[data-bidder-editor-form]')?.replaceChildren();
+  document.querySelector('[data-bidder-editor-results]')?.replaceChildren();
   supabaseState.authEmail = "";
   supabaseState.authUserId = "";
   supabaseState.pendingAuthEmail = "";
@@ -10188,7 +10196,182 @@ function downloadBiddingXlsx() {
   downloadBlob(`natca-zla-bidding-${BID_YEAR}.xlsx`, createZip(files));
 }
 
+// Keep the draft separate from the intake queue until the atomic database save succeeds.
+const bidderEditor = { record: null, person: null, results: [], validated: '', busy: false, generation: 0 };
+let bidderEditorSearchTimer;
+function bidderEditorStatus(message, kind = '') {
+  const status = document.querySelector('[data-bidder-editor-status]');
+  if (status) { status.textContent = message; status.dataset.kind = kind; }
+}
+function bidderEditorDraft() {
+  const form = document.querySelector('[data-bidder-editor-form]');
+  const field = (name) => form.querySelector(`[data-editor-field="${name}"]`)?.value;
+  return {
+    rdo: field('line_id') ? { line_id: field('line_id'), fatigue_group: field('fatigue_group'),
+      flex: field('flex') === 'true', aws: field('aws') === 'true', mid: field('mid') } : null,
+    leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
+      start_date: form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null,
+      end_date: form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null,
+    })),
+  };
+}
+function bidderEditorSetBusy(busy) {
+  bidderEditor.busy = busy;
+  document.querySelectorAll('[data-bidder-editor] input, [data-bidder-editor] select, [data-bidder-editor] button, [data-bidder-editor] fieldset').forEach((el) => { el.disabled = busy; });
+  const submit = document.querySelector('[data-editor-submit]');
+  if (submit) submit.disabled = busy || !bidderEditor.validated || bidderEditor.validated !== JSON.stringify(bidderEditorDraft());
+}
+function invalidateBidderEditor() {
+  bidderEditor.validated = '';
+  bidderEditorSetBusy(false);
+  document.querySelector('[data-editor-review]')?.replaceChildren();
+  bidderEditorStatus('Unsaved changes. Confirm and check changes before submitting.');
+}
+async function searchBidderEditor(query) {
+  const generation = ++bidderEditor.generation;
+  const results = document.querySelector('[data-bidder-editor-results]');
+  results.replaceChildren();
+  if (!query.trim()) { bidderEditorStatus('Enter a name or initials to find a bidder.'); return; }
+  bidderEditorStatus('Searching bidders…');
+  try {
+    const client = supabaseClient();
+    if (!client || !supabaseState.connected) throw new Error('Connect to the database to search and edit saved bids.');
+    const { data, error } = await client.rpc('read_admin_bidder_editor', { requested_bid_year: BID_YEAR, search_text: query.trim() });
+    if (generation !== bidderEditor.generation) return;
+    if (error) throw error;
+    bidderEditor.results = data.bidders;
+    results.innerHTML = data.bidders.map((person) => `<button type="button" data-editor-bidder="${escapeHtml(person.id)}" aria-pressed="${person.id === bidderEditor.person?.id}"><strong>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)}</strong> · ${escapeHtml(person.initials || 'No initials')}<br>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)}</button>`).join('');
+    bidderEditorStatus(data.bidders.length ? `${data.bidders.length} matching bidders${data.bidders.length === 50 ? ' (first 50; refine your search)' : ''}. Select a bidder to edit.` : 'No bidders match this search in your authorized areas.');
+  } catch (error) { if (generation === bidderEditor.generation) bidderEditorStatus(error.message || 'Unable to search bidders.', 'error'); }
+}
+function renderBidderEditorForm() {
+  const { snapshot, lines } = bidderEditor.record;
+  const payload = snapshot.rdo?.payload || {};
+  const assigned = snapshot.assignment;
+  const lineId = snapshot.rdo?.rdo_line_id || assigned?.id || '';
+  const initial = snapshot.rdo ? {
+    fatigue_group: payload.fatigueGroup || payload.fatigue_group || '',
+    flex: String(payload.flex).toLowerCase() === 'true' || payload.flex === 'Yes',
+    aws: String(payload.aws).toLowerCase() === 'true' || payload.aws === 'Yes', mid: payload.mid || 'No',
+  } : assigned || { fatigue_group: '', flex: false, aws: false, mid: 'No' };
+  const select = (label, key, values, value) => `<label>${label}<select data-editor-field="${key}">${values.map(([v,l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(value) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select></label>`;
+  const person = bidderEditor.person;
+  document.querySelector('[data-bidder-editor-form]').innerHTML = `
+    <h3>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)} · ${escapeHtml(person.initials || 'No initials')}</h3>
+    <p>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)} · Changes retain each bid’s current approval status.</p>
+    <fieldset><legend>RDO bid · ${escapeHtml(snapshot.rdo?.status || (assigned ? 'approved' : 'not yet bid'))}</legend><div class="bidder-editor-fields">
+      ${select('RDO line','line_id',[['','Select a line'], ...lines.map(l => [l.id, `${l.line_code} · ${l.pattern}${l.status !== 'open' && l.assigned_bidder_id !== person.id ? ' · unavailable' : ''}`])],lineId)}
+      ${select('Fatigue group','fatigue_group',[['','Select a group'],['A','Group A'],['B','Group B'],['C','Group C']],initial.fatigue_group)}
+      ${select('Flex','flex',[[true,'Yes'],[false,'No']],initial.flex)}
+      ${select('AWS','aws',[[true,'Yes'],[false,'No']],initial.aws)}
+      ${select('Mid','mid',[['No','No'],['Yes','Yes'],['BID','BID']],initial.mid)}
+    </div></fieldset>
+    ${[1,2,3,4,5].map(round => {
+      const rows = snapshot.leave.filter(row => row.round_number === round);
+      return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
+        <div class="bidder-editor-date-row"><div><strong>Priority ${row.priority}</strong> · ${escapeHtml(row.status)}<br><small>${row.charged_days} charged days currently</small></div>
+          <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" /></label>
+          <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" /></label>
+        </div>`).join('') : '<p>No leave bids in this round.</p>'}</fieldset>`;
+    }).join('')}
+    <div data-editor-review aria-live="polite"></div>
+    <div class="bidder-editor-actions"><button type="button" class="secondary-action" data-editor-check>1. Confirm &amp; check changes</button>
+      <button type="button" class="primary-action" data-editor-submit disabled>2. Submit changes to database</button></div>`;
+  bidderEditor.initialDraft = JSON.stringify(bidderEditorDraft());
+  bidderEditor.validated = '';
+}
+async function loadBidderEditor(id) {
+  if (bidderEditor.busy) return;
+  if (bidderEditor.record && JSON.stringify(bidderEditorDraft()) !== bidderEditor.initialDraft &&
+    !window.confirm('Discard unsaved edits and load this bidder?')) return;
+  const person = bidderEditor.results.find(p => p.id === id);
+  if (!person) return;
+  const generation = ++bidderEditor.generation;
+  clearTimeout(bidderEditorSearchTimer);
+  bidderEditorSetBusy(true);
+  bidderEditorStatus('Loading all bid rounds…');
+  try {
+    const { data, error } = await supabaseClient().rpc('read_admin_bidder_editor', { requested_bid_year: BID_YEAR, target_bidder_id: id });
+    if (generation !== bidderEditor.generation) return;
+    if (error) throw error;
+    bidderEditor.person = person;
+    bidderEditor.record = data;
+    renderBidderEditorForm();
+    document.querySelectorAll('[data-editor-bidder]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.editorBidder === id)));
+    bidderEditorStatus('Edit the values below, then confirm and check changes.');
+  } catch (error) { bidderEditorStatus(error.message || 'Could not load bidder.', 'error'); }
+  finally { bidderEditorSetBusy(false); }
+}
+async function processBidderEditor(validateOnly) {
+  if (bidderEditor.busy || !bidderEditor.record || !hasIntakeAccess()) return;
+  const generation = bidderEditor.generation;
+  const draft = bidderEditorDraft();
+  const serialized = JSON.stringify(draft);
+  if (serialized === bidderEditor.initialDraft) { bidderEditorStatus('No changes to save. Edit a value first.'); return; }
+  if (validateOnly) {
+    if (!window.confirm(`Are you sure you want to make these changes to ${bidderEditor.person.first_name} ${bidderEditor.person.last_name} (${bidderEditor.person.initials || bidderEditor.person.area})? The next step checks your changes; nothing is saved yet.`)) return;
+  } else if (bidderEditor.validated !== serialized) { invalidateBidderEditor(); return; }
+  bidderEditor.validated = '';
+  bidderEditorSetBusy(true);
+  bidderEditorStatus(validateOnly ? 'Checking bidding rules and availability…' : 'Rechecking and saving changes…');
+  try {
+    const { data, error } = await supabaseClient().rpc('edit_admin_bidder', {
+      requested_bid_year: BID_YEAR, target_bidder_id: bidderEditor.person.id,
+      expected_snapshot: bidderEditor.record.snapshot, changes: draft, validate_only: validateOnly,
+    });
+    if (generation !== bidderEditor.generation) return;
+    if (error) throw error;
+    if (!data?.valid) throw new Error((data?.errors || ['Validation did not complete.']).join('\n'));
+    if (validateOnly) {
+      bidderEditor.validated = serialized;
+      const original = JSON.parse(bidderEditor.initialDraft);
+      const changes = [];
+      const lineLabel = id => bidderEditor.record.lines.find(l => l.id === id)?.line_code || 'None';
+      const labels = { line_id: 'RDO line', fatigue_group: 'Fatigue group', flex: 'Flex', aws: 'AWS', mid: 'Mid' };
+      for (const [key,label] of Object.entries(labels)) {
+        if (draft.rdo?.[key] !== original.rdo?.[key]) {
+          const format = value => key === 'line_id' ? lineLabel(value) : typeof value === 'boolean' ? value ? 'Yes' : 'No' : value || 'None';
+          changes.push(`${label}: ${format(original.rdo?.[key])} → ${format(draft.rdo?.[key])}`);
+        }
+      }
+      draft.leave.forEach((row,i) => {
+        if (JSON.stringify(row) !== JSON.stringify(original.leave[i])) {
+          const stored = bidderEditor.record.snapshot.leave[i];
+          changes.push(`Round ${stored.round_number}, priority ${stored.priority}: ${original.leave[i].start_date || 'None'} – ${original.leave[i].end_date || 'None'} → ${row.start_date} – ${row.end_date}`);
+        }
+      });
+      document.querySelector('[data-editor-review]').innerHTML = `<div class="bidder-editor-review"><strong>Validated changes</strong><ul>${changes.map(text => `<li>${escapeHtml(text)}</li>`).join('')}</ul></div>`;
+      bidderEditorStatus('Checks passed. Review the changes below, then submit to save them.', 'success');
+    } else {
+      if (!data.saved) throw new Error('The database did not confirm the save. Reload before retrying.');
+      bidderEditor.record.snapshot = data.snapshot;
+      renderBidderEditorForm();
+      bidderEditorStatus('Changes saved to the database. All bid rounds have been refreshed.', 'success');
+      try { await loadSupabaseReferenceData(); renderApp(); }
+      catch { bidderEditorStatus('Changes saved. Refresh the page to update other bidding views.', 'success'); }
+    }
+  } catch (error) { bidderEditorStatus(error.message || 'Unable to complete this operation. Reload before retrying.', 'error'); }
+  finally { bidderEditorSetBusy(false); }
+}
+document.addEventListener('input', (event) => {
+  if (event.target.matches('[data-bidder-editor-search]')) {
+    ++bidderEditor.generation;
+    clearTimeout(bidderEditorSearchTimer);
+    bidderEditorSearchTimer = setTimeout(() => searchBidderEditor(event.target.value), 300);
+  } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
+});
+document.addEventListener('change', (event) => {
+  if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
+});
+document.addEventListener('click', (event) => {
+  const bidder = event.target.closest('[data-editor-bidder]');
+  if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
+  if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
+  if (event.target.closest('[data-editor-submit]')) void processBidderEditor(false);
+});
+
 function renderApp() {
+  setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
     renderPublicPage();
     return;
