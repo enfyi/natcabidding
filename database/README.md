@@ -117,3 +117,30 @@ should match the email the BUE will use to log in.
 When a BUE logs in, `claim_current_bidder_profile()` links the Supabase auth user to the matching `bidders` row by email. After that, the site can load the user's area, seniority, bid role, initials, and contact profile.
 
 If initials are missing, the profile page can collect them from the BUE and save them with `update_current_bidder_profile()`. They remain unverified until reviewed.
+
+## Admin / intake bidder editor
+
+`database/admin_bidder_editor.sql` adds the database endpoints for the **Edit bidder
+information** panel at the top of Intake. Install it after the existing bidding
+routines and `leave_submission_preflight.sql`. The live migration is pending approval.
+
+Search uses bidder UUIDs and the signed-in account's permitted area. Administrators
+can search all areas; intake users and currently scheduled intake representatives
+can edit their own area. Private notes are excluded from editor responses.
+
+The first button confirms the draft and checks it inside a rolled-back transaction.
+The second button reruns the checks and atomically saves the complete record with
+an audit event. Editing any field invalidates the previous validation. Snapshot
+comparison rejects concurrent bidder edits and requires reloading. Pending bids
+remain pending; approved bids retain their approved status. Dates are grouped by
+round, and inactive requests retain their status when their dates are corrected.
+
+Checks include line eligibility/availability, fatigue capacity, required Mid and
+fatigue settings, date bounds, overlapping leave, RDO conflicts, round limits,
+leave-hour allowance, and daily capacity. Administrative corrections can update
+past rounds without an open bidding window, matching manual intake entry. Capacity
+overrides are not accepted by this editor.
+
+Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
+data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed
+`@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
