@@ -68,7 +68,7 @@ create table if not exists rdo_lines (
   line_code text not null,
   line_type text not null default 'CPC' check (line_type in ('CPC', 'DEV')),
   pattern text not null,
-  fatigue_group text check (fatigue_group in ('A', 'B', 'C', 'C only')),
+  fatigue_group text check (fatigue_group in ('A', 'B', 'C', 'C only', 'B only')),
   mid text not null default 'No',
   aws boolean not null default false,
   four_ten boolean not null default false,
