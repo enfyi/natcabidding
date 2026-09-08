@@ -2217,11 +2217,6 @@ function submitManualRdoBid(panel, person, area) {
 }
 
 function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
-  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, person.initials));
-  if (rdoConflicts.length) {
-    return `Leave cannot include ${person.initials}'s RDO: ${formatLeaveConflictDates(rdoConflicts)}.`;
-  }
-
   if (round === 1) {
     const usedWeeks = roundOneWeekKeySetForItems([
       ...leaveRoundUsageForInitials(person.initials, 1),
@@ -2260,13 +2255,11 @@ function submitManualLeaveBid(panel, person, area) {
   }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const enteredDays = Number(panel.querySelector("[data-manual-leave-days]")?.value || chargeableDates.length);
-  if (!Number.isFinite(enteredDays) || enteredDays < 1) {
-    setManualBidStatus(panel, "Enter the number of charged leave days.", "error");
-    return;
-  }
-  if (enteredDays !== chargeableDates.length) {
-    setManualBidStatus(panel, `That range charges ${chargeableDates.length} ${chargeableDates.length === 1 ? "day" : "days"} for ${person.initials}.`, "error");
+  const chargedDays = chargeableDates.length;
+  const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
+  if (manualDaysInput) manualDaysInput.value = String(chargedDays);
+  if (chargedDays < 1) {
+    setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
 
@@ -2278,7 +2271,7 @@ function submitManualLeaveBid(panel, person, area) {
     range,
     dateKeys,
     round,
-    days: enteredDays,
+    days: chargedDays,
     weekKeys,
   });
   if (validationMessage) {
@@ -2310,11 +2303,11 @@ function submitManualLeaveBid(panel, person, area) {
     manualEntry: true,
     enteredBy: currentUser.initials,
     range,
-    days: enteredDays,
+    days: chargedDays,
     round,
     weekUnits,
     weekKeys,
-    summary: `${range} · ${enteredDays} ${enteredDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
 
   intakeQueue.unshift(request);
@@ -2428,11 +2421,10 @@ function databaseStatusFromUi(status) {
 function syncLeaveBuilderInputs() {
   const keys = leaveBuilderDateKeys();
   const rangeInput = document.querySelector("[data-leave-range-input]");
-  const daysInput = document.querySelector("[data-leave-days-input]");
   const chargeableDays = chargeableLeaveDatesForInitials(formatLeaveRangeFromKeys(keys), currentUser.initials, currentRoundNumber()).length;
 
   if (rangeInput) rangeInput.value = formatLeaveRangeFromKeys(keys);
-  if (daysInput) daysInput.value = keys.length ? chargeableDays : "";
+  setLeaveDaysInput(keys.length ? chargeableDays : NaN);
 }
 
 function syncLeavePickerMonthToRange() {
@@ -2615,8 +2607,16 @@ function isRoundOneLeaveItem(item) {
 
 function chargeableLeaveDatesForInitials(range, initials = currentUser.initials, round = currentRoundNumber()) {
   const keys = datesInLeaveRange(range);
-  if (round !== 1) return keys;
   return keys.filter((key) => !isRdoDateForInitials(key, initials));
+}
+
+function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
+  return datesInLeaveRange(range).filter((key) => isRdoDateForInitials(key, initials));
+}
+
+function setLeaveDaysInput(days) {
+  const daysInput = document.querySelector("[data-leave-days-input]");
+  if (daysInput) daysInput.value = Number.isFinite(days) ? String(days) : "";
 }
 
 function leaveApprovalDates(item) {
@@ -2949,16 +2949,11 @@ function draftRangeExists(range) {
 }
 
 function addOrUpdateLeaveSubmission() {
-  const { range, days, notes } = leaveBuilderValues();
+  const { range, notes } = leaveBuilderValues();
   const round = currentRoundNumber();
   const isRoundOne = round === 1;
   if (!range) {
     setLeaveBuilderStatus("Enter a date range before adding leave.", "error");
-    return;
-  }
-
-  if (!Number.isFinite(days) || days <= 0) {
-    setLeaveBuilderStatus("Enter the number of leave days before adding leave.", "error");
     return;
   }
 
@@ -2973,19 +2968,16 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
-  if (rdoConflicts.length) {
-    setLeaveBuilderStatus(`You cannot bid your own RDO: ${formatLeaveConflictDates(rdoConflicts)}.`, "error");
+  const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
+  const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  const chargedDays = chargeableDates.length;
+  setLeaveDaysInput(chargedDays);
+  if (chargedDays <= 0) {
+    setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
-
-  const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const weekUnits = weekKeys.length;
-  if (chargeableDates.length !== days) {
-    setLeaveBuilderStatus(`That request charges ${chargeableDates.length} ${chargeableDates.length === 1 ? "day" : "days"}. Update the Days field before adding it.`, "error");
-    return;
-  }
 
   if (isRoundOne) {
     const existingWeeks = roundOneDraftWeekKeySet();
@@ -2997,14 +2989,14 @@ function addOrUpdateLeaveSubmission() {
     var newRoundOneWeeks = Math.max(0, combinedWeeks - existingWeeks.size);
   } else {
     const currentTotal = leaveDraftTotalDays();
-    if (currentTotal + days > currentRoundLeaveLimit()) {
-      setLeaveBuilderStatus(`Round ${round} can include up to ${currentRoundLeaveLimit()} total days. This batch would be ${currentTotal + days}.`, "error");
+    if (currentTotal + chargedDays > currentRoundLeaveLimit()) {
+      setLeaveBuilderStatus(`Round ${round} can include up to ${currentRoundLeaveLimit()} total days. This batch would be ${currentTotal + chargedDays}.`, "error");
       return;
     }
 
   }
 
-  const projectedChargedDays = leaveProjectedChargedDays([{ range, days, round, weekUnits, weekKeys }]);
+  const projectedChargedDays = leaveProjectedChargedDays([{ range, days: chargedDays, round, weekUnits, weekKeys }]);
   const allowanceLimit = leaveAllowanceLimitForRound(round);
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
@@ -3038,7 +3030,7 @@ function addOrUpdateLeaveSubmission() {
   const draft = {
     id: `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     range,
-    days,
+    days: chargedDays,
     notes,
     round,
     weekUnits,
@@ -3056,14 +3048,15 @@ function addOrUpdateLeaveSubmission() {
   ]);
   const roundOneSuffix = isRoundOne
     ? newRoundOneWeeks
-      ? ` using ${newRoundOneWeeks} new bid ${newRoundOneWeeks === 1 ? "week" : "weeks"} and charging ${days} ${days === 1 ? "day" : "days"}`
-      : ` inside an existing bid week, charging ${days} ${days === 1 ? "day" : "days"}`
+      ? ` using ${newRoundOneWeeks} new bid ${newRoundOneWeeks === 1 ? "week" : "weeks"} and charging ${chargedDays} ${chargedDays === 1 ? "day" : "days"}`
+      : ` inside an existing bid week, charging ${chargedDays} ${chargedDays === 1 ? "day" : "days"}`
     : "";
-  setLeaveBuilderStatus(`${range} added to the preview batch${roundOneSuffix}. Submit the batch when everything looks right.`, "success");
+  const rdoSuffix = rdoDates.length ? ` ${formatLeaveConflictDates(rdoDates)} ${rdoDates.length === 1 ? "was" : "were"} removed as RDO ${rdoDates.length === 1 ? "date" : "dates"}.` : "";
+  setLeaveBuilderStatus(`${range} added to the preview batch${roundOneSuffix}.${rdoSuffix} Submit the batch when everything looks right.`, "success");
 }
 
 function previewLeaveSubmission() {
-  const { range, days } = leaveBuilderValues();
+  const { range } = leaveBuilderValues();
   const round = currentRoundNumber();
   const dateKeys = datesInLeaveRange(range);
   const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
@@ -3078,18 +3071,14 @@ function previewLeaveSubmission() {
     return;
   }
 
-  const rdoConflicts = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
-  if (rdoConflicts.length) {
-    setLeaveBuilderStatus(`You cannot bid your own RDO: ${formatLeaveConflictDates(rdoConflicts)}.`, "error");
-    return;
-  }
-
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
-  const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
-  if (Number.isFinite(days) && days > 0 && chargeableDates.length !== days) {
-    setLeaveBuilderStatus(`That request charges ${chargeableDates.length} ${chargeableDates.length === 1 ? "day" : "days"}. Update the Days field before previewing it.`, "error");
+  const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  setLeaveDaysInput(chargeableDates.length);
+  if (chargeableDates.length <= 0) {
+    setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
+  const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
 
   if (round === 1 && weekUnits > roundOneWeekLimit()) {
     setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This range counts as ${weekUnits}.`, "error");
@@ -3108,9 +3097,10 @@ function previewLeaveSubmission() {
     syncMemberCalendarSelection([...previousPreviewKeys, ...dateKeys]);
   }
   renderLeaveSlotBoard();
+  const rdoSuffix = rdoDates.length ? ` ${formatLeaveConflictDates(rdoDates)} ${rdoDates.length === 1 ? "is" : "are"} removed as RDO ${rdoDates.length === 1 ? "date" : "dates"}.` : "";
   const previewMessage = round === 1
-    ? `Previewing ${weekUnits} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.`
-    : "Previewing this range on the calendar. Use Add to Batch when you want to stage it.";
+    ? `Previewing ${weekUnits} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix}`
+    : `Previewing this range with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix} Use Add to Batch when you want to stage it.`;
   setLeaveBuilderStatus(previewMessage, "info");
 }
 
@@ -3152,11 +3142,6 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
   });
   if (previousRoundDates.size) {
     return `You already bid these dates in a previous round: ${formatLeaveConflictDates([...previousRoundDates].sort())}. Each date may be bid only once across rounds.`;
-  }
-
-  const rdoDates = [...requestedDates.keys()].filter((key) => isRdoDateForInitials(key, currentUser.initials));
-  if (rdoDates.length) {
-    return `You cannot bid dates that are RDOs on your approved bid line: ${formatLeaveConflictDates(rdoDates)}.`;
   }
 
   return "";
@@ -3494,12 +3479,7 @@ function syncApprovedRdoItem(item) {
 }
 
 function applyLeaveApproval(item) {
-  const rdoConflicts = leaveRdoConflicts(item);
-  if (rdoConflicts.length) {
-    item.reviewNote = `Cannot approve: ${formatLeaveConflictDates(rdoConflicts)} ${rdoConflicts.length === 1 ? "is" : "are"} the bidder's RDO. Deny it or edit the date range before approval.`;
-    activeOverrideId = item.id;
-    return false;
-  }
+  refreshLeaveItemCharge(item);
 
   const conflicts = leaveApprovalConflicts(item);
   if (conflicts.length && !item.leaveCapacityOverride) {
@@ -3601,8 +3581,7 @@ function leaveApprovalConflicts(item) {
 
 function leaveRdoConflicts(item) {
   if (item.type !== "Leave") return [];
-  if (isRoundOneLeaveItem(item)) return [];
-  return datesInLeaveRange(item.range).filter((key) => isRdoDateForInitials(key, item.initials));
+  return [];
 }
 
 function formatLeaveConflictDates(keys) {

@@ -1,5 +1,5 @@
--- Validate leave availability, prior-round duplicates, and RDO conflicts before
--- a leave batch is inserted into the intake queue.
+-- Validate leave availability, prior-round duplicates, and RDO prerequisites
+-- before a leave batch is inserted into the intake queue.
 --
 -- The existing submit_leave_bid_batch function remains the owner of round rules
 -- and persistence. This migration moves it behind a private wrapper so the
@@ -72,7 +72,6 @@ declare
   configured_test_round integer;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
-  rdo_conflict_dates date[];
   conflict_date_labels text;
   error_messages text[] := array[]::text[];
 begin
@@ -376,8 +375,8 @@ begin
   end if;
 
   -- A bidder must have requested an RDO line before leave can be submitted,
-  -- but intake approval is not required yet. Only an already assigned line is
-  -- used for RDO date conflicts; pending RDO choices are reconciled later.
+  -- but intake approval is not required yet. Approved RDO patterns are removed
+  -- from charged leave by the underlying submitter and reconciliation trigger.
   select rl.id
   into target_rdo_line_id
   from public.rdo_lines rl
@@ -454,34 +453,6 @@ begin
       error_messages,
       'Submit your RDO request before submitting leave. Intake approval is not required first.'
     );
-  elsif target_rdo_line_id is not null then
-    with requested_dates as (
-      select distinct gs::date as leave_date
-      from jsonb_array_elements(requested_items) requested(item)
-      cross join lateral generate_series(
-        (requested.item ->> 'start_date')::date,
-        (requested.item ->> 'end_date')::date,
-        interval '1 day'
-      ) gs
-    )
-    select array_agg(requested.leave_date order by requested.leave_date)
-    into rdo_conflict_dates
-    from requested_dates requested
-    join public.rdo_line_days line_day
-      on line_day.rdo_line_id = target_rdo_line_id
-     and line_day.is_rdo
-     and line_day.weekday = extract(dow from requested.leave_date)::smallint;
-
-    if cardinality(rdo_conflict_dates) > 0 then
-      select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
-      into conflict_date_labels
-      from unnest(rdo_conflict_dates) date_value;
-
-      error_messages := array_append(
-        error_messages,
-        format('These dates are RDOs on your approved bid line: %s.', conflict_date_labels)
-      );
-    end if;
   end if;
 
   if cardinality(error_messages) > 0 then
@@ -504,7 +475,7 @@ grant execute on function public.submit_leave_bid_batch(integer, jsonb, text, te
   to authenticated;
 
 comment on function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean) is
-  'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
+  'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and RDO request prerequisites before submitting a leave batch for intake review.';
 
 create or replace function private.recalculate_pending_leave_after_rdo_assignment()
 returns trigger
