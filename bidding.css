@@ -558,6 +558,56 @@ button.seniority-pill {
   overflow: hidden;
 }
 
+.public-main .public-rdo-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.public-main .public-rdo-line-section {
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.public-main .public-rdo-line-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  color: #ffffff;
+  background: #14335f;
+}
+
+.public-main .public-rdo-line-section-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-main .public-rdo-line-section-heading span {
+  color: #dbe7ff;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.public-main .public-rdo-line-section .table-wrap {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.public-main .public-rdo-empty {
+  padding: 28px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+}
+
 .public-main .public-rdo-panel .panel-header p,
 .public-main .public-rdo-panel .filter-bar label {
   color: #64748b;
@@ -4490,6 +4540,109 @@ tr.occupied-row .rdo-tag {
   font-weight: 900;
 }
 
+.submitted-leave-manager {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.26);
+  border-radius: 10px;
+  padding: 14px;
+  background: linear-gradient(145deg, rgba(236, 253, 245, 0.92), rgba(240, 249, 255, 0.92));
+}
+
+.submitted-leave-manager[hidden] {
+  display: none;
+}
+
+.submitted-leave-manager-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+}
+
+.submitted-leave-manager-head h3,
+.submitted-leave-manager-head p {
+  margin: 0;
+}
+
+.submitted-leave-manager-head h3 {
+  margin-top: 3px;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.submitted-leave-manager-head p {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.submitted-leave-usage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.submitted-leave-usage > div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.submitted-leave-usage span,
+.submitted-leave-item small {
+  color: #64748b;
+  font-size: 0.71rem;
+  font-weight: 800;
+}
+
+.submitted-leave-usage strong {
+  color: #0f766e;
+  font-size: 0.8rem;
+}
+
+.submitted-leave-list {
+  display: grid;
+  gap: 8px;
+}
+
+.submitted-leave-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #d7e3ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.submitted-leave-item > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+}
+
+.submitted-leave-item strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.submitted-leave-item small {
+  grid-column: 1 / -1;
+}
+
+.submitted-leave-item button {
+  flex: 0 0 auto;
+}
+
 .export-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5559,6 +5712,14 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   display: grid;
   gap: 8px;
   min-width: 130px;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .email-log {
@@ -7811,11 +7972,22 @@ body {
   }
 
   .leave-draft-head,
+  .submitted-leave-manager-head,
+  .submitted-leave-item,
   .slot-day-card,
   .admin-schedule-form,
   .schedule-card,
   .history-item,
   .profile-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .submitted-leave-manager-head,
+  .submitted-leave-item {
+    display: grid;
+  }
+
+  .submitted-leave-usage {
     grid-template-columns: 1fr;
   }
 
@@ -8297,4 +8469,45 @@ video {
   .week-calendar-grid button:focus-visible .leave-date-tooltip.slot-summary {
     display: flex !important;
   }
+}
+
+/* Admin/intake complete bidder editor. */
+.bidder-editor {
+  --text: #152d3b;
+  --muted: #627080;
+  --teal: #216b62;
+  --line: #dbe2e7;
+  margin-bottom: 24px;
+  padding: 24px;
+  color: var(--text);
+  background: #fff;
+  border-color: var(--line);
+  box-shadow: 0 8px 24px rgba(21,45,59,.06);
+  color-scheme: light;
+}
+.bidder-editor h2, .bidder-editor h3 { color: #152d3b; }
+.bidder-editor [data-bidder-editor-status] { margin: 14px 0; white-space: pre-line; }
+.bidder-editor .primary-action { background: #216b62; border-color: #216b62; color: #fff; }
+.bidder-editor .secondary-action { background: #f5f8fa; border-color: #b5c9c5; color: #216b62; }
+.bidder-editor .panel-header { padding: 0 0 18px; }
+.bidder-editor p { color: var(--muted, #627080); }
+.bidder-editor-search { display: grid; gap: 8px; max-width: 560px; font-weight: 600; }
+.bidder-editor input, .bidder-editor select { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #c6ced5; border-radius: 8px; color: #152d3b; background: white; font: inherit; }
+.bidder-editor-results { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.bidder-editor-results button { text-align: left; padding: 10px 14px; border: 1px solid #c6ced5; background: #f5f8fa; border-radius: 8px; cursor: pointer; }
+.bidder-editor-results button[aria-pressed="true"] { border-color: #1e6658; background: #eaf5f0; }
+.bidder-editor fieldset { min-width: 0; margin: 20px 0; padding: 16px; border: 1px solid #dbe2e7; border-radius: 10px; }
+.bidder-editor legend { font-weight: 700; padding: 0 8px; }
+.bidder-editor-fields { display: grid; grid-template-columns: repeat(5, minmax(110px,1fr)); gap: 14px; }
+.bidder-editor-fields label, .bidder-editor-date-row label { display: grid; gap: 6px; }
+.bidder-editor-date-row { display: grid; grid-template-columns: minmax(160px,1fr) 1fr 1fr; align-items: end; gap: 16px; margin: 12px 0; }
+.bidder-editor-actions { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 12px; }
+.bidder-editor button:disabled { opacity: .5; cursor: not-allowed; }
+.bidder-editor [data-kind="error"] { color: #a22727; }
+.bidder-editor [data-kind="success"] { color: #21654d; }
+.bidder-editor-review { background: #f5f8fa; padding: 14px 18px; border-radius: 8px; }
+@media (max-width: 760px) {
+  .bidder-editor { padding: 16px; }
+  .bidder-editor-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .bidder-editor-date-row { grid-template-columns: 1fr; border-top: 1px solid #dbe2e7; padding-top: 12px; }
 }
