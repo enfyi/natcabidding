@@ -87,6 +87,7 @@ as $$
       )::integer as area_seniority_rank
     from bidders area_bidders
     where area_bidders.active
+      and area_bidders.bid_role <> 'ADM'
   )
   select
     lr.id,

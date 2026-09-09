@@ -39,6 +39,7 @@ as $$
     from bidders b
     cross join access_context ac
     where (b.active or (include_inactive and ac.is_admin))
+      and b.bid_role <> 'ADM'
       and (
         ac.is_admin
         or auth.uid() is null
@@ -55,6 +56,7 @@ as $$
       count(*) over (partition by b.area_id) as area_bidder_count
     from bidders b
     where b.active
+      and b.bid_role <> 'ADM'
   )
   select
     b.id as profile_id,

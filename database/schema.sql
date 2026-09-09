@@ -32,7 +32,7 @@ create table if not exists bidders (
   email text,
   phone text,
   role text not null default 'controller' check (role in ('controller', 'intake', 'admin')),
-  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV')),
+  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV', 'ADM')),
   seniority_rank integer,
   leave_slot_allowance integer not null default 4 check (leave_slot_allowance >= 0),
   active boolean not null default true,
@@ -48,16 +48,18 @@ create unique index if not exists bidders_email_unique
   on bidders(lower(email))
   where active and email is not null;
 
-create unique index if not exists bidders_area_seniority_unique
+drop index if exists bidders_area_seniority_unique;
+
+create unique index bidders_area_seniority_unique
   on bidders(area_id, seniority_rank)
-  where active and seniority_rank is not null;
+  where active and seniority_rank is not null and bid_role <> 'ADM';
 
 alter table bidders
   drop constraint if exists bidders_bid_role_check;
 
 alter table bidders
   add constraint bidders_bid_role_check
-  check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV'));
+  check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV', 'ADM'));
 
 create table if not exists bid_year_settings (
   bid_year_id uuid primary key references bid_years(id) on delete cascade,
