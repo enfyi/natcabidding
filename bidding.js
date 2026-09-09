@@ -7901,7 +7901,12 @@ async function deleteRosterEntryByIndex(index) {
     setRosterStatus("You cannot delete the account you are currently using.", "error");
     return;
   }
-  if (!window.confirm(`Delete ${personDisplayName(person)} (${person.initials}) from the working roster?`)) return;
+  const confirmation = window.prompt(`Type ${person.initials} to delete ${personDisplayName(person)} from the roster.`);
+  if (confirmation === null) return;
+  if (confirmation.trim().toUpperCase() !== person.initials) {
+    setRosterStatus(`Delete canceled. Type ${person.initials} to confirm this BUE delete.`, "error");
+    return;
+  }
 
   senioritySource.splice(senioritySource.indexOf(entry), 1);
   intakeTeamInitials.delete(person.initials);
