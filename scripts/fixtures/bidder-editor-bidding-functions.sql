@@ -1,20 +1,4 @@
--- Existing production eligibility/holiday routines, copied read-only for local tests.
-CREATE OR REPLACE FUNCTION public.rdo_line_matches_bid_role(bidder_role text, area_name text, requested_line_type text, requested_pattern text)
- RETURNS boolean
- LANGUAGE sql
- IMMUTABLE
- SET search_path TO ''
-AS $function$
-  select case
-    when area_name = 'TMU' then
-      bidder_role in ('TMC', 'TMCIT', 'GL') and requested_line_type = 'CPC'
-    when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
-    when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
-    when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
-    else false
-  end
-$function$
-
+-- Existing production holiday routines, copied read-only for local tests.
 CREATE OR REPLACE FUNCTION public.refresh_bidder_holiday_in_lieu(target_bid_year_id uuid, target_bidder_id uuid)
  RETURNS void
  LANGUAGE plpgsql

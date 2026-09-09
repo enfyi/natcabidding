@@ -12,11 +12,12 @@ create function auth.jwt() returns jsonb language sql as $$select jsonb_build_ob
 await db.exec(fs.readFileSync(root+'/database/schema.sql','utf8').replace('create extension if not exists pgcrypto;',''));
 await db.exec(`alter table rdo_lines add column assigned_initials text;
 alter table intake_submissions add column round_number integer, add column rdo_line_id uuid, add column leave_request_id uuid;`);
+await db.exec(fs.readFileSync(root+'/database/rdo_line_eligibility.sql','utf8').replaceAll('\n$function$;\n','\n$function$;\n'));
 await db.exec(fs.readFileSync(root+'/scripts/fixtures/bidder-editor-bidding-functions.sql','utf8').replaceAll('\n$function$\n','\n$function$;\n'));
 await db.exec(fs.readFileSync(root+'/database/admin_bidder_editor.sql','utf8'));
 const id=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 await db.exec(`insert into bid_years(id,bid_year) values('${id(1)}',2027);
-insert into areas(id,code,name) values('${id(2)}','area-a','Area A'),('${id(3)}','area-b','Area B');
+insert into areas(id,code,name) values('${id(2)}','area-a','Area A'),('${id(3)}','area-b','Area B'),('${id(4)}','tmu','TMU');
 insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,role,leave_slot_allowance) values
 ('${id(10)}','${id(110)}','${id(2)}','Admin','Test','AD','admin@example.test','admin',208),
 ('${id(11)}','${id(111)}','${id(2)}','Bidder','Test','BT','bidder@example.test','controller',208),
@@ -55,6 +56,19 @@ assert.equal((await db.query("select has_function_privilege('anon','public.edit_
 assert.equal((await db.query("select has_function_privilege('authenticated','private.save_bidder_editor(integer,uuid,jsonb,jsonb)','EXECUTE') allowed")).rows[0].allowed,false);
 console.log('PASS public/private function execution permissions');
 await db.exec('reset role');
+await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,leave_slot_allowance) values
+('${id(13)}','${id(113)}','${id(4)}','TMC','Test','TC','tmc@example.test','TMC',208),
+('${id(14)}','${id(114)}','${id(4)}','Dev','Test','DV','dev@example.test','DEV',208),
+('${id(15)}','${id(115)}','${id(4)}','Ghost','Test','GL','gl@example.test','GL',208);
+insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,fatigue_group,status,assigned_bidder_id,assigned_initials) values
+('${id(23)}','${id(1)}','${id(4)}','TMU-1','CPC','TMC','A','open',null,null),
+('${id(24)}','${id(1)}','${id(4)}','TMU-2','DEV','DEV','B','open',null,null);
+insert into rdo_line_days(rdo_line_id,weekday,shift_code) select l.id,d,case when d in (0,6) then 'RDO' else '0700' end
+  from rdo_lines l cross join generate_series(0,6) d where l.area_id='${id(4)}';`);
+assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(13)])).rows.map((row)=>row.line_code),['TMU-1']);
+assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(14)])).rows.map((row)=>row.line_code),['TMU-2']);
+assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(15)])).rows.map((row)=>row.line_code),['TMU-1']);
+console.log('PASS TMU roles map to eligible RDO lines');
 await db.exec(`insert into leave_requests(id,bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date) values('${id(32)}','${id(1)}','${id(11)}',3,1,'denied','2027-08-02','2027-08-03')`);
 expected=await snap();
 changes.leave.push({id:id(32),start_date:'2027-08-04',end_date:'2027-08-05'});

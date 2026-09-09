@@ -7530,6 +7530,13 @@ function syncRosterBidAsSelect(area, selectedBidAs) {
   select.value = validBidRoleForArea(selectedRole, area) ? selectedRole : defaultBidRoleForArea(area);
 }
 
+function syncRosterDeleteSelectedButton() {
+  const button = document.querySelector("[data-roster-delete-selected]");
+  const editIndex = Number(document.querySelector("[data-roster-edit-index]")?.value);
+  if (!button) return;
+  button.disabled = !findRosterEntryByIndex(editIndex);
+}
+
 function syncBulkRosterBidAsSelect(row, selectedBidAs) {
   const area = row.querySelector("[data-bulk-area]")?.value || selectedRosterArea();
   const select = row.querySelector("[data-bulk-bid-as]");
@@ -7587,6 +7594,7 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
   setValue("[data-roster-rank]", values.rank);
   setValue("[data-roster-leave-slots]", normalizeLeaveSlotAllowance(values.leaveSlotAllowance));
   syncRosterBidAsSelect(values.area, values.bidAs);
+  syncRosterDeleteSelectedButton();
 }
 
 function resetRosterForm() {
@@ -7881,10 +7889,10 @@ async function saveRosterEntry(event) {
 
 function deleteRosterEntry(initials) {
   const entry = findRosterEntryByInitials(initials);
-  deleteRosterEntryByIndex(senioritySource.indexOf(entry));
+  return deleteRosterEntryByIndex(senioritySource.indexOf(entry));
 }
 
-function deleteRosterEntryByIndex(index) {
+async function deleteRosterEntryByIndex(index) {
   if (!hasSystemAdminAccess()) return;
   const entry = findRosterEntryByIndex(index);
   if (!entry) return;
@@ -7903,7 +7911,28 @@ function deleteRosterEntryByIndex(index) {
   logHistory("All Areas", "BUE deleted", `${currentUser.initials} deleted ${person.initials} from the working roster.`);
   resetRosterForm();
   renderApp();
-  setRosterStatus(`${personDisplayName(person)} was deleted from the working roster.`, "success");
+  setRosterStatus(`${personDisplayName(person)} was deleted from the working roster. Syncing to Supabase...`, "info");
+  const supabaseSave = await saveSupabaseRosterRows([{
+    firstName: person.firstName,
+    lastName: person.lastName,
+    initials: person.initials,
+    email: person.email,
+    phone: person.phone,
+    area: person.area,
+    rank: person.rank,
+    bidAs: person.bidAs,
+    leaveSlotAllowance: person.leaveSlotAllowance,
+    active: false,
+    originalArea: person.area,
+    originalInitials: person.initials,
+    originalRank: person.rank,
+  }]);
+  setRosterStatus(
+    supabaseSave.saved
+      ? `${personDisplayName(person)} was deleted from Supabase.`
+      : supabaseSave.message,
+    supabaseSave.saved ? "success" : "error"
+  );
 }
 
 function bulkRowValue(row, selector) {
@@ -8102,6 +8131,7 @@ function renderRosterManager() {
   const rankInput = document.querySelector("[data-roster-rank]");
   if (rankInput && !rankInput.value) rankInput.value = activeRosterEntries(selectedArea).length + 1;
   if (areaInput) syncRosterBidAsSelect(areaInput.value || selectedArea);
+  syncRosterDeleteSelectedButton();
 
   const target = document.querySelector("[data-roster-table]");
   if (!target) return;
@@ -10703,6 +10733,12 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-roster-new]")) {
     resetRosterForm();
+    syncRosterDeleteSelectedButton();
+    return;
+  }
+
+  if (event.target.closest("[data-roster-delete-selected]")) {
+    void deleteRosterEntryByIndex(document.querySelector("[data-roster-edit-index]")?.value);
     return;
   }
 
@@ -10719,7 +10755,7 @@ document.addEventListener("click", async (event) => {
 
   const deleteRosterButton = event.target.closest("[data-delete-roster-bue]");
   if (deleteRosterButton) {
-    deleteRosterEntryByIndex(deleteRosterButton.dataset.deleteRosterBue);
+    void deleteRosterEntryByIndex(deleteRosterButton.dataset.deleteRosterBue);
     return;
   }
 
