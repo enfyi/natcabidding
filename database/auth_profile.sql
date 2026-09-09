@@ -126,6 +126,7 @@ begin
       count(*) over (partition by area_bidders.area_id) as area_bidder_count
     from bidders area_bidders
     where area_bidders.active
+      and area_bidders.bid_role <> 'ADM'
   )
   select
     b.id,
@@ -143,7 +144,7 @@ begin
     rb.area_bidder_count as bidder_count
   from bidders b
   join areas a on a.id = b.area_id
-  join ranked_bidders rb on rb.id = b.id
+  left join ranked_bidders rb on rb.id = b.id
   where b.auth_user_id = auth.uid()
     and lower(b.email) = login_email
     and b.active

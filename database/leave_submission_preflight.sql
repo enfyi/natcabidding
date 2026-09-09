@@ -137,6 +137,10 @@ begin
     raise exception 'The bidder must be assigned to an area before leave can be submitted.';
   end if;
 
+  if target.bid_role = 'ADM' then
+    raise exception 'Admin-only profiles cannot submit leave bids.';
+  end if;
+
   select a.name
   into strict target_area
   from public.areas a

@@ -609,6 +609,7 @@ const publicState = {
 const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
 const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV"];
 const TMU_BID_ROLES = ["TMC", "DEV", "GL"];
+const ADMIN_PROFILE_BID_ROLE = "ADM";
 
 const supabaseState = {
   enabled: false,
@@ -1490,6 +1491,10 @@ function seniorityEntryActive(entry) {
   return entry[7] !== false;
 }
 
+function seniorityEntryIsBue(entry) {
+  return normalizeBidRoleForArea(entry?.[2], seniorityEntryArea(entry)) !== ADMIN_PROFILE_BID_ROLE;
+}
+
 function normalizeLeaveSlotAllowance(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
@@ -1535,6 +1540,7 @@ function personMatchesCurrentUser(person) {
 function activeRosterEntries(area = null) {
   return senioritySource.filter((entry) =>
     seniorityEntryActive(entry) &&
+    seniorityEntryIsBue(entry) &&
     (!area || seniorityEntryArea(entry) === area)
   );
 }

@@ -18,6 +18,7 @@ as $$
   where private.is_current_admin()
     and b.area_id = requested_area_id
     and b.active
+    and b.bid_role <> 'ADM'
     and b.seniority_rank = requested_rank
     and (
       nullif(trim(requested_initials), '') is null
@@ -54,8 +55,9 @@ begin
     select 1
     from public.bidders b
     where b.id = requested_bidder_id and b.active
+      and b.bid_role <> 'ADM'
   ) then
-    raise exception 'The target bidder is not active.';
+    raise exception 'The target bidder is not an active bidding employee.';
   end if;
 
   select exists (

@@ -87,6 +87,10 @@ begin
     raise exception 'Intake users can only replace approved leave in their own area.';
   end if;
 
+  if target.bid_role = 'ADM' then
+    raise exception 'Admin-only profiles cannot be assigned leave.';
+  end if;
+
   select byear.*
   into strict year_row
   from public.bid_years byear

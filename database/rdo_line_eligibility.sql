@@ -15,6 +15,7 @@ as $function$
     when area_name = 'TMU' then
       (bidder_role in ('TMC', 'GL') and requested_line_type = 'CPC')
       or (bidder_role = 'DEV' and requested_line_type = 'DEV')
+    when bidder_role = 'ADM' then false
     when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
     when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
     when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'

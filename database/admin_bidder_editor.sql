@@ -85,6 +85,10 @@ begin
     raise exception 'Intake users can only replace approved leave in their own area.';
   end if;
 
+  if target.bid_role = 'ADM' then
+    raise exception 'Admin-only profiles cannot be assigned leave.';
+  end if;
+
   select byear.*
   into strict year_row
   from public.bid_years byear
@@ -542,7 +546,7 @@ begin
       select b.id,b.first_name,b.last_name,b.initials,a.name area,b.bid_role
       from public.bidders b join public.areas a on a.id=b.area_id
       join public.bidders actor on actor.id=actor_id
-      where b.active and (actor.role='admin' or b.area_id=actor.area_id)
+      where b.active and b.bid_role <> 'ADM' and (actor.role='admin' or b.area_id=actor.area_id)
         and (b.first_name || ' ' || b.last_name || ' ' || coalesce(b.initials,'')) ilike '%' || trim(coalesce(search_text,'')) || '%'
       order by b.last_name,b.first_name,b.id limit 50
     ) x;
@@ -570,6 +574,9 @@ declare
 begin
   actor_id := private.bidder_editor_actor(target_bidder_id);
   select * into strict target from public.bidders where id=target_bidder_id for update;
+  if target.bid_role = 'ADM' then
+    raise exception 'Admin-only profiles cannot be edited as bidders.';
+  end if;
   select id into strict year_id from public.bid_years where bid_year=requested_bid_year;
   perform id from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id order by id for update;
   perform id from public.intake_submissions where bid_year_id=year_id and bidder_id=target.id order by id for update;

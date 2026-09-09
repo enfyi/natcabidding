@@ -16,6 +16,11 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
 
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
+Admin-only login profiles can use `bid_role = 'ADM'`; those profiles still get
+admin access from `role = 'admin'`, but are excluded from BUE roster, seniority,
+bid-window, RDO eligibility, and leave-bidding mechanics.
+Run `database/admin_profile_adm.sql` to mark the standalone Area A admin login
+for `zla.bidding@gmail.com` as `ADM` and clear any bid windows attached to it.
 
 For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
