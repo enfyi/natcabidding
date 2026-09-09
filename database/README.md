@@ -14,6 +14,9 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
+Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
+the shared RDO-line eligibility rule used by member and admin bidding flows.
+
 For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
 the admin-only database operation that safely resizes each day's slot inventory.
@@ -121,8 +124,9 @@ If initials are missing, the profile page can collect them from the BUE and save
 ## Admin / intake bidder editor
 
 `database/admin_bidder_editor.sql` adds the database endpoints for the **Edit bidder
-information** panel at the top of Intake. Install it after the existing bidding
-routines and `leave_submission_preflight.sql`. The live migration is pending approval.
+information** panel at the top of Intake. Install it after
+`database/rdo_line_eligibility.sql` and `leave_submission_preflight.sql`. The live
+migration is pending approval.
 
 Search uses bidder UUIDs and the signed-in account's permitted area. Administrators
 can search all areas; intake users and currently scheduled intake representatives
