@@ -75,6 +75,7 @@ create table if not exists rdo_lines (
   flex boolean not null default false,
   status text not null default 'open' check (status in ('open', 'taken', 'locked')),
   assigned_bidder_id uuid references bidders(id) on delete set null,
+  assigned_initials text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, area_id, line_code)
@@ -245,6 +246,9 @@ create table if not exists intake_submissions (
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   area_id uuid references areas(id) on delete set null,
   bidder_id uuid references bidders(id) on delete set null,
+  round_number integer check (round_number between 1 and 5),
+  rdo_line_id uuid references rdo_lines(id) on delete set null,
+  leave_request_id uuid references leave_requests(id) on delete cascade,
   submission_type text not null check (submission_type in ('rdo', 'leave', 'override', 'help')),
   status text not null default 'pending' check (status in ('draft', 'pending', 'approved', 'denied', 'cancelled')),
   payload jsonb not null default '{}'::jsonb,
