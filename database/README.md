@@ -46,6 +46,19 @@ For the shared admin bid-window testing switch, also run
 all logged-in BUEs to submit outside their assigned bid windows while testing,
 with an optional shared test round for checking Round 1-4 rules individually.
 
+For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
+so the application can read the pilot state. In the disposable pilot database
+only, run `database/pilot_auth_profile.sql`, `database/pilot_seed.sql`, followed by
+`database/pilot_login_only.sql`, to unlock the admin controls and require a
+signed-in roster account for every database read or write. Admins can then
+choose participants by initials, turn the pilot on or off, and reset submissions,
+decisions, assignments, leave allocations, help threads, reminder deliveries,
+credits, and audit events. Reset preserves authentication links, bidders, bid
+lines, capacity, holidays, bid windows, schedules, and the participant list.
+
+Do not run `pilot_seed.sql` against production. The reset function independently
+checks the database marker and refuses to run without it.
+
 If a future server-only admin workflow requires a Supabase secret key, keep it in
 a non-`NEXT_PUBLIC_` variable and never expose it to browser code.
 

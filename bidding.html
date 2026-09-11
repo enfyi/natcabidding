@@ -18,6 +18,9 @@
     <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor" />
   </head>
   <body>
+    <div class="pilot-environment-banner" data-pilot-environment-banner hidden>
+      TEST SITE · Practice bids only · Data may be reset by an administrator
+    </div>
     <section class="login-screen public-shell" aria-label="Public bidding website">
       <aside class="public-rail" aria-label="Public bidding navigation">
         <a class="brand-block" href="index.html" aria-label="NATCA ZLA home">
@@ -1269,6 +1272,28 @@
                     <option value="4">Round 4</option>
                   </select>
                 </label>
+              </section>
+              <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Pilot Access</h3>
+                    <p data-pilot-status-copy>This database is not configured for an isolated pilot.</p>
+                  </div>
+                  <span class="pill" data-pilot-status>Pilot unavailable</span>
+                </div>
+                <label class="toggle-row">
+                  <input type="checkbox" data-pilot-enabled-toggle />
+                  <span>Allow selected BUEs to submit practice bids</span>
+                </label>
+                <label class="testing-select-row">
+                  Pilot BUE initials
+                  <input type="text" data-pilot-member-initials placeholder="AB, CD, EF" autocomplete="off" />
+                  <small>Separate initials with commas. Admin and intake access remains available.</small>
+                </label>
+                <div class="button-row">
+                  <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
+                  <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
+                </div>
               </section>
               <section class="panel editable-rule-card">
                 <div class="panel-header compact">

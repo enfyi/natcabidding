@@ -95,6 +95,15 @@ let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [
 let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
 let bidWindowTestRound = normalizeBidWindowTestRound(storedJsonValue(BID_WINDOW_TEST_ROUND_STORAGE_KEY, null));
 let bidWindowSettingsFallbackMessage = "";
+let pilotState = {
+  available: false,
+  database: false,
+  enabled: false,
+  allowed: true,
+  name: "Pilot",
+  memberIds: [],
+  lastResetAt: null,
+};
 const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
 let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
   ? storedLeaveSlotCapacities
@@ -1749,7 +1758,14 @@ function warnUnconfirmedBidder(action = "submit bids") {
 }
 
 function canSubmitBueBid() {
-  return isConfirmedHelpUser();
+  return isConfirmedHelpUser() && (!pilotState.database || (pilotState.enabled && pilotState.allowed));
+}
+
+function pilotSubmissionErrorMessage() {
+  if (!pilotState.database || (pilotState.enabled && pilotState.allowed)) return "";
+  return pilotState.enabled
+    ? "Your account is not included in the current bidding pilot."
+    : "Practice bidding is currently turned off by an administrator.";
 }
 
 function shouldEnforceBidWindows() {
@@ -1779,6 +1795,8 @@ function currentUserBidWindowStatus(date = new Date()) {
 }
 
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
+  const pilotError = pilotSubmissionErrorMessage();
+  if (pilotError) return pilotError;
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
@@ -1917,6 +1935,106 @@ function applyBidYearSettings(settings) {
     bidWindowTestRound = normalizeBidWindowTestRound(settings.test_bid_round);
     storeJsonValue(BID_WINDOW_TEST_ROUND_STORAGE_KEY, bidWindowTestRound);
   }
+}
+
+function applyPilotSettings(settings) {
+  if (!settings || typeof settings !== "object") return;
+  pilotState = {
+    available: true,
+    database: Boolean(settings.pilot_database),
+    enabled: Boolean(settings.pilot_enabled),
+    allowed: settings.pilot_allowed !== false,
+    name: settings.pilot_name || "Pilot",
+    memberIds: Array.isArray(settings.pilot_member_ids) ? settings.pilot_member_ids : [],
+    lastResetAt: settings.pilot_last_reset_at || null,
+  };
+}
+
+function pilotInitialsForMemberIds() {
+  const ids = new Set(pilotState.memberIds);
+  return senioritySource
+    .filter((entry) => ids.has(seniorityEntryProfileId(entry)))
+    .map((entry) => entry[3])
+    .filter(Boolean)
+    .join(", ");
+}
+
+function syncPilotControls() {
+  const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
+  const banner = document.querySelector("[data-pilot-environment-banner]");
+  if (banner) banner.hidden = environment !== "pilot" && !pilotState.database;
+
+  document.querySelectorAll("[data-pilot-admin-card]").forEach((card) => {
+    card.hidden = !hasSystemAdminAccess();
+  });
+  const toggle = document.querySelector("[data-pilot-enabled-toggle]");
+  const initials = document.querySelector("[data-pilot-member-initials]");
+  if (toggle) {
+    toggle.checked = pilotState.enabled;
+    toggle.disabled = !pilotState.database;
+  }
+  if (initials) {
+    if (document.activeElement !== initials) initials.value = pilotInitialsForMemberIds();
+    initials.disabled = !pilotState.database;
+  }
+  document.querySelectorAll("[data-save-pilot-settings], [data-reset-pilot-data]").forEach((button) => {
+    button.disabled = !pilotState.database;
+  });
+  setText("[data-pilot-status]", !pilotState.database ? "Pilot unavailable" : pilotState.enabled ? "Pilot on" : "Pilot off");
+  setText(
+    "[data-pilot-status-copy]",
+    !pilotState.available
+      ? "Install database/pilot_mode.sql in the isolated pilot database."
+      : !pilotState.database
+      ? "Reset and pilot controls are locked because this database is not marked as a pilot database."
+      : pilotState.enabled
+      ? `${pilotState.name} is accepting practice bids from ${pilotState.memberIds.length} selected BUE${pilotState.memberIds.length === 1 ? "" : "s"}.`
+      : `${pilotState.name} is paused. Selected BUEs cannot submit practice bids.`
+  );
+}
+
+async function savePilotSettings() {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  const initialsInput = document.querySelector("[data-pilot-member-initials]");
+  const requestedInitials = String(initialsInput?.value || "")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+  const byInitials = new Map(senioritySource.map((entry) => [String(entry[3] || "").toUpperCase(), seniorityEntryProfileId(entry)]));
+  const unknown = requestedInitials.filter((initials) => !byInitials.get(initials));
+  if (unknown.length) {
+    window.alert(`These initials were not found in the active roster: ${unknown.join(", ")}.`);
+    return;
+  }
+  const client = supabaseClient();
+  const { data, error } = await client.rpc("set_pilot_mode", {
+    requested_bid_year: BID_YEAR,
+    should_enable: Boolean(document.querySelector("[data-pilot-enabled-toggle]")?.checked),
+    requested_pilot_member_ids: [...new Set(requestedInitials.map((initials) => byInitials.get(initials)))],
+    requested_pilot_name: pilotState.name,
+  });
+  if (error) {
+    window.alert(error.message || "Pilot access could not be saved.");
+    return;
+  }
+  applyPilotSettings(Array.isArray(data) ? data[0] : data);
+  syncPilotControls();
+  renderApp();
+}
+
+async function resetPilotData() {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  if (!window.confirm("Reset all practice bids, decisions, assignments, help messages, and audit history for this pilot year? Tester accounts and the roster will be kept.")) return;
+  const { data, error } = await supabaseClient().rpc("reset_pilot_data", { requested_bid_year: BID_YEAR });
+  if (error) {
+    window.alert(error.message || "Pilot data could not be reset.");
+    return;
+  }
+  applyPilotSettings(Array.isArray(data) ? data[0] : data);
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
+  renderApp();
+  window.alert("Practice data was reset. Tester accounts, roster, schedules, and pilot access were kept.");
 }
 
 async function saveSupabaseBidWindowTestingSettings() {
@@ -3699,10 +3817,66 @@ function captureIntakeOverrideFields(item) {
   item.summary = `${item.range} · ${item.days} days`;
 }
 
-function approveIntakeItem(id) {
+async function supabaseSubmissionIdForIntakeItem(item) {
+  if (item.supabaseSubmissionId) return item.supabaseSubmissionId;
+  if (!item.supabaseRequestId) return "";
+  const { data, error } = await supabaseClient()
+    .from("intake_submissions")
+    .select("id")
+    .eq("leave_request_id", item.supabaseRequestId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || "";
+}
+
+async function persistIntakeDecision(item, decision, denialReason = "") {
+  if (!supabaseState.connected) return false;
+  const submissionId = await supabaseSubmissionIdForIntakeItem(item);
+  if (!submissionId) throw new Error("The saved intake submission could not be found. Reload the queue and try again.");
+  const overridePayload = item.type === "RDO Line"
+    ? {
+        line: item.line,
+        fatigueGroup: item.fatigueGroup,
+        flex: item.flex === true || item.flex === "Yes",
+        aws: item.aws === true || item.aws === "Yes",
+        mid: item.mid,
+      }
+    : { leaveCapacityOverride: Boolean(item.leaveCapacityOverride) };
+  const { error } = await supabaseClient().rpc("review_bidding_submission", {
+    submission_to_review: submissionId,
+    decision,
+    denial_reason_text: denialReason || null,
+    override_payload: overridePayload,
+  });
+  if (error) throw error;
+  item.supabaseSubmissionId = submissionId;
+  return true;
+}
+
+async function approveIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  let persisted = false;
+  try {
+    persisted = await persistIntakeDecision(item, "approved");
+  } catch (error) {
+    item.reviewNote = error.message || "This approval could not be saved.";
+    renderApp();
+    setPage("intake");
+    return;
+  }
+  if (persisted) {
+    queueBidVerifiedEmail(item);
+    activeOverrideId = null;
+    activeDenialId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setPage("intake");
+    return;
+  }
   let approved = true;
   if (item.type === "RDO Line") applyRdoApproval(item);
   if (item.type === "Leave") approved = applyLeaveApproval(item);
@@ -3717,7 +3891,7 @@ function approveIntakeItem(id) {
   setPage("intake");
 }
 
-function denyIntakeItem(id) {
+async function denyIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
 
@@ -3726,6 +3900,26 @@ function denyIntakeItem(id) {
     item.denialDraftError = "Enter a denial reason before sending this back to the BUE.";
     activeDenialId = id;
     activeOverrideId = null;
+    renderApp();
+    setPage("intake");
+    return;
+  }
+
+  let persisted = false;
+  try {
+    persisted = await persistIntakeDecision(item, "denied", reason);
+  } catch (error) {
+    item.denialDraftError = error.message || "This denial could not be saved.";
+    renderApp();
+    setPage("intake");
+    return;
+  }
+  if (persisted) {
+    queueBidDeniedEmail(item);
+    activeDenialId = null;
+    activeOverrideId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
     renderApp();
     setPage("intake");
     return;
@@ -4874,7 +5068,7 @@ async function initializeSupabaseAuth() {
     if (event === "SIGNED_OUT") clearSupabaseAccountState();
   });
 
-  await restoreSupabaseSession();
+  return restoreSupabaseSession();
 }
 
 async function restoreSupabaseSession(page = requestedLandingPage()) {
@@ -4913,16 +5107,18 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
-  let canRequestLink = false;
-  try {
-    canRequestLink = await canRequestSupabaseLoginEmail(email);
-  } catch (error) {
-    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
-    return;
-  }
-  if (!canRequestLink) {
-    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
-    return;
+  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    let canRequestLink = false;
+    try {
+      canRequestLink = await canRequestSupabaseLoginEmail(email);
+    } catch (error) {
+      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+      return;
+    }
+    if (!canRequestLink) {
+      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+      return;
+    }
   }
 
   await client.auth.signOut();
@@ -4951,16 +5147,18 @@ async function sendSupabasePasswordReset(email) {
     return;
   }
 
-  let canRequestLink = false;
-  try {
-    canRequestLink = await canRequestSupabaseLoginEmail(email);
-  } catch (error) {
-    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
-    return;
-  }
-  if (!canRequestLink) {
-    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
-    return;
+  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    let canRequestLink = false;
+    try {
+      canRequestLink = await canRequestSupabaseLoginEmail(email);
+    } catch (error) {
+      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+      return;
+    }
+    if (!canRequestLink) {
+      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+      return;
+    }
   }
 
   const { error } = await client.auth.resetPasswordForEmail(email, {
@@ -5565,32 +5763,18 @@ async function ensureSupabaseBidYearId() {
 async function saveSupabaseRdoRequest(request) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
-  const bidYearId = await ensureSupabaseBidYearId();
-  if (!bidYearId) return false;
-
-  const payload = {
-    line: request.line,
-    rdo_line_code: request.line,
-    fatigue_group: request.fatigueGroup,
-    flex: request.flex,
-    aws: request.aws,
-    mid: request.mid,
-    bid_as: request.bidAs,
-    summary: request.summary,
-  };
-
-  const { error } = await client
-    .from("intake_submissions")
-    .insert({
-      bid_year_id: bidYearId,
-      area_id: null,
-      bidder_id: currentUser.supabaseProfileId,
-      round_number: request.round,
-      submission_type: "rdo",
-      status: "pending",
-      payload,
-      submitted_at: new Date().toISOString(),
-    });
+  const { error } = await client.rpc("submit_rdo_bid", {
+    requested_bid_year: BID_YEAR,
+    requested_line_code: request.line,
+    requested_fatigue_group: request.fatigueGroup,
+    requested_flex: request.flex === true || request.flex === "Yes",
+    requested_aws: request.aws === true || request.aws === "Yes",
+    requested_mid: request.mid,
+    requested_round: request.round,
+    target_initials: null,
+    target_area_name: null,
+    manual_entry: false,
+  });
   if (error) throw error;
   return true;
 }
@@ -5680,6 +5864,7 @@ async function loadSupabaseReferenceData() {
       leaveRequestsResult,
       intakeSchedulesResult,
       bidYearSettingsResult,
+      pilotSettingsResult,
       bidWindowsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
@@ -5689,6 +5874,9 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
+      supabaseState.authUserId
+        ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
+        : Promise.resolve({ data: null, error: null }),
       supabaseState.authUserId
         ? client.from("bid_windows").select("bidder_id,round_number,opens_at,closes_at,status").eq("bid_year_id", bidYear.id)
         : Promise.resolve({ data: [], error: null }),
@@ -5702,6 +5890,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
+      isMissingSupabaseRoutine(pilotSettingsResult.error) ? null : supabaseLoadWarning("pilot settings", pilotSettingsResult),
       supabaseLoadWarning("bid windows", bidWindowsResult),
     ].filter(Boolean);
 
@@ -5715,6 +5904,7 @@ async function loadSupabaseReferenceData() {
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
+    if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     await loadSupabaseHelpThreads();
 
@@ -6068,6 +6258,7 @@ function publicRosterArea(area = publicState.area) {
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section) {
+  syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
   if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
@@ -10391,6 +10582,7 @@ document.addEventListener('click', (event) => {
 });
 
 function renderApp() {
+  syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
     renderPublicPage();
@@ -10467,6 +10659,16 @@ document.addEventListener("click", async (event) => {
   const bidWindowToggle = event.target.closest("[data-bid-window-enforcement-toggle]");
   if (bidWindowToggle) {
     await setBidWindowEnforcement(bidWindowToggle.checked);
+    return;
+  }
+
+  if (event.target.closest("[data-save-pilot-settings]")) {
+    await savePilotSettings();
+    return;
+  }
+
+  if (event.target.closest("[data-reset-pilot-data]")) {
+    await resetPilotData();
     return;
   }
 
@@ -10792,7 +10994,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    await approveIntakeItem(intakeApprove.dataset.intakeApprove);
     return;
   }
 
@@ -10806,7 +11008,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
@@ -11159,7 +11361,10 @@ document.addEventListener("change", async (event) => {
 
 resetSupabaseBackedData();
 renderPublicPage();
-initializeSupabaseAuth().finally(() => loadSupabaseReferenceData()).then(() => {
+initializeSupabaseAuth().then(async (restoredSession) => {
+  if (!restoredSession && window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    await loadSupabaseReferenceData();
+  }
   if (isMemberAppVisible()) {
     renderApp();
   } else {
