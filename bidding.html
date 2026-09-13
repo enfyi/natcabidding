@@ -30,6 +30,22 @@
             <small>Los Angeles Center</small>
           </span>
         </a>
+        <label class="mobile-area-control">
+          <span class="visually-hidden">Select area</span>
+          <select data-mobile-public-area aria-label="Select area">
+            <option value="" disabled>Select area</option><option selected>Area A</option><option>Area B</option><option>Area C</option>
+            <option>Area D</option><option>Area E</option><option>Area F</option><option>TMU</option>
+          </select>
+        </label>
+        <div class="mobile-login-slot"></div>
+        <details class="mobile-public-menu">
+          <summary aria-label="More navigation">More</summary>
+          <div>
+            <button type="button" data-public-area="FAQ">FAQ</button>
+            <button type="button" data-public-area="Previous Years">Previous Years</button>
+            <button type="button" data-help-toggle>Live Help</button>
+          </div>
+        </details>
         <nav class="public-nav">
           <button class="public-nav-item" type="button" data-public-area="FAQ">FAQ</button>
           <details class="public-area" open>
@@ -122,7 +138,7 @@
           <div class="panel-header">
             <div>
               <h2 data-public-sheet-title>Bid Calendar</h2>
-              <p data-public-sheet-code>Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.</p>
+              <p data-public-sheet-code>Select a date to view open slots and bidder initials. Read-only calendar.</p>
             </div>
             <div class="segmented" aria-label="Public calendar mode" data-calendar-mode-control>
               <button type="button" data-calendar-mode="vacation">Vacation</button>
@@ -136,7 +152,7 @@
               <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="public">Minimal</button>
               <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="public">Full</button>
             </div>
-            <p class="calendar-layout-description" data-calendar-layout-description="public">Hover or focus a date to view its slots.</p>
+            <p class="calendar-layout-description" data-calendar-layout-description="public">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
@@ -367,7 +383,7 @@
                 <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="dashboard">Minimal</button>
                 <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="dashboard">Full</button>
               </div>
-              <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Hover or focus a date to view its slots.</p>
+              <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong id="dashboard-calendar-year" data-calendar-year-label>2027</strong>
@@ -597,7 +613,7 @@
                 <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="leave">Minimal</button>
                 <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
               </div>
-              <p class="calendar-layout-description" data-calendar-layout-description="leave">Hover or focus a date to view its slots.</p>
+              <p class="calendar-layout-description" data-calendar-layout-description="leave">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong data-calendar-year-label>2027</strong>
@@ -753,7 +769,7 @@
               <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="member">Minimal</button>
               <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="member">Full</button>
             </div>
-            <p class="calendar-layout-description" data-calendar-layout-description="member">Hover or focus a date to view its slots.</p>
+            <p class="calendar-layout-description" data-calendar-layout-description="member">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
@@ -1630,6 +1646,10 @@
       </div>
     </div>
 
+    <dialog class="public-date-sheet" aria-labelledby="public-date-title" data-public-date-sheet>
+      <header><h2 id="public-date-title">Leave slots</h2><button type="button" data-public-date-close>Close</button></header>
+      <div data-public-date-content></div>
+    </dialog>
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor"></script>

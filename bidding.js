@@ -596,6 +596,9 @@ const calendarLayouts = {
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
+let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
+const annualMobileCalendars = new Set();
+let publicRdoPresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date(BID_YEAR, 0, 1);
 const rdoFilters = {
@@ -4172,6 +4175,73 @@ function cachedFatigueGroupForDate(key, context) {
   return context.fatigueGroups.get(weekKey);
 }
 
+function syncMobileCalendarControls(target) {
+  let controls = document.querySelector(`[data-mobile-calendar="${target.id}"]`);
+  if (!controls) {
+    controls = document.createElement("div");
+    controls.className = "mobile-calendar-controls";
+    controls.dataset.mobileCalendar = target.id;
+    controls.innerHTML = `
+      <div class="mobile-month-navigation">
+        <button type="button" data-mobile-month-step="-1" aria-label="Previous month">‹</button>
+        <label><span class="visually-hidden">Month</span><select data-mobile-month aria-label="Calendar month">${monthNames.map((name, index) => `<option value="${index}">${name}</option>`).join("")}</select></label>
+        <button type="button" data-mobile-month-step="1" aria-label="Next month">›</button>
+      </div>
+      <div class="mobile-calendar-actions"><button type="button" data-mobile-calendar-annual aria-pressed="false">Show full year</button><button type="button" data-calendar-year-action="today">Bid year</button></div>`;
+    target.before(controls);
+  }
+  controls.querySelectorAll("[data-mobile-month] option").forEach((option, index) => { option.textContent = `${monthNames[index]} ${displayedCalendarYear}`; });
+  controls.querySelector("[data-mobile-month]").value = String(displayedCalendarMonth);
+  const annual = annualMobileCalendars.has(target.id);
+  const toggle = controls.querySelector("[data-mobile-calendar-annual]");
+  toggle.setAttribute("aria-pressed", String(annual));
+  toggle.textContent = annual ? "Show one month" : "Show full year";
+}
+
+function syncMobileCalendarMonths(target) {
+  target.classList.toggle("mobile-single-month", !annualMobileCalendars.has(target.id));
+  target.querySelectorAll("[data-calendar-month]").forEach((month) => {
+    month.classList.toggle("mobile-current-month", Number(month.dataset.calendarMonth) === displayedCalendarMonth && Number(month.dataset.calendarYear) === displayedCalendarYear);
+  });
+}
+
+function initializeMobilePublicNavigation() {
+  const login = document.querySelector(".public-login");
+  const slot = document.querySelector(".mobile-login-slot");
+  if (!login || !slot) return;
+  const placeholder = document.createComment("Desktop login position");
+  login.before(placeholder);
+  const query = window.matchMedia("(max-width: 720px)");
+  const relocate = () => {
+    if (query.matches) slot.append(login);
+    else placeholder.after(login);
+  };
+  query.addEventListener("change", relocate);
+  relocate();
+
+  const calendarQuery = window.matchMedia("(max-width: 900px)");
+  calendarQuery.addEventListener("change", () => renderVisibleCalendars());
+}
+
+function openPublicDateSheet(button) {
+  const key = button.dataset.publicLeaveDate;
+  const details = visibleLeaveSlotDetails(key, publicState.area);
+  const sheet = document.querySelector("[data-public-date-sheet]");
+  document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
+  const holiday = calendarHolidayKind(key, { area: publicState.area });
+  sheet.querySelector("[data-public-date-content]").innerHTML = `
+    <p>${escapeHtml(publicState.area)} · Read-only availability</p>
+    ${holiday ? `<p>${escapeHtml(holiday.label)}</p>` : ""}
+    ${["cpc", "dev"].map((bucket) => {
+      const name = bucket === "cpc" ? "CPC" : "Developmental";
+      const capacity = leaveSlotCapacityForDetails(details, bucket);
+      return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
+        ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
+    }).join("")}
+    ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
+  sheet.showModal();
+}
+
 function makeCalendar(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
@@ -4191,15 +4261,17 @@ function makeCalendar(targetId) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
     area,
     showRdo,
     showPersonalLeave,
-    deferSlotTooltip: false,
+    deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
   });
 
+  syncMobileCalendarControls(target);
   target.classList.remove("month-view", "week-view");
   target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
@@ -4208,7 +4280,7 @@ function makeCalendar(targetId) {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: false,
+      deferSlotTooltip,
       expandedSlots,
       context,
     }))
@@ -4216,10 +4288,11 @@ function makeCalendar(targetId) {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: false,
+      deferSlotTooltip,
       expandedSlots,
       context,
     });
+  syncMobileCalendarMonths(target);
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -4245,7 +4318,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
   }
 
   return `
-    <article class="month-card">
+    <article class="month-card" data-calendar-month="${monthIndex}" data-calendar-year="${year}">
       <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
@@ -4401,7 +4474,7 @@ function updateCalendarViewControls() {
     const scope = description.dataset.calendarLayoutDescription;
     description.textContent = calendarLayouts[scope] === "full"
       ? "Every CPC and developmental slot is shown directly on each date."
-      : "Hover or focus a date to view its slots.";
+      : "Select a date to view its slots.";
   });
 }
 
@@ -6013,7 +6086,7 @@ function publicSheetCode(area, section) {
   if (area === "Previous Years") return "Historical RDO, bid-time, and leave calendar resources.";
   if (section === "RDO") return "Public RDO line reference for this area.";
   if (section === "Bid Time") return "Public bid-time schedule for this area.";
-  return "Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.";
+  return "Select a date to view open slots and bidder initials. Read-only calendar.";
 }
 
 function publicInfoText(area, section) {
@@ -6099,7 +6172,20 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
           <h3 id="public-rdo-${bidAsClass(section)}">${section}</h3>
           <span>${sectionLines.length} ${lineLabel}</span>
         </div>
-        <div class="table-wrap rdo-page-table-wrap">
+        <div class="mobile-rdo-cards">
+          ${sectionLines.map((line) => `
+            <details class="mobile-rdo-card">
+              <summary>
+                <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
+                <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+              </summary>
+              <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+              <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+            </details>
+          `).join("")}
+        </div>
+        <div class="table-wrap rdo-page-table-wrap" tabindex="0" role="region" aria-label="${section} schedule comparison table, scroll horizontally">
           <table class="line-table public-rdo-table">
             <thead>
               <tr>
@@ -6156,7 +6242,12 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <div class="public-rdo-sections" data-public-rdo-sections>
+      <div class="mobile-rdo-view" role="group" aria-label="RDO display">
+        <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
+        <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
+      </div>
+      <p class="mobile-table-hint" ${publicRdoPresentation === "table" ? "" : "hidden"}>Swipe the table sideways to compare schedules. Line numbers stay visible.</p>
+      <div class="public-rdo-sections" data-public-rdo-sections data-presentation="${publicRdoPresentation}">
         ${publicRdoSectionsMarkup(area, lines)}
       </div>
     </section>
@@ -6168,7 +6259,19 @@ function renderPublicBidTimeTable(area) {
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <div class="table-wrap public-table-wrap flat">
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <div class="mobile-bid-time-cards">
+      ${seniority.map((person) => `
+        <article class="mobile-bid-time-card">
+          <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+          <p>${escapeHtml(person.initials)}</p>
+          <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+        </article>
+      `).join("")}
+      ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
+      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+    </div>
+    <div class="table-wrap public-table-wrap flat desktop-bid-times">
       <table class="public-bid-time-table">
         <thead>
           <tr>
@@ -6201,6 +6304,12 @@ function renderPublicBidTimeTable(area) {
 function updatePublicView(area = publicState.area, section = publicState.section) {
   publicState.area = area;
   publicState.section = section || "Calendar";
+  const areaSelect = document.querySelector("[data-mobile-public-area]");
+  if (areaSelect) areaSelect.value = ZLA_AREAS.includes(area) ? area : "";
+  document.querySelectorAll(".public-nav .public-area").forEach((group) => {
+    group.open = group.querySelector("[data-public-area]")?.dataset.publicArea === area;
+  });
+  document.querySelector(".mobile-public-menu")?.removeAttribute("open");
 
   const isInfoView = area === "FAQ" || area === "Previous Years" || section !== "Calendar";
   const tabs = document.querySelector(".public-tabs");
@@ -6235,7 +6344,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
   }
 
   if (calendarViewControls) {
-    calendarViewControls.hidden = publicState.section !== "Calendar";
+    calendarViewControls.hidden = isInfoView;
   }
 
   if (infoMessage) {
@@ -10631,6 +10740,43 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const publicDate = event.target.closest("[data-public-leave-date]");
+  if (publicDate && window.matchMedia("(max-width: 900px)").matches) {
+    openPublicDateSheet(publicDate);
+    return;
+  }
+  if (event.target.closest("[data-public-date-close]")) {
+    document.querySelector("[data-public-date-sheet]").close();
+    return;
+  }
+  const mobileCalendar = event.target.closest("[data-mobile-calendar]");
+  const monthStep = event.target.closest("[data-mobile-month-step]");
+  if (monthStep) {
+    const next = new Date(displayedCalendarYear, displayedCalendarMonth + Number(monthStep.dataset.mobileMonthStep), 1);
+    displayedCalendarYear = next.getFullYear();
+    displayedCalendarMonth = next.getMonth();
+    setSelectedDateYear(displayedCalendarYear);
+    annualMobileCalendars.delete(mobileCalendar.dataset.mobileCalendar);
+    renderVisibleCalendars();
+    document.querySelector(`[data-mobile-calendar="${mobileCalendar.dataset.mobileCalendar}"] [data-mobile-month-step="${monthStep.dataset.mobileMonthStep}"]`)?.focus();
+    return;
+  }
+  if (event.target.closest("[data-mobile-calendar-annual]")) {
+    const id = mobileCalendar.dataset.mobileCalendar;
+    if (annualMobileCalendars.has(id)) annualMobileCalendars.delete(id);
+    else annualMobileCalendars.add(id);
+    renderVisibleCalendars();
+    return;
+  }
+  const presentation = event.target.closest("[data-rdo-presentation]");
+  if (presentation) {
+    publicRdoPresentation = presentation.dataset.rdoPresentation;
+    document.querySelector("[data-public-rdo-sections]").dataset.presentation = publicRdoPresentation;
+    document.querySelectorAll("[data-rdo-presentation]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.rdoPresentation === publicRdoPresentation)));
+    document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
+    return;
+  }
+
   primeAlertSound();
 
   if (event.target.closest("[data-add-approval-rule]")) {
@@ -10773,6 +10919,7 @@ document.addEventListener("click", async (event) => {
   const helpMenu = document.querySelector("[data-help-menu]");
 
   if (helpToggle) {
+    document.querySelector(".mobile-public-menu")?.removeAttribute("open");
     openHelpPanel();
     return;
   }
@@ -11138,7 +11285,10 @@ document.addEventListener("click", async (event) => {
     const action = calendarYearButton.dataset.calendarYearAction;
     if (action === "next") displayedCalendarYear += 1;
     if (action === "previous") displayedCalendarYear -= 1;
-    if (action === "today") displayedCalendarYear = BID_YEAR;
+    if (action === "today") {
+      displayedCalendarYear = BID_YEAR;
+      displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
+    }
     setSelectedDateYear(displayedCalendarYear);
     renderVisibleCalendars();
     if (isMemberAppVisible()) renderLeaveSlotBoard();
@@ -11152,6 +11302,7 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    document.querySelector(".mobile-public-menu")?.removeAttribute("open");
     closeLeaveSlotModal();
   }
 
@@ -11246,6 +11397,18 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-mobile-bid-search]")) {
+    const query = event.target.value.trim().toLowerCase();
+    let matches = 0;
+    document.querySelectorAll(".mobile-bid-time-card").forEach((card) => {
+      const name = `${card.querySelector("[data-bidder-name]").textContent} ${card.querySelector("p").textContent}`.toLowerCase();
+      card.hidden = !name.includes(query);
+      if (!card.hidden) matches += 1;
+    });
+    document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    return;
+  }
+
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
@@ -11274,6 +11437,17 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-mobile-public-area]")) {
+    renderPublicPage(event.target.value, publicState.section);
+    return;
+  }
+  if (event.target.matches("[data-mobile-month]")) {
+    displayedCalendarMonth = Number(event.target.value);
+    annualMobileCalendars.delete(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar);
+    renderVisibleCalendars();
+    return;
+  }
+
   const bidWindowTestRoundSelect = event.target.closest("[data-bid-window-test-round]");
   if (bidWindowTestRoundSelect) {
     await setBidWindowTestRound(bidWindowTestRoundSelect.value);
@@ -11359,6 +11533,7 @@ document.addEventListener("change", async (event) => {
   renderApp();
 });
 
+initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
 initializeSupabaseAuth().then(async (restoredSession) => {
