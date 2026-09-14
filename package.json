@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:pilot": "node scripts/run-with-pilot-env.mjs dev",
     "build": "next build",
+    "build:pilot": "node scripts/run-with-pilot-env.mjs build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build"

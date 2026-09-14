@@ -31,9 +31,22 @@ export async function updateSession(request: NextRequest) {
   )
 
   // getClaims verifies the token. Do not replace this with getSession for guards.
-  // Refresh an existing session for optional account features without gating
-  // access to the public bidding website.
-  await supabase.auth.getClaims()
+  const { data } = await supabase.auth.getClaims()
+
+  const isPilot = process.env.NEXT_PUBLIC_APP_ENVIRONMENT === 'pilot'
+  const path = request.nextUrl.pathname
+  const isPilotPublicRoute = path === '/login' || path.startsWith('/auth/')
+
+  if (isPilot && !data?.claims && !isPilotPublicRoute) {
+    const loginUrl = new URL('/login', request.url)
+    const redirectResponse = NextResponse.redirect(loginUrl)
+
+    response.cookies.getAll().forEach(({ name, value, ...options }) => {
+      redirectResponse.cookies.set(name, value, options)
+    })
+
+    return redirectResponse
+  }
 
   return response
 }

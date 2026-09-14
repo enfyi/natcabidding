@@ -95,6 +95,15 @@ let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [
 let enforceBidWindows = storedJsonValue(BID_WINDOW_LOCK_STORAGE_KEY, true) !== false;
 let bidWindowTestRound = normalizeBidWindowTestRound(storedJsonValue(BID_WINDOW_TEST_ROUND_STORAGE_KEY, null));
 let bidWindowSettingsFallbackMessage = "";
+let pilotState = {
+  available: false,
+  database: false,
+  enabled: false,
+  allowed: true,
+  name: "Pilot",
+  memberIds: [],
+  lastResetAt: null,
+};
 const storedLeaveSlotCapacities = storedJsonValue(LEAVE_SLOT_CAPACITY_STORAGE_KEY, {});
 let leaveSlotCapacityOverrides = storedLeaveSlotCapacities && typeof storedLeaveSlotCapacities === "object"
   ? storedLeaveSlotCapacities
@@ -127,6 +136,7 @@ const testAccounts = {
 let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
+let senioritySearchQuery = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let leaveDraftQueue = [];
@@ -587,6 +597,9 @@ const calendarLayouts = {
   member: "minimal",
 };
 let displayedCalendarYear = BID_YEAR;
+let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
+const annualMobileCalendars = new Set();
+let publicRdoPresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date(BID_YEAR, 0, 1);
 const rdoFilters = {
@@ -1661,6 +1674,8 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
+let intakeEditorReturnFocus = null;
+let memberRdoPresentation = "cards";
 let intakeSearchQuery = "";
 const intakeFilters = {
   status: "all",
@@ -1765,7 +1780,14 @@ function warnUnconfirmedBidder(action = "submit bids") {
 }
 
 function canSubmitBueBid() {
-  return isConfirmedHelpUser();
+  return isConfirmedHelpUser() && (!pilotState.database || (pilotState.enabled && pilotState.allowed));
+}
+
+function pilotSubmissionErrorMessage() {
+  if (!pilotState.database || (pilotState.enabled && pilotState.allowed)) return "";
+  return pilotState.enabled
+    ? "Your account is not included in the current bidding pilot."
+    : "Practice bidding is currently turned off by an administrator.";
 }
 
 function shouldEnforceBidWindows() {
@@ -1795,6 +1817,8 @@ function currentUserBidWindowStatus(date = new Date()) {
 }
 
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
+  const pilotError = pilotSubmissionErrorMessage();
+  if (pilotError) return pilotError;
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
@@ -1935,6 +1959,106 @@ function applyBidYearSettings(settings) {
   }
 }
 
+function applyPilotSettings(settings) {
+  if (!settings || typeof settings !== "object") return;
+  pilotState = {
+    available: true,
+    database: Boolean(settings.pilot_database),
+    enabled: Boolean(settings.pilot_enabled),
+    allowed: settings.pilot_allowed !== false,
+    name: settings.pilot_name || "Pilot",
+    memberIds: Array.isArray(settings.pilot_member_ids) ? settings.pilot_member_ids : [],
+    lastResetAt: settings.pilot_last_reset_at || null,
+  };
+}
+
+function pilotInitialsForMemberIds() {
+  const ids = new Set(pilotState.memberIds);
+  return senioritySource
+    .filter((entry) => ids.has(seniorityEntryProfileId(entry)))
+    .map((entry) => entry[3])
+    .filter(Boolean)
+    .join(", ");
+}
+
+function syncPilotControls() {
+  const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
+  const banner = document.querySelector("[data-pilot-environment-banner]");
+  if (banner) banner.hidden = environment !== "pilot" && !pilotState.database;
+
+  document.querySelectorAll("[data-pilot-admin-card]").forEach((card) => {
+    card.hidden = !hasSystemAdminAccess();
+  });
+  const toggle = document.querySelector("[data-pilot-enabled-toggle]");
+  const initials = document.querySelector("[data-pilot-member-initials]");
+  if (toggle) {
+    toggle.checked = pilotState.enabled;
+    toggle.disabled = !pilotState.database;
+  }
+  if (initials) {
+    if (document.activeElement !== initials) initials.value = pilotInitialsForMemberIds();
+    initials.disabled = !pilotState.database;
+  }
+  document.querySelectorAll("[data-save-pilot-settings], [data-reset-pilot-data]").forEach((button) => {
+    button.disabled = !pilotState.database;
+  });
+  setText("[data-pilot-status]", !pilotState.database ? "Pilot unavailable" : pilotState.enabled ? "Pilot on" : "Pilot off");
+  setText(
+    "[data-pilot-status-copy]",
+    !pilotState.available
+      ? "Install database/pilot_mode.sql in the isolated pilot database."
+      : !pilotState.database
+      ? "Reset and pilot controls are locked because this database is not marked as a pilot database."
+      : pilotState.enabled
+      ? `${pilotState.name} is accepting practice bids from ${pilotState.memberIds.length} selected BUE${pilotState.memberIds.length === 1 ? "" : "s"}.`
+      : `${pilotState.name} is paused. Selected BUEs cannot submit practice bids.`
+  );
+}
+
+async function savePilotSettings() {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  const initialsInput = document.querySelector("[data-pilot-member-initials]");
+  const requestedInitials = String(initialsInput?.value || "")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+  const byInitials = new Map(senioritySource.map((entry) => [String(entry[3] || "").toUpperCase(), seniorityEntryProfileId(entry)]));
+  const unknown = requestedInitials.filter((initials) => !byInitials.get(initials));
+  if (unknown.length) {
+    window.alert(`These initials were not found in the active roster: ${unknown.join(", ")}.`);
+    return;
+  }
+  const client = supabaseClient();
+  const { data, error } = await client.rpc("set_pilot_mode", {
+    requested_bid_year: BID_YEAR,
+    should_enable: Boolean(document.querySelector("[data-pilot-enabled-toggle]")?.checked),
+    requested_pilot_member_ids: [...new Set(requestedInitials.map((initials) => byInitials.get(initials)))],
+    requested_pilot_name: pilotState.name,
+  });
+  if (error) {
+    window.alert(error.message || "Pilot access could not be saved.");
+    return;
+  }
+  applyPilotSettings(Array.isArray(data) ? data[0] : data);
+  syncPilotControls();
+  renderApp();
+}
+
+async function resetPilotData() {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  if (!window.confirm("Reset all practice bids, decisions, assignments, help messages, and audit history for this pilot year? Tester accounts and the roster will be kept.")) return;
+  const { data, error } = await supabaseClient().rpc("reset_pilot_data", { requested_bid_year: BID_YEAR });
+  if (error) {
+    window.alert(error.message || "Pilot data could not be reset.");
+    return;
+  }
+  applyPilotSettings(Array.isArray(data) ? data[0] : data);
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
+  renderApp();
+  window.alert("Practice data was reset. Tester accounts, roster, schedules, and pilot access were kept.");
+}
+
 async function saveSupabaseBidWindowTestingSettings() {
   const client = supabaseClient();
   if (!client || !supabaseState.connected) return { saved: false, missingRoutine: false };
@@ -2033,10 +2157,23 @@ function controllerName(person) {
   return `${person.firstName} ${person.lastName}`;
 }
 
-function manualBidControllerOptions(selectedInitials) {
-  return bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs)).map((person) => {
+function manualBidControllerMatches(person, query) {
+  if (!query) return true;
+  const searchable = `${person.rank} ${person.firstName} ${person.lastName} ${person.initials} ${person.area} ${person.bidAs}`.toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function manualBidControllerOptions(selectedInitials, query = "") {
+  const roster = bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs));
+  const matches = roster.filter((person) => manualBidControllerMatches(person, query));
+  const selectedPerson = roster.find((person) => person.initials === selectedInitials);
+  const visiblePeople = selectedPerson && !matches.includes(selectedPerson)
+    ? [selectedPerson, ...matches]
+    : matches;
+  return visiblePeople.map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
-    return `<option value="${person.initials}"${selected}>#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}</option>`;
+    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}`;
+    return `<option value="${escapeHtml(person.initials)}"${selected}>${escapeHtml(label)}</option>`;
   }).join("");
 }
 
@@ -2133,11 +2270,20 @@ function renderManualBidPanel(panel) {
   const selectedPerson = manualBidSelectedPerson(values.controller);
   const lockedArea = selectedPerson.area || currentViewArea();
 
+  const controllerSearch = panel.querySelector("[data-manual-controller-search]");
+  const controllerQuery = controllerSearch?.value.trim() || "";
   const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
   if (controllerSelect) {
     const roster = bueRoster();
-    controllerSelect.innerHTML = manualBidControllerOptions(values.controller);
+    const matchCount = roster.filter((person) => manualBidControllerMatches(person, controllerQuery)).length;
+    controllerSelect.innerHTML = manualBidControllerOptions(values.controller, controllerQuery);
     controllerSelect.value = roster.some((person) => person.initials === values.controller) ? values.controller : roster[0]?.initials || "";
+    const searchStatus = panel.querySelector("[data-manual-controller-search-status]");
+    if (searchStatus) {
+      searchStatus.textContent = controllerQuery
+        ? `${matchCount} ${matchCount === 1 ? "match" : "matches"}${matchCount === 0 ? "; current selection remains available" : ""}`
+        : `${roster.length} active controllers`;
+    }
   }
 
   const typeSelect = panel.querySelector("[data-manual-bid-type]");
@@ -3715,10 +3861,66 @@ function captureIntakeOverrideFields(item) {
   item.summary = `${item.range} · ${item.days} days`;
 }
 
-function approveIntakeItem(id) {
+async function supabaseSubmissionIdForIntakeItem(item) {
+  if (item.supabaseSubmissionId) return item.supabaseSubmissionId;
+  if (!item.supabaseRequestId) return "";
+  const { data, error } = await supabaseClient()
+    .from("intake_submissions")
+    .select("id")
+    .eq("leave_request_id", item.supabaseRequestId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || "";
+}
+
+async function persistIntakeDecision(item, decision, denialReason = "") {
+  if (!supabaseState.connected) return false;
+  const submissionId = await supabaseSubmissionIdForIntakeItem(item);
+  if (!submissionId) throw new Error("The saved intake submission could not be found. Reload the queue and try again.");
+  const overridePayload = item.type === "RDO Line"
+    ? {
+        line: item.line,
+        fatigueGroup: item.fatigueGroup,
+        flex: item.flex === true || item.flex === "Yes",
+        aws: item.aws === true || item.aws === "Yes",
+        mid: item.mid,
+      }
+    : { leaveCapacityOverride: Boolean(item.leaveCapacityOverride) };
+  const { error } = await supabaseClient().rpc("review_bidding_submission", {
+    submission_to_review: submissionId,
+    decision,
+    denial_reason_text: denialReason || null,
+    override_payload: overridePayload,
+  });
+  if (error) throw error;
+  item.supabaseSubmissionId = submissionId;
+  return true;
+}
+
+async function approveIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  let persisted = false;
+  try {
+    persisted = await persistIntakeDecision(item, "approved");
+  } catch (error) {
+    item.reviewNote = error.message || "This approval could not be saved.";
+    renderApp();
+    setPage("intake");
+    return;
+  }
+  if (persisted) {
+    queueBidVerifiedEmail(item);
+    activeOverrideId = null;
+    activeDenialId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setPage("intake");
+    return;
+  }
   let approved = true;
   if (item.type === "RDO Line") applyRdoApproval(item);
   if (item.type === "Leave") approved = applyLeaveApproval(item);
@@ -3733,7 +3935,7 @@ function approveIntakeItem(id) {
   setPage("intake");
 }
 
-function denyIntakeItem(id) {
+async function denyIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
 
@@ -3742,6 +3944,26 @@ function denyIntakeItem(id) {
     item.denialDraftError = "Enter a denial reason before sending this back to the BUE.";
     activeDenialId = id;
     activeOverrideId = null;
+    renderApp();
+    setPage("intake");
+    return;
+  }
+
+  let persisted = false;
+  try {
+    persisted = await persistIntakeDecision(item, "denied", reason);
+  } catch (error) {
+    item.denialDraftError = error.message || "This denial could not be saved.";
+    renderApp();
+    setPage("intake");
+    return;
+  }
+  if (persisted) {
+    queueBidDeniedEmail(item);
+    activeDenialId = null;
+    activeOverrideId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
     renderApp();
     setPage("intake");
     return;
@@ -3994,6 +4216,73 @@ function cachedFatigueGroupForDate(key, context) {
   return context.fatigueGroups.get(weekKey);
 }
 
+function syncMobileCalendarControls(target) {
+  let controls = document.querySelector(`[data-mobile-calendar="${target.id}"]`);
+  if (!controls) {
+    controls = document.createElement("div");
+    controls.className = "mobile-calendar-controls";
+    controls.dataset.mobileCalendar = target.id;
+    controls.innerHTML = `
+      <div class="mobile-month-navigation">
+        <button type="button" data-mobile-month-step="-1" aria-label="Previous month">‹</button>
+        <label><span class="visually-hidden">Month</span><select data-mobile-month aria-label="Calendar month">${monthNames.map((name, index) => `<option value="${index}">${name}</option>`).join("")}</select></label>
+        <button type="button" data-mobile-month-step="1" aria-label="Next month">›</button>
+      </div>
+      <div class="mobile-calendar-actions"><button type="button" data-mobile-calendar-annual aria-pressed="false">Show full year</button><button type="button" data-calendar-year-action="today">Bid year</button></div>`;
+    target.before(controls);
+  }
+  controls.querySelectorAll("[data-mobile-month] option").forEach((option, index) => { option.textContent = `${monthNames[index]} ${displayedCalendarYear}`; });
+  controls.querySelector("[data-mobile-month]").value = String(displayedCalendarMonth);
+  const annual = annualMobileCalendars.has(target.id);
+  const toggle = controls.querySelector("[data-mobile-calendar-annual]");
+  toggle.setAttribute("aria-pressed", String(annual));
+  toggle.textContent = annual ? "Show one month" : "Show full year";
+}
+
+function syncMobileCalendarMonths(target) {
+  target.classList.toggle("mobile-single-month", !annualMobileCalendars.has(target.id));
+  target.querySelectorAll("[data-calendar-month]").forEach((month) => {
+    month.classList.toggle("mobile-current-month", Number(month.dataset.calendarMonth) === displayedCalendarMonth && Number(month.dataset.calendarYear) === displayedCalendarYear);
+  });
+}
+
+function initializeMobilePublicNavigation() {
+  const login = document.querySelector(".public-login");
+  const slot = document.querySelector(".mobile-login-slot");
+  if (!login || !slot) return;
+  const placeholder = document.createComment("Desktop login position");
+  login.before(placeholder);
+  const query = window.matchMedia("(max-width: 720px)");
+  const relocate = () => {
+    if (query.matches) slot.append(login);
+    else placeholder.after(login);
+  };
+  query.addEventListener("change", relocate);
+  relocate();
+
+  const calendarQuery = window.matchMedia("(max-width: 900px)");
+  calendarQuery.addEventListener("change", () => renderVisibleCalendars());
+}
+
+function openPublicDateSheet(button) {
+  const key = button.dataset.publicLeaveDate;
+  const details = visibleLeaveSlotDetails(key, publicState.area);
+  const sheet = document.querySelector("[data-public-date-sheet]");
+  document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
+  const holiday = calendarHolidayKind(key, { area: publicState.area });
+  sheet.querySelector("[data-public-date-content]").innerHTML = `
+    <p>${escapeHtml(publicState.area)} · Read-only availability</p>
+    ${holiday ? `<p>${escapeHtml(holiday.label)}</p>` : ""}
+    ${["cpc", "dev"].map((bucket) => {
+      const name = bucket === "cpc" ? "CPC" : "Developmental";
+      const capacity = leaveSlotCapacityForDetails(details, bucket);
+      return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
+        ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
+    }).join("")}
+    ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
+  sheet.showModal();
+}
+
 function makeCalendar(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
@@ -4013,15 +4302,17 @@ function makeCalendar(targetId) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
   const monthIndexes = monthNames.map((_, index) => index);
   const context = makeCalendarRenderContext({
     area,
     showRdo,
     showPersonalLeave,
-    deferSlotTooltip: false,
+    deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
   });
 
+  syncMobileCalendarControls(target);
   target.classList.remove("month-view", "week-view");
   target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
@@ -4030,7 +4321,7 @@ function makeCalendar(targetId) {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: false,
+      deferSlotTooltip,
       expandedSlots,
       context,
     }))
@@ -4038,10 +4329,11 @@ function makeCalendar(targetId) {
       showRdo,
       showPersonalLeave,
       area,
-      deferSlotTooltip: false,
+      deferSlotTooltip,
       expandedSlots,
       context,
     });
+  syncMobileCalendarMonths(target);
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -4067,7 +4359,7 @@ function renderMonthCard(monthIndex, year, options = {}) {
   }
 
   return `
-    <article class="month-card">
+    <article class="month-card" data-calendar-month="${monthIndex}" data-calendar-year="${year}">
       <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
@@ -4223,7 +4515,7 @@ function updateCalendarViewControls() {
     const scope = description.dataset.calendarLayoutDescription;
     description.textContent = calendarLayouts[scope] === "full"
       ? "Every CPC and developmental slot is shown directly on each date."
-      : "Hover or focus a date to view its slots.";
+      : "Select a date to view its slots.";
   });
 }
 
@@ -4490,19 +4782,26 @@ function renderLeaveSlotBoard() {
   `;
 }
 
+let leaveSlotReturnFocus = null;
+
 function openLeaveSlotModal() {
   renderLeaveSlotBoard();
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
+  leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.hidden = false;
   document.body.classList.add("modal-open");
+  window.requestAnimationFrame(() => modal.querySelector("[data-leave-slot-close]")?.focus());
 }
 
 function closeLeaveSlotModal() {
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
+  const wasOpen = !modal.hidden;
   modal.hidden = true;
   document.body.classList.remove("modal-open");
+  if (wasOpen && leaveSlotReturnFocus?.isConnected) leaveSlotReturnFocus.focus();
+  leaveSlotReturnFocus = null;
 }
 
 function dateKey(year, month, day) {
@@ -4890,7 +5189,7 @@ async function initializeSupabaseAuth() {
     if (event === "SIGNED_OUT") clearSupabaseAccountState();
   });
 
-  await restoreSupabaseSession();
+  return restoreSupabaseSession();
 }
 
 async function restoreSupabaseSession(page = requestedLandingPage()) {
@@ -4929,16 +5228,18 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
-  let canRequestLink = false;
-  try {
-    canRequestLink = await canRequestSupabaseLoginEmail(email);
-  } catch (error) {
-    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
-    return;
-  }
-  if (!canRequestLink) {
-    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
-    return;
+  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    let canRequestLink = false;
+    try {
+      canRequestLink = await canRequestSupabaseLoginEmail(email);
+    } catch (error) {
+      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+      return;
+    }
+    if (!canRequestLink) {
+      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+      return;
+    }
   }
 
   await client.auth.signOut();
@@ -4967,16 +5268,18 @@ async function sendSupabasePasswordReset(email) {
     return;
   }
 
-  let canRequestLink = false;
-  try {
-    canRequestLink = await canRequestSupabaseLoginEmail(email);
-  } catch (error) {
-    setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
-    return;
-  }
-  if (!canRequestLink) {
-    setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
-    return;
+  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    let canRequestLink = false;
+    try {
+      canRequestLink = await canRequestSupabaseLoginEmail(email);
+    } catch (error) {
+      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+      return;
+    }
+    if (!canRequestLink) {
+      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+      return;
+    }
   }
 
   const { error } = await client.auth.resetPasswordForEmail(email, {
@@ -5581,32 +5884,18 @@ async function ensureSupabaseBidYearId() {
 async function saveSupabaseRdoRequest(request) {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) return false;
-  const bidYearId = await ensureSupabaseBidYearId();
-  if (!bidYearId) return false;
-
-  const payload = {
-    line: request.line,
-    rdo_line_code: request.line,
-    fatigue_group: request.fatigueGroup,
-    flex: request.flex,
-    aws: request.aws,
-    mid: request.mid,
-    bid_as: request.bidAs,
-    summary: request.summary,
-  };
-
-  const { error } = await client
-    .from("intake_submissions")
-    .insert({
-      bid_year_id: bidYearId,
-      area_id: null,
-      bidder_id: currentUser.supabaseProfileId,
-      round_number: request.round,
-      submission_type: "rdo",
-      status: "pending",
-      payload,
-      submitted_at: new Date().toISOString(),
-    });
+  const { error } = await client.rpc("submit_rdo_bid", {
+    requested_bid_year: BID_YEAR,
+    requested_line_code: request.line,
+    requested_fatigue_group: request.fatigueGroup,
+    requested_flex: request.flex === true || request.flex === "Yes",
+    requested_aws: request.aws === true || request.aws === "Yes",
+    requested_mid: request.mid,
+    requested_round: request.round,
+    target_initials: null,
+    target_area_name: null,
+    manual_entry: false,
+  });
   if (error) throw error;
   return true;
 }
@@ -5696,6 +5985,7 @@ async function loadSupabaseReferenceData() {
       leaveRequestsResult,
       intakeSchedulesResult,
       bidYearSettingsResult,
+      pilotSettingsResult,
       bidWindowsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
@@ -5705,6 +5995,9 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
+      supabaseState.authUserId
+        ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
+        : Promise.resolve({ data: null, error: null }),
       supabaseState.authUserId
         ? client.from("bid_windows").select("bidder_id,round_number,opens_at,closes_at,status").eq("bid_year_id", bidYear.id)
         : Promise.resolve({ data: [], error: null }),
@@ -5718,6 +6011,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
+      isMissingSupabaseRoutine(pilotSettingsResult.error) ? null : supabaseLoadWarning("pilot settings", pilotSettingsResult),
       supabaseLoadWarning("bid windows", bidWindowsResult),
     ].filter(Boolean);
 
@@ -5731,6 +6025,7 @@ async function loadSupabaseReferenceData() {
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
+    if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     await loadSupabaseHelpThreads();
 
@@ -5839,7 +6134,7 @@ function publicSheetCode(area, section) {
   if (area === "Previous Years") return "Historical RDO, bid-time, and leave calendar resources.";
   if (section === "RDO") return "Public RDO line reference for this area.";
   if (section === "Bid Time") return "Public bid-time schedule for this area.";
-  return "Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.";
+  return "Select a date to view open slots and bidder initials. Read-only calendar.";
 }
 
 function publicInfoText(area, section) {
@@ -5925,7 +6220,20 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
           <h3 id="public-rdo-${bidAsClass(section)}">${section}</h3>
           <span>${sectionLines.length} ${lineLabel}</span>
         </div>
-        <div class="table-wrap rdo-page-table-wrap">
+        <div class="mobile-rdo-cards">
+          ${sectionLines.map((line) => `
+            <details class="mobile-rdo-card">
+              <summary>
+                <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
+                <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+              </summary>
+              <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+              <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+            </details>
+          `).join("")}
+        </div>
+        <div class="table-wrap rdo-page-table-wrap" tabindex="0" role="region" aria-label="${section} schedule comparison table, scroll horizontally">
           <table class="line-table public-rdo-table">
             <thead>
               <tr>
@@ -5982,7 +6290,12 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <div class="public-rdo-sections" data-public-rdo-sections>
+      <div class="mobile-rdo-view" role="group" aria-label="RDO display">
+        <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
+        <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
+      </div>
+      <p class="mobile-table-hint" ${publicRdoPresentation === "table" ? "" : "hidden"}>Swipe the table sideways to compare schedules. Line numbers stay visible.</p>
+      <div class="public-rdo-sections" data-public-rdo-sections data-presentation="${publicRdoPresentation}">
         ${publicRdoSectionsMarkup(area, lines)}
       </div>
     </section>
@@ -5994,7 +6307,19 @@ function renderPublicBidTimeTable(area) {
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <div class="table-wrap public-table-wrap flat">
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <div class="mobile-bid-time-cards">
+      ${seniority.map((person) => `
+        <article class="mobile-bid-time-card">
+          <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+          <p>${escapeHtml(person.initials)}</p>
+          <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+        </article>
+      `).join("")}
+      ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
+      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+    </div>
+    <div class="table-wrap public-table-wrap flat desktop-bid-times">
       <table class="public-bid-time-table">
         <thead>
           <tr>
@@ -6027,6 +6352,12 @@ function renderPublicBidTimeTable(area) {
 function updatePublicView(area = publicState.area, section = publicState.section) {
   publicState.area = area;
   publicState.section = section || "Calendar";
+  const areaSelect = document.querySelector("[data-mobile-public-area]");
+  if (areaSelect) areaSelect.value = ZLA_AREAS.includes(area) ? area : "";
+  document.querySelectorAll(".public-nav .public-area").forEach((group) => {
+    group.open = group.querySelector("[data-public-area]")?.dataset.publicArea === area;
+  });
+  document.querySelector(".mobile-public-menu")?.removeAttribute("open");
 
   const isInfoView = area === "FAQ" || area === "Previous Years" || section !== "Calendar";
   const tabs = document.querySelector(".public-tabs");
@@ -6061,7 +6392,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
   }
 
   if (calendarViewControls) {
-    calendarViewControls.hidden = publicState.section !== "Calendar";
+    calendarViewControls.hidden = isInfoView;
   }
 
   if (infoMessage) {
@@ -6084,6 +6415,7 @@ function publicRosterArea(area = publicState.area) {
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section) {
+  syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
   if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
@@ -6663,6 +6995,37 @@ function renderRdoLines() {
   target.innerHTML = rows.length
     ? rows.join("")
     : `<tr><td colspan="11">No RDO lines match those filters for ${viewArea}.</td></tr>`;
+
+  const mobileCards = document.querySelector("[data-member-rdo-cards]");
+  const mobileResults = document.querySelector("[data-member-rdo-results]");
+  if (mobileResults) mobileResults.dataset.presentation = memberRdoPresentation;
+  if (mobileCards) {
+    mobileCards.innerHTML = filteredLines.length
+      ? filteredLines.map((line) => {
+        const isSelected = line.line === selectedLineId && isViewingHomeArea();
+        const isOccupied = line.status === "Taken";
+        const rdoDays = line.week
+          .map((value, index) => value === "RDO" ? dayNames[index] : "")
+          .filter(Boolean)
+          .join(", ") || line.pattern;
+        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const selectButton = !isOccupied && isViewingHomeArea()
+          ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
+          : "";
+        return `
+          <details class="mobile-rdo-card member-rdo-card ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
+            <summary>
+              <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${escapeHtml(rdoDays)}</span></span>
+              <span class="mobile-line-status">${status}</span>
+              <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+            </summary>
+            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+            <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
+          </details>
+        `;
+      }).join("")
+      : `<div class="empty-state">No RDO lines match those filters for ${escapeHtml(viewArea)}.</div>`;
+  }
 }
 
 function updateSelectedLine() {
@@ -8968,13 +9331,13 @@ function addIntakeScheduleFromForm() {
   setScheduleFormStatus(`${name} is scheduled for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
 }
 
-function seniorityCardMarkup() {
-  return seniority
+function seniorityCardMarkup(people = seniority) {
+  return people
     .map((person) => {
       const isBiddingNow = Boolean(person.openRound);
       const isCurrentUser = personMatchesCurrentUser(person);
       return `
-      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
+      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}"${isCurrentUser ? ' data-seniority-current tabindex="-1"' : ""}>
         <div class="seniority-card-head">
           <span>#${person.rank}</span>
         </div>
@@ -9006,7 +9369,7 @@ function seniorityCardMarkup() {
     .join("");
 }
 
-function seniorityTableMarkup() {
+function seniorityTableMarkup(people = seniority) {
   return `
     <table class="seniority-time-table">
       <thead>
@@ -9022,11 +9385,11 @@ function seniorityTableMarkup() {
         </tr>
       </thead>
       <tbody>
-        ${seniority.map((person) => {
+        ${people.map((person) => {
           const isBiddingNow = Boolean(person.openRound);
           const isCurrentUser = personMatchesCurrentUser(person);
           return `
-            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}">
+            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}"${isCurrentUser ? ' data-seniority-current tabindex="-1"' : ""}>
               <td>${person.rank}</td>
               <td>
                 <div class="seniority-table-person">
@@ -9080,8 +9443,33 @@ function renderSeniority() {
   cardTarget.hidden = isListView;
   tableTarget.hidden = !isListView;
 
-  cardTarget.innerHTML = seniorityCardMarkup();
-  tableTarget.innerHTML = isListView ? seniorityTableMarkup() : "";
+  const normalizedQuery = senioritySearchQuery.trim().toLowerCase();
+  const visiblePeople = normalizedQuery
+    ? seniority.filter((person) => `${person.rank} ${person.firstName} ${person.lastName} ${person.initials} ${person.bidAs}`.toLowerCase().includes(normalizedQuery))
+    : seniority;
+  const currentPerson = seniority.find(personMatchesCurrentUser);
+  const searchInput = document.querySelector("[data-seniority-search]");
+  if (searchInput && searchInput.value !== senioritySearchQuery) searchInput.value = senioritySearchQuery;
+  const jumpButton = document.querySelector("[data-seniority-jump-current]");
+  if (jumpButton) {
+    jumpButton.disabled = !currentPerson;
+    jumpButton.title = currentPerson ? `Go to ${currentPerson.firstName} ${currentPerson.lastName}` : "Your account is not in this area's seniority list.";
+  }
+  setText(
+    "[data-seniority-search-status]",
+    normalizedQuery
+      ? `${visiblePeople.length} ${visiblePeople.length === 1 ? "bidder" : "bidders"} found`
+      : `${seniority.length} bidders shown`
+  );
+
+  cardTarget.innerHTML = visiblePeople.length
+    ? seniorityCardMarkup(visiblePeople)
+    : '<div class="empty-state seniority-empty-state">No bidders match this search.</div>';
+  tableTarget.innerHTML = isListView
+    ? visiblePeople.length
+      ? seniorityTableMarkup(visiblePeople)
+      : '<div class="empty-state seniority-empty-state">No bidders match this search.</div>'
+    : "";
 }
 
 function renderHistory() {
@@ -9873,6 +10261,47 @@ function renderIntakeQueue() {
     denialPanel.hidden = !denialItem;
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
   }
+  const backdrop = document.querySelector("[data-intake-editor-backdrop]");
+  if (backdrop) backdrop.hidden = !(activeItem || denialItem);
+}
+
+function focusIntakeEditor(panelId) {
+  window.requestAnimationFrame(() => {
+    const panel = document.getElementById(panelId);
+    if (!panel || panel.hidden) return;
+    const focusTarget = panel.querySelector("[data-denial-reason]")
+      || panel.querySelector("[data-override-line], [data-override-range]")
+      || panel.querySelector("textarea, input:not([readonly]), select")
+      || panel.querySelector("button");
+    focusTarget?.focus();
+    if (!window.matchMedia("(max-width: 720px)").matches) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+function closeIntakeEditor() {
+  const returnTarget = intakeEditorReturnFocus;
+  activeOverrideId = null;
+  activeDenialId = null;
+  renderIntakeQueue();
+  if (returnTarget) {
+    const actionSelector = returnTarget.action === "deny" ? "[data-intake-deny]" : "[data-intake-edit]";
+    const returnCard = [...document.querySelectorAll("[data-intake-card]")]
+      .find((card) => card.dataset.intakeCard === returnTarget.id);
+    returnCard?.querySelector(actionSelector)?.focus();
+  }
+  intakeEditorReturnFocus = null;
+}
+
+function revealIntakeDetail() {
+  if (!window.matchMedia("(max-width: 720px)").matches) return;
+  window.requestAnimationFrame(() => {
+    const detail = document.querySelector("[data-intake-detail-panel]");
+    if (!detail || detail.hidden) return;
+    detail.scrollIntoView({ behavior: "smooth", block: "start" });
+    detail.focus({ preventScroll: true });
+  });
 }
 
 function setPage(pageName) {
@@ -9886,6 +10315,8 @@ function setPage(pageName) {
     pageName = "dashboard";
   }
 
+  const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
+
   document.querySelectorAll(".page").forEach((page) => {
     page.classList.toggle("active", page.dataset.pagePanel === pageName);
   });
@@ -9893,6 +10324,7 @@ function setPage(pageName) {
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.page === pageName);
   });
+  document.querySelector(".mobile-app-menu")?.removeAttribute("open");
 
   const title = document.getElementById("page-title");
   const titles = {
@@ -9909,6 +10341,10 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
+  if (activePageName !== pageName) {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
     renderCalendars({ includePublic: false });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
@@ -10450,6 +10886,7 @@ document.addEventListener('click', (event) => {
 });
 
 function renderApp() {
+  syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
     renderPublicPage();
@@ -10498,6 +10935,58 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const mobileAppMenu = event.target.closest(".mobile-app-menu");
+  if (mobileAppMenu && event.target.closest("button")) mobileAppMenu.removeAttribute("open");
+
+  const publicDate = event.target.closest("[data-public-leave-date]");
+  if (publicDate && window.matchMedia("(max-width: 900px)").matches) {
+    openPublicDateSheet(publicDate);
+    return;
+  }
+  if (event.target.closest("[data-public-date-close]")) {
+    document.querySelector("[data-public-date-sheet]").close();
+    return;
+  }
+  const mobileCalendar = event.target.closest("[data-mobile-calendar]");
+  const monthStep = event.target.closest("[data-mobile-month-step]");
+  if (monthStep) {
+    const next = new Date(displayedCalendarYear, displayedCalendarMonth + Number(monthStep.dataset.mobileMonthStep), 1);
+    displayedCalendarYear = next.getFullYear();
+    displayedCalendarMonth = next.getMonth();
+    setSelectedDateYear(displayedCalendarYear);
+    annualMobileCalendars.delete(mobileCalendar.dataset.mobileCalendar);
+    renderVisibleCalendars();
+    document.querySelector(`[data-mobile-calendar="${mobileCalendar.dataset.mobileCalendar}"] [data-mobile-month-step="${monthStep.dataset.mobileMonthStep}"]`)?.focus();
+    return;
+  }
+  if (event.target.closest("[data-mobile-calendar-annual]")) {
+    const id = mobileCalendar.dataset.mobileCalendar;
+    if (annualMobileCalendars.has(id)) annualMobileCalendars.delete(id);
+    else annualMobileCalendars.add(id);
+    renderVisibleCalendars();
+    return;
+  }
+  const presentation = event.target.closest("[data-rdo-presentation]");
+  if (presentation) {
+    publicRdoPresentation = presentation.dataset.rdoPresentation;
+    document.querySelector("[data-public-rdo-sections]").dataset.presentation = publicRdoPresentation;
+    document.querySelectorAll("[data-rdo-presentation]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.rdoPresentation === publicRdoPresentation)));
+    document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
+    return;
+  }
+  const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
+  if (memberPresentation) {
+    memberRdoPresentation = memberPresentation.dataset.memberRdoPresentation === "table" ? "table" : "cards";
+    const results = document.querySelector("[data-member-rdo-results]");
+    if (results) results.dataset.presentation = memberRdoPresentation;
+    document.querySelectorAll("[data-member-rdo-presentation]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.memberRdoPresentation === memberRdoPresentation));
+    });
+    const hint = document.querySelector(".member-rdo-table-hint");
+    if (hint) hint.hidden = memberRdoPresentation !== "table";
+    return;
+  }
+
   primeAlertSound();
 
   if (event.target.closest("[data-add-approval-rule]")) {
@@ -10526,6 +11015,16 @@ document.addEventListener("click", async (event) => {
   const bidWindowToggle = event.target.closest("[data-bid-window-enforcement-toggle]");
   if (bidWindowToggle) {
     await setBidWindowEnforcement(bidWindowToggle.checked);
+    return;
+  }
+
+  if (event.target.closest("[data-save-pilot-settings]")) {
+    await savePilotSettings();
+    return;
+  }
+
+  if (event.target.closest("[data-reset-pilot-data]")) {
+    await resetPilotData();
     return;
   }
 
@@ -10630,6 +11129,7 @@ document.addEventListener("click", async (event) => {
   const helpMenu = document.querySelector("[data-help-menu]");
 
   if (helpToggle) {
+    document.querySelector(".mobile-public-menu")?.removeAttribute("open");
     openHelpPanel();
     return;
   }
@@ -10835,10 +11335,32 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const adminSectionButton = event.target.closest("[data-admin-section-target]");
+  if (adminSectionButton) {
+    const section = document.getElementById(adminSectionButton.dataset.adminSectionTarget);
+    section?.scrollIntoView({ behavior: "instant", block: "start" });
+    section?.focus({ preventScroll: true });
+    return;
+  }
+
   const seniorityViewButton = event.target.closest("[data-seniority-view]");
   if (seniorityViewButton) {
     seniorityViewMode = seniorityViewButton.dataset.seniorityView === "list" ? "list" : "cards";
     renderSeniority();
+    return;
+  }
+
+  if (event.target.closest("[data-seniority-jump-current]")) {
+    senioritySearchQuery = "";
+    renderSeniority();
+    window.requestAnimationFrame(() => {
+      const visiblePanel = seniorityViewMode === "list"
+        ? document.getElementById("seniority-page-table")
+        : document.getElementById("seniority-page-list");
+      const currentEntry = visiblePanel?.querySelector("[data-seniority-current]");
+      currentEntry?.scrollIntoView({ behavior: "smooth", block: "center" });
+      currentEntry?.focus({ preventScroll: true });
+    });
     return;
   }
 
@@ -10851,35 +11373,38 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    await approveIntakeItem(intakeApprove.dataset.intakeApprove);
     return;
   }
 
   const intakeDeny = event.target.closest("[data-intake-deny]");
   if (intakeDeny) {
+    intakeEditorReturnFocus = { id: intakeDeny.dataset.intakeDeny, action: "deny" };
     activeDenialId = intakeDeny.dataset.intakeDeny;
     activeOverrideId = null;
     renderIntakeQueue();
+    focusIntakeEditor("denial-panel");
     return;
   }
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
-  if (event.target.closest("[data-denial-cancel]")) {
-    activeDenialId = null;
-    renderIntakeQueue();
+  if (event.target.closest("[data-denial-cancel], [data-intake-editor-close], [data-intake-editor-backdrop]")) {
+    closeIntakeEditor();
     return;
   }
 
   const intakeEdit = event.target.closest("[data-intake-edit]");
   if (intakeEdit) {
+    intakeEditorReturnFocus = { id: intakeEdit.dataset.intakeEdit, action: "edit" };
     activeOverrideId = intakeEdit.dataset.intakeEdit;
     activeDenialId = null;
     renderIntakeQueue();
+    focusIntakeEditor("override-panel");
     return;
   }
 
@@ -10893,6 +11418,7 @@ document.addEventListener("click", async (event) => {
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
     renderIntakeQueue();
+    revealIntakeDetail();
     return;
   }
 
@@ -10995,7 +11521,10 @@ document.addEventListener("click", async (event) => {
     const action = calendarYearButton.dataset.calendarYearAction;
     if (action === "next") displayedCalendarYear += 1;
     if (action === "previous") displayedCalendarYear -= 1;
-    if (action === "today") displayedCalendarYear = BID_YEAR;
+    if (action === "today") {
+      displayedCalendarYear = BID_YEAR;
+      displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
+    }
     setSelectedDateYear(displayedCalendarYear);
     renderVisibleCalendars();
     if (isMemberAppVisible()) renderLeaveSlotBoard();
@@ -11009,6 +11538,9 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    document.querySelector(".mobile-public-menu")?.removeAttribute("open");
+    document.querySelector(".mobile-app-menu")?.removeAttribute("open");
+    if (activeOverrideId || activeDenialId) closeIntakeEditor();
     closeLeaveSlotModal();
   }
 
@@ -11033,6 +11565,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
     renderIntakeQueue();
+    revealIntakeDetail();
   }
 });
 
@@ -11103,6 +11636,31 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-mobile-bid-search]")) {
+    const query = event.target.value.trim().toLowerCase();
+    let matches = 0;
+    document.querySelectorAll(".mobile-bid-time-card").forEach((card) => {
+      const name = `${card.querySelector("[data-bidder-name]").textContent} ${card.querySelector("p").textContent}`.toLowerCase();
+      card.hidden = !name.includes(query);
+      if (!card.hidden) matches += 1;
+    });
+    document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    return;
+  }
+
+  if (event.target.matches("[data-seniority-search]")) {
+    senioritySearchQuery = event.target.value;
+    renderSeniority();
+    return;
+  }
+
+  const manualControllerSearch = event.target.closest("[data-manual-controller-search]");
+  if (manualControllerSearch) {
+    const panel = manualControllerSearch.closest("[data-manual-bid-panel]");
+    if (panel) renderManualBidPanel(panel);
+    return;
+  }
+
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
@@ -11131,6 +11689,17 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-mobile-public-area]")) {
+    renderPublicPage(event.target.value, publicState.section);
+    return;
+  }
+  if (event.target.matches("[data-mobile-month]")) {
+    displayedCalendarMonth = Number(event.target.value);
+    annualMobileCalendars.delete(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar);
+    renderVisibleCalendars();
+    return;
+  }
+
   const bidWindowTestRoundSelect = event.target.closest("[data-bid-window-test-round]");
   if (bidWindowTestRoundSelect) {
     await setBidWindowTestRound(bidWindowTestRoundSelect.value);
@@ -11233,9 +11802,13 @@ document.addEventListener("change", async (event) => {
   renderApp();
 });
 
+initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
-initializeSupabaseAuth().finally(() => loadSupabaseReferenceData()).then(() => {
+initializeSupabaseAuth().then(async (restoredSession) => {
+  if (!restoredSession && window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+    await loadSupabaseReferenceData();
+  }
   if (isMemberAppVisible()) {
     renderApp();
   } else {

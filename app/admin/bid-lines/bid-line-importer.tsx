@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
 import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
 import { getSupabaseEnv } from '@/lib/env'
+import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
 
 type AreaOption = { code: string; name: string }
 type BidYearOption = { bid_year: number; status: string }
@@ -120,6 +121,7 @@ export function BidLineImporter() {
     setIssues([])
     setStatus('Reading and validating the workbook…')
     setResult(null)
+    const requestTimeout = createImportRequestTimeout()
 
     try {
       const { data: sessionData } = await supabase.auth.getSession()
@@ -132,6 +134,7 @@ export function BidLineImporter() {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
+        signal: requestTimeout.signal,
       })
       const body = await response.json()
       if (!response.ok) {
@@ -143,8 +146,11 @@ export function BidLineImporter() {
       setStatus(`${body.lines.length} bid lines are ready to import.`)
     } catch (error) {
       setPreview(null)
-      setStatus(error instanceof Error ? error.message : 'The workbook could not be previewed.')
+      setStatus(requestTimeout.didExpire()
+        ? importTimeoutMessage('preview')
+        : error instanceof Error ? error.message : 'The workbook could not be previewed.')
     } finally {
+      requestTimeout.clear()
       setBusy(false)
     }
   }
@@ -154,21 +160,29 @@ export function BidLineImporter() {
     setBusy(true)
     setIssues([])
     setStatus('Importing bid lines into Supabase…')
+    const requestTimeout = createImportRequestTimeout()
 
     try {
-      const { data, error } = await supabase.rpc('import_bid_line_schedule', {
-        requested_bid_year: Number(bidYear),
-        requested_area_code: areaCode,
-        requested_lines: importPayload(preview.lines),
-      })
+      const { data, error } = await supabase
+        .rpc('import_bid_line_schedule', {
+          requested_bid_year: Number(bidYear),
+          requested_area_code: areaCode,
+          requested_lines: importPayload(preview.lines),
+        })
+        .abortSignal(requestTimeout.signal)
+      if (requestTimeout.didExpire()) throw new Error(importTimeoutMessage('import'))
       if (error) throw error
 
       const imported = data as ImportResult
       setResult(imported)
       setStatus(`Import complete: ${imported.inserted} added and ${imported.updated} updated.`)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'The import failed. No partial changes were saved.')
+      if (requestTimeout.didExpire()) setPreview(null)
+      setStatus(requestTimeout.didExpire()
+        ? importTimeoutMessage('import')
+        : error instanceof Error ? error.message : 'The import failed. No partial changes were saved.')
     } finally {
+      requestTimeout.clear()
       setBusy(false)
     }
   }

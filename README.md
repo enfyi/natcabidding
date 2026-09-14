@@ -70,6 +70,26 @@ Define `NEXT_PUBLIC_SUPABASE_URL` and
 Define `NEXT_PUBLIC_SITE_URL` only for Production (and locally in `.env.local`).
 The build intentionally fails if the Supabase URL or publishable key is missing.
 
+The browser configuration at `/supabase-config.js` is generated from these
+environment variables at request time. Set `NEXT_PUBLIC_APP_ENVIRONMENT=pilot`
+on an isolated pilot deployment to show the permanent practice-data banner.
+Never point a pilot deployment at the production Supabase project.
+
+## Isolated bidding pilot
+
+Use a separate Supabase project and a separate Vercel deployment for a
+participant pilot. Apply the normal database scripts, then apply
+`database/pilot_auth_profile.sql`, `database/pilot_mode.sql`,
+`database/pilot_seed.sql`, and `database/pilot_login_only.sql` only in that
+disposable database. The Admin page can then select BUEs by initials, turn
+practice bidding on or off, and reset the year's practice data. Reset keeps the
+roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
+participant list.
+
+The database refuses pilot activation and reset unless `pilot_seed.sql` marked
+it as isolated. A reset also turns the pilot off, so the administrator must
+review the clean state and turn it back on for the next run.
+
 ## Bid notification email
 
 Bid submission, approval, and denial notifications are sent through a Google
