@@ -38,8 +38,8 @@ begin
     raise exception 'Authenticated bidder profile required.';
   end if;
 
-  if actor.bid_role = 'ADM' then
-    raise exception 'Admin-only profiles cannot manage leave bids.';
+  if actor.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile is not eligible to manage leave bids.';
   end if;
 
   select request.*

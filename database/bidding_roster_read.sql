@@ -56,7 +56,7 @@ as $$
       count(*) over (partition by b.area_id) as area_bidder_count
     from bidders b
     where b.active
-      and b.bid_role <> 'ADM'
+      and b.bid_role not in ('ADM', 'NB')
   )
   select
     b.id as profile_id,

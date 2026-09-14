@@ -137,8 +137,8 @@ begin
     raise exception 'The bidder must be assigned to an area before leave can be submitted.';
   end if;
 
-  if target.bid_role = 'ADM' then
-    raise exception 'Admin-only profiles cannot submit leave bids.';
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile is not eligible to submit leave bids.';
   end if;
 
   select a.name
@@ -332,6 +332,7 @@ begin
       and b.area_id = target.area_id
       and lr.status = 'pending'
       and d.charged
+      and b.bid_role not in ('ADM', 'NB')
       and case
         when b.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
