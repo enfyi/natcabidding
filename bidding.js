@@ -607,9 +607,10 @@ const publicState = {
 };
 
 const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
-const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV"];
-const TMU_BID_ROLES = ["TMC", "DEV", "GL"];
+const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV", "NB"];
+const TMU_BID_ROLES = ["TMC", "DEV", "GL", "NB"];
 const ADMIN_PROFILE_BID_ROLE = "ADM";
+const NON_BIDDING_EMPLOYEE_BID_ROLE = "NB";
 
 const supabaseState = {
   enabled: false,
@@ -1349,6 +1350,7 @@ function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
+  if (!bidRoleParticipatesInBidding(currentUserBidAs())) return null;
   if (area === currentUser.area && Number.isFinite(currentUser.seniorityRank)) {
     return currentUser.seniorityRank;
   }
@@ -1358,6 +1360,7 @@ function currentUserSeniorityRank(area = currentUser.area) {
 }
 
 function currentUserBidderCount(area = currentUser.area) {
+  if (!bidRoleParticipatesInBidding(currentUserBidAs())) return activeRosterEntries(area).length;
   if (area === currentUser.area && Number.isFinite(currentUser.bidderCount) && currentUser.bidderCount > 0) {
     return currentUser.bidderCount;
   }
@@ -1491,8 +1494,16 @@ function seniorityEntryActive(entry) {
   return entry[7] !== false;
 }
 
-function seniorityEntryIsBue(entry) {
+function bidRoleParticipatesInBidding(bidAs) {
+  return ![ADMIN_PROFILE_BID_ROLE, NON_BIDDING_EMPLOYEE_BID_ROLE].includes(String(bidAs || "").trim().toUpperCase());
+}
+
+function seniorityEntryIsRosterPerson(entry) {
   return normalizeBidRoleForArea(entry?.[2], seniorityEntryArea(entry)) !== ADMIN_PROFILE_BID_ROLE;
+}
+
+function seniorityEntryParticipatesInBidding(entry) {
+  return bidRoleParticipatesInBidding(normalizeBidRoleForArea(entry?.[2], seniorityEntryArea(entry)));
 }
 
 function normalizeLeaveSlotAllowance(value) {
@@ -1540,7 +1551,7 @@ function personMatchesCurrentUser(person) {
 function activeRosterEntries(area = null) {
   return senioritySource.filter((entry) =>
     seniorityEntryActive(entry) &&
-    seniorityEntryIsBue(entry) &&
+    seniorityEntryParticipatesInBidding(entry) &&
     (!area || seniorityEntryArea(entry) === area)
   );
 }
@@ -1548,13 +1559,18 @@ function activeRosterEntries(area = null) {
 function rosterEntryToPerson(entry, rank = null, options = {}) {
   const [lastName, firstName, bidAs, initials] = entry;
   const area = seniorityEntryArea(entry);
-  const resolvedRank = Number.isFinite(rank) ? rank : activeRosterEntries(seniorityEntryArea(entry)).findIndex((item) => item === entry) + 1;
+  const normalizedBidAs = normalizeBidRoleForArea(bidAs, area);
+  const participatesInBidding = bidRoleParticipatesInBidding(normalizedBidAs);
+  const rosterRank = activeRosterEntries(seniorityEntryArea(entry)).findIndex((item) => item === entry) + 1;
+  const resolvedRank = participatesInBidding
+    ? (Number.isFinite(rank) ? rank : rosterRank || null)
+    : null;
   const shouldUseFallbackInitials = options.fallbackInitials !== false;
   return {
     rank: resolvedRank,
     firstName,
     lastName,
-    bidAs: normalizeBidRoleForArea(bidAs, area),
+    bidAs: normalizedBidAs,
     initials: initials || (shouldUseFallbackInitials ? fallbackInitials(firstName, lastName) : ""),
     area,
     email: seniorityEntryEmail(entry),
@@ -2018,7 +2034,7 @@ function controllerName(person) {
 }
 
 function manualBidControllerOptions(selectedInitials) {
-  return bueRoster().map((person) => {
+  return bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs)).map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
     return `<option value="${person.initials}"${selected}>#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}</option>`;
   }).join("");
@@ -2032,7 +2048,7 @@ function manualBidAreaOptions(selectedArea) {
 }
 
 function manualBidSelectedPerson(selectedInitials) {
-  const roster = bueRoster();
+  const roster = bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs));
   return roster.find((person) => person.initials === selectedInitials) || roster[0] || {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
@@ -7543,6 +7559,21 @@ function syncRosterDeleteSelectedButton() {
   button.disabled = !findRosterEntryByIndex(editIndex);
 }
 
+function syncRosterParticipationFields() {
+  const bidAs = document.querySelector("[data-roster-bid-as]")?.value || "";
+  const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
+  const rankInput = document.querySelector("[data-roster-rank]");
+  const leaveSlotsInput = document.querySelector("[data-roster-leave-slots]");
+  if (rankInput) {
+    if (!participatesInBidding) rankInput.value = "";
+    rankInput.disabled = !participatesInBidding;
+  }
+  if (leaveSlotsInput) {
+    if (!participatesInBidding) leaveSlotsInput.value = "0";
+    leaveSlotsInput.disabled = !participatesInBidding;
+  }
+}
+
 function syncBulkRosterBidAsSelect(row, selectedBidAs) {
   const area = row.querySelector("[data-bulk-area]")?.value || selectedRosterArea();
   const select = row.querySelector("[data-bulk-bid-as]");
@@ -7550,6 +7581,19 @@ function syncBulkRosterBidAsSelect(row, selectedBidAs) {
   const selectedRole = normalizeBidRoleForArea(selectedBidAs || select.value, area);
   select.innerHTML = rosterBidAsOptions(selectedRole, area);
   select.value = validBidRoleForArea(selectedRole, area) ? selectedRole : defaultBidRoleForArea(area);
+  syncBulkRosterParticipationFields(row);
+}
+
+function syncBulkRosterParticipationFields(row) {
+  const bidAs = row.querySelector("[data-bulk-bid-as]")?.value || "";
+  const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
+  const rankInput = row.querySelector("[data-bulk-rank]");
+  const leaveSlotsInput = row.querySelector("[data-bulk-leave-slots]");
+  if (rankInput && !participatesInBidding) rankInput.value = "";
+  if (leaveSlotsInput) {
+    if (!participatesInBidding) leaveSlotsInput.value = "0";
+    leaveSlotsInput.disabled = !participatesInBidding;
+  }
 }
 
 function findRosterEntryByInitials(initials) {
@@ -7600,6 +7644,7 @@ function setRosterFormValues(values = defaultRosterFormValues()) {
   setValue("[data-roster-rank]", values.rank);
   setValue("[data-roster-leave-slots]", normalizeLeaveSlotAllowance(values.leaveSlotAllowance));
   syncRosterBidAsSelect(values.area, values.bidAs);
+  syncRosterParticipationFields();
   syncRosterDeleteSelectedButton();
 }
 
@@ -7627,7 +7672,7 @@ function editRosterEntryByIndex(index) {
     email: person.email,
     phone: person.phone,
     area: person.area,
-    rank: Number.isFinite(person.rank) ? person.rank : activeRosterEntries(person.area).length + 1,
+    rank: bidRoleParticipatesInBidding(person.bidAs) && Number.isFinite(person.rank) ? person.rank : "",
     bidAs: person.bidAs,
     leaveSlotAllowance: person.leaveSlotAllowance,
   });
@@ -7637,6 +7682,9 @@ function editRosterEntryByIndex(index) {
 function rosterFormValues() {
   const value = (selector) => document.querySelector(selector)?.value.trim() || "";
   const area = value("[data-roster-area]") || selectedRosterArea();
+  const bidAs = normalizeBidRoleForArea(value("[data-roster-bid-as]") || defaultBidRoleForArea(area), area);
+  const rank = Number(value("[data-roster-rank]"));
+  const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
   return {
     editInitials: value("[data-roster-edit-initials]").toUpperCase(),
     firstName: value("[data-roster-first-name]"),
@@ -7645,9 +7693,9 @@ function rosterFormValues() {
     email: value("[data-roster-email]").toLowerCase(),
     phone: value("[data-roster-phone]"),
     area,
-    rank: Number(value("[data-roster-rank]")),
-    bidAs: normalizeBidRoleForArea(value("[data-roster-bid-as]") || defaultBidRoleForArea(area), area),
-    leaveSlotAllowance: normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")),
+    rank: participatesInBidding && Number.isFinite(rank) ? rank : null,
+    bidAs,
+    leaveSlotAllowance: participatesInBidding ? normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")) : 0,
     editIndex: Number(value("[data-roster-edit-index]")),
     active: true,
   };
@@ -7813,24 +7861,26 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
 
 function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
   return [...areas].flatMap((area) =>
-    activeRosterEntries(area).map((entry, index) => {
-      const person = rosterEntryToPerson(entry, index + 1, { fallbackInitials: false });
-      const override = entryOverrides.get(entry) || {};
-      return {
-        firstName: person.firstName,
-        lastName: person.lastName,
-        initials: person.initials,
-        email: person.email,
-        phone: person.phone,
-        area: person.area,
-        rank: person.rank,
-        bidAs: person.bidAs,
-        leaveSlotAllowance: person.leaveSlotAllowance,
-        active: person.active,
-        originalArea: override.originalArea || person.area,
-        originalInitials: override.originalInitials || person.initials,
-      };
-    })
+    senioritySource
+      .filter((entry) => seniorityEntryArea(entry) === area && seniorityEntryActive(entry) && seniorityEntryIsRosterPerson(entry))
+      .map((entry) => {
+        const person = rosterEntryToPerson(entry, null, { fallbackInitials: false });
+        const override = entryOverrides.get(entry) || {};
+        return {
+          firstName: person.firstName,
+          lastName: person.lastName,
+          initials: person.initials,
+          email: person.email,
+          phone: person.phone,
+          area: person.area,
+          rank: person.rank,
+          bidAs: person.bidAs,
+          leaveSlotAllowance: person.leaveSlotAllowance,
+          active: person.active,
+          originalArea: override.originalArea || person.area,
+          originalInitials: override.originalInitials || person.initials,
+        };
+      })
   );
 }
 
@@ -7851,7 +7901,7 @@ async function saveRosterEntry(event) {
     setRosterStatus("Choose a valid bid role.", "error");
     return;
   }
-  if (!Number.isFinite(values.rank) || values.rank < 1) {
+  if (bidRoleParticipatesInBidding(values.bidAs) && (!Number.isFinite(values.rank) || values.rank < 1)) {
     setRosterStatus("Enter a valid seniority rank.", "error");
     return;
   }
@@ -7877,7 +7927,8 @@ async function saveRosterEntry(event) {
   placeRosterEntry(entry, values.area, values.rank);
 
   syncCurrentUserFromRoster(values.editInitials || values.initials, values.initials);
-  logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area} at seniority #${values.rank}.`);
+  const rankDetail = Number.isFinite(values.rank) ? ` at seniority #${values.rank}` : "";
+  logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area}${rankDetail}.`);
   renderApp();
   editRosterEntryByIndex(senioritySource.indexOf(entry));
   setRosterStatus(`${values.firstName} ${values.lastName} saved in the working roster. Syncing to Supabase...`, "info");
@@ -7966,6 +8017,9 @@ function bulkRosterRows() {
     .map((row) => {
       const originalInitials = row.dataset.originalInitials || "";
       const area = bulkRowValue(row, "[data-bulk-area]");
+      const bidAs = normalizeBidRoleForArea(bulkRowValue(row, "[data-bulk-bid-as]") || defaultBidRoleForArea(area), area);
+      const rank = Number(bulkRowValue(row, "[data-bulk-rank]"));
+      const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
       return {
         originalInitials,
         sourceIndex: Number(row.dataset.rosterEntryIndex),
@@ -7975,9 +8029,9 @@ function bulkRosterRows() {
         email: bulkRowValue(row, "[data-bulk-email]").toLowerCase(),
         phone: bulkRowValue(row, "[data-bulk-phone]"),
         area,
-        rank: Number(bulkRowValue(row, "[data-bulk-rank]")),
-        bidAs: normalizeBidRoleForArea(bulkRowValue(row, "[data-bulk-bid-as]") || defaultBidRoleForArea(area), area),
-        leaveSlotAllowance: normalizeLeaveSlotAllowance(bulkRowValue(row, "[data-bulk-leave-slots]")),
+        rank: participatesInBidding && Number.isFinite(rank) ? rank : null,
+        bidAs,
+        leaveSlotAllowance: participatesInBidding ? normalizeLeaveSlotAllowance(bulkRowValue(row, "[data-bulk-leave-slots]")) : 0,
         active: true,
       };
     });
@@ -7989,7 +8043,7 @@ function validateBulkRosterRows(rows) {
     if (!row.firstName || !row.lastName) return "Every edited BUE needs first name and last name.";
     if (!ZLA_AREAS.includes(row.area)) return `Choose a valid area for ${row.initials}.`;
     if (!validBidRoleForArea(row.bidAs, row.area)) return `Choose a valid bid role for ${row.initials}.`;
-    if (!Number.isFinite(row.rank) || row.rank < 1) return `Enter a valid seniority rank for ${row.initials}.`;
+    if (bidRoleParticipatesInBidding(row.bidAs) && (!Number.isFinite(row.rank) || row.rank < 1)) return `Enter a valid seniority rank for ${row.initials}.`;
     if (!Number.isFinite(row.leaveSlotAllowance) || row.leaveSlotAllowance < 0) return `Enter a valid leave-slot allowance for ${row.initials}.`;
   }
 
@@ -8076,7 +8130,7 @@ function rebuildRosterFromBulkRows(rows) {
   ZLA_AREAS.forEach((area) => {
     const areaEntries = entriesByArea.get(area);
     const activeEntries = areaEntries
-      .filter(seniorityEntryActive)
+      .filter((entry) => seniorityEntryActive(entry) && seniorityEntryParticipatesInBidding(entry))
       .sort((a, b) => {
         const rankDifference = rankSortValue(a) - rankSortValue(b);
         if (rankDifference !== 0) return rankDifference;
@@ -8089,10 +8143,13 @@ function rebuildRosterFromBulkRows(rows) {
         if (aRow && bRow) return aRow.bulkIndex - bRow.bulkIndex;
         return originalOrder.get(a) - originalOrder.get(b);
       });
+    const nonBiddingEntries = areaEntries
+      .filter((entry) => seniorityEntryActive(entry) && !seniorityEntryParticipatesInBidding(entry))
+      .sort((a, b) => originalOrder.get(a) - originalOrder.get(b));
     const inactiveEntries = areaEntries
       .filter((entry) => !seniorityEntryActive(entry))
       .sort((a, b) => originalOrder.get(a) - originalOrder.get(b));
-    rebuilt.push(...activeEntries, ...inactiveEntries);
+    rebuilt.push(...activeEntries, ...nonBiddingEntries, ...inactiveEntries);
   });
 
   senioritySource.splice(0, senioritySource.length, ...rebuilt, ...extraEntries);
@@ -8142,6 +8199,7 @@ function renderRosterManager() {
   const rankInput = document.querySelector("[data-roster-rank]");
   if (rankInput && !rankInput.value) rankInput.value = activeRosterEntries(selectedArea).length + 1;
   if (areaInput) syncRosterBidAsSelect(areaInput.value || selectedArea);
+  syncRosterParticipationFields();
   syncRosterDeleteSelectedButton();
 
   const target = document.querySelector("[data-roster-table]");
@@ -8170,6 +8228,7 @@ function renderRosterManager() {
       </tr>
     `).join("")
     : '<tr><td colspan="11">No BUEs in this area yet.</td></tr>';
+  rosterTableRows().forEach(syncBulkRosterParticipationFields);
   applyRosterColumnWidths();
 }
 
@@ -11114,10 +11173,20 @@ document.addEventListener("change", async (event) => {
   const rosterAreaInput = event.target.closest("[data-roster-area]");
   if (rosterAreaInput) {
     syncRosterBidAsSelect(rosterAreaInput.value);
-    if (!document.querySelector("[data-roster-edit-initials]")?.value) {
+    if (
+      !document.querySelector("[data-roster-edit-initials]")?.value &&
+      bidRoleParticipatesInBidding(document.querySelector("[data-roster-bid-as]")?.value)
+    ) {
       const rankInput = document.querySelector("[data-roster-rank]");
       if (rankInput) rankInput.value = activeRosterEntries(rosterAreaInput.value).length + 1;
     }
+    syncRosterParticipationFields();
+    return;
+  }
+
+  const rosterBidAsInput = event.target.closest("[data-roster-bid-as]");
+  if (rosterBidAsInput) {
+    syncRosterParticipationFields();
     return;
   }
 
@@ -11125,6 +11194,13 @@ document.addEventListener("change", async (event) => {
   if (bulkRosterAreaInput) {
     const row = bulkRosterAreaInput.closest("[data-roster-row]");
     if (row) syncBulkRosterBidAsSelect(row);
+    return;
+  }
+
+  const bulkRosterBidAsInput = event.target.closest("[data-bulk-bid-as]");
+  if (bulkRosterBidAsInput) {
+    const row = bulkRosterBidAsInput.closest("[data-roster-row]");
+    if (row) syncBulkRosterParticipationFields(row);
     return;
   }
 

@@ -87,7 +87,7 @@ as $$
       )::integer as area_seniority_rank
     from bidders area_bidders
     where area_bidders.active
-      and area_bidders.bid_role <> 'ADM'
+      and area_bidders.bid_role not in ('ADM', 'NB')
   )
   select
     lr.id,

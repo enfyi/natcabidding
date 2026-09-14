@@ -87,8 +87,8 @@ begin
     raise exception 'Intake users can only replace approved leave in their own area.';
   end if;
 
-  if target.bid_role = 'ADM' then
-    raise exception 'Admin-only profiles cannot be assigned leave.';
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile cannot be assigned leave.';
   end if;
 
   select byear.*
@@ -377,6 +377,7 @@ begin
       and pending_date.leave_date = edit_date
       and pending_date.charged
       and pending_bidder.area_id = target.area_id
+      and pending_bidder.bid_role not in ('ADM', 'NB')
       and case
         when pending_bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'

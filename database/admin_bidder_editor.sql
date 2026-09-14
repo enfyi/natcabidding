@@ -85,8 +85,8 @@ begin
     raise exception 'Intake users can only replace approved leave in their own area.';
   end if;
 
-  if target.bid_role = 'ADM' then
-    raise exception 'Admin-only profiles cannot be assigned leave.';
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile cannot be assigned leave.';
   end if;
 
   select byear.*
@@ -379,6 +379,7 @@ begin
       and pending_date.leave_date = edit_date
       and pending_date.charged
       and pending_bidder.area_id = target.area_id
+      and pending_bidder.bid_role not in ('ADM', 'NB')
       and case
         when pending_bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
@@ -574,8 +575,8 @@ declare
 begin
   actor_id := private.bidder_editor_actor(target_bidder_id);
   select * into strict target from public.bidders where id=target_bidder_id for update;
-  if target.bid_role = 'ADM' then
-    raise exception 'Admin-only profiles cannot be edited as bidders.';
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile cannot be edited as a bidder.';
   end if;
   select id into strict year_id from public.bid_years where bid_year=requested_bid_year;
   perform id from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id order by id for update;

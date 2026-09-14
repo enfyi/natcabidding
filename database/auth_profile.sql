@@ -126,7 +126,7 @@ begin
       count(*) over (partition by area_bidders.area_id) as area_bidder_count
     from bidders area_bidders
     where area_bidders.active
-      and area_bidders.bid_role <> 'ADM'
+      and area_bidders.bid_role not in ('ADM', 'NB')
   )
   select
     b.id,
