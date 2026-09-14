@@ -136,6 +136,7 @@ const testAccounts = {
 let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
+let senioritySearchQuery = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let leaveDraftQueue = [];
@@ -1657,6 +1658,8 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
+let intakeEditorReturnFocus = null;
+let memberRdoPresentation = "cards";
 let intakeSearchQuery = "";
 const intakeFilters = {
   status: "all",
@@ -2138,10 +2141,23 @@ function controllerName(person) {
   return `${person.firstName} ${person.lastName}`;
 }
 
-function manualBidControllerOptions(selectedInitials) {
-  return bueRoster().map((person) => {
+function manualBidControllerMatches(person, query) {
+  if (!query) return true;
+  const searchable = `${person.rank} ${person.firstName} ${person.lastName} ${person.initials} ${person.area} ${person.bidAs}`.toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function manualBidControllerOptions(selectedInitials, query = "") {
+  const roster = bueRoster();
+  const matches = roster.filter((person) => manualBidControllerMatches(person, query));
+  const selectedPerson = roster.find((person) => person.initials === selectedInitials);
+  const visiblePeople = selectedPerson && !matches.includes(selectedPerson)
+    ? [selectedPerson, ...matches]
+    : matches;
+  return visiblePeople.map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
-    return `<option value="${person.initials}"${selected}>#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}</option>`;
+    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}`;
+    return `<option value="${escapeHtml(person.initials)}"${selected}>${escapeHtml(label)}</option>`;
   }).join("");
 }
 
@@ -2238,11 +2254,20 @@ function renderManualBidPanel(panel) {
   const selectedPerson = manualBidSelectedPerson(values.controller);
   const lockedArea = selectedPerson.area || currentViewArea();
 
+  const controllerSearch = panel.querySelector("[data-manual-controller-search]");
+  const controllerQuery = controllerSearch?.value.trim() || "";
   const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
   if (controllerSelect) {
     const roster = bueRoster();
-    controllerSelect.innerHTML = manualBidControllerOptions(values.controller);
+    const matchCount = roster.filter((person) => manualBidControllerMatches(person, controllerQuery)).length;
+    controllerSelect.innerHTML = manualBidControllerOptions(values.controller, controllerQuery);
     controllerSelect.value = roster.some((person) => person.initials === values.controller) ? values.controller : roster[0]?.initials || "";
+    const searchStatus = panel.querySelector("[data-manual-controller-search-status]");
+    if (searchStatus) {
+      searchStatus.textContent = controllerQuery
+        ? `${matchCount} ${matchCount === 1 ? "match" : "matches"}${matchCount === 0 ? "; current selection remains available" : ""}`
+        : `${roster.length} active controllers`;
+    }
   }
 
   const typeSelect = panel.querySelector("[data-manual-bid-type]");
@@ -4741,19 +4766,26 @@ function renderLeaveSlotBoard() {
   `;
 }
 
+let leaveSlotReturnFocus = null;
+
 function openLeaveSlotModal() {
   renderLeaveSlotBoard();
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
+  leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   modal.hidden = false;
   document.body.classList.add("modal-open");
+  window.requestAnimationFrame(() => modal.querySelector("[data-leave-slot-close]")?.focus());
 }
 
 function closeLeaveSlotModal() {
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
+  const wasOpen = !modal.hidden;
   modal.hidden = true;
   document.body.classList.remove("modal-open");
+  if (wasOpen && leaveSlotReturnFocus?.isConnected) leaveSlotReturnFocus.focus();
+  leaveSlotReturnFocus = null;
 }
 
 function dateKey(year, month, day) {
@@ -6947,6 +6979,37 @@ function renderRdoLines() {
   target.innerHTML = rows.length
     ? rows.join("")
     : `<tr><td colspan="11">No RDO lines match those filters for ${viewArea}.</td></tr>`;
+
+  const mobileCards = document.querySelector("[data-member-rdo-cards]");
+  const mobileResults = document.querySelector("[data-member-rdo-results]");
+  if (mobileResults) mobileResults.dataset.presentation = memberRdoPresentation;
+  if (mobileCards) {
+    mobileCards.innerHTML = filteredLines.length
+      ? filteredLines.map((line) => {
+        const isSelected = line.line === selectedLineId && isViewingHomeArea();
+        const isOccupied = line.status === "Taken";
+        const rdoDays = line.week
+          .map((value, index) => value === "RDO" ? dayNames[index] : "")
+          .filter(Boolean)
+          .join(", ") || line.pattern;
+        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const selectButton = !isOccupied && isViewingHomeArea()
+          ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
+          : "";
+        return `
+          <details class="mobile-rdo-card member-rdo-card ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
+            <summary>
+              <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${escapeHtml(rdoDays)}</span></span>
+              <span class="mobile-line-status">${status}</span>
+              <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+            </summary>
+            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+            <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
+          </details>
+        `;
+      }).join("")
+      : `<div class="empty-state">No RDO lines match those filters for ${escapeHtml(viewArea)}.</div>`;
+  }
 }
 
 function updateSelectedLine() {
@@ -9209,13 +9272,13 @@ function addIntakeScheduleFromForm() {
   setScheduleFormStatus(`${name} is scheduled for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
 }
 
-function seniorityCardMarkup() {
-  return seniority
+function seniorityCardMarkup(people = seniority) {
+  return people
     .map((person) => {
       const isBiddingNow = Boolean(person.openRound);
       const isCurrentUser = personMatchesCurrentUser(person);
       return `
-      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}">
+      <article class="seniority-card ${isBiddingNow ? "active bidding-now" : person.status === "active" ? "active" : ""}"${isCurrentUser ? ' data-seniority-current tabindex="-1"' : ""}>
         <div class="seniority-card-head">
           <span>#${person.rank}</span>
         </div>
@@ -9247,7 +9310,7 @@ function seniorityCardMarkup() {
     .join("");
 }
 
-function seniorityTableMarkup() {
+function seniorityTableMarkup(people = seniority) {
   return `
     <table class="seniority-time-table">
       <thead>
@@ -9263,11 +9326,11 @@ function seniorityTableMarkup() {
         </tr>
       </thead>
       <tbody>
-        ${seniority.map((person) => {
+        ${people.map((person) => {
           const isBiddingNow = Boolean(person.openRound);
           const isCurrentUser = personMatchesCurrentUser(person);
           return `
-            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}">
+            <tr class="${isCurrentUser ? "current-user-row" : ""} ${isBiddingNow ? "active-bidder-row" : ""}"${isCurrentUser ? ' data-seniority-current tabindex="-1"' : ""}>
               <td>${person.rank}</td>
               <td>
                 <div class="seniority-table-person">
@@ -9321,8 +9384,33 @@ function renderSeniority() {
   cardTarget.hidden = isListView;
   tableTarget.hidden = !isListView;
 
-  cardTarget.innerHTML = seniorityCardMarkup();
-  tableTarget.innerHTML = isListView ? seniorityTableMarkup() : "";
+  const normalizedQuery = senioritySearchQuery.trim().toLowerCase();
+  const visiblePeople = normalizedQuery
+    ? seniority.filter((person) => `${person.rank} ${person.firstName} ${person.lastName} ${person.initials} ${person.bidAs}`.toLowerCase().includes(normalizedQuery))
+    : seniority;
+  const currentPerson = seniority.find(personMatchesCurrentUser);
+  const searchInput = document.querySelector("[data-seniority-search]");
+  if (searchInput && searchInput.value !== senioritySearchQuery) searchInput.value = senioritySearchQuery;
+  const jumpButton = document.querySelector("[data-seniority-jump-current]");
+  if (jumpButton) {
+    jumpButton.disabled = !currentPerson;
+    jumpButton.title = currentPerson ? `Go to ${currentPerson.firstName} ${currentPerson.lastName}` : "Your account is not in this area's seniority list.";
+  }
+  setText(
+    "[data-seniority-search-status]",
+    normalizedQuery
+      ? `${visiblePeople.length} ${visiblePeople.length === 1 ? "bidder" : "bidders"} found`
+      : `${seniority.length} bidders shown`
+  );
+
+  cardTarget.innerHTML = visiblePeople.length
+    ? seniorityCardMarkup(visiblePeople)
+    : '<div class="empty-state seniority-empty-state">No bidders match this search.</div>';
+  tableTarget.innerHTML = isListView
+    ? visiblePeople.length
+      ? seniorityTableMarkup(visiblePeople)
+      : '<div class="empty-state seniority-empty-state">No bidders match this search.</div>'
+    : "";
 }
 
 function renderHistory() {
@@ -10114,6 +10202,47 @@ function renderIntakeQueue() {
     denialPanel.hidden = !denialItem;
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
   }
+  const backdrop = document.querySelector("[data-intake-editor-backdrop]");
+  if (backdrop) backdrop.hidden = !(activeItem || denialItem);
+}
+
+function focusIntakeEditor(panelId) {
+  window.requestAnimationFrame(() => {
+    const panel = document.getElementById(panelId);
+    if (!panel || panel.hidden) return;
+    const focusTarget = panel.querySelector("[data-denial-reason]")
+      || panel.querySelector("[data-override-line], [data-override-range]")
+      || panel.querySelector("textarea, input:not([readonly]), select")
+      || panel.querySelector("button");
+    focusTarget?.focus();
+    if (!window.matchMedia("(max-width: 720px)").matches) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+function closeIntakeEditor() {
+  const returnTarget = intakeEditorReturnFocus;
+  activeOverrideId = null;
+  activeDenialId = null;
+  renderIntakeQueue();
+  if (returnTarget) {
+    const actionSelector = returnTarget.action === "deny" ? "[data-intake-deny]" : "[data-intake-edit]";
+    const returnCard = [...document.querySelectorAll("[data-intake-card]")]
+      .find((card) => card.dataset.intakeCard === returnTarget.id);
+    returnCard?.querySelector(actionSelector)?.focus();
+  }
+  intakeEditorReturnFocus = null;
+}
+
+function revealIntakeDetail() {
+  if (!window.matchMedia("(max-width: 720px)").matches) return;
+  window.requestAnimationFrame(() => {
+    const detail = document.querySelector("[data-intake-detail-panel]");
+    if (!detail || detail.hidden) return;
+    detail.scrollIntoView({ behavior: "smooth", block: "start" });
+    detail.focus({ preventScroll: true });
+  });
 }
 
 function setPage(pageName) {
@@ -10127,6 +10256,8 @@ function setPage(pageName) {
     pageName = "dashboard";
   }
 
+  const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
+
   document.querySelectorAll(".page").forEach((page) => {
     page.classList.toggle("active", page.dataset.pagePanel === pageName);
   });
@@ -10134,6 +10265,7 @@ function setPage(pageName) {
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.page === pageName);
   });
+  document.querySelector(".mobile-app-menu")?.removeAttribute("open");
 
   const title = document.getElementById("page-title");
   const titles = {
@@ -10150,6 +10282,10 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
+  if (activePageName !== pageName) {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
     renderCalendars({ includePublic: false });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
@@ -10740,6 +10876,9 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const mobileAppMenu = event.target.closest(".mobile-app-menu");
+  if (mobileAppMenu && event.target.closest("button")) mobileAppMenu.removeAttribute("open");
+
   const publicDate = event.target.closest("[data-public-leave-date]");
   if (publicDate && window.matchMedia("(max-width: 900px)").matches) {
     openPublicDateSheet(publicDate);
@@ -10774,6 +10913,18 @@ document.addEventListener("click", async (event) => {
     document.querySelector("[data-public-rdo-sections]").dataset.presentation = publicRdoPresentation;
     document.querySelectorAll("[data-rdo-presentation]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.rdoPresentation === publicRdoPresentation)));
     document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
+    return;
+  }
+  const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
+  if (memberPresentation) {
+    memberRdoPresentation = memberPresentation.dataset.memberRdoPresentation === "table" ? "table" : "cards";
+    const results = document.querySelector("[data-member-rdo-results]");
+    if (results) results.dataset.presentation = memberRdoPresentation;
+    document.querySelectorAll("[data-member-rdo-presentation]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.memberRdoPresentation === memberRdoPresentation));
+    });
+    const hint = document.querySelector(".member-rdo-table-hint");
+    if (hint) hint.hidden = memberRdoPresentation !== "table";
     return;
   }
 
@@ -11125,10 +11276,32 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const adminSectionButton = event.target.closest("[data-admin-section-target]");
+  if (adminSectionButton) {
+    const section = document.getElementById(adminSectionButton.dataset.adminSectionTarget);
+    section?.scrollIntoView({ behavior: "instant", block: "start" });
+    section?.focus({ preventScroll: true });
+    return;
+  }
+
   const seniorityViewButton = event.target.closest("[data-seniority-view]");
   if (seniorityViewButton) {
     seniorityViewMode = seniorityViewButton.dataset.seniorityView === "list" ? "list" : "cards";
     renderSeniority();
+    return;
+  }
+
+  if (event.target.closest("[data-seniority-jump-current]")) {
+    senioritySearchQuery = "";
+    renderSeniority();
+    window.requestAnimationFrame(() => {
+      const visiblePanel = seniorityViewMode === "list"
+        ? document.getElementById("seniority-page-table")
+        : document.getElementById("seniority-page-list");
+      const currentEntry = visiblePanel?.querySelector("[data-seniority-current]");
+      currentEntry?.scrollIntoView({ behavior: "smooth", block: "center" });
+      currentEntry?.focus({ preventScroll: true });
+    });
     return;
   }
 
@@ -11147,9 +11320,11 @@ document.addEventListener("click", async (event) => {
 
   const intakeDeny = event.target.closest("[data-intake-deny]");
   if (intakeDeny) {
+    intakeEditorReturnFocus = { id: intakeDeny.dataset.intakeDeny, action: "deny" };
     activeDenialId = intakeDeny.dataset.intakeDeny;
     activeOverrideId = null;
     renderIntakeQueue();
+    focusIntakeEditor("denial-panel");
     return;
   }
 
@@ -11159,17 +11334,18 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("[data-denial-cancel]")) {
-    activeDenialId = null;
-    renderIntakeQueue();
+  if (event.target.closest("[data-denial-cancel], [data-intake-editor-close], [data-intake-editor-backdrop]")) {
+    closeIntakeEditor();
     return;
   }
 
   const intakeEdit = event.target.closest("[data-intake-edit]");
   if (intakeEdit) {
+    intakeEditorReturnFocus = { id: intakeEdit.dataset.intakeEdit, action: "edit" };
     activeOverrideId = intakeEdit.dataset.intakeEdit;
     activeDenialId = null;
     renderIntakeQueue();
+    focusIntakeEditor("override-panel");
     return;
   }
 
@@ -11183,6 +11359,7 @@ document.addEventListener("click", async (event) => {
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
     renderIntakeQueue();
+    revealIntakeDetail();
     return;
   }
 
@@ -11303,6 +11480,8 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     document.querySelector(".mobile-public-menu")?.removeAttribute("open");
+    document.querySelector(".mobile-app-menu")?.removeAttribute("open");
+    if (activeOverrideId || activeDenialId) closeIntakeEditor();
     closeLeaveSlotModal();
   }
 
@@ -11327,6 +11506,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
     renderIntakeQueue();
+    revealIntakeDetail();
   }
 });
 
@@ -11406,6 +11586,19 @@ document.addEventListener("input", (event) => {
       if (!card.hidden) matches += 1;
     });
     document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    return;
+  }
+
+  if (event.target.matches("[data-seniority-search]")) {
+    senioritySearchQuery = event.target.value;
+    renderSeniority();
+    return;
+  }
+
+  const manualControllerSearch = event.target.closest("[data-manual-controller-search]");
+  if (manualControllerSearch) {
+    const panel = manualControllerSearch.closest("[data-manual-bid-panel]");
+    if (panel) renderManualBidPanel(panel);
     return;
   }
 

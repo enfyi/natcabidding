@@ -185,28 +185,28 @@
 
         <nav class="app-nav" aria-label="Bidding pages">
           <p>Home</p>
-          <button class="nav-item" type="button" data-public-home>
+          <button class="nav-item mobile-secondary-nav" type="button" data-public-home>
             <span class="nav-icon">⌂</span>
             Front Page
           </button>
           <p>Bidding</p>
-          <button class="nav-item active" type="button" data-page="dashboard">
+          <button class="nav-item mobile-primary-nav active" type="button" data-page="dashboard">
             <span class="nav-icon">▥</span>
             Dashboard
           </button>
-          <button class="nav-item" type="button" data-page="seniority">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="seniority">
             <span class="nav-icon">#</span>
             Bid Times
           </button>
-          <button class="nav-item" type="button" data-page="rdos">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="rdos">
             <span class="nav-icon">▦</span>
             RDOs
           </button>
-          <button class="nav-item" type="button" data-page="leave">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="leave">
             <span class="nav-icon">▣</span>
             Leave
           </button>
-          <button class="nav-item" type="button" data-page="history">
+          <button class="nav-item mobile-secondary-nav" type="button" data-page="history">
             <span class="nav-icon">◷</span>
             History
           </button>
@@ -225,6 +225,22 @@
             Admin
           </button>
         </nav>
+
+        <details class="mobile-app-menu">
+          <summary aria-label="Open more navigation options">
+            <span class="nav-icon" aria-hidden="true">•••</span>
+            <span>More</span>
+          </summary>
+          <div class="mobile-app-menu-panel">
+            <button class="nav-item" type="button" data-public-home><span class="nav-icon">⌂</span>Front Page</button>
+            <button class="nav-item" type="button" data-page="history"><span class="nav-icon">◷</span>History</button>
+            <button class="nav-item" type="button" data-page="intake" data-admin-only hidden><span class="nav-icon">!</span>Intake<span class="nav-badge" data-intake-count>0</span></button>
+            <button class="nav-item" type="button" data-page="intake-schedule" data-intake-rep-only hidden><span class="nav-icon">◫</span>Intake Schedule</button>
+            <button class="nav-item" type="button" data-page="admin" data-system-admin-only hidden><span class="nav-icon">⚙</span>Admin</button>
+            <button class="nav-item" type="button" data-help-toggle><span class="nav-icon">?</span>Live Help</button>
+            <button class="nav-item danger" type="button" data-log-out><span class="nav-icon">↪</span>Log Out</button>
+          </div>
+        </details>
 
         <div class="side-footer">
           <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
@@ -503,6 +519,14 @@
                   </div>
                 </div>
               </div>
+              <div class="seniority-find-tools">
+                <label>
+                  Find a bidder
+                  <input type="search" placeholder="Name, initials, rank, or role" autocomplete="off" data-seniority-search />
+                </label>
+                <button class="secondary-action" type="button" data-seniority-jump-current>Jump to me</button>
+                <p data-seniority-search-status role="status" aria-live="polite"></p>
+              </div>
               <div class="seniority-board" id="seniority-page-list"></div>
               <div class="table-wrap seniority-list-wrap" id="seniority-page-table" hidden></div>
             </section>
@@ -533,7 +557,14 @@
                   <option value="No">4-10: No</option>
                 </select>
               </div>
-              <div class="table-wrap tall rdo-page-table-wrap">
+              <div class="mobile-rdo-view member-rdo-view" role="group" aria-label="RDO display">
+                <button type="button" aria-pressed="true" data-member-rdo-presentation="cards">Line cards</button>
+                <button type="button" aria-pressed="false" data-member-rdo-presentation="table">Compare table</button>
+              </div>
+              <p class="mobile-table-hint member-rdo-table-hint" hidden>Swipe horizontally to compare the full weekly schedule.</p>
+              <div class="member-rdo-results" data-member-rdo-results data-presentation="cards">
+                <div class="mobile-rdo-cards member-rdo-cards" data-member-rdo-cards></div>
+                <div class="table-wrap tall rdo-page-table-wrap" tabindex="0" role="region" aria-label="RDO schedule comparison table, scroll horizontally">
                 <table class="line-table">
                   <thead>
                     <tr>
@@ -552,6 +583,7 @@
                   </thead>
                   <tbody id="rdo-line-rows"></tbody>
                 </table>
+                </div>
               </div>
             </section>
             <aside class="right-stack">
@@ -841,7 +873,7 @@
                 </div>
                 <span class="pill open"><b data-intake-count>0</b> pending</span>
               </div>
-              <div class="intake-detail-panel" data-intake-detail-panel hidden></div>
+              <div class="intake-detail-panel" data-intake-detail-panel tabindex="-1" hidden></div>
               <div class="intake-queue" id="intake-queue"></div>
             </section>
             <aside class="intake-info-stack">
@@ -874,12 +906,14 @@
               </section>
             </aside>
             <aside class="right-stack">
+              <button class="intake-editor-backdrop" type="button" aria-label="Close intake editor" data-intake-editor-backdrop hidden></button>
               <section class="panel" id="override-panel" hidden>
                 <div class="panel-header compact">
                   <div>
                     <h2>Admin Override / Edit</h2>
                     <p>Changes are logged under the signed-in intake account.</p>
                   </div>
+                  <button class="secondary-action small intake-editor-close" type="button" data-intake-editor-close>Close</button>
                 </div>
                 <div class="override-editor" data-override-editor></div>
               </section>
@@ -889,6 +923,7 @@
                     <h2>Deny Request</h2>
                     <p>Tell the BUE what needs to change before resubmitting.</p>
                   </div>
+                  <button class="secondary-action small intake-editor-close" type="button" data-intake-editor-close>Close</button>
                 </div>
                 <div class="denial-editor" data-denial-editor></div>
               </section>
@@ -900,6 +935,11 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -988,6 +1028,11 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -1098,6 +1143,14 @@
         </section>
 
         <section class="page" id="admin-page" data-page-panel="admin">
+          <nav class="admin-section-nav" aria-label="Admin console sections">
+            <button type="button" data-admin-section-target="admin-capacity-section">Capacity</button>
+            <button type="button" data-admin-section-target="admin-roster-section">Roster</button>
+            <button type="button" data-admin-section-target="admin-access-section">Access</button>
+            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
+            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
+            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
+          </nav>
           <div class="workspace-grid admin-workspace">
             <section class="panel admin-console-panel">
               <div class="panel-header">
@@ -1111,7 +1164,7 @@
                   <span class="pill open">System Admin</span>
                 </div>
               </div>
-              <section class="slot-capacity-manager" aria-label="Daily leave slot capacity">
+              <section class="slot-capacity-manager admin-section-target" id="admin-capacity-section" tabindex="-1" aria-label="Daily leave slot capacity">
                 <div class="panel-header compact">
                   <div>
                     <h3>Daily Bid Slot Capacity</h3>
@@ -1163,7 +1216,7 @@
                 </div>
                 <div class="slot-capacity-change-grid" data-slot-capacity-changes></div>
               </section>
-              <section class="roster-manager" aria-label="BUE roster manager">
+              <section class="roster-manager admin-section-target" id="admin-roster-section" tabindex="-1" aria-label="BUE roster manager">
                 <div class="panel-header compact">
                   <div>
                     <h3>BUE Roster</h3>
@@ -1227,6 +1280,7 @@
                       </div>
                       <button class="primary-action small" type="button" data-apply-bulk-roster>Apply Bulk Changes</button>
                     </div>
+                    <p class="mobile-roster-hint">Edit rank directly to reorder. Swipe the roster horizontally for contact details and row actions.</p>
                     <div class="roster-table-scroll">
                       <table class="roster-table" data-roster-table-element>
                         <colgroup>
@@ -1263,7 +1317,9 @@
                   </div>
                 </div>
               </section>
-              <div class="admin-user-list" data-admin-user-list></div>
+              <section class="admin-section-target" id="admin-access-section" tabindex="-1" aria-label="Administrator and intake access">
+                <div class="admin-user-list" data-admin-user-list></div>
+              </section>
             </section>
             <aside class="right-stack">
               <section class="panel bid-window-testing-card" data-system-admin-only hidden>
@@ -1311,7 +1367,7 @@
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
                 </div>
               </section>
-              <section class="panel editable-rule-card">
+              <section class="panel editable-rule-card admin-section-target" id="admin-rules-section" tabindex="-1">
                 <div class="panel-header compact">
                   <div>
                     <h3>Round Rules</h3>
@@ -1333,7 +1389,7 @@
                   <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
                 </div>
               </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-schedule-section" tabindex="-1">
                 <h3>Schedule Intake Rep</h3>
                 <p>Access opens 15 minutes before the shift starts.</p>
                 <div class="schedule-form">
@@ -1353,7 +1409,7 @@
                   <p class="form-status" data-admin-schedule-status></p>
                 </div>
               </section>
-              <section class="panel manual-bid-card" data-manual-bid-panel>
+              <section class="panel manual-bid-card admin-section-target" id="admin-entry-section" tabindex="-1" data-manual-bid-panel>
                 <div class="panel-header compact">
                   <div>
                     <h3>Manual Bid Entry</h3>
@@ -1361,6 +1417,11 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -1449,6 +1510,11 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
