@@ -1511,6 +1511,10 @@ function bidRoleParticipatesInBidding(bidAs) {
   return ![ADMIN_PROFILE_BID_ROLE, NON_BIDDING_EMPLOYEE_BID_ROLE].includes(String(bidAs || "").trim().toUpperCase());
 }
 
+function bidRoleKeepsLeaveAllowance(bidAs) {
+  return String(bidAs || "").trim().toUpperCase() !== ADMIN_PROFILE_BID_ROLE;
+}
+
 function seniorityEntryIsRosterPerson(entry) {
   return normalizeBidRoleForArea(entry?.[2], seniorityEntryArea(entry)) !== ADMIN_PROFILE_BID_ROLE;
 }
@@ -7925,6 +7929,7 @@ function syncRosterDeleteSelectedButton() {
 function syncRosterParticipationFields() {
   const bidAs = document.querySelector("[data-roster-bid-as]")?.value || "";
   const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
+  const keepsLeaveAllowance = bidRoleKeepsLeaveAllowance(bidAs);
   const rankInput = document.querySelector("[data-roster-rank]");
   const leaveSlotsInput = document.querySelector("[data-roster-leave-slots]");
   if (rankInput) {
@@ -7932,8 +7937,8 @@ function syncRosterParticipationFields() {
     rankInput.disabled = !participatesInBidding;
   }
   if (leaveSlotsInput) {
-    if (!participatesInBidding) leaveSlotsInput.value = "0";
-    leaveSlotsInput.disabled = !participatesInBidding;
+    if (!keepsLeaveAllowance) leaveSlotsInput.value = "0";
+    leaveSlotsInput.disabled = !keepsLeaveAllowance;
   }
 }
 
@@ -7950,12 +7955,13 @@ function syncBulkRosterBidAsSelect(row, selectedBidAs) {
 function syncBulkRosterParticipationFields(row) {
   const bidAs = row.querySelector("[data-bulk-bid-as]")?.value || "";
   const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
+  const keepsLeaveAllowance = bidRoleKeepsLeaveAllowance(bidAs);
   const rankInput = row.querySelector("[data-bulk-rank]");
   const leaveSlotsInput = row.querySelector("[data-bulk-leave-slots]");
   if (rankInput && !participatesInBidding) rankInput.value = "";
   if (leaveSlotsInput) {
-    if (!participatesInBidding) leaveSlotsInput.value = "0";
-    leaveSlotsInput.disabled = !participatesInBidding;
+    if (!keepsLeaveAllowance) leaveSlotsInput.value = "0";
+    leaveSlotsInput.disabled = !keepsLeaveAllowance;
   }
 }
 
@@ -8058,7 +8064,7 @@ function rosterFormValues() {
     area,
     rank: participatesInBidding && Number.isFinite(rank) ? rank : null,
     bidAs,
-    leaveSlotAllowance: participatesInBidding ? normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")) : 0,
+    leaveSlotAllowance: bidRoleKeepsLeaveAllowance(bidAs) ? normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")) : 0,
     editIndex: Number(value("[data-roster-edit-index]")),
     active: true,
   };
@@ -8394,7 +8400,7 @@ function bulkRosterRows() {
         area,
         rank: participatesInBidding && Number.isFinite(rank) ? rank : null,
         bidAs,
-        leaveSlotAllowance: participatesInBidding ? normalizeLeaveSlotAllowance(bulkRowValue(row, "[data-bulk-leave-slots]")) : 0,
+        leaveSlotAllowance: bidRoleKeepsLeaveAllowance(bidAs) ? normalizeLeaveSlotAllowance(bulkRowValue(row, "[data-bulk-leave-slots]")) : 0,
         active: true,
       };
     });
