@@ -29,6 +29,10 @@ For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
 the admin-only database operation that safely resizes each day's slot inventory.
 
+For public FAQ and MOU publishing, also run `database/faq_mous.sql`. It creates
+admin-managed FAQ rows, a public MOU document list, and the public Supabase
+storage bucket used by the `/admin/faq` editor.
+
 For durable intake/admin replacement of dates on an approved leave request, also
 run `database/admin_leave_request_edit.sql` after the leave submission preflight.
 The operation releases the request's old slots, validates and reserves its new

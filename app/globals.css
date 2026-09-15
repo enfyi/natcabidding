@@ -273,12 +273,101 @@ h1 {
 .import-access-card { width: min(600px, 100%); }
 .import-access-card h1 { max-width: none; font-size: clamp(2.5rem, 6vw, 4.5rem); }
 .import-access-card .button { margin-top: 26px; }
+.faq-admin-shell h1 { max-width: none; }
+.faq-admin-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 12px;
+}
+.faq-admin-stats div {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.7);
+}
+.faq-admin-stats strong {
+  display: block;
+  color: var(--green-dark);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 2.2rem;
+  font-weight: 500;
+}
+.faq-admin-stats span { color: var(--muted); font-size: 0.85rem; font-weight: 800; }
+.faq-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.faq-editor-card,
+.faq-list-card {
+  display: grid;
+  gap: 18px;
+}
+.faq-list-card { margin-top: 20px; }
+.faq-editor-card label,
+.faq-admin-row label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.faq-editor-card input,
+.faq-editor-card textarea,
+.faq-admin-row input,
+.faq-admin-row textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: #fff;
+}
+.faq-editor-card textarea,
+.faq-admin-row textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.faq-editor-card small { color: var(--muted); font-weight: 500; line-height: 1.4; }
+.faq-admin-list {
+  display: grid;
+  gap: 14px;
+}
+.faq-admin-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: #fff;
+}
+.faq-admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+.faq-admin-row-actions > label:not(.faq-checkbox) {
+  max-width: 110px;
+}
+.faq-checkbox {
+  display: inline-flex !important;
+  min-height: 48px;
+  align-items: center;
+  grid-template-columns: auto 1fr;
+  gap: 8px !important;
+}
+.faq-checkbox input {
+  width: auto;
+}
 
 @media (max-width: 820px) {
   .import-shell { width: min(100% - 24px, 1480px); }
   .import-hero { align-items: flex-start; flex-direction: column; padding-top: 34px; }
   .import-field-grid { grid-template-columns: 1fr; }
   .import-section-heading { align-items: flex-start; }
+  .faq-admin-grid,
+  .faq-admin-stats { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
