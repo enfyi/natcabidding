@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useState } from 'react'
-import { getBasePath, getSupabaseEnv } from '@/lib/env'
+import { getSupabaseEnv } from '@/lib/env'
 
 type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
 type FaqEntry = {
@@ -23,7 +23,6 @@ type MouDocument = {
   published: boolean
 }
 
-const basePath = getBasePath()
 const MOU_BUCKET = 'mou-documents'
 
 declare global {
