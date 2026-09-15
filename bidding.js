@@ -618,6 +618,10 @@ const publicState = {
   area: "Area A",
   section: "Calendar",
 };
+const publicFaqContent = {
+  entries: [],
+  documents: [],
+};
 
 const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
 const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV", "NB"];
@@ -657,7 +661,7 @@ function isMissingSupabaseRoutine(error) {
 }
 
 function isMissingSupabaseColumn(error) {
-  return /column .* does not exist|Could not find .* column|schema cache|PGRST204/i.test(error?.message || "");
+  return /column .* does not exist|relation .* does not exist|Could not find .* column|Could not find the table|schema cache|PGRST204|PGRST205/i.test(error?.message || "");
 }
 
 function isUuid(value) {
@@ -5757,6 +5761,8 @@ function resetSupabaseBackedData() {
   seniority = [];
   intakeQueue = [];
   helpThreads = [];
+  publicFaqContent.entries = [];
+  publicFaqContent.documents = [];
   intakeSchedules.splice(0, intakeSchedules.length);
   intakeTeamInitials.clear();
   holidayOverrides.clear();
@@ -5991,6 +5997,8 @@ async function loadSupabaseReferenceData() {
       bidYearSettingsResult,
       pilotSettingsResult,
       bidWindowsResult,
+      faqEntriesResult,
+      mouDocumentsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
@@ -6005,6 +6013,8 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId
         ? client.from("bid_windows").select("bidder_id,round_number,opens_at,closes_at,status").eq("bid_year_id", bidYear.id)
         : Promise.resolve({ data: [], error: null }),
+      client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
+      client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
     ]);
 
     const loadWarnings = [
@@ -6017,6 +6027,8 @@ async function loadSupabaseReferenceData() {
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(pilotSettingsResult.error) ? null : supabaseLoadWarning("pilot settings", pilotSettingsResult),
       supabaseLoadWarning("bid windows", bidWindowsResult),
+      isMissingSupabaseColumn(faqEntriesResult.error) ? null : supabaseLoadWarning("FAQ entries", faqEntriesResult),
+      isMissingSupabaseColumn(mouDocumentsResult.error) ? null : supabaseLoadWarning("MOU documents", mouDocumentsResult),
     ].filter(Boolean);
 
     supabaseRows(holidaysResult).forEach((holiday) => {
@@ -6031,11 +6043,13 @@ async function loadSupabaseReferenceData() {
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
+    if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
+    if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(rdoSubmissionsResult).length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(rdoSubmissionsResult).length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
@@ -6114,6 +6128,10 @@ function escapeHtml(value = "") {
     .replace(/"/g, "&quot;");
 }
 
+function escapeAttribute(value = "") {
+  return escapeHtml(value).replace(/'/g, "&#39;");
+}
+
 function publicAreaPrefix(area) {
   if (area === "TMU") return "TMU";
   return area.replace("Area ", "");
@@ -6143,11 +6161,7 @@ function publicSheetCode(area, section) {
 
 function publicInfoText(area, section) {
   if (area === "FAQ") {
-    return `
-      <div class="public-info-card">
-        <p>Use this public area for bidding rules, leave slot definitions, RDO line notes, and who to contact before your personal bid window opens.</p>
-      </div>
-    `;
+    return renderPublicFaq();
   }
 
   if (area === "Previous Years") {
@@ -6167,6 +6181,61 @@ function publicInfoText(area, section) {
   }
 
   return "";
+}
+
+function paragraphMarkup(text = "") {
+  return String(text)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function renderPublicFaq() {
+  const entries = publicFaqContent.entries || [];
+  const documents = publicFaqContent.documents || [];
+
+  if (!entries.length && !documents.length) {
+    return `
+      <div class="public-info-card">
+        <p>Use this public area for bidding rules, leave slot definitions, RDO line notes, and who to contact before your personal bid window opens.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="public-faq-grid">
+      <section class="public-faq-section" aria-labelledby="public-faq-heading">
+        <div class="public-table-heading flat">
+          <strong id="public-faq-heading">Frequently asked questions</strong>
+          <small>${entries.length ? "Current guidance published by the ZLA bidding team." : "Questions will appear here when they are published."}</small>
+        </div>
+        <div class="public-faq-list">
+          ${entries.map((entry) => `
+            <details class="public-faq-item" open>
+              <summary>${escapeHtml(entry.question)}</summary>
+              <div>${paragraphMarkup(entry.answer)}</div>
+            </details>
+          `).join("") || '<p class="public-empty-note">No FAQ items are published yet.</p>'}
+        </div>
+      </section>
+      <section class="public-faq-section" aria-labelledby="public-mou-heading">
+        <div class="public-table-heading flat">
+          <strong id="public-mou-heading">MOUs and references</strong>
+          <small>${documents.length ? "Download the current documents for bidding reference." : "MOU documents will appear here when they are uploaded."}</small>
+        </div>
+        <div class="public-mou-list">
+          ${documents.map((document) => `
+            <a class="public-mou-link" href="${escapeAttribute(document.file_url || "")}" target="_blank" rel="noreferrer">
+              <strong>${escapeHtml(document.title)}</strong>
+              ${document.description ? `<span>${escapeHtml(document.description)}</span>` : ""}
+            </a>
+          `).join("") || '<p class="public-empty-note">No MOU documents are published yet.</p>'}
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function bidAsClass(bidAs) {

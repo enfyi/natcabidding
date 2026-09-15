@@ -484,6 +484,82 @@ button.seniority-pill {
   margin-top: 4px;
 }
 
+.public-faq-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 18px;
+}
+
+.public-faq-section {
+  min-width: 0;
+}
+
+.public-faq-list,
+.public-mou-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.public-faq-item,
+.public-mou-link,
+.public-empty-note {
+  border: 1px solid #d7e0dd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.public-faq-item summary {
+  cursor: pointer;
+  padding: 16px 18px;
+  color: #103f36;
+  font-weight: 800;
+}
+
+.public-faq-item > div {
+  border-top: 1px solid #e4ece8;
+  padding: 0 18px 16px;
+  color: #35514c;
+  line-height: 1.65;
+}
+
+.public-faq-item p {
+  margin: 14px 0 0;
+}
+
+.public-mou-link {
+  display: grid;
+  gap: 5px;
+  padding: 16px 18px;
+  text-decoration: none;
+}
+
+.public-mou-link strong {
+  color: #103f36;
+}
+
+.public-mou-link span,
+.public-empty-note {
+  color: #5f7771;
+  line-height: 1.5;
+}
+
+.public-mou-link:hover {
+  border-color: #7aa99e;
+  background: #f7fbf9;
+}
+
+.public-empty-note {
+  margin: 0;
+  padding: 16px 18px;
+}
+
+@media (max-width: 720px) {
+  .public-faq-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .public-table-wrap {
   max-height: 62vh;
   border: 1px solid #d7e1ec;
