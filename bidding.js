@@ -4491,7 +4491,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       ${isFatigueWeekStart ? `<i class="fatigue-week-dot" aria-hidden="true"></i>` : ""}
       ${expandedSlots ? `
         <span class="expanded-day-heading">
-          <span class="date-number">${label}</span>
+          <span class="date-number" data-day-number="${day}">${label}</span>
         </span>
       ` : `<span class="date-number">${label}</span>`}
       ${slotTooltip}

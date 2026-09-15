@@ -8469,15 +8469,83 @@ video {
 }
 
 @media (max-width: 720px) {
-  .expanded-slots-calendar .month-card > .month-grid,
-  .expanded-slots-calendar .leave-year-continuation-days {
+  /* The public and dashboard Full views keep the standard seven-day week on
+     phones. Only the dedicated leave/member slot boards use the compact list. */
+  #leave-calendar.expanded-slots-calendar .month-card > .month-grid,
+  #full-calendar.expanded-slots-calendar .month-card > .month-grid,
+  #leave-calendar.expanded-slots-calendar .leave-year-continuation-days,
+  #full-calendar.expanded-slots-calendar .leave-year-continuation-days {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     min-width: 0 !important;
   }
 
-  .expanded-slots-calendar .month-grid > .dow,
-  .expanded-slots-calendar .month-grid > span:not(.dow) {
+  #leave-calendar.expanded-slots-calendar .month-grid > .dow,
+  #leave-calendar.expanded-slots-calendar .month-grid > span:not(.dow),
+  #full-calendar.expanded-slots-calendar .month-grid > .dow,
+  #full-calendar.expanded-slots-calendar .month-grid > span:not(.dow) {
     display: none;
+  }
+
+  #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number,
+  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number {
+    font-size: 0;
+  }
+
+  #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after,
+  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after {
+    content: attr(data-day-number);
+    font-size: 0.68rem;
+  }
+
+  #public-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day,
+  #dashboard-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day {
+    min-height: 92px !important;
+    padding: 4px;
+  }
+
+  #public-calendar.expanded-slots-calendar .expanded-day-heading,
+  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading {
+    place-items: center;
+    margin-bottom: 3px;
+  }
+
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary {
+    border: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
+    display: none !important;
+  }
+
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
+    align-content: start;
+    gap: 3px !important;
+  }
+
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+    min-height: 0 !important;
+  }
+
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value,
+  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value {
+    width: 100% !important;
+    min-height: 18px !important;
+    padding: 2px !important;
+    text-align: center;
   }
 }
 
