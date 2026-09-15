@@ -91,6 +91,8 @@ Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line
 
 Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and seniority rank, treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status.
 
+Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
+
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 
 Private data stays protected by Supabase Row Level Security. Leave requests, intake submissions, help threads, bid windows, holiday in-lieu records, credit events, and audit history remain limited to the user's own area or their own account.
@@ -128,7 +130,7 @@ The remaining write-support work includes:
 
 ## Seniority Imports
 
-Seniority spreadsheets should land in `staging_seniority_roster` first.
+Administrators can use `/admin/roster-import` to validate, preview, and apply a cleaned Excel or CSV roster. Raw source spreadsheets can still land in `staging_seniority_roster` first when initials or other identity fields need manual cleanup.
 
 The current seniority workbook does not include reliable BUE initials. The cleaned import file keeps an empty `initials` column and marks `needs_initials = Yes`. Initials should be filled manually or collected from each user's profile before promoting the staging rows into the live `bidders` table.
 
