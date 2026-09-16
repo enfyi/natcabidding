@@ -46,6 +46,10 @@ request only while that request's round bid window is open, releases any assigne
 slots, and records the change in the audit log. Re-run
 `database/leave_submission_preflight.sql` as part of this update so added ranges
 are checked against the member's allotted leave hours and current-round limits.
+Run `database/member_leave_request_replacement.sql` after the holiday round
+rules to enable Change Dates. It cancels the old request and submits the
+replacement in one transaction, so validation counts only the surviving bids.
+If the replacement is invalid, the old request and its assigned slots remain.
 
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
@@ -123,7 +127,7 @@ Server-side admin actions using the Supabase service role can still manage all a
 
 Round 1 is stored with `leave_request_week_buckets`.
 
-A bucket is a consecutive period of up to 7 calendar days. Any number of selected leave dates inside that bucket counts as 1 bid week, but only the charged dates spend leave. RDOs, holidays, and holiday in-lieu days can be stored on `leave_request_dates` without charging leave.
+A bucket is a consecutive period of up to 7 calendar days. Any number of selected leave dates inside that bucket counts as 1 bid week, but only charged dates spend leave. Round 1 RDO dates are uncharged; holidays and holiday-in-lieu dates count against the bidder's allowance in Round 1.
 
 That lets the app support cases like:
 

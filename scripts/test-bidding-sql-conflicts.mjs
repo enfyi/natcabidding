@@ -6,7 +6,7 @@ const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth; create schema private;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
-for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','admin_leave_request_edit.sql']) {
+for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','admin_leave_request_edit.sql']) {
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
@@ -120,3 +120,36 @@ if(inLieuResult.charged_days!==1) throw new Error('Pending RDO in-lieu leave did
 const inLieuSaved=(await db.query("select d.is_holiday_in_lieu,d.charged from leave_request_dates d join leave_requests r on r.id=d.leave_request_id where r.bidder_id=$1 and d.leave_date='2027-06-01'",[inLieuBidder])).rows[0];
 if(!inLieuSaved.is_holiday_in_lieu || !inLieuSaved.charged) throw new Error('Pending in-lieu date flags are incorrect');
 console.log('PASS pending RDO creates an in-lieu date that counts as charged leave');
+
+const changeBidder='00000000-0000-0000-0000-000000000241';
+const changeAuth='00000000-0000-0000-0000-000000000242';
+await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,leave_slot_allowance)
+ values('${changeBidder}','${changeAuth}','${bidder.area_id}','Change','Tester','CT','change@example.test','CPC',16);
+ insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+ values('${year}','${bidder.area_id}','${changeBidder}',1,'${holidayLine}','rdo','pending','{"line":"HOLIDAY-TEST"}',now());
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ values('${year}','${bidder.area_id}','2027-07-01','cpc','CHANGE-1'),
+       ('${year}','${bidder.area_id}','2027-07-15','cpc','CHANGE-2'),
+       ('${year}','${bidder.area_id}','2027-07-16','cpc','CHANGE-3'),
+       ('${year}','${bidder.area_id}','2027-07-17','cpc','CHANGE-4') on conflict do nothing;
+ set test.uid='${changeAuth}'; set test.email='change@example.test';`);
+const submitChangeDate=async(date)=>db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+  [JSON.stringify([{start_date:date,end_date:date,round:1,rdo_line_code:'HOLIDAY-TEST'}])]);
+await submitChangeDate('2027-07-01');
+await submitChangeDate('2027-07-15');
+const originalChangeRequest=(await db.query("select id from leave_requests where bidder_id=$1 and requested_start_date='2027-07-01' and status='pending'",[changeBidder])).rows[0].id;
+await db.query("select public.replace_own_leave_request($1,'2027-07-16','2027-07-16',null)",[originalChangeRequest]);
+const changedRequests=(await db.query("select id,status,requested_start_date::text as requested_start_date from leave_requests where bidder_id=$1 order by requested_start_date",[changeBidder])).rows;
+if(changedRequests.filter(row=>row.status==='pending').length!==2 || changedRequests.find(row=>row.id===originalChangeRequest)?.status!=='cancelled')
+  throw new Error('Replacement did not subtract the original request');
+const activeBuckets=(await db.query("select count(distinct b.bucket_start_date) as buckets from leave_request_week_buckets b join leave_requests r on r.id=b.leave_request_id where r.bidder_id=$1 and r.status='pending'",[changeBidder])).rows[0].buckets;
+if(activeBuckets!==1) throw new Error('Replacement did not reuse the surviving week bucket');
+const newRequest=changedRequests.find(row=>row.requested_start_date==='2027-07-16' && row.status==='pending');
+try {
+  await db.query("select public.replace_own_leave_request($1,'2027-07-16','2027-07-17',null)",[newRequest.id]);
+  throw new Error('Over-allowance replacement unexpectedly passed');
+} catch(error) {if(!error.message.includes('allowance')) throw error;}
+const stillActive=(await db.query('select status,charged_days from leave_requests where id=$1',[newRequest.id])).rows[0];
+if(stillActive.status!=='pending' || stillActive.charged_days!==1)
+  throw new Error('Failed replacement did not restore the original request');
+console.log('PASS replacement subtracts old dates and buckets; failed replacement rolls back');
