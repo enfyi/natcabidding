@@ -50,6 +50,9 @@ Run `database/member_leave_request_replacement.sql` after the holiday round
 rules to enable Change Dates. It cancels the old request and submits the
 replacement in one transaction, so validation counts only the surviving bids.
 If the replacement is invalid, the old request and its assigned slots remain.
+Run `database/reject_unchanged_leave_rebid.sql` after that migration to reject
+an exact repeat of dates the bidder removed in the same round, whether through
+Change Dates or a later new batch. The bidder must choose a different range.
 
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
