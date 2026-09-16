@@ -2803,29 +2803,33 @@ function roundOneWeekKeyForDateKey(key) {
   return dateKeyFromDate(start);
 }
 
-function roundOneWeekKeysForDateKeys(dateKeys) {
+function roundOneWeekKeysForDateKeys(dateKeys, existingStarts = []) {
   const sortedKeys = [...new Set(dateKeys)].sort();
-  const periodKeys = [];
-  let periodEnd = null;
+  const periodKeys = [...new Set(existingStarts)].sort();
 
   sortedKeys.forEach((key) => {
     const date = dateFromKey(key);
-    if (!periodEnd || date > periodEnd) {
-      const start = dateFromKey(key);
-      periodEnd = new Date(start);
-      periodEnd.setDate(start.getDate() + 6);
+    const covered = periodKeys.some((startKey) => {
+      const start = dateFromKey(startKey);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return date >= start && date <= end;
+    });
+    if (!covered) {
       periodKeys.push(key);
     }
   });
 
-  return periodKeys;
+  return periodKeys.sort();
 }
 
 function roundOneWeekKeySetForItems(items = []) {
-  const dateKeys = items.flatMap((item) =>
-    isRoundOneLeaveItem(item) ? datesInLeaveRange(item.range) : []
+  const roundOneItems = items.filter(isRoundOneLeaveItem);
+  const existingStarts = roundOneItems.flatMap((item) => item.weekBucketStarts || []);
+  const dateKeys = roundOneItems.flatMap((item) =>
+    item.weekBucketStarts?.length ? [] : datesInLeaveRange(item.range)
   );
-  return new Set(roundOneWeekKeysForDateKeys(dateKeys));
+  return new Set(roundOneWeekKeysForDateKeys(dateKeys, existingStarts));
 }
 
 function roundOneDraftWeekKeySet(extraItems = []) {
@@ -3230,15 +3234,18 @@ function addOrUpdateLeaveSubmission() {
   const weekUnits = weekKeys.length;
 
   if (isRoundOne) {
-    const committedWeeks = leaveRoundUsageForInitials(currentUser.initials, 1)
-      .reduce((total, item) => total + Math.max(1, Number(item.weekUnits || 0)), 0);
-    const existingWeeks = committedWeeks + leaveDraftTotalWeeks();
-    const combinedWeeks = existingWeeks + weekUnits;
+    const existingItems = [
+      ...leaveRoundUsageForInitials(currentUser.initials, 1),
+      ...leaveDraftQueue,
+    ];
+    const existingWeekKeys = roundOneWeekKeySetForItems(existingItems);
+    const combinedWeekKeys = roundOneWeekKeySetForItems([...existingItems, { range, round }]);
+    const combinedWeeks = combinedWeekKeys.size;
     if (combinedWeeks > roundOneWeekLimit()) {
       setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This would use ${combinedWeeks}.`, "error");
       return;
     }
-    var newRoundOneWeeks = weekUnits;
+    var newRoundOneWeeks = [...combinedWeekKeys].filter((key) => !existingWeekKeys.has(key)).length;
   } else {
     const committedRoundDays = leaveRoundUsageForInitials(currentUser.initials, round)
       .reduce((total, item) => total + leaveItemChargedDays(item), 0);
@@ -3338,10 +3345,14 @@ function previewLeaveSubmission() {
     setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
-  const weekUnits = round === 1 ? roundOneWeekUnitsForDateKeys(dateKeys) : 0;
+  const weekUnits = round === 1 ? roundOneWeekKeySetForItems([
+    ...leaveRoundUsageForInitials(currentUser.initials, 1),
+    ...leaveDraftQueue,
+    { range, round },
+  ]).size : 0;
 
   if (round === 1 && weekUnits > roundOneWeekLimit()) {
-    setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This range counts as ${weekUnits}.`, "error");
+    setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This selection would use ${weekUnits}.`, "error");
     return;
   }
 
@@ -3359,7 +3370,7 @@ function previewLeaveSubmission() {
   renderLeaveSlotBoard();
   const rdoSuffix = rdoDates.length ? ` ${formatLeaveConflictDates(rdoDates)} ${rdoDates.length === 1 ? "is" : "are"} removed as RDO ${rdoDates.length === 1 ? "date" : "dates"}.` : "";
   const previewMessage = round === 1
-    ? `Previewing ${weekUnits} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix}`
+    ? `This selection would use ${weekUnits} of ${roundOneWeekLimit()} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix}`
     : `Previewing this range with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix} Use Add to Batch when you want to stage it.`;
   setLeaveBuilderStatus(previewMessage, "info");
 }
@@ -5706,9 +5717,34 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     round,
     weekUnits: weekKeys.length,
     weekKeys,
+    weekBucketStarts: row.weekBucketStarts || [],
     notes: row.notes || "",
     summary: `${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
   };
+}
+
+async function attachLeaveRequestWeekBuckets(client, rows = []) {
+  const requestIds = rows
+    .filter((row) => Number(row.round_number) === 1 && ["pending", "approved"].includes(row.status))
+    .map((row) => row.id);
+  const startsByRequest = new Map();
+
+  for (let index = 0; index < requestIds.length; index += 100) {
+    const { data, error } = await client.from("leave_request_week_buckets")
+      .select("leave_request_id,bucket_start_date")
+      .in("leave_request_id", requestIds.slice(index, index + 100));
+    if (error) {
+      console.warn(`Round 1 week buckets could not be loaded: ${error.message || error}`);
+      return rows;
+    }
+    (data || []).forEach((bucket) => {
+      const starts = startsByRequest.get(bucket.leave_request_id) || [];
+      starts.push(bucket.bucket_start_date);
+      startsByRequest.set(bucket.leave_request_id, starts);
+    });
+  }
+
+  return rows.map((row) => ({ ...row, weekBucketStarts: startsByRequest.get(row.id) || [] }));
 }
 
 function datesBetweenKeys(startKey, endKey) {
@@ -5751,6 +5787,7 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
       round: item.round,
       weekUnits: item.weekUnits,
       weekKeys: item.weekKeys,
+      weekBucketStarts: item.weekBucketStarts,
     });
   });
 }
@@ -5951,7 +5988,7 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
   if (refreshError) {
     console.warn(`Leave batch was saved, but the intake queue could not be refreshed. ${refreshError.message || refreshError}`);
   } else {
-    upsertLeaveRequestsFromDatabase(savedRequests || [], new Map());
+    upsertLeaveRequestsFromDatabase(await attachLeaveRequestWeekBuckets(client, savedRequests || []), new Map());
   }
 
   return true;
@@ -6043,7 +6080,12 @@ async function loadSupabaseReferenceData() {
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!rdoSubmissionsResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionsResult.data || [], areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
-    if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    if (!leaveRequestsResult.error) {
+      upsertLeaveRequestsFromDatabase(
+        await attachLeaveRequestWeekBuckets(client, leaveRequestsResult.data || []),
+        areaById
+      );
+    }
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
@@ -7304,7 +7346,10 @@ function renderLeaveDraftQueue() {
   if (!panel || !list || !total || !submitButton) return;
 
   const usedDays = leaveDraftTotalDays();
-  const usedWeeks = leaveDraftTotalWeeks();
+  const usedWeeks = roundOneWeekKeySetForItems([
+    ...leaveRoundUsageForInitials(currentUser.initials, 1),
+    ...leaveDraftQueue,
+  ]).size;
   total.textContent = isRoundOneLeaveRound()
     ? `${usedWeeks} / ${roundOneWeekLimit()} weeks · ${usedDays} ${usedDays === 1 ? "day" : "days"}`
     : `${usedDays} / ${currentRoundLeaveLimit()} days`;
@@ -7382,11 +7427,9 @@ function renderSubmittedLeaveManager() {
   const usedHours = leaveCommittedChargedDays() * hoursPerDay;
   const remainingHours = Math.max(0, maximumHours - usedHours);
   const roundDays = items.reduce((total, item) => total + leaveItemChargedDays(item), 0);
-  const roundWeeks = items.reduce((total, item) => total + Math.max(1, Number(item.weekUnits || 0)), 0);
+  const roundWeeks = round === 1 ? roundOneWeekKeySetForItems(items).size : 0;
   const windowError = leaveBidWindowErrorMessage(now);
-  const roundLimitReached = round === 1
-    ? roundWeeks >= roundOneWeekLimit()
-    : roundDays >= leaveDayLimitForRound(round);
+  const roundLimitReached = round !== 1 && roundDays >= leaveDayLimitForRound(round);
   const constraintError = remainingHours <= 0
     ? `You have used your ${formatEstimatedLeaveDays(maximumHours)} allotted leave hours.`
     : roundLimitReached
