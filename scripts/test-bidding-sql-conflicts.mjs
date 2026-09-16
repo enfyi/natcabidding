@@ -6,7 +6,7 @@ const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth; create schema private;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
-for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','admin_leave_request_edit.sql']) {
+for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql']) {
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
@@ -153,3 +153,16 @@ const stillActive=(await db.query('select status,charged_days from leave_request
 if(stillActive.status!=='pending' || stillActive.charged_days!==1)
   throw new Error('Failed replacement did not restore the original request');
 console.log('PASS replacement subtracts old dates and buckets; failed replacement rolls back');
+try {
+  await db.query("select public.replace_own_leave_request($1,'2027-07-16','2027-07-16',null)",[newRequest.id]);
+  throw new Error('Unchanged replacement unexpectedly passed');
+} catch(error) {if(!error.message.includes('same dates')) throw error;}
+if((await db.query('select status from leave_requests where id=$1',[newRequest.id])).rows[0].status!=='pending')
+  throw new Error('Unchanged replacement removed the original bid');
+await db.query('select public.cancel_own_leave_request($1)',[newRequest.id]);
+try {
+  await submitChangeDate('2027-07-16');
+  throw new Error('Removed date was accepted in a new batch');
+} catch(error) {if(!error.message.includes('same dates')) throw error;}
+await submitChangeDate('2027-07-17');
+console.log('PASS unchanged replacement and removed-then-rebid dates are rejected');

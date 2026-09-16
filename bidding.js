@@ -2930,6 +2930,17 @@ function leaveRoundUsageForInitials(initials, round, extraItems = []) {
     .filter((item) => leaveRoundForItem(item) === round);
 }
 
+function matchesRemovedLeaveDates(dateKeys, round) {
+  if (!dateKeys.length) return false;
+  return leaveBids.some((item) => {
+    if (item.status !== "Cancelled" || leaveRoundForItem(item) !== round) return false;
+    if (item.initials && item.initials !== currentUser.initials) return false;
+    const removedKeys = datesInLeaveRange(item.range);
+    return removedKeys[0] === dateKeys[0]
+      && removedKeys[removedKeys.length - 1] === dateKeys[dateKeys.length - 1];
+  });
+}
+
 function leaveItemArea(item) {
   return item.area || currentUser.area;
 }
@@ -3238,6 +3249,11 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  if (matchesRemovedLeaveDates(dateKeys, round)) {
+    setLeaveBuilderStatus(`These are the same dates you removed in Round ${round}. Choose different dates before adding a new batch.`, "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
   const chargedDays = chargeableDates.length;
@@ -3354,6 +3370,15 @@ function previewLeaveSubmission() {
     return;
   }
 
+  if (matchesRemovedLeaveDates(dateKeys, round)) {
+    setLeaveBuilderStatus(`These are the same dates you removed in Round ${round}. Choose different dates before previewing a new batch.`, "error");
+    return;
+  }
+  if (matchesCurrentReplacementDates(dateKeys)) {
+    setLeaveBuilderStatus("Those are the same dates as your existing bid. Choose different dates and try again.", "error");
+    return;
+  }
+
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
   setLeaveDaysInput(chargeableDates.length);
@@ -3450,6 +3475,14 @@ async function submitLeaveDraftBatch() {
 
   if (!leaveDraftQueue.length) {
     setLeaveBuilderStatus("Add at least one leave request before submitting a batch.", "error");
+    return;
+  }
+
+  const repeatedDraft = leaveDraftQueue.find((draft) =>
+    matchesRemovedLeaveDates(datesInLeaveRange(draft.range), draft.round)
+  );
+  if (repeatedDraft) {
+    setLeaveBuilderStatus(`The batch includes ${repeatedDraft.range}, which you already removed in this round. Choose different dates and try again.`, "error");
     return;
   }
 
@@ -7414,6 +7447,14 @@ function leaveReplacementItem() {
     : null;
 }
 
+function matchesCurrentReplacementDates(dateKeys) {
+  const item = leaveReplacementItem();
+  if (!item || !dateKeys.length) return false;
+  const originalKeys = datesInLeaveRange(item.range);
+  return dateKeys[0] === originalKeys[0]
+    && dateKeys[dateKeys.length - 1] === originalKeys[originalKeys.length - 1];
+}
+
 function setSubmittedLeaveStatus(message, status = "info") {
   const target = document.querySelector("[data-submitted-leave-status]");
   if (!target) return;
@@ -7556,6 +7597,14 @@ async function replaceSubmittedLeaveRequest() {
     return;
   }
   const round = leaveRoundForItem(item);
+  if (matchesCurrentReplacementDates(dateKeys)) {
+    setLeaveBuilderStatus("Those are the same dates as your existing bid. Choose different dates and try again.", "error");
+    return;
+  }
+  if (matchesRemovedLeaveDates(dateKeys, round)) {
+    setLeaveBuilderStatus(`These are the same dates you removed in Round ${round}. Choose different dates and try again.`, "error");
+    return;
+  }
   const chargedDays = chargeableLeaveDatesForInitials(range, currentUser.initials, round).length;
   if (!chargedDays) {
     setLeaveBuilderStatus("The replacement must include at least one chargeable leave day.", "error");
