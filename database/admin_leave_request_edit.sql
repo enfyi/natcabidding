@@ -30,6 +30,11 @@ declare
   replacement_week_count integer := 0;
   other_round_usage integer;
   round_limit integer;
+  check_round integer;
+  leave_hours_per_day integer;
+  used_hours integer;
+  credit_days integer;
+  manual_credit_days integer;
   edit_date date;
   selected_slot_id uuid;
   open_slot_count integer;
@@ -165,7 +170,7 @@ begin
     requested_end_date::timestamp,
     interval '1 day'
   ) generated_date
-  where not exists (
+  where (request_row.round_number <= 3 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = request_row.bid_year_id
@@ -177,7 +182,7 @@ begin
       where in_lieu.bid_year_id = request_row.bid_year_id
         and in_lieu.bidder_id = request_row.bidder_id
         and in_lieu.in_lieu_date = generated_date::date
-    )
+    )))
     and not (
       request_row.round_number = 1
       and target_rdo_line_id is not null
@@ -305,9 +310,9 @@ begin
     request_row.id,
     bucket.id,
     generated_date::date,
-    not holiday.is_holiday
-      and not in_lieu.is_holiday_in_lieu
-      and not (request_row.round_number = 1 and rdo.is_rdo),
+    not (request_row.round_number = 1 and rdo.is_rdo)
+      and (request_row.round_number <= 3
+        or (not holiday.is_holiday and not in_lieu.is_holiday_in_lieu)),
     rdo.is_rdo,
     holiday.is_holiday,
     in_lieu.is_holiday_in_lieu
@@ -351,6 +356,7 @@ begin
     from public.leave_request_dates request_date
     where request_date.leave_request_id = request_row.id
       and request_date.charged
+      and not request_date.is_holiday and not request_date.is_holiday_in_lieu
     order by request_date.leave_date
   loop
     select count(*)::integer
@@ -376,6 +382,7 @@ begin
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
+      and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
       and pending_bidder.bid_role not in ('ADM', 'NB')
       and case
@@ -447,6 +454,45 @@ begin
       reviewed_at = now(),
       updated_at = now()
   where request.id = request_row.id;
+
+  select case when line.four_ten then 10 else 8 end
+  into leave_hours_per_day
+  from public.rdo_lines line where line.id = target_rdo_line_id;
+  leave_hours_per_day := coalesce(leave_hours_per_day, 8);
+  for check_round in 1..4 loop
+    select coalesce(sum(request.charged_days), 0) * leave_hours_per_day
+    into used_hours
+    from public.leave_requests request
+    where request.bid_year_id = request_row.bid_year_id
+      and request.bidder_id = target.id
+      and request.status in ('pending', 'approved')
+      and request.round_number <= check_round;
+    credit_days := 0;
+    if check_round = 4 then
+      select count(distinct request_date.leave_date)
+      into credit_days
+      from public.leave_request_dates request_date
+      join public.leave_requests request on request.id = request_date.leave_request_id
+      where request.bid_year_id = request_row.bid_year_id
+        and request.bidder_id = target.id
+        and request.round_number between 1 and 3
+        and request.status in ('pending', 'approved')
+        and request_date.charged
+        and (request_date.is_holiday or request_date.is_holiday_in_lieu);
+      select coalesce(sum(event.credit_days), 0)
+      into manual_credit_days
+      from public.leave_credit_events event
+      where event.bid_year_id = request_row.bid_year_id
+        and event.bidder_id = target.id
+        and event.round_number <= check_round
+        and event.source = 'manual_adjustment';
+      credit_days := credit_days + manual_credit_days;
+    end if;
+    if used_hours > target.leave_slot_allowance + credit_days * leave_hours_per_day then
+      raise exception 'Round % would use % leave hours, above the % hour allowance.',
+        check_round, used_hours, target.leave_slot_allowance + credit_days * leave_hours_per_day;
+    end if;
+  end loop;
 
   insert into public.audit_events (
     bid_year_id,

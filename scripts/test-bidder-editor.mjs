@@ -10,8 +10,6 @@ await db.exec(`create role anon; create role authenticated; create schema auth;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
 await db.exec(fs.readFileSync(root+'/database/schema.sql','utf8').replace('create extension if not exists pgcrypto;',''));
-await db.exec(`alter table rdo_lines add column assigned_initials text;
-alter table intake_submissions add column round_number integer, add column rdo_line_id uuid, add column leave_request_id uuid;`);
 await db.exec(fs.readFileSync(root+'/database/rdo_line_eligibility.sql','utf8').replaceAll('\n$function$;\n','\n$function$;\n'));
 await db.exec(fs.readFileSync(root+'/scripts/fixtures/bidder-editor-bidding-functions.sql','utf8').replaceAll('\n$function$\n','\n$function$;\n'));
 await db.exec(fs.readFileSync(root+'/database/admin_bidder_editor.sql','utf8'));

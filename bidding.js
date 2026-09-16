@@ -2846,7 +2846,15 @@ function isRoundOneLeaveItem(item) {
 
 function chargeableLeaveDatesForInitials(range, initials = currentUser.initials, round = currentRoundNumber()) {
   const keys = datesInLeaveRange(range);
-  return keys.filter((key) => !isRdoDateForInitials(key, initials));
+  return keys.filter((key) =>
+    !isRdoDateForInitials(key, initials) && (round <= 3 || !isHolidayDate(key, initials))
+  );
+}
+
+function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
+  return datesInLeaveRange(range).filter((key) =>
+    !isRdoDateForInitials(key, initials) && !isHolidayDate(key, initials)
+  );
 }
 
 function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
@@ -2859,11 +2867,7 @@ function setLeaveDaysInput(days) {
 }
 
 function leaveApprovalDates(item) {
-  return chargeableLeaveDatesForInitials(
-    item.range,
-    item.initials,
-    isRoundOneLeaveItem(item) ? 1 : Number(item.round || 0)
-  );
+  return leaveSlotDatesForInitials(item.range, item.initials);
 }
 
 function leaveRoundForItem(item) {
@@ -3027,7 +3031,8 @@ function leaveItemChargedDays(item) {
 
 function leaveHolidayDateSet(items) {
   return items.reduce((holidays, item) => {
-    datesInLeaveRange(item.range).forEach((key) => {
+    const round = leaveRoundForItem(item);
+    chargeableLeaveDatesForInitials(item.range, item.initials || currentUser.initials, round).forEach((key) => {
       if (isHolidayDate(key, item.initials || currentUser.initials)) holidays.add(key);
     });
     return holidays;
@@ -3124,7 +3129,7 @@ function visibleLeaveSlotDetailsFromMap(
   };
   const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
-  if (showCurrentUserOverlay && previewItem && leaveDisplayDatesForItem(previewItem, currentUser.initials).includes(key)) {
+  if (showCurrentUserOverlay && previewItem && leaveSlotDatesForInitials(previewItem.range, currentUser.initials).includes(key)) {
     const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   }
@@ -3132,13 +3137,13 @@ function visibleLeaveSlotDetailsFromMap(
   leaveBids.forEach((item) => {
     if (!showCurrentUserOverlay) return;
     if (!["Pending", "Approved"].includes(item.status)) return;
-    if (!leaveDisplayDatesForItem(item, currentUser.initials).includes(key)) return;
+    if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
     showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   leaveDraftQueue.forEach((item) => {
     if (!showCurrentUserOverlay) return;
-    if (!leaveDisplayDatesForItem(item, currentUser.initials).includes(key)) return;
+    if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   });
@@ -3146,7 +3151,7 @@ function visibleLeaveSlotDetailsFromMap(
   intakeQueue.forEach((item) => {
     if (item.area !== area) return;
     if (item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)) return;
-    if (!leaveDisplayDatesForItem(item, item.initials).includes(key)) return;
+    if (!leaveSlotDatesForInitials(item.range, item.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs);
     showInitialsInVisibleSlot(visible, bucket, item.initials);
   });
