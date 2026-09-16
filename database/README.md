@@ -53,6 +53,26 @@ For the shared admin bid-window testing switch, also run
 all logged-in BUEs to submit outside their assigned bid windows while testing,
 with an optional shared test round for checking Round 1-4 rules individually.
 
+For databases that already have the transactional bidding, high-priority fixes,
+and leave preflight functions installed, run
+`database/resolve_bidding_sql_conflicts.sql` once in the SQL editor. It updates
+the RDO submitter, private leave submitter, and public leave preflight together.
+The per-bidder leave allowance is measured in hours; Round 1 RDO dates use the
+pending or approved RDO request; and the shared testing setting applies to both
+RDO and leave submissions. Existing bids and assignments are preserved. A local
+regression test is available with `PGLITE_MODULE` set to an installed PGlite
+module: `node scripts/test-bidding-sql-conflicts.mjs`.
+
+Run `database/holiday_leave_round_rules.sql` after that upgrade to charge bid
+holidays and holiday-in-lieu dates against the member's leave days and hours in
+Rounds 1–3. They still do not reserve daily CPC/DEV leave slots. In Round 4,
+each distinct holiday or in-lieu date actually charged in an active Round 1–3
+request returns one day of leave allowance (8 or 10 hours for the selected
+line). In-lieu dates are calculated from a pending RDO request so leave can be
+submitted before intake approves that line. The normal five-day Round 4 bid
+limit still applies. The migration
+recalculates older saved holiday charges and updates the leave-summary views.
+
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database
 only, run `database/pilot_auth_profile.sql`, `database/pilot_seed.sql`, followed by

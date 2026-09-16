@@ -166,7 +166,7 @@ begin
     requested_edit_end_date::timestamp,
     interval '1 day'
   ) generated_date
-  where not exists (
+  where (request_row.round_number <= 3 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = request_row.bid_year_id
@@ -178,7 +178,7 @@ begin
       where in_lieu.bid_year_id = request_row.bid_year_id
         and in_lieu.bidder_id = request_row.bidder_id
         and in_lieu.in_lieu_date = generated_date::date
-    )
+    )))
     and not (
       request_row.round_number = 1
       and target_rdo_line_id is not null
@@ -306,9 +306,9 @@ begin
     request_row.id,
     bucket.id,
     generated_date::date,
-    not holiday.is_holiday
-      and not in_lieu.is_holiday_in_lieu
-      and not (request_row.round_number = 1 and rdo.is_rdo),
+    not (request_row.round_number = 1 and rdo.is_rdo)
+      and (request_row.round_number <= 3
+        or (not holiday.is_holiday and not in_lieu.is_holiday_in_lieu)),
     rdo.is_rdo,
     holiday.is_holiday,
     in_lieu.is_holiday_in_lieu
@@ -352,6 +352,7 @@ begin
     from public.leave_request_dates request_date
     where request_date.leave_request_id = request_row.id
       and request_date.charged
+      and not request_date.is_holiday and not request_date.is_holiday_in_lieu
       and request_row.status in ('pending','approved')
     order by request_date.leave_date
   loop
@@ -378,6 +379,7 @@ begin
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
+      and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
       and pending_bidder.bid_role not in ('ADM', 'NB')
       and case
@@ -570,7 +572,7 @@ declare
   actor_id uuid; target public.bidders%rowtype; year_id uuid; before_state jsonb;
   line_row public.rdo_lines%rowtype; line_change jsonb; entry jsonb; prior jsonb;
   rdo_id uuid; rdo_status text; group_name text; area_max integer; crew_max integer;
-  start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer;
+  start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer; manual_credit_days integer;
   bucket text; d date; r record;
 begin
   actor_id := private.bidder_editor_actor(target_bidder_id);
@@ -681,8 +683,18 @@ begin
   for round_no in 1..5 loop
     select coalesce(sum(charged_days),0)*day_hours into used_hours from public.leave_requests
       where bid_year_id=year_id and bidder_id=target.id and status in ('pending','approved') and round_number<=round_no;
-    select coalesce(sum(c.credit_days),0) into credit_days from public.leave_credit_events c
-      where c.bid_year_id=year_id and c.bidder_id=target.id and c.round_number<=round_no and round_no>=4;
+    credit_days := 0;
+    if round_no >= 4 then
+      select count(distinct d.leave_date) into credit_days
+      from public.leave_request_dates d join public.leave_requests request on request.id=d.leave_request_id
+      where request.bid_year_id=year_id and request.bidder_id=target.id
+        and request.round_number between 1 and 3 and request.status in ('pending','approved')
+        and d.charged and (d.is_holiday or d.is_holiday_in_lieu);
+      select coalesce(sum(c.credit_days),0) into manual_credit_days from public.leave_credit_events c
+        where c.bid_year_id=year_id and c.bidder_id=target.id and c.round_number<=round_no
+          and c.source='manual_adjustment';
+      credit_days := credit_days + manual_credit_days;
+    end if;
     if used_hours > target.leave_slot_allowance+credit_days*day_hours then
       raise exception 'Round % would use % leave hours, above the % hour allowance.',round_no,used_hours,target.leave_slot_allowance+credit_days*day_hours;
     end if;

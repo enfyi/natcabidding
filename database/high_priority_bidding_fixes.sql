@@ -171,15 +171,16 @@ declare
   priority_no integer;
   item_charged integer;
   batch_charged integer := 0;
-  committed_charged integer;
   committed_round_charged integer;
-  existing_request_count integer;
+  enforce_bid_windows boolean := true;
+  configured_test_round integer;
   all_dates date[];
   bucket_starts date[] := array[]::date[];
   bucket_start date;
   is_rdo boolean;
   is_holiday boolean;
   is_in_lieu boolean;
+  effective_rdo_line_id uuid;
   result_ids jsonb := '[]'::jsonb;
 begin
   select * into actor from public.bidders
@@ -189,6 +190,11 @@ begin
   if actor.id is null then raise exception 'Authenticated bidder profile required.'; end if;
 
   select * into strict year_row from public.bid_years where bid_year = requested_bid_year;
+  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
+  into enforce_bid_windows, configured_test_round
+  from public.bid_year_settings settings
+  where settings.bid_year_id = year_row.id;
+  enforce_bid_windows := coalesce(enforce_bid_windows, true);
   if requested_items is null or jsonb_typeof(requested_items) <> 'array' or jsonb_array_length(requested_items) = 0 then
     raise exception 'At least one leave request is required.';
   end if;
@@ -249,6 +255,20 @@ begin
   from jsonb_array_elements(requested_items) j
   cross join lateral generate_series((j->>'start_date')::date, (j->>'end_date')::date, interval '1 day') gs;
 
+  select rl.id into effective_rdo_line_id
+  from public.rdo_lines rl
+  where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id and rl.status = 'taken'
+  order by rl.updated_at desc, rl.id limit 1;
+  if effective_rdo_line_id is null then
+    select submission.rdo_line_id into effective_rdo_line_id
+    from public.intake_submissions submission
+    where submission.bid_year_id = year_row.id and submission.bidder_id = target.id
+      and submission.submission_type = 'rdo' and submission.status in ('pending', 'approved')
+    order by submission.reviewed_at desc nulls last,
+      submission.submitted_at desc nulls last, submission.created_at desc
+    limit 1;
+  end if;
+
   for item in select * from jsonb_array_elements(requested_items) loop
     start_date := (item->>'start_date')::date;
     end_date := (item->>'end_date')::date;
@@ -263,21 +283,28 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = effective_rdo_line_id
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       if round_no > 1 and is_rdo then raise exception 'Leave cannot include the bidder''s RDO after Round 1 (%).', leave_date; end if;
-      if not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo) then item_charged := item_charged + 1; end if;
+      if not (round_no = 1 and is_rdo)
+         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+        item_charged := item_charged + 1;
+      end if;
     end loop;
     batch_charged := batch_charged + item_charged;
   end loop;
 
-  if not manual_entry and not exists (
+  if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at
   ) then raise exception 'Your bidding window is not open.'; end if;
+  if not manual_entry and not enforce_bid_windows
+     and configured_test_round is not null and batch_round <> configured_test_round then
+    raise exception 'Testing mode is currently set to Round %.', configured_test_round;
+  end if;
 
   if batch_round = 1 then
     select coalesce(array_agg(distinct wb.bucket_start_date order by wb.bucket_start_date), array[]::date[])
@@ -308,18 +335,9 @@ begin
     end if;
   end if;
 
-  select coalesce(sum(charged_days), 0) into committed_charged
-  from public.leave_requests
-  where bid_year_id = year_row.id and bidder_id = target.id and status in ('pending', 'approved');
-  if committed_charged + batch_charged > year_row.annual_leave_allowance_days then
-    raise exception 'The annual leave allowance would be exceeded.';
-  end if;
-
-  select count(*) into existing_request_count from public.leave_requests
-  where bid_year_id = year_row.id and bidder_id = target.id and status in ('pending', 'approved');
-  if existing_request_count + jsonb_array_length(requested_items) > target.leave_slot_allowance then
-    raise exception 'The bidder''s leave-slot allowance would be exceeded.';
-  end if;
+  -- The public preflight owns the per-bidder leave-hour allowance. This private
+  -- submitter must not reinterpret leave_slot_allowance as a request count or
+  -- apply a separate bid-year day cap after preflight has accepted the batch.
 
   select coalesce(max(priority), 0) into priority_no from public.leave_requests
   where bid_year_id = year_row.id and bidder_id = target.id and round_number = batch_round;
@@ -334,12 +352,15 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = effective_rdo_line_id
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
-      if not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo) then item_charged := item_charged + 1; end if;
+      if not (round_no = 1 and is_rdo)
+         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+        item_charged := item_charged + 1;
+      end if;
     end loop;
 
     insert into public.leave_requests (
@@ -362,13 +383,16 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = effective_rdo_line_id
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       insert into public.leave_request_dates (leave_request_id, leave_date, charged, is_rdo, is_holiday, is_holiday_in_lieu)
-      values (request_id, leave_date, not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo), is_rdo, is_holiday, is_in_lieu);
+      values (request_id, leave_date,
+        not (round_no = 1 and is_rdo)
+          and (round_no <= 3 or (not is_holiday and not is_in_lieu)),
+        is_rdo, is_holiday, is_in_lieu);
     end loop;
 
     insert into public.intake_submissions (
@@ -511,7 +535,9 @@ begin
       bucket := case when target.bid_role in ('R-DEV', 'D-DEV', 'DEV') then 'dev' else 'cpc' end;
       for date_row in
         select d.leave_date from public.leave_request_dates d
-        where d.leave_request_id = leave_row.id and d.charged order by d.leave_date
+        where d.leave_request_id = leave_row.id and d.charged
+          and not d.is_holiday and not d.is_holiday_in_lieu
+        order by d.leave_date
       loop
         select * into slot_row from public.leave_slots s
         where s.bid_year_id = submission.bid_year_id and s.area_id = target.area_id
@@ -553,6 +579,10 @@ begin
       denial_reason = case when decision = 'denied' then denial_reason_text else null end,
       payload = payload || override_payload, updated_at = now()
   where id = submission.id;
+
+  if submission.submission_type = 'rdo' and decision = 'denied' then
+    perform public.refresh_bidder_holiday_in_lieu(submission.bid_year_id, target.id);
+  end if;
 
   insert into public.audit_events (bid_year_id, area_id, actor_id, event_type, entity_table, entity_id, details)
   values (submission.bid_year_id, submission.area_id, actor.id, 'submission_' || decision,
