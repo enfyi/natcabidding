@@ -148,6 +148,7 @@ let leavePickerOpen = false;
 let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
 let leaveManagementPendingId = "";
+let leaveReplacementRequestId = "";
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
@@ -2709,14 +2710,14 @@ function selectLeaveBuilderDate(key) {
   const chargeableDays = chargeableLeaveDatesForInitials(range, currentUser.initials, currentRoundNumber()).length;
 
   if (leaveRangeSelectionComplete) {
-    const weekUnits = roundOneWeekUnitsForDateKeys(keys);
+    const weekUnits = isRoundOneLeaveRound() ? roundOneProjectedWeekCount(range) : 0;
     const roundOneNote = isRoundOneLeaveRound()
-      ? `${weekUnits} bid ${weekUnits === 1 ? "week" : "weeks"}, ${chargeableDays} chargeable ${chargeableDays === 1 ? "day" : "days"}`
+      ? `${weekUnits} of ${roundOneWeekLimit()} bid weeks after this selection, ${chargeableDays} chargeable ${chargeableDays === 1 ? "day" : "days"}`
       : `${chargeableDays} ${chargeableDays === 1 ? "day" : "days"}`;
     setLeaveBuilderStatus(`${range} selected: ${roundOneNote}.`, "success");
   } else {
     const roundOneNote = isRoundOneLeaveRound()
-      ? ` This counts as 1 bid week and ${chargeableDays} chargeable ${chargeableDays === 1 ? "day" : "days"}.`
+      ? ` This would use ${roundOneProjectedWeekCount(range)} of ${roundOneWeekLimit()} bid weeks and ${chargeableDays} chargeable ${chargeableDays === 1 ? "day" : "days"}.`
       : "";
     setLeaveBuilderStatus(`${range} selected.${roundOneNote} Select another date to expand the range.`, "info");
   }
@@ -2830,6 +2831,17 @@ function roundOneWeekKeySetForItems(items = []) {
     item.weekBucketStarts?.length ? [] : datesInLeaveRange(item.range)
   );
   return new Set(roundOneWeekKeysForDateKeys(dateKeys, existingStarts));
+}
+
+function roundOneProjectedWeekCount(range) {
+  const committedItems = leaveRoundUsageForInitials(currentUser.initials, 1).filter((item) =>
+    submittedLeaveItemKey(item) !== leaveReplacementRequestId
+  );
+  return roundOneWeekKeySetForItems([
+    ...committedItems,
+    ...leaveDraftQueue,
+    { range, round: 1 },
+  ]).size;
 }
 
 function roundOneDraftWeekKeySet(extraItems = []) {
@@ -3202,6 +3214,10 @@ function addOrUpdateLeaveSubmission() {
     setLeaveBuilderStatus(windowError, "error");
     return;
   }
+  if (leaveReplacementRequestId) {
+    void replaceSubmittedLeaveRequest();
+    return;
+  }
 
   const { range, notes } = leaveBuilderValues();
   const round = currentRoundNumber();
@@ -3345,11 +3361,7 @@ function previewLeaveSubmission() {
     setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
-  const weekUnits = round === 1 ? roundOneWeekKeySetForItems([
-    ...leaveRoundUsageForInitials(currentUser.initials, 1),
-    ...leaveDraftQueue,
-    { range, round },
-  ]).size : 0;
+  const weekUnits = round === 1 ? roundOneProjectedWeekCount(range) : 0;
 
   if (round === 1 && weekUnits > roundOneWeekLimit()) {
     setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This selection would use ${weekUnits}.`, "error");
@@ -7396,6 +7408,12 @@ function submittedLeaveItemKey(item) {
   return item.supabaseRequestId || item.id || `${leaveRoundForItem(item)}|${item.priority}|${item.range}`;
 }
 
+function leaveReplacementItem() {
+  return leaveReplacementRequestId
+    ? submittedLeaveItemsForCurrentRound().find((item) => submittedLeaveItemKey(item) === leaveReplacementRequestId)
+    : null;
+}
+
 function setSubmittedLeaveStatus(message, status = "info") {
   const target = document.querySelector("[data-submitted-leave-status]");
   if (!target) return;
@@ -7419,6 +7437,8 @@ function renderSubmittedLeaveManager() {
     (!item.initials || item.initials === currentUser.initials) &&
     !["Draft", "Preview"].includes(item.status)
   );
+  const addToBatchButton = document.querySelector("[data-add-leave-request]");
+  if (addToBatchButton) addToBatchButton.textContent = leaveReplacementRequestId ? "Save Changed Dates" : "Add to Batch";
   panel.hidden = !hasSubmittedThisRound;
   if (!hasSubmittedThisRound) return;
 
@@ -7456,6 +7476,7 @@ function renderSubmittedLeaveManager() {
           <strong>${escapeHtml(item.range)}</strong>
           <small>${formatEstimatedLeaveDays(leaveItemChargedDays(item) * hoursPerDay)} leave hours · Priority ${Number(item.priority || 0)}</small>
         </div>
+        <button class="secondary-action small" type="button" data-change-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId || !item.supabaseRequestId ? "disabled" : ""}>${leaveReplacementRequestId === itemKey ? "Cancel Change" : "Change Dates"}</button>
         <button class="secondary-action danger small" type="button" data-remove-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId ? "disabled" : ""} title="${escapeHtml(windowError)}">${isSaving ? "Removing…" : "Remove"}</button>
       </article>
     `;
@@ -7471,12 +7492,120 @@ function openLeaveBuilderForMoreDates() {
     return;
   }
 
+  leaveReplacementRequestId = "";
+  renderSubmittedLeaveManager();
+
   const rangeInput = document.querySelector("[data-leave-range-input]");
   rangeInput?.scrollIntoView({ behavior: "smooth", block: "center" });
   rangeInput?.focus({ preventScroll: true });
   syncLeavePickerMonthToRange();
   setLeavePickerOpen(true);
   setLeaveBuilderStatus("Select another date range, add it to the batch, and submit it before your window closes.", "info");
+}
+
+function openSubmittedLeaveForReplacement(itemKey) {
+  if (leaveReplacementRequestId === itemKey) {
+    leaveReplacementRequestId = "";
+    renderSubmittedLeaveManager();
+    setSubmittedLeaveStatus("Change cancelled. Your submitted dates are still in place.", "info");
+    return;
+  }
+  const item = submittedLeaveItemsForCurrentRound().find((entry) => submittedLeaveItemKey(entry) === itemKey);
+  const windowError = leaveBidWindowErrorMessage();
+  if (!item || !item.supabaseRequestId || windowError) {
+    setSubmittedLeaveStatus(windowError || "This leave request cannot be changed here.", "error");
+    return;
+  }
+  if (leaveDraftQueue.length) {
+    setSubmittedLeaveStatus("Submit or remove the preview batch before changing submitted dates.", "error");
+    return;
+  }
+
+  const keys = datesInLeaveRange(item.range);
+  if (!keys.length) {
+    setSubmittedLeaveStatus("The saved date range could not be loaded.", "error");
+    return;
+  }
+  leaveReplacementRequestId = itemKey;
+  leaveRangeStartKey = keys[0];
+  leaveRangeEndKey = keys[keys.length - 1];
+  leaveRangeSelectionComplete = true;
+  leaveRangePreviewActive = false;
+  const notesInput = document.querySelector("[data-leave-notes-input]");
+  if (notesInput) notesInput.value = item.notes || "";
+  syncLeaveBuilderInputs();
+  syncLeavePickerMonthToRange();
+  renderSubmittedLeaveManager();
+  document.querySelector("[data-leave-range-input]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  setLeavePickerOpen(true);
+  setLeaveBuilderStatus(`Choose replacement dates for ${item.range}, then select Save Changed Dates. The original bid stays in place if the replacement fails validation.`, "info");
+}
+
+async function replaceSubmittedLeaveRequest() {
+  if (leaveManagementPendingId) return;
+  const item = leaveReplacementItem();
+  const windowError = leaveBidWindowErrorMessage();
+  if (!item || !item.supabaseRequestId || windowError) {
+    setLeaveBuilderStatus(windowError || "This leave request cannot be changed here.", "error");
+    return;
+  }
+  const { range, notes } = leaveBuilderValues();
+  const dateKeys = datesInLeaveRange(range);
+  if (!dateKeys.length || invalidLeaveYearDateKeys(dateKeys).length) {
+    setLeaveBuilderStatus("Choose replacement dates within the bidding leave year.", "error");
+    return;
+  }
+  const round = leaveRoundForItem(item);
+  const chargedDays = chargeableLeaveDatesForInitials(range, currentUser.initials, round).length;
+  if (!chargedDays) {
+    setLeaveBuilderStatus("The replacement must include at least one chargeable leave day.", "error");
+    return;
+  }
+  const otherRoundItems = leaveRoundUsageForInitials(currentUser.initials, round)
+    .filter((entry) => submittedLeaveItemKey(entry) !== leaveReplacementRequestId);
+  if (round === 1) {
+    const weeks = roundOneWeekKeySetForItems([...otherRoundItems, { range, round }]).size;
+    if (weeks > roundOneWeekLimit()) {
+      setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This replacement would use ${weeks}.`, "error");
+      return;
+    }
+  } else {
+    const roundDays = otherRoundItems.reduce((total, entry) => total + leaveItemChargedDays(entry), chargedDays);
+    if (roundDays > leaveDayLimitForRound(round)) {
+      setLeaveBuilderStatus(`Round ${round} can include up to ${leaveDayLimitForRound(round)} charged days. This replacement would use ${roundDays}.`, "error");
+      return;
+    }
+  }
+  const projectedDays = leaveProjectedChargedDays() - leaveItemChargedDays(item) + chargedDays;
+  if (projectedDays > leaveAllowanceLimitForRound(round)) {
+    setLeaveBuilderStatus(`This replacement would exceed the Round ${round} leave allowance.`, "error");
+    return;
+  }
+
+  leaveManagementPendingId = leaveReplacementRequestId;
+  renderSubmittedLeaveManager();
+  setLeaveBuilderStatus(`Checking replacement dates for ${item.range}…`, "info");
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const { error } = await client.rpc("replace_own_leave_request", {
+      requested_leave_request_id: item.supabaseRequestId,
+      replacement_start_date: dateKeys[0],
+      replacement_end_date: dateKeys[dateKeys.length - 1],
+      replacement_notes: notes,
+    });
+    if (error) throw error;
+    await loadSupabaseReferenceData();
+    leaveReplacementRequestId = "";
+    leaveManagementPendingId = "";
+    renderApp();
+    setSubmittedLeaveStatus(`${item.range} was replaced with ${range}.`, "success");
+    setLeaveBuilderStatus("Changed dates saved and sent to intake review.", "success");
+  } catch (error) {
+    leaveManagementPendingId = "";
+    renderSubmittedLeaveManager();
+    setLeaveBuilderStatus(error.message || "The leave dates could not be changed.", "error");
+  }
 }
 
 async function removeSubmittedLeaveRequest(itemKey) {
@@ -7528,6 +7657,7 @@ async function removeSubmittedLeaveRequest(itemKey) {
     }
 
     leaveManagementPendingId = "";
+    if (leaveReplacementRequestId === itemKey) leaveReplacementRequestId = "";
     renderApp();
     setSubmittedLeaveStatus(`${item.range} was removed. You may add different or additional dates while your window remains open.`, "success");
   } catch (error) {
@@ -11371,6 +11501,12 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-add-more-leave-dates]")) {
     openLeaveBuilderForMoreDates();
+    return;
+  }
+
+  const changeSubmittedLeave = event.target.closest("[data-change-submitted-leave]");
+  if (changeSubmittedLeave) {
+    openSubmittedLeaveForReplacement(changeSubmittedLeave.dataset.changeSubmittedLeave);
     return;
   }
 
