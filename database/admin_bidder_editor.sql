@@ -192,23 +192,36 @@ begin
     );
 
   if request_row.round_number = 1 then
-    replacement_week_count := pg_catalog.ceil(
-      (requested_edit_end_date - requested_edit_start_date + 1)::numeric / 7
-    )::integer;
+    select cardinality(private.round_one_week_bucket_starts(array_agg(generated_date::date)))
+    into replacement_week_count
+    from pg_catalog.generate_series(
+      requested_edit_start_date::timestamp,
+      requested_edit_end_date::timestamp,
+      interval '1 day'
+    ) generated_date;
 
-    select count(*)::integer
+    select cardinality(private.round_one_week_bucket_starts(array_agg(week_dates.leave_date)))
     into other_round_usage
-    from public.leave_request_week_buckets bucket
-    join public.leave_requests other_request
-      on other_request.id = bucket.leave_request_id
-    where other_request.bid_year_id = request_row.bid_year_id
-      and other_request.bidder_id = request_row.bidder_id
-      and other_request.round_number = 1
-      and other_request.status in ('pending', 'approved')
-      and other_request.id <> request_row.id;
+    from (
+      select request_date.leave_date
+      from public.leave_request_dates request_date
+      join public.leave_requests other_request on other_request.id = request_date.leave_request_id
+      where other_request.bid_year_id = request_row.bid_year_id
+        and other_request.bidder_id = request_row.bidder_id
+        and other_request.round_number = 1
+        and other_request.status in ('pending', 'approved')
+        and other_request.id <> request_row.id
+      union all
+      select generated_date::date
+      from pg_catalog.generate_series(
+        requested_edit_start_date::timestamp,
+        requested_edit_end_date::timestamp,
+        interval '1 day'
+      ) generated_date
+    ) week_dates;
 
-    if request_row.status in ('pending','approved') and other_round_usage + replacement_week_count > 2 then
-      raise exception 'Round 1 can include no more than 2 bid weeks.';
+    if request_row.status in ('pending','approved') and other_round_usage > 2 then
+      raise exception 'Round 1 can include no more than 2 seven-day bid weeks.';
     end if;
   else
     round_limit := case when request_row.round_number in (2, 3) then 10 else 5 end;
@@ -482,6 +495,10 @@ begin
       'capacity_override_used', used_capacity_override
     )
   );
+
+  if request_row.round_number = 1 and request_row.status in ('pending', 'approved') then
+    perform private.rebuild_round_one_week_buckets(request_row.bid_year_id, request_row.bidder_id);
+  end if;
 
   return jsonb_build_object(
     'leave_request_id', request_row.id,
