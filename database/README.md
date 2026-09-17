@@ -55,7 +55,8 @@ an exact repeat of dates the bidder removed in the same round, whether through
 Change Dates or a later new batch. The bidder must choose a different range.
 Run `database/round_one_flexible_week_buckets.sql` after the leave submission
 and admin editor SQL to make Round 1 buckets movable when dates are added,
-removed, or replaced. It also rebuilds the saved bucket links for active bids.
+removed, or replaced. It also rebuilds the saved bucket links for active bids
+and updates admin editor routines only where those routines are installed.
 
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run

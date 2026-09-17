@@ -401,6 +401,10 @@ end
 $$;
 
 -- Current implementation from admin_leave_request_edit.sql
+do $upgrade$
+begin
+  if to_regprocedure('private.replace_approved_leave_request_dates_unchecked(uuid,date,date,boolean)') is not null then
+    execute $definition$
 create or replace function private.replace_approved_leave_request_dates_unchecked(
   requested_leave_request_id uuid,
   requested_start_date date,
@@ -946,8 +950,16 @@ begin
   );
 end;
 $function$;
+$definition$;
+  end if;
+end;
+$upgrade$;
 
 -- Current implementation from admin_bidder_editor.sql
+do $upgrade$
+begin
+  if to_regprocedure('private.replace_bidder_editor_leave_dates(uuid,date,date,boolean,uuid)') is not null then
+    execute $definition$
 create or replace function private.replace_bidder_editor_leave_dates(
   requested_leave_request_id uuid,
   requested_edit_start_date date,
@@ -1453,3 +1465,7 @@ begin
   );
 end;
 $function$;
+$definition$;
+  end if;
+end;
+$upgrade$;
