@@ -31,12 +31,12 @@ const DEFAULT_ROUND_RULES = {
     detail: "Leave may include up to 2 bid weeks.",
   },
   2: {
-    label: "10 days",
-    detail: "Leave may include up to 10 charged days.",
+    label: "8 or 10 days",
+    detail: "Leave may include up to 10 days with two RDOs or 8 days with three RDOs.",
   },
   3: {
-    label: "10 days",
-    detail: "Leave may include up to 10 charged days.",
+    label: "8 or 10 days",
+    detail: "Leave may include up to 10 days with two RDOs or 8 days with three RDOs.",
   },
   4: {
     label: "5 days",
@@ -2469,7 +2469,7 @@ function manualLeaveValidationMessage({ person, area, range, dateKeys, round, da
     return "";
   }
 
-  const roundLimit = leaveDayLimitForRound(round);
+  const roundLimit = leaveDayLimitForRound(round, person.initials);
   const alreadyBidDays = leaveRoundUsageForInitials(person.initials, round)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
   const projectedDays = alreadyBidDays + days;
@@ -2495,6 +2495,11 @@ function submitManualLeaveBid(panel, person, area) {
   }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
+  const rdoDates = leaveRdoDatesForInitials(range, person.initials);
+  if (round > 1 && rdoDates.length) {
+    setManualBidStatus(panel, `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}.`, "error");
+    return;
+  }
   const chargedDays = chargeableDates.length;
   const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
   if (manualDaysInput) manualDaysInput.value = String(chargedDays);
@@ -2767,11 +2772,15 @@ function nextLeavePriority() {
 function currentRoundLeaveLimit() {
   const round = currentRoundNumber();
   if (round <= 1) return roundOneWeekLimit();
-  return round <= 3 ? 10 : 5;
+  return leaveDayLimitForRound(round);
 }
 
-function leaveDayLimitForRound(round) {
-  return round <= 3 ? 10 : 5;
+function leaveDayLimitForRound(round, initials = currentUser.initials) {
+  if (round === 2 || round === 3) {
+    const line = submittedRdoLineForInitials(initials);
+    return rdoWeekdaysForLine(line).size === 3 ? 8 : 10;
+  }
+  return 5;
 }
 
 function currentRoundNumber() {
@@ -2787,6 +2796,13 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
+  if (round === 2 || round === 3) {
+    const line = submittedRdoLineForInitials();
+    if (line) {
+      const limit = leaveDayLimitForRound(round);
+      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.` };
+    }
+  }
   return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
@@ -3014,12 +3030,11 @@ function submittedRdoLineForInitials(initials = currentUser.initials) {
 
 function leaveHoursPerDayForInitials(initials = currentUser.initials) {
   const line = submittedRdoLineForInitials(initials);
-  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  return rdoWeekdaysForLine(line).size === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
 }
 
 function currentUserLeaveAllowanceHours() {
-  const hours = normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance);
-  return hours > 0 ? hours : DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE;
+  return normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance);
 }
 
 function currentUserBaseLeaveAllowanceDays() {
@@ -3253,6 +3268,10 @@ function addOrUpdateLeaveSubmission() {
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  if (round > 1 && rdoDates.length) {
+    setLeaveBuilderStatus(`Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Choose different dates.`, "error");
+    return;
+  }
   const chargedDays = chargeableDates.length;
   setLeaveDaysInput(chargedDays);
   if (chargedDays <= 0) {
@@ -3378,6 +3397,10 @@ function previewLeaveSubmission() {
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
   const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  if (round > 1 && rdoDates.length) {
+    setLeaveBuilderStatus(`Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Choose different dates.`, "error");
+    return;
+  }
   setLeaveDaysInput(chargeableDates.length);
   if (chargeableDates.length <= 0) {
     setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
@@ -3425,6 +3448,14 @@ function refreshLeaveDraftUi(affectedDateKeys = []) {
 function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
   const requestedDates = new Map();
   const overlappingDates = new Set();
+
+  for (const draft of drafts) {
+    const round = Number(draft.round || currentRoundNumber());
+    const rdoDates = leaveRdoDatesForInitials(draft.range, currentUser.initials);
+    if (round > 1 && rdoDates.length) {
+      return `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Remove those dates before submitting.`;
+    }
+  }
 
   drafts.forEach((draft) => {
     datesInLeaveRange(draft.range).forEach((key) => {
@@ -4197,7 +4228,7 @@ function rdoLineForInitials(initials = currentUser.initials) {
 }
 
 function isRdoDateForInitials(key, initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   if (!line) return false;
   return rdoWeekdaysForLine(line).has(dateFromKey(key).getDay());
 }
@@ -7600,6 +7631,11 @@ async function replaceSubmittedLeaveRequest() {
   }
   if (matchesRemovedLeaveDates(dateKeys, round)) {
     setLeaveBuilderStatus(`These are the same dates you removed in Round ${round}. Choose different dates and try again.`, "error");
+    return;
+  }
+  const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  if (round > 1 && rdoDates.length) {
+    setLeaveBuilderStatus(`Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Choose different dates.`, "error");
     return;
   }
   const chargedDays = chargeableLeaveDatesForInitials(range, currentUser.initials, round).length;

@@ -6,11 +6,15 @@ const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth; create schema private;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
-for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql']) {
+for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql','round_two_three_rdo_limits.sql']) {
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 const year=(await db.query('select id from bid_years where bid_year=2027')).rows[0].id;
+const mismatchedLines=(await db.query(`select count(*)::integer as total from rdo_lines line
+  where line.bid_year_id=$1 and private.rdo_count_for_line(line.id) in (2,3)
+    and line.four_ten is distinct from (private.rdo_count_for_line(line.id)=3)`,[year])).rows[0].total;
+if(mismatchedLines) throw new Error(`${mismatchedLines} existing RDO lines still have the wrong 4/10 flag`);
 const sevenDateSpan=(await db.query(`select private.round_one_week_bucket_starts(
  array['2027-06-16','2027-06-22']::date[])::text as starts`)).rows[0].starts;
 if(sevenDateSpan!=='{2027-06-16}') throw new Error('Wednesday through Tuesday did not fit one bid week');
@@ -222,3 +226,42 @@ const afterRemoval=(await db.query(`select min(bucket.bucket_start_date)::text a
  where request.bidder_id=$1 and request.status='pending'`,[flexibleBidder])).rows[0].first_start;
 if(afterRemoval!=='2027-06-08') throw new Error('Removing the earliest bid did not move the surviving week bucket');
 console.log('PASS skipped dates share a movable seven-day week and later dates use another week');
+
+for (const fixture of [
+  { initials: 'R2', bidder: '00000000-0000-0000-0000-000000000261', auth: '00000000-0000-0000-0000-000000000262', line: '00000000-0000-0000-0000-000000000263', rdos: [5, 6], round: 2, limit: 10, hours: 8, start: '2027-09-01' },
+  { initials: 'R3', bidder: '00000000-0000-0000-0000-000000000271', auth: '00000000-0000-0000-0000-000000000272', line: '00000000-0000-0000-0000-000000000273', rdos: [0, 5, 6], round: 3, limit: 8, hours: 10, start: '2027-10-01' },
+]) {
+  const lineCode=`ROUND23-${fixture.initials}`;
+  await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,leave_slot_allowance)
+    values('${fixture.bidder}','${fixture.auth}','${bidder.area_id}','Round','Limits','${fixture.initials}','${fixture.initials.toLowerCase()}@example.test','CPC',1000);
+    insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status,four_ten)
+    values('${fixture.line}','${year}','${bidder.area_id}','${lineCode}','CPC','TEST','open',${fixture.rdos.length===2});
+    insert into rdo_line_days(rdo_line_id,weekday,shift_code)
+    select '${fixture.line}',weekday,case when weekday in (${fixture.rdos.join(',')}) then 'RDO' else '0700' end
+    from generate_series(0,6) weekday;
+    insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+    values('${year}','${bidder.area_id}','${fixture.bidder}',1,'${fixture.line}','rdo','pending','{"line":"${lineCode}"}',now());
+    set test.uid='${fixture.auth}'; set test.email='${fixture.initials.toLowerCase()}@example.test';
+    update bid_year_settings set test_bid_round=${fixture.round} where bid_year_id='${year}';`);
+  const count=(await db.query('select private.rdo_count_for_line($1) as n,private.leave_hours_for_line($1) as hours,private.round_two_three_limit_for_line($1) as cap',[fixture.line])).rows[0];
+  if(count.n!==fixture.rdos.length || count.hours!==fixture.hours || count.cap!==fixture.limit)
+    throw new Error(`${fixture.initials} RDO-derived rules are incorrect`);
+  const candidateDates=[]; const firstDate=new Date(`${fixture.start}T12:00:00Z`);
+  for(let i=0;i<35;i++){const date=new Date(firstDate);date.setUTCDate(date.getUTCDate()+i);candidateDates.push({date:date.toISOString().slice(0,10),rdo:fixture.rdos.includes(date.getUTCDay())});}
+  const workDates=candidateDates.filter(item=>!item.rdo).map(item=>item.date);
+  await db.exec(`insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+    select '${year}','${bidder.area_id}',day,'cpc','ROUND23-' || day::text
+    from unnest(array[${workDates.map(day=>`'${day}'`).join(',')}]::date[]) day on conflict do nothing;`);
+  const submit=async(date)=>db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',[JSON.stringify([{start_date:date,end_date:date,round:fixture.round,rdo_line_code:lineCode}])]);
+  try {await submit(candidateDates.find(item=>item.rdo).date);throw new Error('RDO bid unexpectedly passed');}
+  catch(error){if(!error.message.includes('RDO dates')) throw error;}
+  for(const date of workDates.slice(0,fixture.limit)) await submit(date);
+  try {await submit(workDates[fixture.limit]);throw new Error('Over-limit bid unexpectedly passed');}
+  catch(error){if(!error.message.includes(`${fixture.limit} charged leave days`)) throw error;}
+  await db.exec(`update bidders set leave_slot_allowance=${fixture.limit*fixture.hours-fixture.hours} where id='${fixture.bidder}';`);
+  const nextRound=fixture.round===2?3:2;
+  await db.exec(`update bid_year_settings set test_bid_round=${nextRound} where bid_year_id='${year}';`);
+  try {await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',[JSON.stringify([{start_date:workDates[fixture.limit+1],end_date:workDates[fixture.limit+1],round:nextRound,rdo_line_code:lineCode}])]);throw new Error('Over-allowance bid unexpectedly passed');}
+  catch(error){if(!error.message.includes('allowance')) throw error;}
+  console.log(`PASS ${fixture.rdos.length} RDOs: ${fixture.limit} days, RDO rejection, and ${fixture.hours}-hour allowance`);
+}
