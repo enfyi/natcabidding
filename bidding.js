@@ -2804,9 +2804,9 @@ function roundOneWeekKeyForDateKey(key) {
   return dateKeyFromDate(start);
 }
 
-function roundOneWeekKeysForDateKeys(dateKeys, existingStarts = []) {
+function roundOneWeekKeysForDateKeys(dateKeys) {
   const sortedKeys = [...new Set(dateKeys)].sort();
-  const periodKeys = [...new Set(existingStarts)].sort();
+  const periodKeys = [];
 
   sortedKeys.forEach((key) => {
     const date = dateFromKey(key);
@@ -2826,11 +2826,8 @@ function roundOneWeekKeysForDateKeys(dateKeys, existingStarts = []) {
 
 function roundOneWeekKeySetForItems(items = []) {
   const roundOneItems = items.filter(isRoundOneLeaveItem);
-  const existingStarts = roundOneItems.flatMap((item) => item.weekBucketStarts || []);
-  const dateKeys = roundOneItems.flatMap((item) =>
-    item.weekBucketStarts?.length ? [] : datesInLeaveRange(item.range)
-  );
-  return new Set(roundOneWeekKeysForDateKeys(dateKeys, existingStarts));
+  const dateKeys = roundOneItems.flatMap((item) => datesInLeaveRange(item.range));
+  return new Set(roundOneWeekKeysForDateKeys(dateKeys));
 }
 
 function roundOneProjectedWeekCount(range) {

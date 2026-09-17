@@ -53,6 +53,9 @@ If the replacement is invalid, the old request and its assigned slots remain.
 Run `database/reject_unchanged_leave_rebid.sql` after that migration to reject
 an exact repeat of dates the bidder removed in the same round, whether through
 Change Dates or a later new batch. The bidder must choose a different range.
+Run `database/round_one_flexible_week_buckets.sql` after the leave submission
+and admin editor SQL to make Round 1 buckets movable when dates are added,
+removed, or replaced. It also rebuilds the saved bucket links for active bids.
 
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
@@ -130,12 +133,14 @@ Server-side admin actions using the Supabase service role can still manage all a
 
 Round 1 is stored with `leave_request_week_buckets`.
 
-A bucket is a consecutive period of up to 7 calendar days. Any number of selected leave dates inside that bucket counts as 1 bid week, but only charged dates spend leave. Round 1 RDO dates are uncharged; holidays and holiday-in-lieu dates count against the bidder's allowance in Round 1.
+A bid week is a span of 7 consecutive calendar dates containing the bidder's selected leave dates and one occurrence of each RDO weekday. A bidder may skip dates inside the span. The earliest selected date starts a bucket; another selected date more than 6 days later starts the next bucket. Adding or removing a bid may move the bucket start, so active Round 1 dates are regrouped before enforcing the two-week limit. Only charged dates spend leave. Round 1 RDO dates are uncharged; holidays and holiday-in-lieu dates count against the bidder's allowance in Round 1.
 
 That lets the app support cases like:
 
 - June 1 alone counts as 1 bid week and 1 charged leave day.
 - June 9 through June 16 spans more than 7 calendar days, so it needs 2 Round 1 buckets.
+- With Friday–Saturday RDOs, Monday, Tuesday, Thursday, and the immediately following Sunday fit within Monday–Sunday and count as 1 bid week; a Sunday one week later starts a second.
+- With the same RDOs, Wednesday–Tuesday may also count as 1 bid week when all selected dates fit that seven-date span.
 - A BUE can use up to 2 Round 1 buckets, even if those buckets only spend a few charged leave days.
 
 ## Browser Adapter

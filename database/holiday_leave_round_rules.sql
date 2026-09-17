@@ -451,22 +451,20 @@ begin
   end if;
 
   if batch_round = 1 then
-    select coalesce(array_agg(distinct wb.bucket_start_date order by wb.bucket_start_date), array[]::date[])
+    select private.round_one_week_bucket_starts(
+      coalesce(array_agg(request_date.leave_date), array[]::date[]) || all_dates
+    )
     into bucket_starts
-    from public.leave_request_week_buckets wb
-    join public.leave_requests lr on lr.id = wb.leave_request_id
-    where lr.bid_year_id = year_row.id and lr.bidder_id = target.id
-      and lr.round_number = 1 and lr.status in ('pending', 'approved');
+    from public.leave_request_dates request_date
+    join public.leave_requests request on request.id = request_date.leave_request_id
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number = 1
+      and request.status in ('pending', 'approved');
 
-    foreach leave_date in array all_dates loop
-      if not exists (
-        select 1 from unnest(bucket_starts) as existing_buckets(existing_start)
-        where leave_date between existing_start and existing_start + 6
-      ) then
-        bucket_starts := array_append(bucket_starts, leave_date);
-      end if;
-    end loop;
-    if cardinality(bucket_starts) > 2 then raise exception 'Round 1 can include at most two consecutive seven-day buckets.'; end if;
+    if cardinality(bucket_starts) > 2 then
+      raise exception 'Round 1 can include at most two seven-day bid weeks.';
+    end if;
   else
     select coalesce(sum(charged_days), 0) into committed_round_charged
     from public.leave_requests
@@ -555,6 +553,10 @@ begin
   insert into public.audit_events (bid_year_id, area_id, actor_id, event_type, entity_table, details)
   values (year_row.id, target.area_id, actor.id, 'leave_batch_submitted', 'intake_submissions',
     jsonb_build_object('target_bidder_id', target.id, 'round', batch_round, 'charged_days', batch_charged, 'submission_ids', result_ids));
+
+  if batch_round = 1 then
+    perform private.rebuild_round_one_week_buckets(year_row.id, target.id);
+  end if;
 
   return jsonb_build_object('submission_ids', result_ids, 'round', batch_round, 'charged_days', batch_charged);
 end
