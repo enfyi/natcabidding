@@ -39,8 +39,8 @@ const DEFAULT_ROUND_RULES = {
     detail: "Leave may include up to 10 days with two RDOs or 8 days with three RDOs.",
   },
   4: {
-    label: "5 days",
-    detail: "Leave may include up to 5 charged days.",
+    label: "4 or 5 days",
+    detail: "Leave may include up to 5 days with two RDOs or 4 days with three RDOs. Prior holiday and in-lieu bids return to the allowance.",
   },
   5: {
     label: "5 days",
@@ -2776,8 +2776,9 @@ function currentRoundLeaveLimit() {
 }
 
 function leaveDayLimitForRound(round, initials = currentUser.initials) {
-  if (round === 2 || round === 3) {
+  if (round >= 2 && round <= 4) {
     const line = submittedRdoLineForInitials(initials);
+    if (round === 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
     return rdoWeekdaysForLine(line).size === 3 ? 8 : 10;
   }
   return 5;
@@ -2796,11 +2797,12 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  if (round === 2 || round === 3) {
+  if (round >= 2 && round <= 4) {
     const line = submittedRdoLineForInitials();
     if (line) {
       const limit = leaveDayLimitForRound(round);
-      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.` };
+      const creditDetail = round === 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
+      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.${creditDetail}` };
     }
   }
   return roundRules[round] || {
@@ -3089,6 +3091,11 @@ function leaveHolidayCreditsForRound(round) {
 
 function leaveAllowanceLimitForRound(round) {
   return currentUserBaseLeaveAllowanceDays() + leaveHolidayCreditsForRound(round);
+}
+
+function leaveAllowanceHoursForRound(round) {
+  return currentUserLeaveAllowanceHours()
+    + leaveHolidayCreditsForRound(round) * leaveHoursPerDayForInitials();
 }
 
 function leaveProjectedChargedDays(extraItems = []) {
@@ -7512,7 +7519,7 @@ function renderSubmittedLeaveManager() {
   if (!hasSubmittedThisRound) return;
 
   const hoursPerDay = leaveHoursPerDayForInitials();
-  const maximumHours = leaveAllowanceLimitForRound(round) * hoursPerDay;
+  const maximumHours = leaveAllowanceHoursForRound(round);
   const usedHours = leaveCommittedChargedDays() * hoursPerDay;
   const remainingHours = Math.max(0, maximumHours - usedHours);
   const roundDays = items.reduce((total, item) => total + leaveItemChargedDays(item), 0);
@@ -7755,8 +7762,8 @@ function renderLeaveAllowanceSummary() {
   const round = currentRoundNumber();
   const credits = leaveHolidayCreditsForRound(round);
   const totalAllowance = leaveAllowanceLimitForRound(round);
-  const baseAllowance = currentUserBaseLeaveAllowanceDays();
   const allowanceHours = currentUserLeaveAllowanceHours();
+  const totalAllowanceHours = leaveAllowanceHoursForRound(round);
   const hoursPerDay = leaveHoursPerDayForInitials();
   const scheduleText = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour CWS days" : "8-hour days";
   const bidDays = leaveCommittedChargedDays();
@@ -7769,11 +7776,11 @@ function renderLeaveAllowanceSummary() {
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 
   setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
-  setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(allowanceHours)} hours / ${scheduleText})`);
+  setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(totalAllowanceHours)} hours / ${scheduleText})`);
   setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
   setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
   setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
-  setText("[data-leave-balance-summary]", `${formatLeaveDaysLabel(baseAllowance)} base · ${scheduleText} · ${holidayText}`);
+  setText("[data-leave-balance-summary]", `${formatEstimatedLeaveDays(allowanceHours)} base hours · ${credits * hoursPerDay} returned hours · ${scheduleText}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
