@@ -1,6 +1,8 @@
 -- Public FAQ and MOU document management for system administrators.
 
 create schema if not exists private;
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated;
 
 create or replace function private.current_admin_profile_id()
 returns uuid
