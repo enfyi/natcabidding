@@ -118,7 +118,7 @@ drop policy if exists "public can read published FAQ entries" on public.faq_entr
 create policy "public can read published FAQ entries"
 on public.faq_entries for select
 to anon, authenticated
-using (published or public.is_current_admin());
+using (published);
 
 drop policy if exists "admins can manage FAQ entries" on public.faq_entries;
 create policy "admins can manage FAQ entries"
@@ -131,7 +131,7 @@ drop policy if exists "public can read published MOU documents" on public.mou_do
 create policy "public can read published MOU documents"
 on public.mou_documents for select
 to anon, authenticated
-using (published or public.is_current_admin());
+using (published);
 
 drop policy if exists "admins can manage MOU documents" on public.mou_documents;
 create policy "admins can manage MOU documents"
