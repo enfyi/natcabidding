@@ -615,9 +615,11 @@ const publicRdoFilters = {
   mid: "all",
   fourTen: "all",
 };
+const DEFAULT_PUBLIC_AREA = "FAQ";
+const DEFAULT_PUBLIC_SECTION = "Calendar";
 const publicState = {
-  area: "Area A",
-  section: "Calendar",
+  area: DEFAULT_PUBLIC_AREA,
+  section: DEFAULT_PUBLIC_SECTION,
 };
 const publicFaqContent = {
   entries: [],
@@ -5277,7 +5279,7 @@ function showPublicHome() {
     loginToggle.setAttribute("aria-expanded", "false");
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  renderPublicPage();
+  renderPublicPage(DEFAULT_PUBLIC_AREA, DEFAULT_PUBLIC_SECTION);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -11384,6 +11386,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-public-home]")) {
+    event.preventDefault();
     showPublicHome();
     return;
   }
