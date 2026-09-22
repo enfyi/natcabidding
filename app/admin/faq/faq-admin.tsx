@@ -24,7 +24,8 @@ type MouDocument = {
 }
 
 const MOU_BUCKET = 'mou-documents'
-const RICH_TEXT_TAGS = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'UL', 'OL', 'LI', 'A', 'H3', 'H4', 'BLOCKQUOTE'])
+const RICH_TEXT_TAGS = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'UL', 'OL', 'LI', 'A', 'H3', 'H4', 'BLOCKQUOTE', 'SPAN'])
+const RICH_TEXT_FONT_SIZES = new Set(['0.75rem', '0.875rem', '1rem', '1.125rem', '1.25rem', '1.5rem', '2rem'])
 
 declare global {
   interface Window {
@@ -76,6 +77,23 @@ function plainTextMarkup(value: string) {
     .join('')
 }
 
+function safeRichTextColor(value: string) {
+  const color = value.trim().toLowerCase()
+  if (/^#[0-9a-f]{3,8}$/i.test(color)) return color
+  if (/^rgba?\(\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(color)) return color
+  return ''
+}
+
+function safeRichTextStyle(element: Element) {
+  if (!(element instanceof HTMLElement) || element.tagName !== 'SPAN') return ''
+  const declarations: string[] = []
+  const fontSize = element.style.fontSize.trim().toLowerCase()
+  const color = safeRichTextColor(element.style.color)
+  if (RICH_TEXT_FONT_SIZES.has(fontSize)) declarations.push(`font-size: ${fontSize}`)
+  if (color) declarations.push(`color: ${color}`)
+  return declarations.join('; ')
+}
+
 function sanitizeRichHtml(value: string) {
   const parser = new DOMParser()
   const document = parser.parseFromString(value, 'text/html')
@@ -93,6 +111,7 @@ function sanitizeRichHtml(value: string) {
     }
 
     const href = element.tagName === 'A' ? element.getAttribute('href')?.trim() || '' : ''
+    const inlineStyle = safeRichTextStyle(element)
     Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name))
     if (element.tagName === 'A') {
       if (/^(https?:|mailto:|tel:|\/)/i.test(href)) {
@@ -101,6 +120,7 @@ function sanitizeRichHtml(value: string) {
         element.setAttribute('rel', 'noopener noreferrer')
       }
     }
+    if (element.tagName === 'SPAN' && inlineStyle) element.setAttribute('style', inlineStyle)
   })
 
   return document.body.innerHTML.trim()
@@ -109,7 +129,7 @@ function sanitizeRichHtml(value: string) {
 function normalizedRichHtml(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return ''
-  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ul|ol|li|a|h3|h4|blockquote)\b/i.test(trimmed)
+  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ul|ol|li|a|h3|h4|blockquote|span)\b/i.test(trimmed)
   return sanitizeRichHtml(hasSupportedMarkup ? trimmed : plainTextMarkup(trimmed))
 }
 
@@ -129,8 +149,11 @@ type HtmlEditorProps = {
 function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const lastEmittedValueRef = useRef<string | null>(null)
+  const savedRangeRef = useRef<Range | null>(null)
   const [html, setHtml] = useState(() => normalizedRichHtml(value))
   const [sourceMode, setSourceMode] = useState(false)
+  const [fontSizeSelection, setFontSizeSelection] = useState('')
+  const [textColor, setTextColor] = useState('#244c38')
 
   useEffect(() => {
     if (value === lastEmittedValueRef.current) return
@@ -156,9 +179,55 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     onCommit?.(cleanHtml)
   }
 
+  function rememberSelection() {
+    const selection = window.getSelection()
+    if (!selection?.rangeCount || !editorRef.current) return
+    const range = selection.getRangeAt(0)
+    if (editorRef.current.contains(range.commonAncestorContainer)) savedRangeRef.current = range.cloneRange()
+  }
+
+  function restoreSelection() {
+    const range = savedRangeRef.current
+    if (!range) return
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }
+
   function runCommand(command: string, commandValue?: string) {
     editorRef.current?.focus()
+    restoreSelection()
     document.execCommand(command, false, commandValue)
+    emit(editorRef.current?.innerHTML || '')
+  }
+
+  function normalizeEditorFontTags(fontSize?: string) {
+    editorRef.current?.querySelectorAll('font').forEach((font) => {
+      const span = document.createElement('span')
+      const color = safeRichTextColor(font.getAttribute('color') || '')
+      if (fontSize && RICH_TEXT_FONT_SIZES.has(fontSize)) span.style.fontSize = fontSize
+      if (color) span.style.color = color
+      span.append(...Array.from(font.childNodes))
+      font.replaceWith(span)
+    })
+  }
+
+  function applyFontSize(fontSize: string) {
+    if (!RICH_TEXT_FONT_SIZES.has(fontSize)) return
+    editorRef.current?.focus()
+    restoreSelection()
+    document.execCommand('fontSize', false, '7')
+    normalizeEditorFontTags(fontSize)
+    emit(editorRef.current?.innerHTML || '')
+  }
+
+  function applyTextColor(color: string) {
+    const safeColor = safeRichTextColor(color)
+    if (!safeColor) return
+    editorRef.current?.focus()
+    restoreSelection()
+    document.execCommand('foreColor', false, safeColor)
+    normalizeEditorFontTags()
     emit(editorRef.current?.innerHTML || '')
   }
 
@@ -234,6 +303,45 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('formatBlock', 'h3')} title="Heading">H</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('bold')} title="Bold"><strong>B</strong></button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('italic')} title="Italic"><em>I</em></button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('underline')} title="Underline"><u>U</u></button>
+        <select
+          className="html-editor-select"
+          value={fontSizeSelection}
+          disabled={sourceMode}
+          aria-label="Font size"
+          title="Font size"
+          onMouseDown={rememberSelection}
+          onChange={(event) => {
+            const fontSize = event.target.value
+            setFontSizeSelection(fontSize)
+            applyFontSize(fontSize)
+            setFontSizeSelection('')
+          }}
+        >
+          <option value="">Size</option>
+          <option value="0.75rem">Small</option>
+          <option value="0.875rem">Compact</option>
+          <option value="1rem">Normal</option>
+          <option value="1.125rem">Medium</option>
+          <option value="1.25rem">Large</option>
+          <option value="1.5rem">Larger</option>
+          <option value="2rem">Largest</option>
+        </select>
+        <label className="html-editor-color" title="Text color">
+          <span>Color</span>
+          <input
+            type="color"
+            value={textColor}
+            disabled={sourceMode}
+            aria-label="Text color"
+            onMouseDown={rememberSelection}
+            onChange={(event) => {
+              const color = event.target.value
+              setTextColor(color)
+              applyTextColor(color)
+            }}
+          />
+        </label>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertUnorderedList')} title="Bulleted list">• List</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertOrderedList')} title="Numbered list">1. List</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={indentListItem} title="Nest list item">↳ Indent</button>
@@ -262,7 +370,12 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
           aria-multiline="true"
           data-placeholder={placeholder}
           suppressContentEditableWarning
-          onInput={(event) => emit(event.currentTarget.innerHTML)}
+          onInput={(event) => {
+            rememberSelection()
+            emit(event.currentTarget.innerHTML)
+          }}
+          onKeyUp={rememberSelection}
+          onMouseUp={rememberSelection}
           onKeyDown={handleEditorKeyDown}
           onBlur={(event) => commit(event.currentTarget.innerHTML)}
         />
