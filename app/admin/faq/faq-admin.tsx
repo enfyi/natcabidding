@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { getSupabaseEnv } from '@/lib/env'
 
 type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
@@ -169,6 +169,54 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     runCommand('createLink', safeHref)
   }
 
+  function selectedListItem() {
+    const selection = window.getSelection()
+    const anchorNode = selection?.anchorNode
+    const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement
+    const listItem = anchorElement?.closest('li')
+    return listItem instanceof HTMLLIElement && editorRef.current?.contains(listItem) ? listItem : null
+  }
+
+  function indentListItem() {
+    const listItem = selectedListItem()
+    const parentList = listItem?.parentElement
+    const previousItem = listItem?.previousElementSibling
+    if (!listItem || !parentList || !(previousItem instanceof HTMLLIElement)) return
+    if (parentList.tagName !== 'UL' && parentList.tagName !== 'OL') return
+
+    let nestedList = Array.from(previousItem.children).find((child) => child.tagName === parentList.tagName)
+    if (!nestedList) {
+      nestedList = document.createElement(parentList.tagName.toLowerCase())
+      previousItem.append(nestedList)
+    }
+    nestedList.append(listItem)
+    editorRef.current?.focus()
+    emit(editorRef.current?.innerHTML || '')
+  }
+
+  function outdentListItem() {
+    const listItem = selectedListItem()
+    const parentList = listItem?.parentElement
+    const parentItem = parentList?.parentElement
+    const outerList = parentItem?.parentElement
+    if (!listItem || !parentList || !(parentItem instanceof HTMLLIElement) || !outerList) return
+    if (outerList.tagName !== 'UL' && outerList.tagName !== 'OL') return
+
+    outerList.insertBefore(listItem, parentItem.nextSibling)
+    if (!parentList.children.length) parentList.remove()
+    editorRef.current?.focus()
+    emit(editorRef.current?.innerHTML || '')
+  }
+
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') return
+    if (!selectedListItem()) return
+
+    event.preventDefault()
+    if (event.shiftKey) outdentListItem()
+    else indentListItem()
+  }
+
   function toggleSourceMode() {
     if (sourceMode) {
       const cleanHtml = normalizedRichHtml(html)
@@ -188,6 +236,8 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('italic')} title="Italic"><em>I</em></button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertUnorderedList')} title="Bulleted list">• List</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertOrderedList')} title="Numbered list">1. List</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={indentListItem} title="Nest list item">↳ Indent</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={outdentListItem} title="Move list item out one level">↰ Outdent</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={addLink} title="Add link">Link</button>
         <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('removeFormat')} title="Clear formatting">Clear</button>
         <button className="html-editor-source-toggle" type="button" aria-pressed={sourceMode} onClick={toggleSourceMode}>{sourceMode ? 'Visual' : 'HTML'}</button>
@@ -213,6 +263,7 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
           data-placeholder={placeholder}
           suppressContentEditableWarning
           onInput={(event) => emit(event.currentTarget.innerHTML)}
+          onKeyDown={handleEditorKeyDown}
           onBlur={(event) => commit(event.currentTarget.innerHTML)}
         />
       )}
