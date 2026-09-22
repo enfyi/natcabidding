@@ -6321,7 +6321,25 @@ function plainTextMarkup(text = "") {
     .join("");
 }
 
-const PUBLIC_RICH_TEXT_TAGS = new Set(["P", "DIV", "BR", "STRONG", "B", "EM", "I", "U", "UL", "OL", "LI", "A", "H3", "H4", "BLOCKQUOTE"]);
+const PUBLIC_RICH_TEXT_TAGS = new Set(["P", "DIV", "BR", "STRONG", "B", "EM", "I", "U", "UL", "OL", "LI", "A", "H3", "H4", "BLOCKQUOTE", "SPAN"]);
+const PUBLIC_RICH_TEXT_FONT_SIZES = new Set(["0.75rem", "0.875rem", "1rem", "1.125rem", "1.25rem", "1.5rem", "2rem"]);
+
+function safePublicRichTextColor(value = "") {
+  const color = String(value).trim().toLowerCase();
+  if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
+  if (/^rgba?\(\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?\s*,\s*\d{1,3}(?:\.\d+)?%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(color)) return color;
+  return "";
+}
+
+function safePublicRichTextStyle(element) {
+  if (!(element instanceof HTMLElement) || element.tagName !== "SPAN") return "";
+  const declarations = [];
+  const fontSize = element.style.fontSize.trim().toLowerCase();
+  const color = safePublicRichTextColor(element.style.color);
+  if (PUBLIC_RICH_TEXT_FONT_SIZES.has(fontSize)) declarations.push(`font-size: ${fontSize}`);
+  if (color) declarations.push(`color: ${color}`);
+  return declarations.join("; ");
+}
 
 function sanitizePublicRichHtml(value = "") {
   const parser = new DOMParser();
@@ -6338,12 +6356,14 @@ function sanitizePublicRichHtml(value = "") {
     }
 
     const href = element.tagName === "A" ? (element.getAttribute("href") || "").trim() : "";
+    const inlineStyle = safePublicRichTextStyle(element);
     Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
     if (element.tagName === "A" && /^(https?:|mailto:|tel:|\/)/i.test(href)) {
       element.setAttribute("href", href);
       element.setAttribute("target", "_blank");
       element.setAttribute("rel", "noopener noreferrer");
     }
+    if (element.tagName === "SPAN" && inlineStyle) element.setAttribute("style", inlineStyle);
   });
   return parsed.body.innerHTML.trim();
 }
@@ -6351,7 +6371,7 @@ function sanitizePublicRichHtml(value = "") {
 function richTextMarkup(value = "") {
   const text = String(value).trim();
   if (!text) return "";
-  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ul|ol|li|a|h3|h4|blockquote)\b/i.test(text);
+  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ol|ul|li|a|h3|h4|blockquote|span)\b/i.test(text);
   return sanitizePublicRichHtml(hasSupportedMarkup ? text : plainTextMarkup(text));
 }
 
