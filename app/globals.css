@@ -313,13 +313,15 @@ h1 {
 }
 .faq-list-card { margin-top: 20px; }
 .faq-editor-card label,
-.faq-admin-row label {
+.faq-admin-row label,
+.faq-field {
   display: grid;
   gap: 8px;
   color: var(--ink);
   font-size: 0.82rem;
   font-weight: 800;
 }
+.faq-field-label { display: block; }
 .faq-editor-card input,
 .faq-editor-card textarea,
 .faq-admin-row input,
@@ -335,6 +337,83 @@ h1 {
 .faq-admin-row textarea {
   resize: vertical;
   line-height: 1.5;
+}
+.html-editor {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.html-editor:focus-within {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(36, 95, 67, 0.1);
+}
+.html-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-bottom: 1px solid var(--line);
+  padding: 7px;
+  background: #f5f8f5;
+}
+.html-editor-toolbar button {
+  min-width: 34px;
+  border: 1px solid #d7dfd8;
+  border-radius: 7px;
+  padding: 6px 8px;
+  color: var(--green-dark);
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.html-editor-toolbar button:hover,
+.html-editor-toolbar button[aria-pressed="true"] {
+  border-color: var(--green);
+  background: #e9f4ed;
+}
+.html-editor-toolbar button:disabled { cursor: not-allowed; opacity: 0.45; }
+.html-editor-toolbar .html-editor-source-toggle { margin-left: auto; }
+.html-editor-content,
+.html-editor-source {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 13px 14px !important;
+  outline: 0;
+  color: var(--ink);
+  background: #fff;
+  line-height: 1.6;
+}
+.html-editor-content:empty::before {
+  color: #7c8a82;
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+.html-editor-content p,
+.html-editor-content h3,
+.html-editor-content h4,
+.html-editor-content blockquote,
+.html-editor-content ul,
+.html-editor-content ol { margin: 0 0 0.75em; }
+.html-editor-content > :last-child { margin-bottom: 0; }
+.html-editor-content ul,
+.html-editor-content ol { padding-left: 1.5rem; }
+.html-editor-content blockquote {
+  border-left: 3px solid #9bb6a7;
+  padding-left: 12px;
+  color: var(--muted);
+}
+.html-editor-source {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
 }
 .faq-editor-card small { color: var(--muted); font-weight: 500; line-height: 1.4; }
 .faq-admin-list {

@@ -6312,13 +6312,47 @@ function publicInfoText(area, section) {
   return "";
 }
 
-function paragraphMarkup(text = "") {
+function plainTextMarkup(text = "") {
   return String(text)
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
+}
+
+const PUBLIC_RICH_TEXT_TAGS = new Set(["P", "DIV", "BR", "STRONG", "B", "EM", "I", "U", "UL", "OL", "LI", "A", "H3", "H4", "BLOCKQUOTE"]);
+
+function sanitizePublicRichHtml(value = "") {
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(String(value), "text/html");
+  Array.from(parsed.body.querySelectorAll("*")).forEach((element) => {
+    if (element.tagName === "SCRIPT" || element.tagName === "STYLE") {
+      element.remove();
+      return;
+    }
+
+    if (!PUBLIC_RICH_TEXT_TAGS.has(element.tagName)) {
+      element.replaceWith(...Array.from(element.childNodes));
+      return;
+    }
+
+    const href = element.tagName === "A" ? (element.getAttribute("href") || "").trim() : "";
+    Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
+    if (element.tagName === "A" && /^(https?:|mailto:|tel:|\/)/i.test(href)) {
+      element.setAttribute("href", href);
+      element.setAttribute("target", "_blank");
+      element.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+  return parsed.body.innerHTML.trim();
+}
+
+function richTextMarkup(value = "") {
+  const text = String(value).trim();
+  if (!text) return "";
+  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ul|ol|li|a|h3|h4|blockquote)\b/i.test(text);
+  return sanitizePublicRichHtml(hasSupportedMarkup ? text : plainTextMarkup(text));
 }
 
 function renderPublicFaq() {
@@ -6344,7 +6378,7 @@ function renderPublicFaq() {
           ${entries.map((entry) => `
             <details class="public-faq-item" open>
               <summary>${escapeHtml(entry.question)}</summary>
-              <div>${paragraphMarkup(entry.answer)}</div>
+              <div class="public-rich-text">${richTextMarkup(entry.answer)}</div>
             </details>
           `).join("") || '<p class="public-empty-note">No FAQ items are published yet.</p>'}
         </div>
@@ -6356,10 +6390,10 @@ function renderPublicFaq() {
         </div>
         <div class="public-mou-list">
           ${documents.map((document) => `
-            <a class="public-mou-link" href="${escapeAttribute(document.file_url || "")}" target="_blank" rel="noreferrer">
-              <strong>${escapeHtml(document.title)}</strong>
-              ${document.description ? `<span>${escapeHtml(document.description)}</span>` : ""}
-            </a>
+            <article class="public-mou-link">
+              <a class="public-mou-title" href="${escapeAttribute(document.file_url || "")}" target="_blank" rel="noreferrer">${escapeHtml(document.title)}</a>
+              ${document.description ? `<div class="public-rich-text">${richTextMarkup(document.description)}</div>` : ""}
+            </article>
           `).join("") || '<p class="public-empty-note">No MOU documents are published yet.</p>'}
         </div>
       </section>

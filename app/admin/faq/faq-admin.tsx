@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getSupabaseEnv } from '@/lib/env'
 
 type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
@@ -24,6 +24,7 @@ type MouDocument = {
 }
 
 const MOU_BUCKET = 'mou-documents'
+const RICH_TEXT_TAGS = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'UL', 'OL', 'LI', 'A', 'H3', 'H4', 'BLOCKQUOTE'])
 
 declare global {
   interface Window {
@@ -59,6 +60,164 @@ function slugFileName(fileName: string) {
 function documentUrl(client: SupabaseClient, document: MouDocument) {
   if (document.file_url) return document.file_url
   return client.storage.from(MOU_BUCKET).getPublicUrl(document.file_path).data.publicUrl
+}
+
+function plainTextMarkup(value: string) {
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${paragraph
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/\n/g, '<br>')}</p>`)
+    .join('')
+}
+
+function sanitizeRichHtml(value: string) {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(value, 'text/html')
+  const elements = Array.from(document.body.querySelectorAll('*'))
+
+  elements.forEach((element) => {
+    if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') {
+      element.remove()
+      return
+    }
+
+    if (!RICH_TEXT_TAGS.has(element.tagName)) {
+      element.replaceWith(...Array.from(element.childNodes))
+      return
+    }
+
+    const href = element.tagName === 'A' ? element.getAttribute('href')?.trim() || '' : ''
+    Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name))
+    if (element.tagName === 'A') {
+      if (/^(https?:|mailto:|tel:|\/)/i.test(href)) {
+        element.setAttribute('href', href)
+        element.setAttribute('target', '_blank')
+        element.setAttribute('rel', 'noopener noreferrer')
+      }
+    }
+  })
+
+  return document.body.innerHTML.trim()
+}
+
+function normalizedRichHtml(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const hasSupportedMarkup = /<\/?(?:p|div|br|strong|b|em|i|u|ul|ol|li|a|h3|h4|blockquote)\b/i.test(trimmed)
+  return sanitizeRichHtml(hasSupportedMarkup ? trimmed : plainTextMarkup(trimmed))
+}
+
+function hasRichText(value: string) {
+  const document = new DOMParser().parseFromString(value, 'text/html')
+  return Boolean(document.body.textContent?.trim())
+}
+
+type HtmlEditorProps = {
+  value: string
+  onChange?: (value: string) => void
+  onCommit?: (value: string) => void
+  placeholder: string
+  ariaLabel: string
+}
+
+function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlEditorProps) {
+  const editorRef = useRef<HTMLDivElement>(null)
+  const lastEmittedValueRef = useRef<string | null>(null)
+  const [html, setHtml] = useState(() => normalizedRichHtml(value))
+  const [sourceMode, setSourceMode] = useState(false)
+
+  useEffect(() => {
+    if (value === lastEmittedValueRef.current) return
+    const nextHtml = normalizedRichHtml(value)
+    setHtml(nextHtml)
+    if (editorRef.current && editorRef.current.innerHTML !== nextHtml) editorRef.current.innerHTML = nextHtml
+  }, [value])
+
+  useEffect(() => {
+    if (!sourceMode && editorRef.current && editorRef.current.innerHTML !== html) editorRef.current.innerHTML = html
+  }, [html, sourceMode])
+
+  function emit(nextHtml: string) {
+    lastEmittedValueRef.current = nextHtml
+    setHtml(nextHtml)
+    onChange?.(nextHtml)
+  }
+
+  function commit(nextValue = html) {
+    const cleanHtml = normalizedRichHtml(nextValue)
+    emit(cleanHtml)
+    if (editorRef.current && editorRef.current.innerHTML !== cleanHtml) editorRef.current.innerHTML = cleanHtml
+    onCommit?.(cleanHtml)
+  }
+
+  function runCommand(command: string, commandValue?: string) {
+    editorRef.current?.focus()
+    document.execCommand(command, false, commandValue)
+    emit(editorRef.current?.innerHTML || '')
+  }
+
+  function addLink() {
+    const href = window.prompt('Paste the website or email link:')?.trim()
+    if (!href) return
+    const safeHref = /^(https?:|mailto:|tel:|\/)/i.test(href) ? href : `https://${href}`
+    runCommand('createLink', safeHref)
+  }
+
+  function toggleSourceMode() {
+    if (sourceMode) {
+      const cleanHtml = normalizedRichHtml(html)
+      emit(cleanHtml)
+    } else {
+      emit(editorRef.current?.innerHTML || html)
+    }
+    setSourceMode((current) => !current)
+  }
+
+  return (
+    <div className="html-editor">
+      <div className="html-editor-toolbar" role="toolbar" aria-label={`${ariaLabel} formatting`}>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('formatBlock', 'p')} title="Paragraph">P</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('formatBlock', 'h3')} title="Heading">H</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('bold')} title="Bold"><strong>B</strong></button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('italic')} title="Italic"><em>I</em></button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertUnorderedList')} title="Bulleted list">• List</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('insertOrderedList')} title="Numbered list">1. List</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={addLink} title="Add link">Link</button>
+        <button type="button" disabled={sourceMode} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand('removeFormat')} title="Clear formatting">Clear</button>
+        <button className="html-editor-source-toggle" type="button" aria-pressed={sourceMode} onClick={toggleSourceMode}>{sourceMode ? 'Visual' : 'HTML'}</button>
+      </div>
+      {sourceMode ? (
+        <textarea
+          className="html-editor-source"
+          value={html}
+          rows={8}
+          aria-label={`${ariaLabel} HTML source`}
+          spellCheck={false}
+          onChange={(event) => emit(event.target.value)}
+          onBlur={() => commit()}
+        />
+      ) : (
+        <div
+          ref={editorRef}
+          className="html-editor-content"
+          contentEditable
+          role="textbox"
+          aria-label={ariaLabel}
+          aria-multiline="true"
+          data-placeholder={placeholder}
+          suppressContentEditableWarning
+          onInput={(event) => emit(event.currentTarget.innerHTML)}
+          onBlur={(event) => commit(event.currentTarget.innerHTML)}
+        />
+      )}
+    </div>
+  )
 }
 
 export function FaqAdmin() {
@@ -130,8 +289,8 @@ export function FaqAdmin() {
   async function addEntry() {
     if (!supabase) return
     const cleanQuestion = question.trim()
-    const cleanAnswer = answer.trim()
-    if (!cleanQuestion || !cleanAnswer) {
+    const cleanAnswer = normalizedRichHtml(answer)
+    if (!cleanQuestion || !hasRichText(cleanAnswer)) {
       setStatus('Add both a question and an answer.')
       return
     }
@@ -181,7 +340,7 @@ export function FaqAdmin() {
   async function addDocument() {
     if (!supabase) return
     const cleanTitle = docTitle.trim()
-    const cleanDescription = docDescription.trim()
+    const cleanDescription = normalizedRichHtml(docDescription)
     if (!cleanTitle || !docFile) {
       setStatus('Add a document title and choose the MOU file.')
       return
@@ -295,7 +454,7 @@ export function FaqAdmin() {
               <span>1</span>
               <div>
                 <h2 id="faq-add-heading">Add a question</h2>
-                <p>The answer can be plain text with multiple paragraphs.</p>
+                <p>Format the answer visually, or switch to HTML when you need precise control.</p>
               </div>
             </div>
           </div>
@@ -303,10 +462,10 @@ export function FaqAdmin() {
             Question
             <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should members know?" />
           </label>
-          <label>
-            Answer
-            <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} rows={8} placeholder="Write the answer exactly as it should appear." />
-          </label>
+          <div className="faq-field">
+            <span className="faq-field-label">Answer</span>
+            <HtmlEditor value={answer} onChange={setAnswer} placeholder="Write the answer exactly as it should appear." ariaLabel="New FAQ answer" />
+          </div>
           <button className="button primary" type="button" disabled={busy} onClick={() => void addEntry()}>Publish FAQ</button>
         </section>
 
@@ -324,10 +483,10 @@ export function FaqAdmin() {
             Document title
             <input value={docTitle} onChange={(event) => setDocTitle(event.target.value)} placeholder="2027 Annual Leave MOU" />
           </label>
-          <label>
-            Short note
-            <textarea value={docDescription} onChange={(event) => setDocDescription(event.target.value)} rows={4} placeholder="Optional context for this document." />
-          </label>
+          <div className="faq-field">
+            <span className="faq-field-label">Short note</span>
+            <HtmlEditor value={docDescription} onChange={setDocDescription} placeholder="Optional context for this document." ariaLabel="New MOU note" />
+          </div>
           <label>
             File
             <input data-mou-file-input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(event) => setDocFile(event.target.files?.[0] || null)} />
@@ -359,13 +518,17 @@ export function FaqAdmin() {
                   if (value && value !== entry.question) void updateEntry(entry, { question: value })
                 }} />
               </label>
-              <label>
-                Answer
-                <textarea defaultValue={entry.answer} rows={5} onBlur={(event) => {
-                  const value = event.target.value.trim()
-                  if (value && value !== entry.answer) void updateEntry(entry, { answer: value })
-                }} />
-              </label>
+              <div className="faq-field">
+                <span className="faq-field-label">Answer</span>
+                <HtmlEditor
+                  value={entry.answer}
+                  placeholder="Write the answer exactly as it should appear."
+                  ariaLabel={`Answer for ${entry.question}`}
+                  onCommit={(value) => {
+                    if (hasRichText(value) && value !== normalizedRichHtml(entry.answer)) void updateEntry(entry, { answer: value })
+                  }}
+                />
+              </div>
               <div className="faq-admin-row-actions">
                 <label>
                   Order
@@ -406,13 +569,17 @@ export function FaqAdmin() {
                   if (value && value !== document.title) void updateDocument(document, { title: value })
                 }} />
               </label>
-              <label>
-                Short note
-                <textarea defaultValue={document.description || ''} rows={3} onBlur={(event) => {
-                  const value = event.target.value.trim()
-                  if (value !== (document.description || '')) void updateDocument(document, { description: value || null })
-                }} />
-              </label>
+              <div className="faq-field">
+                <span className="faq-field-label">Short note</span>
+                <HtmlEditor
+                  value={document.description || ''}
+                  placeholder="Optional context for this document."
+                  ariaLabel={`Note for ${document.title}`}
+                  onCommit={(value) => {
+                    if (value !== normalizedRichHtml(document.description || '')) void updateDocument(document, { description: value || null })
+                  }}
+                />
+              </div>
               <div className="faq-admin-row-actions">
                 <a className="button secondary" href={supabase ? documentUrl(supabase, document) : '#'} target="_blank" rel="noreferrer">Open file</a>
                 <label>
