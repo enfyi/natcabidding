@@ -196,19 +196,26 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
   }
 
   function restoreSelection() {
+    const selection = window.getSelection()
+    const currentRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+    if (currentRange && editorRef.current?.contains(currentRange.commonAncestorContainer)
+      && (!currentRange.collapsed || document.activeElement === editorRef.current)) {
+      savedRangeRef.current = currentRange.cloneRange()
+      return
+    }
+
     const range = savedRangeRef.current
     if (!range || !editorRef.current?.contains(range.startContainer) || !editorRef.current.contains(range.endContainer)) {
       savedRangeRef.current = null
       return
     }
-    const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
   }
 
   function runCommand(command: string, commandValue?: string) {
-    editorRef.current?.focus()
     restoreSelection()
+    editorRef.current?.focus()
     document.execCommand(command, false, commandValue)
     rememberSelection()
     emit(editorRef.current?.innerHTML || '')
@@ -241,8 +248,8 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
 
   function applyFontSize(fontSize: string) {
     if (!RICH_TEXT_FONT_SIZES.has(fontSize)) return
-    editorRef.current?.focus()
     restoreSelection()
+    editorRef.current?.focus()
     document.execCommand('fontSize', false, '7')
     normalizeEditorFontTags(fontSize)
     emit(editorRef.current?.innerHTML || '')
@@ -251,8 +258,8 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
   function applyTextColor(color: string) {
     const safeColor = safeRichTextColor(color)
     if (!safeColor) return
-    editorRef.current?.focus()
     restoreSelection()
+    editorRef.current?.focus()
     document.execCommand('foreColor', false, safeColor)
     normalizeEditorFontTags()
     emit(editorRef.current?.innerHTML || '')
