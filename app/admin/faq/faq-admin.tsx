@@ -150,7 +150,7 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
   const editorRef = useRef<HTMLDivElement>(null)
   const lastEmittedValueRef = useRef<string | null>(null)
   const savedRangeRef = useRef<Range | null>(null)
-  const [html, setHtml] = useState(() => normalizedRichHtml(value))
+  const [html, setHtml] = useState(() => typeof DOMParser === 'undefined' ? value : normalizedRichHtml(value))
   const [sourceMode, setSourceMode] = useState(false)
   const [fontSizeSelection, setFontSizeSelection] = useState('')
   const [textColor, setTextColor] = useState('#244c38')
@@ -159,11 +159,17 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     if (value === lastEmittedValueRef.current) return
     const nextHtml = normalizedRichHtml(value)
     setHtml(nextHtml)
-    if (editorRef.current && editorRef.current.innerHTML !== nextHtml) editorRef.current.innerHTML = nextHtml
+    if (editorRef.current && editorRef.current.innerHTML !== nextHtml) {
+      editorRef.current.innerHTML = nextHtml
+      savedRangeRef.current = null
+    }
   }, [value])
 
   useEffect(() => {
-    if (!sourceMode && editorRef.current && editorRef.current.innerHTML !== html) editorRef.current.innerHTML = html
+    if (!sourceMode && editorRef.current && editorRef.current.innerHTML !== html) {
+      editorRef.current.innerHTML = html
+      savedRangeRef.current = null
+    }
   }, [html, sourceMode])
 
   function emit(nextHtml: string) {
@@ -175,7 +181,10 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
   function commit(nextValue = html) {
     const cleanHtml = normalizedRichHtml(nextValue)
     emit(cleanHtml)
-    if (editorRef.current && editorRef.current.innerHTML !== cleanHtml) editorRef.current.innerHTML = cleanHtml
+    if (editorRef.current && editorRef.current.innerHTML !== cleanHtml) {
+      editorRef.current.innerHTML = cleanHtml
+      savedRangeRef.current = null
+    }
     onCommit?.(cleanHtml)
   }
 
@@ -188,7 +197,10 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
 
   function restoreSelection() {
     const range = savedRangeRef.current
-    if (!range) return
+    if (!range || !editorRef.current?.contains(range.startContainer) || !editorRef.current.contains(range.endContainer)) {
+      savedRangeRef.current = null
+      return
+    }
     const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
@@ -198,10 +210,12 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     editorRef.current?.focus()
     restoreSelection()
     document.execCommand(command, false, commandValue)
+    rememberSelection()
     emit(editorRef.current?.innerHTML || '')
   }
 
   function normalizeEditorFontTags(fontSize?: string) {
+    const replacements: HTMLSpanElement[] = []
     editorRef.current?.querySelectorAll('font').forEach((font) => {
       const span = document.createElement('span')
       const color = safeRichTextColor(font.getAttribute('color') || '')
@@ -209,7 +223,20 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
       if (color) span.style.color = color
       span.append(...Array.from(font.childNodes))
       font.replaceWith(span)
+      replacements.push(span)
     })
+
+    if (replacements.length) {
+      const range = document.createRange()
+      range.setStartBefore(replacements[0])
+      range.setEndAfter(replacements[replacements.length - 1])
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      savedRangeRef.current = range.cloneRange()
+    } else {
+      rememberSelection()
+    }
   }
 
   function applyFontSize(fontSize: string) {
@@ -246,12 +273,36 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     return listItem instanceof HTMLLIElement && editorRef.current?.contains(listItem) ? listItem : null
   }
 
+  function captureListSelection() {
+    const selection = window.getSelection()
+    if (!selection?.rangeCount) return null
+    const range = selection.getRangeAt(0)
+    return {
+      startContainer: range.startContainer,
+      startOffset: range.startOffset,
+      endContainer: range.endContainer,
+      endOffset: range.endOffset,
+    }
+  }
+
+  function restoreListSelection(position: ReturnType<typeof captureListSelection>) {
+    if (!position || !editorRef.current?.contains(position.startContainer) || !editorRef.current.contains(position.endContainer)) return
+    const range = document.createRange()
+    range.setStart(position.startContainer, position.startOffset)
+    range.setEnd(position.endContainer, position.endOffset)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    savedRangeRef.current = range.cloneRange()
+  }
+
   function indentListItem() {
     const listItem = selectedListItem()
     const parentList = listItem?.parentElement
     const previousItem = listItem?.previousElementSibling
     if (!listItem || !parentList || !(previousItem instanceof HTMLLIElement)) return
     if (parentList.tagName !== 'UL' && parentList.tagName !== 'OL') return
+    const selection = captureListSelection()
 
     let nestedList = Array.from(previousItem.children).find((child) => child.tagName === parentList.tagName)
     if (!nestedList) {
@@ -260,6 +311,7 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     }
     nestedList.append(listItem)
     editorRef.current?.focus()
+    restoreListSelection(selection)
     emit(editorRef.current?.innerHTML || '')
   }
 
@@ -270,10 +322,12 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     const outerList = parentItem?.parentElement
     if (!listItem || !parentList || !(parentItem instanceof HTMLLIElement) || !outerList) return
     if (outerList.tagName !== 'UL' && outerList.tagName !== 'OL') return
+    const selection = captureListSelection()
 
     outerList.insertBefore(listItem, parentItem.nextSibling)
     if (!parentList.children.length) parentList.remove()
     editorRef.current?.focus()
+    restoreListSelection(selection)
     emit(editorRef.current?.innerHTML || '')
   }
 
@@ -287,6 +341,7 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
   }
 
   function toggleSourceMode() {
+    savedRangeRef.current = null
     if (sourceMode) {
       const cleanHtml = normalizedRichHtml(html)
       emit(cleanHtml)
