@@ -570,6 +570,12 @@ button.seniority-pill {
   margin: 12px 0 0;
   padding-left: 1.4rem;
 }
+.public-rich-text li > ul,
+.public-rich-text li > ol { margin-top: 5px; }
+.public-rich-text ul ul { list-style-type: circle; }
+.public-rich-text ul ul ul { list-style-type: square; }
+.public-rich-text ol ol { list-style-type: lower-alpha; }
+.public-rich-text ol ol ol { list-style-type: lower-roman; }
 .public-rich-text li + li { margin-top: 5px; }
 .public-rich-text blockquote {
   margin: 14px 0 0;
