@@ -5124,6 +5124,13 @@ function clearSupabaseAccountState() {
   syncAccountFields();
 }
 
+function syncSupabaseAccountStateFromSession(session) {
+  supabaseState.authEmail = session.user?.email || "";
+  supabaseState.authUserId = session.user?.id || "";
+  supabaseState.pendingAuthEmail = session.user?.new_email || "";
+  syncAccountFields();
+}
+
 function syncAccountFields() {
   const hasSession = Boolean(supabaseState.authUserId);
   const currentEmail = supabaseState.authEmail || "Not connected";
@@ -5165,10 +5172,7 @@ async function refreshSupabaseAccountState() {
     return null;
   }
 
-  supabaseState.authEmail = data.session.user?.email || "";
-  supabaseState.authUserId = data.session.user?.id || "";
-  supabaseState.pendingAuthEmail = data.session.user?.new_email || "";
-  syncAccountFields();
+  syncSupabaseAccountStateFromSession(data.session);
   return data.session;
 }
 
@@ -5288,6 +5292,16 @@ async function initializeSupabaseAuth() {
   supabaseState.authInitialized = true;
   client.auth.onAuthStateChange((event, session) => {
     if (session && ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"].includes(event)) {
+      const isKnownSession = Boolean(
+        supabaseState.authUserId && supabaseState.authUserId === session.user?.id
+      );
+      syncSupabaseAccountStateFromSession(session);
+
+      // Supabase can emit SIGNED_IN again when an authenticated tab regains focus.
+      // Refresh the stored credentials without rebuilding the app, changing pages,
+      // or resetting the visitor's scroll position.
+      if (event === "TOKEN_REFRESHED" || (event === "SIGNED_IN" && isKnownSession)) return;
+
       restoreSupabaseSession();
     }
     if (event === "SIGNED_OUT") clearSupabaseAccountState();
