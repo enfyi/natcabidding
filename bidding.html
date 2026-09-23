@@ -8,6 +8,12 @@
       content="NATCA ZLA annual RDO and leave bidding prototype for Los Angeles Center controllers."
     />
     <title>NATCA ZLA Bidding</title>
+    <script>
+      const bootParams = new URLSearchParams(location.search);
+      if (bootParams.get("member") === "1" || ["dashboard", "intake", "intake-schedule", "admin"].includes(bootParams.get("page"))) {
+        document.documentElement.classList.add("member-boot-pending");
+      }
+    </script>
     <link rel="icon" href="assets/logo-5v2a.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,6 +24,14 @@
     <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-mobile-seven-day-full-calendar-mobile-initials-only" />
   </head>
   <body>
+    <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
+      <img src="assets/logo-5v2a.png" alt="" />
+      <div>
+        <p>Member access</p>
+        <h1>Loading your dashboard…</h1>
+        <span>Restoring your secure session and current bidding data.</span>
+      </div>
+    </section>
     <div class="pilot-environment-banner" data-pilot-environment-banner hidden>
       TEST SITE · Practice bids only · Data may be reset by an administrator
     </div>
@@ -1722,7 +1736,7 @@
       <div data-public-date-content></div>
     </dialog>
     <script src="supabase-config.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/vendor/supabase.js?v=2.112.3"></script>
     <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-mobile-seven-day-full-calendar"></script>
     <script>
       window.setTimeout(() => {

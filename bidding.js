@@ -645,6 +645,7 @@ const supabaseState = {
   authUserId: "",
   pendingAuthEmail: "",
   placeholdersCleared: false,
+  referenceDataLoaded: false,
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
@@ -5258,11 +5259,7 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
   setPage(intendedLandingPage(page));
-  void loadSupabaseHelpThreads().then(() => {
-    renderHelpSummary();
-    renderHelpPanel();
-    renderAlerts();
-  });
+  document.documentElement.classList.remove("member-boot-pending");
 }
 
 function showPublicHome() {
@@ -5280,6 +5277,7 @@ function showPublicHome() {
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
   renderPublicPage(DEFAULT_PUBLIC_AREA, DEFAULT_PUBLIC_SECTION);
+  document.documentElement.classList.remove("member-boot-pending");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -6093,20 +6091,19 @@ async function loadSupabaseReferenceData() {
   supabaseState.message = "Loading bidding data from Supabase...";
 
   try {
-    const { data: bidYear, error: bidYearError } = await client
-      .from("bid_years")
-      .select("id,bid_year,annual_leave_allowance_days")
-      .eq("bid_year", BID_YEAR)
-      .single();
-    if (bidYearError) throw bidYearError;
-
-    const [areasResult, rosterResult] = await Promise.all([
+    const [bidYearResult, areasResult, rosterResult] = await Promise.all([
+      client
+        .from("bid_years")
+        .select("id,bid_year,annual_leave_allowance_days")
+        .eq("bid_year", BID_YEAR)
+        .single(),
       client.from("areas").select("id,code,name,display_order").order("display_order"),
       client.rpc("read_bidding_roster"),
     ]);
-    const requiredError = [areasResult, rosterResult].find((result) => result.error)?.error;
+    const requiredError = [bidYearResult, areasResult, rosterResult].find((result) => result.error)?.error;
     if (requiredError) throw requiredError;
 
+    const bidYear = bidYearResult.data;
     supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
     applyRosterFromDatabase(rosterResult.data || [], areaById);
@@ -6123,6 +6120,7 @@ async function loadSupabaseReferenceData() {
       bidWindowsResult,
       faqEntriesResult,
       mouDocumentsResult,
+      _helpThreadsLoaded,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
@@ -6139,6 +6137,7 @@ async function loadSupabaseReferenceData() {
         : Promise.resolve({ data: [], error: null }),
       client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
       client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
+      loadSupabaseHelpThreads(),
     ]);
 
     const loadWarnings = [
@@ -6174,8 +6173,6 @@ async function loadSupabaseReferenceData() {
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
-    await loadSupabaseHelpThreads();
-
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
     supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(rdoSubmissionsResult).length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
@@ -6189,6 +6186,7 @@ async function loadSupabaseReferenceData() {
     console.warn(supabaseState.message);
   } finally {
     supabaseState.loading = false;
+    supabaseState.referenceDataLoaded = true;
   }
 }
 
@@ -6380,9 +6378,14 @@ function renderPublicFaq() {
   const documents = publicFaqContent.documents || [];
 
   if (!entries.length && !documents.length) {
+    const message = !supabaseState.referenceDataLoaded
+      ? "Loading the current FAQ and bidding references…"
+      : supabaseState.connected
+        ? "No FAQ items or MOU documents are published yet."
+        : "The current FAQ could not be loaded. Please refresh to try again.";
     return `
       <div class="public-info-card">
-        <p>Use this public area for bidding rules, leave slot definitions, RDO line notes, and who to contact before your personal bid window opens.</p>
+        <p>${message}</p>
       </div>
     `;
   }
@@ -12218,6 +12221,7 @@ initializeSupabaseAuth().then(async (restoredSession) => {
     renderApp();
   } else {
     renderPublicPage();
+    document.documentElement.classList.remove("member-boot-pending");
   }
 });
 setInterval(updateBidWindow, 1000);
