@@ -213,9 +213,42 @@ function HtmlEditor({ value, onChange, onCommit, placeholder, ariaLabel }: HtmlE
     selection?.addRange(range)
   }
 
+  function toggleFirefoxWholeLineBold() {
+    if (!navigator.userAgent.includes('Firefox/')) return false
+    const selection = window.getSelection()
+    if (!selection?.rangeCount || selection.isCollapsed || !editorRef.current) return false
+    const range = selection.getRangeAt(0)
+    const startElement = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement
+    const block = startElement?.closest('p, li, div, h3, h4, blockquote')
+    if (!block || block === editorRef.current || !editorRef.current.contains(block) || !block.contains(range.endContainer)) return false
+    if (range.toString().trim() !== block.textContent?.trim()) return false
+
+    // Firefox's bold command can skip a fully selected formatted line.
+    const existingBold = Array.from(block.querySelectorAll('b, strong'))
+      .find((element) => element.textContent?.trim() === block.textContent?.trim())
+    if (existingBold) {
+      const children = Array.from(existingBold.childNodes)
+      if (!children.length) return false
+      existingBold.replaceWith(...children)
+      range.setStartBefore(children[0])
+      range.setEndAfter(children[children.length - 1])
+    } else {
+      const bold = document.createElement('strong')
+      bold.append(range.extractContents())
+      range.insertNode(bold)
+      range.selectNodeContents(bold)
+    }
+    selection.removeAllRanges()
+    selection.addRange(range)
+    rememberSelection()
+    emit(editorRef.current.innerHTML)
+    return true
+  }
+
   function runCommand(command: string, commandValue?: string) {
     restoreSelection()
     editorRef.current?.focus()
+    if (command === 'bold' && toggleFirefoxWholeLineBold()) return
     document.execCommand(command, false, commandValue)
     rememberSelection()
     emit(editorRef.current?.innerHTML || '')
