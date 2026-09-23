@@ -6408,8 +6408,8 @@ function renderPublicFaq() {
       </section>
       <section class="public-faq-section" aria-labelledby="public-mou-heading">
         <div class="public-table-heading flat">
-          <strong id="public-mou-heading">MOUs and references</strong>
-          <small>${documents.length ? "Download the current documents for bidding reference." : "MOU documents will appear here when they are uploaded."}</small>
+          <strong id="public-mou-heading">MOUs and References</strong>
+          <small>Click on the article to download the MOU.</small>
         </div>
         <div class="public-mou-list">
           ${documents.map((document) => `
