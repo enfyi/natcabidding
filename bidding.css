@@ -46,6 +46,52 @@ body {
   font-family: "Open Sans", Arial, sans-serif;
 }
 
+.member-boot-screen {
+  display: none;
+  min-height: 100vh;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 32px;
+  text-align: center;
+}
+
+.member-boot-screen img {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+}
+
+.member-boot-screen p {
+  margin: 0 0 8px;
+  color: var(--teal);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.member-boot-screen h1 {
+  margin: 0;
+  font-family: "Montserrat", sans-serif;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+}
+
+.member-boot-screen span {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+html.member-boot-pending .member-boot-screen {
+  display: grid;
+}
+
+html.member-boot-pending .login-screen,
+html.member-boot-pending .app-shell {
+  display: none !important;
+}
+
 body.modal-open {
   overflow: hidden;
 }

@@ -37,6 +37,17 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname
   const isPilotPublicRoute = path === '/login' || path.startsWith('/auth/')
 
+  if (request.method === 'GET' && path === '/' && data?.claims) {
+    const dashboardUrl = new URL('/dashboard', request.url)
+    const redirectResponse = NextResponse.redirect(dashboardUrl)
+
+    response.cookies.getAll().forEach(({ name, value, ...options }) => {
+      redirectResponse.cookies.set(name, value, options)
+    })
+
+    return redirectResponse
+  }
+
   if (isPilot && !data?.claims && !isPilotPublicRoute) {
     const loginUrl = new URL('/login', request.url)
     const redirectResponse = NextResponse.redirect(loginUrl)
