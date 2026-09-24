@@ -6442,6 +6442,98 @@ function bidAsClass(bidAs) {
   return bidAs.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
+let activeRdoStickyHeaderSource = null;
+let activeRdoStickyHeaderSignature = "";
+let rdoStickyHeaderUpdateFrame = 0;
+
+function rdoStickyHeaderElement() {
+  let header = document.querySelector("[data-rdo-floating-header]");
+  if (header) return header;
+
+  header = document.createElement("div");
+  header.className = "rdo-floating-table-header";
+  header.dataset.rdoFloatingHeader = "";
+  header.setAttribute("aria-hidden", "true");
+  header.hidden = true;
+  header.innerHTML = '<div class="rdo-floating-table-header-viewport" data-rdo-floating-header-viewport></div>';
+  document.body.append(header);
+  return header;
+}
+
+function rdoStickyHeaderTop() {
+  const publicHeader = document.querySelector(".public-shell:not([hidden]) .public-topbar");
+  const memberHeader = document.querySelector(".app-shell:not([hidden]) .topbar");
+  const header = publicHeader || memberHeader;
+  if (!header || !["fixed", "sticky"].includes(getComputedStyle(header).position)) return 0;
+  return Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+}
+
+function rebuildRdoStickyHeader(source, floatingHeader) {
+  const sourceTable = source.querySelector("table");
+  const sourceHead = sourceTable?.querySelector("thead");
+  if (!sourceTable || !sourceHead) return false;
+
+  const sourceCells = [...sourceHead.querySelectorAll("th")];
+  const sourceWidth = sourceTable.getBoundingClientRect().width;
+  const cellWidths = sourceCells.map((cell) => cell.getBoundingClientRect().width);
+  const signature = `${sourceHead.textContent}|${sourceWidth}|${cellWidths.join(",")}`;
+  if (source === activeRdoStickyHeaderSource && signature === activeRdoStickyHeaderSignature) return true;
+
+  const table = document.createElement("table");
+  table.className = sourceTable.className;
+  table.style.width = `${sourceWidth}px`;
+  table.style.minWidth = `${sourceWidth}px`;
+
+  const columns = document.createElement("colgroup");
+  cellWidths.forEach((width) => {
+    const column = document.createElement("col");
+    column.style.width = `${width}px`;
+    columns.append(column);
+  });
+  table.append(columns, sourceHead.cloneNode(true));
+
+  floatingHeader.querySelector("[data-rdo-floating-header-viewport]").replaceChildren(table);
+  floatingHeader.dataset.surface = source.closest(".public-main") ? "public" : "member";
+  activeRdoStickyHeaderSource = source;
+  activeRdoStickyHeaderSignature = signature;
+  return true;
+}
+
+function updateRdoStickyHeader() {
+  rdoStickyHeaderUpdateFrame = 0;
+  const floatingHeader = rdoStickyHeaderElement();
+  const top = rdoStickyHeaderTop();
+  const source = [...document.querySelectorAll(".rdo-page-table-wrap")].find((wrap) => {
+    const bounds = wrap.getBoundingClientRect();
+    return bounds.width > 0 && bounds.height > 0 && bounds.top < top && bounds.bottom > top + 38;
+  });
+
+  if (!source || !rebuildRdoStickyHeader(source, floatingHeader)) {
+    floatingHeader.hidden = true;
+    activeRdoStickyHeaderSource = null;
+    activeRdoStickyHeaderSignature = "";
+    return;
+  }
+
+  const bounds = source.getBoundingClientRect();
+  floatingHeader.style.top = `${top}px`;
+  floatingHeader.style.left = `${bounds.left}px`;
+  floatingHeader.style.width = `${bounds.width}px`;
+  floatingHeader.hidden = false;
+  floatingHeader.querySelector("[data-rdo-floating-header-viewport]").scrollLeft = source.scrollLeft;
+}
+
+function scheduleRdoStickyHeaderUpdate() {
+  if (rdoStickyHeaderUpdateFrame) return;
+  rdoStickyHeaderUpdateFrame = window.requestAnimationFrame(updateRdoStickyHeader);
+}
+
+document.addEventListener("scroll", scheduleRdoStickyHeaderUpdate, true);
+window.addEventListener("resize", () => {
+  activeRdoStickyHeaderSignature = "";
+  scheduleRdoStickyHeaderUpdate();
+});
+
 function publicRdoFilteredLines(area) {
   return rdoLinesForArea(area).filter((line) => rdoLineMatchesFilterSet(line, publicRdoFilters));
 }

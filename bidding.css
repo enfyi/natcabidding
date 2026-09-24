@@ -3445,13 +3445,47 @@ dd {
 }
 
 .table-wrap.rdo-page-table-wrap {
-  max-height: 65dvh;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  max-height: none;
 }
 
 .rdo-page-table-wrap thead th {
   box-shadow: 0 1px 0 rgba(122, 189, 194, 0.3), 0 8px 16px rgba(0, 0, 0, 0.12);
+}
+
+.rdo-floating-table-header {
+  position: fixed;
+  z-index: 45;
+  overflow: hidden;
+  border-bottom: 1px solid #cbd8e6;
+  background: #f1f6fb;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+  pointer-events: none;
+}
+
+.rdo-floating-table-header[hidden] {
+  display: none;
+}
+
+.rdo-floating-table-header-viewport {
+  width: 100%;
+  overflow: hidden;
+}
+
+.rdo-floating-table-header table {
+  margin: 0;
+}
+
+.rdo-floating-table-header th {
+  top: 0;
+  border-bottom-color: #dbe4ef;
+  color: #2b7f86;
+  background: #f1f6fb;
+  box-shadow: none;
+}
+
+.rdo-floating-table-header .line-table th:nth-child(1),
+.rdo-floating-table-header .line-table th:nth-child(2) {
+  background: #edf3f8;
 }
 
 table {
