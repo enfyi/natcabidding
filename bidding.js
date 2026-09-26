@@ -139,6 +139,8 @@ let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
+let bidWindowUiStateKey = "";
+let bidWindowCountdownTargets = [];
 let leaveDraftQueue = [];
 let leaveRangeStartKey = "2027-04-08";
 let leaveRangeEndKey = "2027-04-09";
@@ -6397,8 +6399,7 @@ function formatDateRange(start, end) {
   return `${dateFormatter.format(start)} · ${timeFormatter.format(start)} - ${timeFormatter.format(end)}`;
 }
 
-function latestAreaRound(date = new Date()) {
-  const roundState = areaBidRoundState(date);
+function latestAreaRound(date = new Date(), roundState = areaBidRoundState(date)) {
   if (roundState) return roundState.round;
 
   const activePerson = seniority.find((person) => person.openRound);
@@ -7156,19 +7157,19 @@ function hasSubmittedRdoBid() {
   return currentUserHasRdoRequestForLeave();
 }
 
-function updateBidWindow() {
+function updateBidWindow(force = false) {
   const now = new Date();
   const roundState = areaBidRoundState(now);
   const isValidationPeriod = roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
-  const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now);
+  const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now <= personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
-  const activeRank = activeBidderRank(now);
+  const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
   const statusText = areaRoundOpen ? "Open" : "Closed";
@@ -7197,6 +7198,49 @@ function updateBidWindow() {
         ? "Currently Bidding"
         : "Window Status";
   const currentRoundRule = roundRuleForRound(currentRound);
+  const pendingRequest = pendingCurrentUserRdoRequest();
+  const hasRdoBid = currentUserHasRdoRequestForLeave();
+
+  // The countdown changes every second; the rest of the controls only need work
+  // when a bid window, round, active bidder, or rendered page state changes.
+  if (force || !bidWindowCountdownTargets.length || bidWindowCountdownTargets.some((element) => !element.isConnected)) {
+    bidWindowCountdownTargets = [...document.querySelectorAll("[data-bid-window-countdown]")];
+  }
+  bidWindowCountdownTargets.forEach((element) => {
+    if (element.textContent !== countdownText) element.textContent = countdownText;
+  });
+
+  const clock = document.getElementById("bid-window-clock");
+  const clockCountdown = clock?.querySelector("strong");
+  if (clockCountdown && clockCountdown.textContent !== countdownText) {
+    clockCountdown.textContent = countdownText;
+  }
+
+  const stateKey = JSON.stringify([
+    currentViewArea(),
+    currentRound,
+    roundState?.phase || "closed",
+    roundState?.activeRank || null,
+    personalBidWindow?.start?.getTime() || null,
+    personalBidWindow?.end?.getTime() || null,
+    viewingHomeArea,
+    isBefore,
+    isOpen,
+    isTestingBypass,
+    canUseBidActions,
+    activePerson?.rank || null,
+    activePerson?.initials || "",
+    statusText,
+    clockLabel,
+    countdownLabel,
+    currentRoundRule.label,
+    currentRoundRule.detail,
+    pendingRequest?.id || null,
+    hasRdoBid,
+  ]);
+
+  if (!force && stateKey === bidWindowUiStateKey) return;
+  bidWindowUiStateKey = stateKey;
 
   const status = document.getElementById("bid-window-status");
   if (status) {
@@ -7208,7 +7252,6 @@ function updateBidWindow() {
     }
   }
 
-  const clock = document.getElementById("bid-window-clock");
   if (clock) {
     clock.classList.toggle("closed", !(isOpen || (isTestingBypass && viewingHomeArea)));
     clock.querySelector("span").textContent = clockLabel;
@@ -7221,7 +7264,6 @@ function updateBidWindow() {
   }
 
   setText("[data-bid-window-text]", statusText);
-  setText("[data-bid-window-countdown]", countdownText);
   setText("[data-bid-window-countdown-label]", countdownLabel);
   setText("[data-bid-window-close]", personalBidWindow ? formatDateTime(personalBidWindow.end) : "Not scheduled");
   setText("[data-bid-window-range]", personalBidWindow ? formatDateRange(personalBidWindow.start, personalBidWindow.end) : "Not scheduled");
@@ -7238,7 +7280,7 @@ function updateBidWindow() {
       : areaRoundOpen && activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : "Closed"
   );
   setText("[data-current-round]", `Round ${currentRound}`);
-  renderRoundRuleSummary(now);
+  renderRoundRuleSummary(now, roundState);
 
   document.querySelectorAll("[data-bid-window-pill]").forEach((pill) => {
     pill.textContent = statusText;
@@ -7254,7 +7296,6 @@ function updateBidWindow() {
   syncLeaveBidWindowControls(now);
 
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
-    const pendingRequest = pendingCurrentUserRdoRequest();
     if (pendingRequest) {
       button.disabled = true;
       button.classList.add("disabled");
@@ -7276,7 +7317,7 @@ function updateBidWindow() {
       return;
     }
 
-    button.textContent = hasSubmittedRdoBid() ? "Change Bid" : "Bid";
+    button.textContent = hasRdoBid ? "Change Bid" : "Bid";
   });
 }
 
@@ -8115,10 +8156,9 @@ function renderLeaveAllowanceSummary() {
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
 
-function renderRoundRuleSummary(date = new Date()) {
-  const roundState = areaBidRoundState(date);
+function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundState(date)) {
   const testRound = activeTestBidRound();
-  const round = testRound || latestAreaRound(date);
+  const round = testRound || latestAreaRound(date, roundState);
   const rule = roundRuleForRound(round);
   const phaseDetail = testRound
     ? "Testing mode is using this round for BUE self-service submissions."
@@ -11619,7 +11659,6 @@ function renderApp() {
   renderLeaveDraftQueue();
   renderSubmittedLeaveManager();
   renderLeaveAllowanceSummary();
-  renderRoundRuleSummary();
   renderRuleEditors();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
@@ -11633,7 +11672,7 @@ function renderApp() {
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
-  updateBidWindow();
+  updateBidWindow(true);
 }
 
 function logOut() {
@@ -12537,5 +12576,10 @@ initializeSupabaseAuth().then(async (restoredSession) => {
     document.documentElement.classList.remove("member-boot-pending");
   }
 });
-setInterval(updateBidWindow, 1000);
+setInterval(() => {
+  if (document.visibilityState === "visible") updateBidWindow();
+}, 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") updateBidWindow(true);
+});
 window.NATCA_BIDDING_READY = true;
