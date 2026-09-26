@@ -17,5 +17,6 @@ assert.match(migration, /create or replace function public\.enforce_pending_rdo_
 assert.match(migration, /actor_role in \('admin', 'intake'\)/)
 assert.match(migration, /tg_op = 'UPDATE'[\s\S]*old\.status = 'pending'/)
 assert.match(migration, /tg_op = 'INSERT'[\s\S]*submission\.status = 'pending'/)
+assert.match(migration, /revoke all on function public\.enforce_pending_rdo_bidder_lock\(\) from public, anon, authenticated/)
 
 console.log('Pending RDO bidder lock regression checks passed.')

@@ -102,6 +102,8 @@ begin
 end
 $$;
 
+revoke all on function public.enforce_pending_rdo_bidder_lock() from public, anon, authenticated;
+
 drop trigger if exists enforce_pending_rdo_bidder_lock on public.intake_submissions;
 create trigger enforce_pending_rdo_bidder_lock
 before insert or update on public.intake_submissions
