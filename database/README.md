@@ -120,7 +120,7 @@ Run `database/rls_area_policies.sql` after `database/schema.sql`.
 
 Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line importer. The import RPC validates every row, adds or updates `rdo_lines` and `rdo_line_days` atomically without deleting omitted lines, preserves existing assignments and status, and records an audit event. Fatigue group, AWS, and Flex are optional: blank values preserve existing lines and use C, No, and Yes for new lines.
 
-Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and seniority rank, treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status.
+Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and the displayed area seniority rank (the same rank shown in the bidding UI), treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status. Reapply this script to pilot databases after roster changes so appended tester rows and rank gaps continue to resolve to the bidder shown in the preview.
 
 Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
 

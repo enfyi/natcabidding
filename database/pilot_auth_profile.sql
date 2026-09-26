@@ -55,6 +55,7 @@ begin
       count(*) over (partition by area_bidders.area_id) as area_bidder_count
     from public.bidders area_bidders
     where area_bidders.active
+      and area_bidders.bid_role not in ('ADM', 'NB')
   )
   select
     b.id,
@@ -72,7 +73,7 @@ begin
     rb.area_bidder_count
   from public.bidders b
   join public.areas a on a.id = b.area_id
-  join ranked_bidders rb on rb.id = b.id
+  left join ranked_bidders rb on rb.id = b.id
   where b.auth_user_id = caller_id
     and lower(b.email) = login_email
     and b.active
