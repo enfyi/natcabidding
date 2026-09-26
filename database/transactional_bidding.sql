@@ -1123,6 +1123,7 @@ begin
       'bidAs', b.bid_role, 'seniority', b.seniority_rank,
       'submittedAt', s.submitted_at, 'reviewedAt', s.reviewed_at,
       'reviewedBy', reviewer.initials, 'denialReason', s.denial_reason,
+      'requestId', s.leave_request_id,
       'line', rl.line_code, 'range', case
         when lr.id is null then null
         when lr.requested_end_date = lr.requested_start_date then to_char(lr.requested_start_date, 'Mon FMDD, YYYY')

@@ -1,5 +1,6 @@
-begin;
-
+-- Intake/admin reviewers need the submission UUID for every visible leave request.
+-- This security-definer read also avoids relying on own-area table RLS for the
+-- cross-area intake queue.
 create or replace function public.read_bidding_state(requested_bid_year integer)
 returns jsonb
 language plpgsql
@@ -54,5 +55,3 @@ $$;
 
 revoke all on function public.read_bidding_state(integer) from public, anon;
 grant execute on function public.read_bidding_state(integer) to authenticated;
-
-commit;

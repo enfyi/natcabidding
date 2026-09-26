@@ -4002,15 +4002,11 @@ function captureIntakeOverrideFields(item) {
 
 async function supabaseSubmissionIdForIntakeItem(item) {
   if (item.supabaseSubmissionId) return item.supabaseSubmissionId;
-  if (!item.supabaseRequestId) return "";
-  const { data, error } = await supabaseClient()
-    .from("intake_submissions")
-    .select("id")
-    .eq("leave_request_id", item.supabaseRequestId)
-    .eq("status", "pending")
-    .maybeSingle();
+  const { data, error } = await supabaseClient().rpc("read_bidding_state", {
+    requested_bid_year: BID_YEAR,
+  });
   if (error) throw error;
-  return data?.id || "";
+  return intakeSubmissionIdFromBiddingState(item, data?.submissions || []);
 }
 
 async function persistIntakeDecision(item, decision, denialReason = "") {
@@ -5695,15 +5691,15 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
 }
 
 function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
-  const bidder = row.bidders || {};
+  const bidder = row.bidders || row;
   const payload = row.payload || {};
-  const line = payload.rdo_line_code || payload.line || "";
-  const area = row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const line = payload.rdo_line_code || payload.line || row.line || "";
+  const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
   const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
   const flex = payload.flex || "";
   const aws = payload.aws || "";
   const mid = payload.mid || "";
-  const round = Number(row.round_number || currentRoundNumber());
+  const round = Number(row.round_number || row.round || currentRoundNumber());
 
   return {
     id: `supabase-rdo-${row.id}`,
@@ -5713,15 +5709,15 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     name: controllerName({
       firstName: bidder.first_name || "",
       lastName: bidder.last_name || "",
-    }).trim() || bidder.initials || "",
+    }).trim() || row.name || bidder.initials || "",
     initials: bidder.initials || "",
-    bidAs: normalizeBidRoleForArea(bidder.bid_role || payload.bid_as || "CPC", area),
-    seniority: bidder.seniority_rank,
+    bidAs: normalizeBidRoleForArea(bidder.bid_role || row.bidAs || payload.bid_as || "CPC", area),
+    seniority: bidder.seniority_rank || row.seniority,
     status: uiStatusFromDatabase(row.status),
-    submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
-    approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
-    deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
-    denialReason: row.denial_reason || "",
+    submittedAt: row.submittedAt || (row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at))),
+    approvedAt: row.reviewedAt && String(row.status).toLowerCase() === "approved" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    deniedAt: row.reviewedAt && String(row.status).toLowerCase() === "denied" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    denialReason: row.denialReason || row.denial_reason || "",
     round,
     line,
     fatigueGroup,
@@ -5737,6 +5733,58 @@ function upsertRdoSubmissionsFromDatabase(rows, areaById) {
   const ids = new Set(items.map((item) => item.supabaseSubmissionId));
   intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId || !ids.has(item.supabaseSubmissionId));
   intakeQueue.unshift(...items);
+}
+
+function biddingStateSubmissionType(row) {
+  const type = String(row.type || row.submission_type || "").toLowerCase();
+  return type === "rdo" || type === "rdo line" ? "RDO Line" : "Leave";
+}
+
+function intakeSubmissionIdFromBiddingState(item, submissions = []) {
+  const itemType = item.type === "RDO Line" ? "RDO Line" : "Leave";
+  const pending = submissions.filter((row) => (
+    biddingStateSubmissionType(row) === itemType
+    && String(row.status || "").toLowerCase() === "pending"
+  ));
+
+  if (item.supabaseRequestId) {
+    const exactRequest = pending.find((row) => (
+      String(row.requestId || row.leave_request_id || "") === String(item.supabaseRequestId)
+    ));
+    if (exactRequest?.id) return exactRequest.id;
+  }
+
+  const candidates = pending.filter((row) => {
+    const payload = row.payload || {};
+    const sameBidder = String(row.initials || row.bidders?.initials || "").toUpperCase()
+      === String(item.initials || "").toUpperCase();
+    const sameRound = Number(row.round || row.round_number || 0) === Number(item.round || 0);
+    if (!sameBidder || !sameRound) return false;
+
+    if (itemType === "RDO Line") {
+      const line = payload.rdo_line_code || payload.line || row.line || "";
+      return String(line) === String(item.line || "");
+    }
+
+    const dateKeys = datesInLeaveRange(item.range);
+    const startDate = payload.start_date || payload.startDate || "";
+    const endDate = payload.end_date || payload.endDate || "";
+    return dateKeys.length > 0
+      && startDate === dateKeys[0]
+      && endDate === dateKeys[dateKeys.length - 1];
+  });
+
+  return candidates.length === 1 ? candidates[0].id : "";
+}
+
+function attachSubmissionIdsToLeaveRequests(rows, submissions) {
+  return (rows || []).map((row) => {
+    const item = supabaseLeaveRequestToIntakeItem(row);
+    return {
+      ...row,
+      submission_id: intakeSubmissionIdFromBiddingState(item, submissions),
+    };
+  });
 }
 
 function upsertLeaveSlotsFromDatabase(rows, areaById) {
@@ -5822,6 +5870,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   return {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
+    supabaseSubmissionId: row.submission_id || "",
     type: "Leave",
     area,
     name: controllerName({
@@ -6207,7 +6256,7 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
-      rdoSubmissionsResult,
+      biddingStateResult,
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
@@ -6220,7 +6269,7 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
-      supabaseState.authUserId ? client.from("intake_submissions").select("id,area_id,bidder_id,round_number,status,payload,submitted_at,reviewed_at,denial_reason,created_at,bidders:bidder_id(first_name,last_name,initials,bid_role,seniority_rank,area_id),areas(name)").eq("bid_year_id", bidYear.id).eq("submission_type", "rdo").in("status", ["pending", "approved"]).order("submitted_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
@@ -6239,7 +6288,7 @@ async function loadSupabaseReferenceData() {
     const loadWarnings = [
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
-      supabaseLoadWarning("RDO submissions", rdoSubmissionsResult),
+      supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
@@ -6255,11 +6304,21 @@ async function loadSupabaseReferenceData() {
     });
 
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
-    if (!rdoSubmissionsResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionsResult.data || [], areaById);
+    const biddingStateSubmissions = biddingStateResult.error
+      ? []
+      : biddingStateResult.data?.submissions || [];
+    const rdoSubmissionRows = biddingStateSubmissions.filter((row) => (
+      biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved"].includes(String(row.status || "").toLowerCase())
+    ));
+    if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) {
       upsertLeaveRequestsFromDatabase(
-        await attachLeaveRequestWeekBuckets(client, leaveRequestsResult.data || []),
+        attachSubmissionIdsToLeaveRequests(
+          await attachLeaveRequestWeekBuckets(client, leaveRequestsResult.data || []),
+          biddingStateSubmissions
+        ),
         areaById
       );
     }
@@ -6271,7 +6330,7 @@ async function loadSupabaseReferenceData() {
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(rdoSubmissionsResult).length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${rdoSubmissionRows.length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
