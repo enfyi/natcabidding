@@ -124,6 +124,16 @@ Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enabl
 
 Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
 
+Run `database/admin_roster_deactivation.sql` to enable reliable admin deletion
+from the roster editor. It deactivates the selected bidder by immutable profile
+ID, clears their active seniority rank, and preserves historical bids, leave
+records, and the authentication link for auditability or later restoration.
+
+Run `database/admin_roster_management.sql` to enable atomic roster editing from
+the Admin Console. It saves names, initials, contact information, area, bid role,
+seniority rank, leave allowance, and active status by immutable bidder ID, while
+also supporting the older initials-based payload during deployment rollout.
+
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 
 Private data stays protected by Supabase Row Level Security. Leave requests, intake submissions, help threads, bid windows, holiday in-lieu records, credit events, and audit history remain limited to the user's own area or their own account.
