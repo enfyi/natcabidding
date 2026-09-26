@@ -1592,6 +1592,7 @@ function rosterEntryToPerson(entry, rank = null, options = {}) {
     : null;
   const shouldUseFallbackInitials = options.fallbackInitials !== false;
   return {
+    profileId: seniorityEntryProfileId(entry),
     rank: resolvedRank,
     firstName,
     lastName,
@@ -8573,6 +8574,7 @@ function rosterFormValues() {
 
 function supabaseRosterPayload(values) {
   return {
+    profile_id: values.profileId || null,
     original_area_name: values.originalArea || values.area,
     original_initials: values.originalInitials || values.editInitials || values.initials,
     original_seniority_rank: Number.isFinite(values.originalRank) ? values.originalRank : null,
@@ -8591,7 +8593,7 @@ function supabaseRosterPayload(values) {
 
 function friendlyRosterSyncFailure(error) {
   const message = error?.message || "";
-  if (/admin_save_bidder_roster_entry|function .*not found|Could not find/i.test(message)) {
+  if (/admin_save_bidder_roster_(entry|rows)|function .*not found|Could not find/i.test(message)) {
     return "Working roster updated, but the backend roster sync helper is not installed for this Supabase project.";
   }
   if (/Authentication is required|JWT|not authenticated|session/i.test(message)) {
@@ -8686,6 +8688,51 @@ async function saveSupabaseRosterRows(rows) {
   return { saved: true };
 }
 
+async function deactivateSupabaseRosterEntry(person) {
+  const client = supabaseClient();
+  if (!client) {
+    return {
+      saved: false,
+      message: "Supabase is not configured on this page yet, so the BUE was not deleted.",
+    };
+  }
+
+  if (!person.profileId) {
+    return {
+      saved: false,
+      message: "Could not identify this BUE in Supabase. Refresh the roster and try again.",
+    };
+  }
+
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData?.session) {
+    return {
+      saved: false,
+      message: "Sign in with a Supabase admin account before deleting a BUE.",
+    };
+  }
+
+  const { data, error } = await client.rpc("admin_deactivate_bidder_roster_entry", {
+    target_bidder_id: person.profileId,
+  });
+  if (error) {
+    const message = /admin_deactivate_bidder_roster_entry|function .*not found|Could not find/i.test(error.message || "")
+      ? "The bidder-delete database helper is not installed for this Supabase project."
+      : error.message || "Supabase could not delete this BUE.";
+    return { saved: false, message };
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result || result.profile_id !== person.profileId || result.active !== false) {
+    return {
+      saved: false,
+      message: "Supabase did not confirm that this BUE was removed from the active roster.",
+    };
+  }
+
+  return { saved: true };
+}
+
 function placeRosterEntry(entry, area, rank) {
   const oldIndex = senioritySource.indexOf(entry);
   if (oldIndex >= 0) senioritySource.splice(oldIndex, 1);
@@ -8737,6 +8784,7 @@ function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
         const person = rosterEntryToPerson(entry, null, { fallbackInitials: false });
         const override = entryOverrides.get(entry) || {};
         return {
+          profileId: person.profileId,
           firstName: person.firstName,
           lastName: person.lastName,
           initials: person.initials,
@@ -8798,7 +8846,6 @@ async function saveRosterEntry(event) {
 
   syncCurrentUserFromRoster(values.editInitials || values.initials, values.initials);
   const rankDetail = Number.isFinite(values.rank) ? ` at seniority #${values.rank}` : "";
-  logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area}${rankDetail}.`);
   renderApp();
   editRosterEntryByIndex(senioritySource.indexOf(entry));
   setRosterStatus(`${values.firstName} ${values.lastName} saved in the working roster. Syncing to Supabase...`, "info");
@@ -8806,6 +8853,11 @@ async function saveRosterEntry(event) {
     new Set([originalArea, values.area]),
     new Map([[entry, { originalArea, originalInitials }]])
   ));
+  await loadSupabaseReferenceData();
+  renderApp();
+  if (supabaseSave.saved) {
+    logHistory("All Areas", existingEntry ? "BUE roster amended" : "BUE added", `${currentUser.initials} saved ${values.firstName} ${values.lastName} (${values.initials}) in ${values.area}${rankDetail}.`);
+  }
   setRosterStatus(
     supabaseSave.saved
       ? `${values.firstName} ${values.lastName} saved to Supabase.`
@@ -8835,6 +8887,13 @@ async function deleteRosterEntryByIndex(index) {
     return;
   }
 
+  setRosterStatus(`Deleting ${personDisplayName(person)} from Supabase...`, "info");
+  const supabaseSave = await deactivateSupabaseRosterEntry(person);
+  if (!supabaseSave.saved) {
+    setRosterStatus(supabaseSave.message, "error");
+    return;
+  }
+
   senioritySource.splice(senioritySource.indexOf(entry), 1);
   intakeTeamInitials.delete(person.initials);
   for (let index = intakeSchedules.length - 1; index >= 0; index -= 1) {
@@ -8843,28 +8902,7 @@ async function deleteRosterEntryByIndex(index) {
   logHistory("All Areas", "BUE deleted", `${currentUser.initials} deleted ${person.initials} from the working roster.`);
   resetRosterForm();
   renderApp();
-  setRosterStatus(`${personDisplayName(person)} was deleted from the working roster. Syncing to Supabase...`, "info");
-  const supabaseSave = await saveSupabaseRosterRows([{
-    firstName: person.firstName,
-    lastName: person.lastName,
-    initials: person.initials,
-    email: person.email,
-    phone: person.phone,
-    area: person.area,
-    rank: person.rank,
-    bidAs: person.bidAs,
-    leaveSlotAllowance: person.leaveSlotAllowance,
-    active: false,
-    originalArea: person.area,
-    originalInitials: person.initials,
-    originalRank: person.rank,
-  }]);
-  setRosterStatus(
-    supabaseSave.saved
-      ? `${personDisplayName(person)} was deleted from Supabase.`
-      : supabaseSave.message,
-    supabaseSave.saved ? "success" : "error"
-  );
+  setRosterStatus(`${personDisplayName(person)} was removed from the active Supabase roster.`, "success");
 }
 
 function bulkRowValue(row, selector) {
@@ -8891,6 +8929,7 @@ function bulkRosterRows() {
       const rank = Number(bulkRowValue(row, "[data-bulk-rank]"));
       const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
       return {
+        profileId: seniorityEntryProfileId(senioritySource[Number(row.dataset.rosterEntryIndex)]),
         originalInitials,
         sourceIndex: Number(row.dataset.rosterEntryIndex),
         firstName: bulkRowValue(row, "[data-bulk-first-name]"),
@@ -9046,10 +9085,14 @@ async function applyBulkRosterChanges() {
     syncCurrentUserFromRoster(row.originalInitials, row.initials);
   });
 
-  logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} visible roster rows from the bulk editor.`);
   renderApp();
   setRosterStatus(`${editedEntries.length} visible roster rows applied. Syncing to Supabase...`, "info");
   const supabaseSave = await saveSupabaseRosterRows(rows);
+  await loadSupabaseReferenceData();
+  renderApp();
+  if (supabaseSave.saved) {
+    logHistory("All Areas", "Bulk roster update", `${currentUser.initials} applied ${editedEntries.length} visible roster rows from the bulk editor.`);
+  }
   setRosterStatus(
     supabaseSave.saved
       ? `${editedEntries.length} visible roster rows saved to Supabase.`
