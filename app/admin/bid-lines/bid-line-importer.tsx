@@ -94,7 +94,6 @@ export function BidLineImporter() {
       const nextYears = (yearsResult.data || []) as BidYearOption[]
       setAreas(nextAreas)
       setBidYears(nextYears)
-      setAreaCode(nextAreas[0]?.code || '')
       setBidYear(String(nextYears[0]?.bid_year || ''))
       setAccess('admin')
     }
@@ -248,7 +247,8 @@ export function BidLineImporter() {
           </label>
           <label>
             Area
-            <select value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+            <select required value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+              <option value="" disabled>Select an area</option>
               {areas.map((area) => <option key={area.code} value={area.code}>{area.name}</option>)}
             </select>
           </label>
@@ -261,7 +261,7 @@ export function BidLineImporter() {
 
         <p className="import-safety-note"><strong>Safe add/update:</strong> Matching line codes are updated and new codes are added. Blank Fatigue, AWS, and Flex cells preserve existing values; new lines use C, No, and Yes. Lines omitted from the workbook are never deleted.</p>
 
-        <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>
+        <button className="button primary" type="button" disabled={busy || !file || !areaCode} onClick={() => void previewFile()}>
           {busy && !preview ? 'Validating…' : 'Preview import'}
         </button>
       </section>
