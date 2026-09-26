@@ -16,6 +16,9 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
 
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
+Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL
+to prevent bidders from replacing an RDO request while it is pending intake.
+Intake and administrators can still edit, approve, or deny the pending request.
 Admin-only login profiles can use `bid_role = 'ADM'`; those profiles still get
 admin access from `role = 'admin'`, but are excluded from BUE roster, seniority,
 bid-window, RDO eligibility, and leave-bidding mechanics.

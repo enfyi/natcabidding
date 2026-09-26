@@ -1735,6 +1735,14 @@ function currentUserRdoRequest() {
   );
 }
 
+function pendingCurrentUserRdoRequest() {
+  return intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === currentUser.initials &&
+    item.status === "Pending"
+  );
+}
+
 function currentUserHasRdoRequestForLeave() {
   return Boolean(currentUserRdoRequest()) ||
     rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials);
@@ -1873,6 +1881,9 @@ function syncLeaveBidWindowControls(date = new Date()) {
 }
 
 function rdoBidWindowErrorMessage(date = new Date()) {
+  if (pendingCurrentUserRdoRequest()) {
+    return "Your RDO bid is awaiting an intake decision. You can submit another change after it is approved or denied.";
+  }
   return bidWindowErrorMessage("RDO bids", date);
 }
 
@@ -7243,6 +7254,15 @@ function updateBidWindow() {
   syncLeaveBidWindowControls(now);
 
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
+    const pendingRequest = pendingCurrentUserRdoRequest();
+    if (pendingRequest) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "Awaiting Intake Decision";
+      button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
+      return;
+    }
+    button.title = "";
     if (isValidationPeriod && !isTestingBypass) {
       button.textContent = "Round Closed";
       return;
@@ -7467,6 +7487,8 @@ function renderRdoLines() {
   const areaLines = rdoLinesForArea(viewArea);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
   const countTarget = document.querySelector("[data-rdo-filter-count]");
+  const pendingRequest = pendingCurrentUserRdoRequest();
+  const bidderSelectionLocked = Boolean(pendingRequest);
 
   if (countTarget) {
     const lineLabel = filteredLines.length === 1 ? "line" : "lines";
@@ -7488,7 +7510,7 @@ function renderRdoLines() {
     const midValue = lineMidReferenceValue(line);
 
     rows.push(`
-      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
@@ -7515,7 +7537,7 @@ function renderRdoLines() {
           .filter(Boolean)
           .join(", ") || line.pattern;
         const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
-        const selectButton = !isOccupied && isViewingHomeArea()
+        const selectButton = !isOccupied && isViewingHomeArea() && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
           : "";
         return `
@@ -7546,6 +7568,8 @@ function updateSelectedLine() {
   const fatigueCapacity = fatigueCapacityForLine(line);
   const canEditLineSchedule = hasSystemAdminAccess();
   const lineSchedule = lineScheduleLabel(line);
+  const pendingRequest = pendingCurrentUserRdoRequest();
+  const bidderSelectionLocked = Boolean(pendingRequest);
 
   document.querySelectorAll("[data-selected-line]").forEach((element) => {
     element.textContent = `Line ${line.line}`;
@@ -7560,7 +7584,7 @@ function updateSelectedLine() {
     element.textContent =
       !isViewingHomeArea()
         ? `Viewing ${currentViewArea()} for reference. Bidding actions stay limited to your home area.`
-        : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
+        : request ? `Line ${line.line} is pending intake review. Wait for approval or denial before changing it.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : pendingRequest ? `Your RDO bid is pending intake review. Wait for approval or denial before changing it.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;
@@ -7577,7 +7601,7 @@ function updateSelectedLine() {
             const isSelected = selectedFatigueGroup === item.group;
             const available = canChooseGroup(item, isSelected);
             return `
-              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
                 <strong>${item.group}</strong>
                 <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
               </button>
@@ -7589,7 +7613,7 @@ function updateSelectedLine() {
         <em>Flex</em>
         <span class="choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedFlexPreference === value ? "active" : ""}" type="button" data-flex-choice="${value}">
+            <button class="choice-option ${selectedFlexPreference === value ? "active" : ""}" type="button" data-flex-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
               ${value}
             </button>
           `).join("")}
@@ -7609,7 +7633,7 @@ function updateSelectedLine() {
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}">
+            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
               ${value}
             </button>
           `).join("")}
@@ -7626,7 +7650,7 @@ function updateSelectedLine() {
           ? ""
           : `<span class="mid-options">
               ${["Yes", "No"].map((value) => `
-                <button class="mid-option ${selectedMidPreference === value ? "active" : ""}" type="button" data-mid-choice="${value}">
+                <button class="mid-option ${selectedMidPreference === value ? "active" : ""}" type="button" data-mid-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
                   ${value}
                 </button>
               `).join("")}
