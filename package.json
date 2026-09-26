@@ -8,6 +8,7 @@
     "build": "next build",
     "build:pilot": "node scripts/run-with-pilot-env.mjs build",
     "start": "next start",
+    "test:bid-line-import": "node scripts/test-bid-line-import.mjs",
     "test:bid-time-import": "node scripts/test-bid-time-import-ranking.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build"
