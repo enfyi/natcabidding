@@ -5,6 +5,15 @@
 alter table public.bidders
   add column if not exists seniority_date date;
 
+-- Keep the table constraint in sync with the roles accepted by the importer.
+-- TMCIT remains allowed for legacy rows while new imports normalize it to DEV.
+alter table public.bidders
+  drop constraint if exists bidders_bid_role_check;
+
+alter table public.bidders
+  add constraint bidders_bid_role_check
+  check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV', 'TMCIT', 'ADM', 'NB'));
+
 create schema if not exists private;
 revoke all on schema private from public, anon;
 grant usage on schema private to authenticated;
@@ -86,7 +95,9 @@ begin
       raise exception 'Row % bid_role is not valid for area %.', row_number, area_code_value;
     end if;
 
-    select a.id into target_area_id from public.areas a where upper(a.code) = area_code_value;
+    select a.id into target_area_id
+    from public.areas a
+    where upper(pg_catalog.regexp_replace(a.code, '^area[-_[:space:]]*', '', 'i')) = area_code_value;
     if target_area_id is null then raise exception 'Row % area code % does not exist.', row_number, area_code_value; end if;
 
     requested_profile_id := null;
@@ -151,7 +162,9 @@ begin
   loop
     row_index := row_index + 1;
     target_profile_id := target_ids[row_index];
-    select a.id into strict target_area_id from public.areas a where upper(a.code) = upper(trim(roster_item ->> 'area_code'));
+    select a.id into strict target_area_id
+    from public.areas a
+    where upper(pg_catalog.regexp_replace(a.code, '^area[-_[:space:]]*', '', 'i')) = upper(trim(roster_item ->> 'area_code'));
     rank_value := (roster_item ->> 'seniority_rank')::integer;
     first_name_value := trim(roster_item ->> 'first_name');
     last_name_value := trim(roster_item ->> 'last_name');
