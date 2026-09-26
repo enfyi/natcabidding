@@ -2393,7 +2393,7 @@ function renderManualBidEntry() {
   document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
 }
 
-function submitManualRdoBid(panel, person, area) {
+async function submitManualRdoBid(panel, person, area) {
   const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
@@ -2431,6 +2431,7 @@ function submitManualRdoBid(panel, person, area) {
     bidAs: person.bidAs,
     seniority: person.rank,
     status: "Pending",
+    round: currentRoundNumber(),
     submittedAt,
     approvedBy: "",
     approvedAt: "",
@@ -2445,6 +2446,15 @@ function submitManualRdoBid(panel, person, area) {
     mid,
     summary: `Line ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
+
+  try {
+    setManualBidStatus(panel, `Saving ${person.initials}'s RDO bid to Supabase...`);
+    const savedSubmission = await saveSupabaseManualRdoRequest(request, person, area);
+    if (savedSubmission?.submission_id) request.supabaseSubmissionId = savedSubmission.submission_id;
+  } catch (error) {
+    setManualBidStatus(panel, error.message || "The manual RDO bid could not be saved. Try again.", "error");
+    return;
+  }
 
   if (existing) {
     Object.assign(existing, request);
@@ -2484,7 +2494,7 @@ function manualLeaveValidationMessage({ person, area, range, dateKeys, round, da
   return "";
 }
 
-function submitManualLeaveBid(panel, person, area) {
+async function submitManualLeaveBid(panel, person, area) {
   const range = manualLeaveRangeValue(panel);
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
@@ -2559,6 +2569,16 @@ function submitManualLeaveBid(panel, person, area) {
     summary: `${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
 
+  try {
+    setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
+    const savedBatch = await saveSupabaseManualLeaveRequest(request, person, area, notes);
+    const submissionId = savedBatch?.submission_ids?.[0];
+    if (submissionId) request.supabaseSubmissionId = submissionId;
+  } catch (error) {
+    setManualBidStatus(panel, error.message || "The manual leave bid could not be saved. Try again.", "error");
+    return;
+  }
+
   intakeQueue.unshift(request);
   leaveBids.push({
     priority: nextLeavePriority(),
@@ -2581,7 +2601,8 @@ function submitManualLeaveBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s leave bid was added to the intake queue.`, "success");
 }
 
-function submitManualBidEntry(panel) {
+async function submitManualBidEntry(panel) {
+  if (panel.dataset.manualBidSubmitting === "true") return;
   if (!(hasIntakeAccess() || hasSystemAdminAccess())) {
     setManualBidStatus(panel, "Manual bid entry requires intake or admin access.", "error");
     return;
@@ -2590,11 +2611,21 @@ function submitManualBidEntry(panel) {
   const person = manualBidPerson(panel);
   const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
   const type = panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line";
-  if (type === "Leave") {
-    submitManualLeaveBid(panel, person, area);
-    return;
+  const submitButton = panel.querySelector("[data-manual-bid-submit]");
+  panel.dataset.manualBidSubmitting = "true";
+  if (submitButton) submitButton.disabled = true;
+  try {
+    if (type === "Leave") {
+      await submitManualLeaveBid(panel, person, area);
+      return;
+    }
+    await submitManualRdoBid(panel, person, area);
+  } finally {
+    if (panel.isConnected) {
+      delete panel.dataset.manualBidSubmitting;
+      if (submitButton) submitButton.disabled = false;
+    }
   }
-  submitManualRdoBid(panel, person, area);
 }
 
 function setLeaveBuilderStatus(message, status = "info") {
@@ -6045,6 +6076,56 @@ async function saveSupabaseRdoRequest(request) {
   });
   if (error) throw error;
   return true;
+}
+
+async function saveSupabaseManualRdoRequest(request, person, area) {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return null;
+  const { data, error } = await client.rpc("submit_rdo_bid", {
+    requested_bid_year: BID_YEAR,
+    requested_line_code: request.line,
+    requested_fatigue_group: request.fatigueGroup,
+    requested_flex: request.flex === true || request.flex === "Yes",
+    requested_aws: request.aws === true || request.aws === "Yes",
+    requested_mid: request.mid,
+    requested_round: request.round,
+    target_initials: person.initials,
+    target_area_name: area,
+    manual_entry: true,
+  });
+  if (error) throw error;
+  if (!data?.submission_id) throw new Error("Supabase did not return the saved manual RDO submission.");
+  return data;
+}
+
+async function saveSupabaseManualLeaveRequest(request, person, area, notes = "") {
+  const client = supabaseClient();
+  if (!client || !currentUser.supabaseProfileId) return null;
+  const dateKeys = datesInLeaveRange(request.range);
+  const targetRdoLine = rdoLineForInitials(person.initials);
+  const requestedItems = [{
+    start_date: dateKeys[0],
+    end_date: dateKeys[dateKeys.length - 1],
+    round: request.round,
+    rdo_line_code: targetRdoLine?.line || null,
+    fatigue_group: targetRdoLine?.group || null,
+    flex: targetRdoLine?.flex || null,
+    aws: targetRdoLine?.aws || null,
+    mid: targetRdoLine?.mid || null,
+    notes,
+  }];
+  const { data, error } = await client.rpc("submit_leave_bid_batch", {
+    requested_bid_year: BID_YEAR,
+    requested_items: requestedItems,
+    target_initials: person.initials,
+    target_area_name: area,
+    manual_entry: true,
+  });
+  if (error) throw error;
+  if (!Array.isArray(data?.submission_ids) || !data.submission_ids.length) {
+    throw new Error("Supabase did not return the saved manual leave submission.");
+  }
+  return data;
 }
 
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
@@ -11924,7 +12005,7 @@ document.addEventListener("click", async (event) => {
   const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
-    if (panel) submitManualBidEntry(panel);
+    if (panel) await submitManualBidEntry(panel);
     return;
   }
 
