@@ -13,6 +13,7 @@
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
+    "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build"
   },
