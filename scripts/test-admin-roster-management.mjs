@@ -39,6 +39,7 @@ await db.exec(`
 `)
 await db.exec(fs.readFileSync(`${root}/database/schema.sql`, 'utf8').replace('create extension if not exists pgcrypto;', ''))
 await db.exec(fs.readFileSync(`${root}/database/admin_roster_management.sql`, 'utf8'))
+await db.exec(fs.readFileSync(`${root}/database/admin_roster_deactivation.sql`, 'utf8'))
 await db.exec(`
   insert into areas (id, code, name) values
     ('${id(1)}', 'area-a', 'Area A'),
@@ -101,6 +102,25 @@ await db.query('select public.admin_save_bidder_roster_rows($1)', [JSON.stringif
 await db.exec('reset role')
 assert.equal((await db.query('select leave_slot_allowance from bidders where id = $1', [id(12)])).rows[0].leave_slot_allowance, 304)
 console.log('PASS deployed legacy payload still resolves the existing bidder safely')
+
+await db.exec(`set test.uid = '${id(110)}'; set test.email = 'admin@example.test'; set role authenticated;`)
+await db.query('select * from public.admin_deactivate_bidder_roster_entry($1)', [id(13)])
+const reassignedInitialsRow = rosterRow({
+  profile_id: id(12), original_initials: 'B2', original_seniority_rank: 1,
+  profile_first_name: 'Second', profile_last_name: 'Bidder', profile_initials: 'B3',
+  profile_email: 'b2@example.test', profile_phone: '555-0002', profile_seniority_rank: 1,
+  profile_leave_slot_allowance: 304,
+})
+await db.query('select public.admin_save_bidder_roster_rows($1)', [JSON.stringify([reassignedInitialsRow])])
+await db.exec('reset role')
+assert.deepEqual(
+  (await db.query('select id, initials, active from bidders where initials = $1 order by active, id', ['B3'])).rows,
+  [
+    { id: id(13), initials: 'B3', active: false },
+    { id: id(12), initials: 'B3', active: true },
+  ],
+)
+console.log('PASS initials from a deactivated bidder can be reassigned to an active bidder')
 
 await db.exec(`set test.uid = '${id(112)}'; set test.email = 'b2@example.test'; set role authenticated;`)
 await assert.rejects(

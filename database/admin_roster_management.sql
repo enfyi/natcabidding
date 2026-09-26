@@ -121,6 +121,7 @@ begin
       select b.id into target_profile_id
       from public.bidders b
       where b.bid_role <> 'ADM'
+        and b.active
         and upper(trim(coalesce(b.initials, ''))) = original_initials_value
       limit 1;
     end if;
@@ -128,8 +129,10 @@ begin
     if target_profile_id is not null and target_profile_id = any(array_remove(target_ids, null)) then
       raise exception 'Row % identifies a bidder already included in this save.', row_number;
     end if;
-    if initials_value = any(initials_values) then raise exception 'Initials % occur more than once in this save.', initials_value; end if;
-    initials_values := array_append(initials_values, initials_value);
+    if active_value then
+      if initials_value = any(initials_values) then raise exception 'Initials % occur more than once in this save.', initials_value; end if;
+      initials_values := array_append(initials_values, initials_value);
+    end if;
     if email_value is not null then
       if email_value = any(email_values) then raise exception 'Email % occurs more than once in this save.', email_value; end if;
       email_values := array_append(email_values, email_value);
@@ -146,6 +149,7 @@ begin
     select 1 from public.bidders b
     where not (b.id = any(array_remove(target_ids, null)))
       and b.bid_role <> 'ADM'
+      and b.active
       and upper(trim(coalesce(b.initials, ''))) = any(initials_values)
   ) then
     raise exception 'One or more initials are already assigned to another bidder.';
