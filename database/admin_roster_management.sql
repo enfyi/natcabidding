@@ -125,7 +125,14 @@ begin
         and upper(trim(coalesce(b.initials, ''))) = original_initials_value
       limit 1;
     end if;
-    if target_profile_id = actor_profile_id then raise exception 'You cannot change the admin-only profile you are currently using.'; end if;
+    if target_profile_id = actor_profile_id then
+      if not active_value then
+        raise exception 'You cannot deactivate the admin account you are currently using.';
+      end if;
+      if email_value is distinct from lower(auth.jwt() ->> 'email') then
+        raise exception 'You cannot change the roster email for the admin account you are currently using.';
+      end if;
+    end if;
     if target_profile_id is not null and target_profile_id = any(array_remove(target_ids, null)) then
       raise exception 'Row % identifies a bidder already included in this save.', row_number;
     end if;

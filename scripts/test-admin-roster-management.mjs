@@ -45,7 +45,7 @@ await db.exec(`
     ('${id(1)}', 'area-a', 'Area A'),
     ('${id(2)}', 'area-b', 'Area B');
   insert into bidders (id, auth_user_id, area_id, first_name, last_name, initials, email, phone, role, bid_role, seniority_rank, leave_slot_allowance) values
-    ('${id(10)}', '${id(110)}', '${id(1)}', 'Admin', 'Test', 'AD', 'admin@example.test', null, 'admin', 'ADM', null, 0),
+    ('${id(10)}', '${id(110)}', '${id(1)}', 'Admin', 'Test', 'AD', 'admin@example.test', null, 'admin', 'CPC', 3, 0),
     ('${id(11)}', '${id(111)}', '${id(1)}', 'First', 'Bidder', 'B1', 'b1@example.test', '555-0001', 'controller', 'CPC', 1, 288),
     ('${id(12)}', '${id(112)}', '${id(1)}', 'Second', 'Bidder', 'B2', 'b2@example.test', '555-0002', 'controller', 'CPC', 2, 288),
     ('${id(13)}', '${id(113)}', '${id(2)}', 'Third', 'Bidder', 'B3', 'b3@example.test', '555-0003', 'controller', 'CPC', 1, 288);
@@ -121,6 +121,28 @@ assert.deepEqual(
   ],
 )
 console.log('PASS initials from a deactivated bidder can be reassigned to an active bidder')
+
+await db.exec(`set test.uid = '${id(110)}'; set test.email = 'admin@example.test'; set role authenticated;`)
+const activeAdminRow = rosterRow({
+  profile_id: id(10), original_initials: 'AD', original_seniority_rank: 3,
+  profile_first_name: 'Admin', profile_last_name: 'Test', profile_initials: 'AD',
+  profile_email: 'admin@example.test', profile_phone: null, profile_seniority_rank: 3,
+  profile_leave_slot_allowance: 0,
+})
+const activeAdminSave = (await db.query(
+  'select public.admin_save_bidder_roster_rows($1) as result',
+  [JSON.stringify([activeAdminRow])],
+)).rows[0].result
+assert.equal(activeAdminSave.saved, true)
+await assert.rejects(
+  () => db.query('select public.admin_save_bidder_roster_rows($1)', [JSON.stringify([{ ...activeAdminRow, profile_active: false }])]),
+  /cannot deactivate the admin account/i,
+)
+await assert.rejects(
+  () => db.query('select public.admin_save_bidder_roster_rows($1)', [JSON.stringify([{ ...activeAdminRow, profile_email: 'changed@example.test' }])]),
+  /cannot change the roster email/i,
+)
+console.log('PASS active admin roster row saves without allowing self-deactivation or login email changes')
 
 await db.exec(`set test.uid = '${id(112)}'; set test.email = 'b2@example.test'; set role authenticated;`)
 await assert.rejects(
