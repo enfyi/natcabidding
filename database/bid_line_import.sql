@@ -3,6 +3,8 @@
 -- existing bidder assignments and line status.
 
 create schema if not exists private;
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated;
 
 create or replace function private.current_admin_profile_id()
 returns uuid
@@ -48,18 +50,19 @@ $$;
 revoke execute on function public.is_current_admin() from public, anon;
 grant execute on function public.is_current_admin() to authenticated;
 
-grant insert, update on public.rdo_lines to authenticated;
-grant insert, update on public.rdo_line_days to authenticated;
-grant insert on public.audit_events to authenticated;
+-- All writes stay behind the admin-checked importer. Authenticated users must
+-- not be able to bypass it through direct Data API table mutations.
+revoke insert, update on public.rdo_lines, public.rdo_line_days from anon, authenticated;
+revoke insert on public.audit_events from anon, authenticated;
 
-create or replace function public.import_bid_line_schedule(
+create or replace function private.import_bid_line_schedule_impl(
   requested_bid_year integer,
   requested_area_code text,
   requested_lines jsonb
 )
 returns jsonb
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -262,6 +265,22 @@ begin
     'processed', inserted_count + updated_count
   );
 end;
+$$;
+
+revoke execute on function private.import_bid_line_schedule_impl(integer, text, jsonb) from public, anon;
+grant execute on function private.import_bid_line_schedule_impl(integer, text, jsonb) to authenticated;
+
+create or replace function public.import_bid_line_schedule(
+  requested_bid_year integer,
+  requested_area_code text,
+  requested_lines jsonb
+)
+returns jsonb
+language sql
+security invoker
+set search_path = ''
+as $$
+  select private.import_bid_line_schedule_impl(requested_bid_year, requested_area_code, requested_lines);
 $$;
 
 revoke execute on function public.import_bid_line_schedule(integer, text, jsonb) from public, anon;
