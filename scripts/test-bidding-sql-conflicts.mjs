@@ -10,6 +10,13 @@ for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_pri
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
+{
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql']) {
+  const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
+  const sql=fs.readFileSync(migration,'utf8');
+  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
+ }
+}
 const year=(await db.query('select id from bid_years where bid_year=2027')).rows[0].id;
 const mismatchedLines=(await db.query(`select count(*)::integer as total from rdo_lines line
   where line.bid_year_id=$1 and private.rdo_count_for_line(line.id) in (2,3)
