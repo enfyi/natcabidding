@@ -1746,6 +1746,14 @@ function pendingCurrentUserRdoRequest() {
   );
 }
 
+function latestCurrentUserDeniedRdoRequest() {
+  const latestRequest = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === currentUser.initials
+  );
+  return latestRequest?.status === "Denied" ? latestRequest : null;
+}
+
 function currentUserHasRdoRequestForLeave() {
   return Boolean(currentUserRdoRequest()) ||
     rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials);
@@ -4251,6 +4259,7 @@ async function denyIntakeItem(id) {
     return;
   }
   if (persisted) {
+    item.denialReason = reason;
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
@@ -6138,6 +6147,7 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
       weekUnits: item.weekUnits,
       weekKeys: item.weekKeys,
       weekBucketStarts: item.weekBucketStarts,
+      denialReason: item.denialReason,
     });
   });
 }
@@ -6484,7 +6494,7 @@ async function loadSupabaseReferenceData() {
       : biddingStateResult.data?.submissions || [];
     const rdoSubmissionRows = biddingStateSubmissions.filter((row) => (
       biddingStateSubmissionType(row) === "RDO Line"
-      && ["pending", "approved"].includes(String(row.status || "").toLowerCase())
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())
     ));
     if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
@@ -7572,6 +7582,16 @@ function rdoAssignmentValue(assignment, key) {
   return "";
 }
 
+function renderLatestRdoDenialReason() {
+  const deniedRequest = latestCurrentUserDeniedRdoRequest();
+  document.querySelectorAll("[data-rdo-denial-reason]").forEach((element) => {
+    element.hidden = !deniedRequest;
+    element.textContent = deniedRequest
+      ? `Intake denial reason: ${deniedRequest.denialReason || "No reason was provided. Contact the Bidding Office."}`
+      : "";
+  });
+}
+
 function renderDashboardSelectedLineCard(assignment) {
   const line = assignment?.line;
   const request = assignment?.request;
@@ -7611,6 +7631,7 @@ function renderDashboardSelectedLineCard(assignment) {
   } else if (weekTarget) {
     weekTarget.innerHTML = "";
   }
+  renderLatestRdoDenialReason();
 }
 
 function selectedLineReadinessItems(line) {
@@ -7943,7 +7964,10 @@ function renderLeaveRows(targetId) {
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
-          <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
+          <td>
+            <span class="status ${bid.status.toLowerCase()}">${bid.status}</span>
+            ${bid.status === "Denied" ? `<small class="bid-denial-reason">Reason: ${escapeHtml(bid.denialReason || "No reason was provided. Contact the Bidding Office.")}</small>` : ""}
+          </td>
           <td>${bid.notes ? escapeHtml(bid.notes) : "—"}</td>
         </tr>
       `;

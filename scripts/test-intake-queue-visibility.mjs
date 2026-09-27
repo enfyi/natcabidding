@@ -13,6 +13,12 @@ assert.match(source, /submission_id: intakeSubmissionIdFromBiddingState\(item, s
 assert.match(source, /supabaseSubmissionId: row\.submission_id \|\| ""/)
 assert.match(source, /payload\.start_date \|\| payload\.startDate/)
 assert.match(source, /payload\.end_date \|\| payload\.endDate/)
+assert.match(source, /\["pending", "approved", "denied"\]\.includes/)
+assert.match(source, /denialReason: item\.denialReason/)
+assert.match(source, /item\.denialReason = reason;[\s\S]{0,80}queueBidDeniedEmail\(item\)/)
+assert.match(source, /function latestCurrentUserDeniedRdoRequest\(/)
+assert.match(source, /Intake denial reason:/)
+assert.match(source, /Reason: \$\{escapeHtml\(bid\.denialReason/)
 assert.doesNotMatch(
   source,
   /\.from\("intake_submissions"\)[\s\S]{0,200}\.eq\("leave_request_id"/,
