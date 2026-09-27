@@ -79,13 +79,20 @@ module: `node scripts/test-bidding-sql-conflicts.mjs`.
 
 Run `database/holiday_leave_round_rules.sql` after that upgrade to charge bid
 holidays and holiday-in-lieu dates against the member's leave days and hours in
-Rounds 1–3. They still do not reserve daily CPC/DEV leave slots. In Round 4,
+Rounds 1–3. In Round 4,
 each distinct holiday or in-lieu date actually charged in an active Round 1–3
 request returns one day of leave allowance (8 or 10 hours for the selected
 line). In-lieu dates are calculated from a pending RDO request so leave can be
 submitted before intake approves that line. The normal five-day Round 4 bid
 limit still applies. The migration
 recalculates older saved holiday charges and updates the leave-summary views.
+
+Run `database/holiday_slot_reservations.sql` after the holiday rules and the
+Round 2–4 allowance upgrades. Charged holiday and holiday-in-lieu bids then hold
+normal CPC/DEV daily inventory while pending, display the bidder's initials in
+the calendar, and remain assigned when approved. Existing active holiday bids
+are backfilled into open slots; the migration stops on a real capacity conflict
+instead of silently increasing the configured capacity.
 
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database

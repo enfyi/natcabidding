@@ -6,7 +6,7 @@ const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth; create schema private;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
-for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql','round_two_three_rdo_limits.sql','round_four_holiday_allowances.sql']) {
+for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql','round_two_three_rdo_limits.sql','round_four_holiday_allowances.sql','holiday_slot_reservations.sql']) {
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
@@ -59,6 +59,9 @@ await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,
  insert into holiday_in_lieu_days(bid_year_id,bidder_id,holiday_id,in_lieu_date)
  select '${year}','${holidayBidder}',id,'2027-06-01' from holidays where bid_year_id='${year}' and holiday_date='2027-05-31' limit 1;
  delete from leave_slots where bid_year_id='${year}' and area_id='${bidder.area_id}' and slot_date in ('2027-05-31','2027-06-01');
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ values('${year}','${bidder.area_id}','2027-05-31','cpc','HOLIDAY-1'),
+       ('${year}','${bidder.area_id}','2027-06-01','cpc','IN-LIEU-1');
  set test.uid='${holidayAuth}'; set test.email='holiday@example.test';
  update bid_year_settings set test_bid_round=2 where bid_year_id='${year}';`);
 const holidayResult=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
@@ -68,12 +71,17 @@ const holidayRequest=(await db.query(`select id,charged_days from leave_requests
 if(holidayRequest.charged_days!==2) throw new Error('Stored Round 2 charged days differ from submission');
 const holidayFlags=(await db.query('select charged from leave_request_dates where leave_request_id=$1 order by leave_date',[holidayRequest.id])).rows;
 if(holidayFlags.length!==2 || holidayFlags.some(row=>!row.charged)) throw new Error('Holiday dates were not stored as charged');
-console.log('PASS Round 2 holiday and in-lieu dates charge hours/days without leave slots');
+const heldHolidaySlots=(await db.query(`select slot_date::text as slot_date,slot_initials,status
+  from leave_slots where source_leave_request_id=$1 order by slot_date`,[holidayRequest.id])).rows;
+if(heldHolidaySlots.length!==2 || heldHolidaySlots.some(row=>row.slot_initials!=='HT' || row.status!=='held'))
+  throw new Error('Pending holiday and in-lieu bids did not hold visible daily slots');
+console.log('PASS Round 2 holiday and in-lieu dates charge hours/days and hold visible slots');
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
 await db.query('select public.review_bidding_submission($1,\'approved\')',[holidayResult.submission_ids[0]]);
-if((await db.query('select count(*) as used from leave_slots where source_leave_request_id=$1',[holidayRequest.id])).rows[0].used!==0)
-  throw new Error('Approval consumed a leave slot for a holiday');
-console.log('PASS holiday approval does not allocate daily leave slots');
+const approvedHolidaySlots=(await db.query(`select count(*)::integer as used
+  from leave_slots where source_leave_request_id=$1 and slot_initials='HT' and status='approved'`,[holidayRequest.id])).rows[0].used;
+if(approvedHolidaySlots!==2) throw new Error('Approval did not retain the holiday slots and initials');
+console.log('PASS holiday approval keeps initials in two consumed daily slots');
 await db.exec(`set test.uid='${holidayAuth}'; set test.email='holiday@example.test'; update bid_year_settings set test_bid_round=3 where bid_year_id='${year}';
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
  values('${year}','${bidder.area_id}','2027-06-02','cpc','HOLIDAY-TEST') on conflict do nothing;`);
@@ -101,12 +109,18 @@ await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
  values('${year}','${bidder.area_id}','${roundOneBidder}',1,'${holidayLine}','rdo','pending','{"line":"HOLIDAY-TEST"}',now());
  delete from leave_slots where bid_year_id='${year}' and area_id='${bidder.area_id}' and slot_date='2027-01-18';
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ values('${year}','${bidder.area_id}','2027-01-18','cpc','ROUND1-HOLIDAY');
  set test.uid='${roundOneAuth}'; set test.email='round-one@example.test';
  update bid_year_settings set test_bid_round=1 where bid_year_id='${year}';`);
 const roundOneHoliday=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
   [JSON.stringify([{start_date:'2027-01-18',end_date:'2027-01-18',round:1,rdo_line_code:'HOLIDAY-TEST'}])])).rows[0].result;
 if(roundOneHoliday.charged_days!==1) throw new Error('Round 1 holiday did not use one leave day');
-console.log('PASS Round 1 holiday uses one leave day without a daily slot');
+const roundOneHolidaySlot=(await db.query(`select slot_initials,status from leave_slots
+  where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[roundOneBidder])).rows[0];
+if(!roundOneHolidaySlot || roundOneHolidaySlot.slot_initials!=='R1' || roundOneHolidaySlot.status!=='held')
+  throw new Error('Round 1 holiday did not hold a visible daily slot');
+console.log('PASS Round 1 holiday uses one leave day and one visible daily slot');
 
 const inLieuBidder='00000000-0000-0000-0000-000000000231';
 const inLieuAuth='00000000-0000-0000-0000-000000000232';
@@ -117,6 +131,8 @@ await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,
  values('${inLieuLine}','${year}','${bidder.area_id}','IN-LIEU-TEST','CPC','IN-LIEU-TEST','open');
  insert into rdo_line_days(rdo_line_id,weekday,shift_code)
  select '${inLieuLine}',day,case when day=1 then 'RDO' else '0700' end from generate_series(0,6) day;
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ values('${year}','${bidder.area_id}','2027-06-01','cpc','IN-LIEU-2');
  set test.uid='${inLieuAuth}'; set test.email='in-lieu@example.test';`);
 await db.query('select public.submit_rdo_bid(2027,\'IN-LIEU-TEST\',\'A\',true,false,\'No\',1)');
 const provisional=(await db.query("select count(*) as days from holiday_in_lieu_days where bidder_id=$1 and in_lieu_date='2027-06-01'",[inLieuBidder])).rows[0].days;
@@ -126,7 +142,19 @@ const inLieuResult=(await db.query('select public.submit_leave_bid_batch(2027,$1
 if(inLieuResult.charged_days!==1) throw new Error('Pending RDO in-lieu leave did not use one day');
 const inLieuSaved=(await db.query("select d.is_holiday_in_lieu,d.charged from leave_request_dates d join leave_requests r on r.id=d.leave_request_id where r.bidder_id=$1 and d.leave_date='2027-06-01'",[inLieuBidder])).rows[0];
 if(!inLieuSaved.is_holiday_in_lieu || !inLieuSaved.charged) throw new Error('Pending in-lieu date flags are incorrect');
-console.log('PASS pending RDO creates an in-lieu date that counts as charged leave');
+const inLieuSlot=(await db.query(`select slot_initials,status from leave_slots
+  where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[inLieuBidder])).rows[0];
+if(!inLieuSlot || inLieuSlot.slot_initials!=='IL' || inLieuSlot.status!=='held')
+  throw new Error('Pending in-lieu bid did not hold a visible daily slot');
+console.log('PASS pending RDO creates a charged in-lieu date with a visible daily slot');
+await db.query(`update leave_request_dates set is_holiday_in_lieu=false
+  where leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)
+    and leave_date='2027-06-01'`,[inLieuBidder]);
+const releasedInLieuSlot=(await db.query(`select bidder_id,slot_initials,status,source_leave_request_id
+  from leave_slots where slot_code='IN-LIEU-2'`)).rows[0];
+if(releasedInLieuSlot.bidder_id || releasedInLieuSlot.slot_initials || releasedInLieuSlot.source_leave_request_id || releasedInLieuSlot.status!=='open')
+  throw new Error('Removed in-lieu designation left a stale slot reservation');
+console.log('PASS removing an in-lieu designation releases its held slot');
 
 const changeBidder='00000000-0000-0000-0000-000000000241';
 const changeAuth='00000000-0000-0000-0000-000000000242';
@@ -283,6 +311,9 @@ for (const fixture of [
     insert into holiday_in_lieu_days(bid_year_id,bidder_id,holiday_id,in_lieu_date)
     select '${year}','${fixture.bidder}',id,'2027-06-01' from holidays
     where bid_year_id='${year}' and holiday_date='2027-05-31' limit 1;
+    insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+    values('${year}','${bidder.area_id}','2027-05-31','cpc','${fixture.initials}-HOLIDAY'),
+          ('${year}','${bidder.area_id}','2027-06-01','cpc','${fixture.initials}-IN-LIEU');
     set test.uid='${fixture.auth}'; set test.email='${fixture.initials.toLowerCase()}@example.test';
     update bid_year_settings set test_bid_round=2 where bid_year_id='${year}';`);
   const submit=async(date,round)=>db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
