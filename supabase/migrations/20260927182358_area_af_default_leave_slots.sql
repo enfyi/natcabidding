@@ -1,17 +1,5 @@
--- Per-area, per-date CPC/DEV leave capacity and the admin-only resize operation.
-
-create table if not exists public.leave_slot_capacities (
-  id uuid primary key default gen_random_uuid(),
-  bid_year_id uuid not null references public.bid_years(id) on delete cascade,
-  area_id uuid not null references public.areas(id) on delete cascade,
-  slot_date date not null,
-  cpc_capacity integer not null default 3 check (cpc_capacity between 0 and 99),
-  dev_capacity integer not null default 4 check (dev_capacity between 0 and 99),
-  updated_by uuid references public.bidders(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (bid_year_id, area_id, slot_date)
-);
+-- Increase the standard Area A-F daily DEV inventory from two slots to four.
+-- Explicit per-date capacity overrides remain unchanged, and TMU remains at two.
 
 alter table public.leave_slot_capacities
   alter column dev_capacity set default 4;
@@ -48,33 +36,6 @@ cross join lateral pg_catalog.generate_series(
 ) as series(slot_number)
 where pg_catalog.lower(a.code) in ('area-a', 'area-b', 'area-c', 'area-d', 'area-e', 'area-f')
 on conflict (bid_year_id, area_id, slot_date, slot_group, slot_code) do nothing;
-
-create index if not exists leave_slot_capacities_date_idx
-  on public.leave_slot_capacities(bid_year_id, area_id, slot_date);
-
-create index if not exists leave_slot_capacities_area_idx
-  on public.leave_slot_capacities(area_id);
-
-create index if not exists leave_slot_capacities_updated_by_idx
-  on public.leave_slot_capacities(updated_by);
-
-alter table public.leave_slot_capacities enable row level security;
-
-drop policy if exists "public can read leave slot capacities" on public.leave_slot_capacities;
-create policy "public can read leave slot capacities"
-on public.leave_slot_capacities for select
-to anon
-using (true);
-
-drop policy if exists "users can read leave slot capacities" on public.leave_slot_capacities;
-create policy "users can read leave slot capacities"
-on public.leave_slot_capacities for select
-to authenticated
-using (true);
-
-create schema if not exists private;
-revoke all on schema private from public, anon;
-grant usage on schema private to authenticated;
 
 create or replace function private.set_daily_leave_slot_capacity_unchecked(
   requested_bid_year integer,
@@ -316,128 +277,7 @@ begin
 end;
 $$;
 
-grant select on table public.leave_slot_capacities to anon, authenticated;
-
 revoke all on function private.set_daily_leave_slot_capacity_unchecked(integer, text, date, integer, integer)
 from public, anon;
 grant execute on function private.set_daily_leave_slot_capacity_unchecked(integer, text, date, integer, integer)
-to authenticated;
-
-create or replace function public.set_daily_leave_slot_capacity(
-  requested_bid_year integer,
-  requested_area_name text,
-  requested_slot_date date,
-  requested_cpc_capacity integer,
-  requested_dev_capacity integer
-)
-returns jsonb
-language sql
-security invoker
-set search_path = ''
-as $$
-  select private.set_daily_leave_slot_capacity_unchecked(
-    requested_bid_year,
-    requested_area_name,
-    requested_slot_date,
-    requested_cpc_capacity,
-    requested_dev_capacity
-  )
-$$;
-
-revoke all on function public.set_daily_leave_slot_capacity(integer, text, date, integer, integer)
-from public, anon;
-grant execute on function public.set_daily_leave_slot_capacity(integer, text, date, integer, integer)
-to authenticated;
-
-create or replace function private.set_leave_slot_capacity_range_unchecked(
-  requested_bid_year integer,
-  requested_area_name text,
-  requested_start_date date,
-  requested_end_date date,
-  requested_cpc_capacity integer,
-  requested_dev_capacity integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  capacity_date date;
-  date_count integer;
-begin
-  if not public.is_current_admin() then
-    raise exception 'Only system admins can change leave slot capacity ranges.';
-  end if;
-
-  if requested_start_date is null or requested_end_date is null or requested_end_date < requested_start_date then
-    raise exception 'Choose a valid start and end date.';
-  end if;
-
-  if requested_start_date < pg_catalog.make_date(requested_bid_year, 1, 10)
-    or requested_end_date > pg_catalog.make_date(requested_bid_year + 1, 1, 8) then
-    raise exception 'The range must be within the % bid leave year.', requested_bid_year;
-  end if;
-
-  date_count := requested_end_date - requested_start_date + 1;
-
-  for capacity_date in
-    select generated_date::date
-    from pg_catalog.generate_series(
-      requested_start_date::timestamp,
-      requested_end_date::timestamp,
-      interval '1 day'
-    ) as generated_date
-  loop
-    perform private.set_daily_leave_slot_capacity_unchecked(
-      requested_bid_year,
-      requested_area_name,
-      capacity_date,
-      requested_cpc_capacity,
-      requested_dev_capacity
-    );
-  end loop;
-
-  return jsonb_build_object(
-    'area_name', requested_area_name,
-    'start_date', requested_start_date,
-    'end_date', requested_end_date,
-    'date_count', date_count,
-    'cpc_capacity', requested_cpc_capacity,
-    'dev_capacity', requested_dev_capacity
-  );
-end;
-$$;
-
-revoke all on function private.set_leave_slot_capacity_range_unchecked(integer, text, date, date, integer, integer)
-from public, anon;
-grant execute on function private.set_leave_slot_capacity_range_unchecked(integer, text, date, date, integer, integer)
-to authenticated;
-
-create or replace function public.set_leave_slot_capacity_range(
-  requested_bid_year integer,
-  requested_area_name text,
-  requested_start_date date,
-  requested_end_date date,
-  requested_cpc_capacity integer,
-  requested_dev_capacity integer
-)
-returns jsonb
-language sql
-security invoker
-set search_path = ''
-as $$
-  select private.set_leave_slot_capacity_range_unchecked(
-    requested_bid_year,
-    requested_area_name,
-    requested_start_date,
-    requested_end_date,
-    requested_cpc_capacity,
-    requested_dev_capacity
-  )
-$$;
-
-revoke all on function public.set_leave_slot_capacity_range(integer, text, date, date, integer, integer)
-from public, anon;
-grant execute on function public.set_leave_slot_capacity_range(integer, text, date, date, integer, integer)
 to authenticated;
