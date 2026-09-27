@@ -1217,7 +1217,13 @@ select bys.id, a.id, d::date, slots.slot_group, slots.slot_code, 'open'
 from public.bid_years bys
 cross join public.areas a
 cross join lateral generate_series(make_date(bys.bid_year, 1, 10), make_date(bys.bid_year + 1, 1, 8), interval '1 day') d
-cross join (values ('cpc', 'C1'), ('cpc', 'C2'), ('cpc', 'C3'), ('dev', 'D1')) slots(slot_group, slot_code)
+cross join lateral (
+  select 'cpc'::text as slot_group, 'C' || slot_number as slot_code
+  from generate_series(1, case when lower(a.code) = 'tmu' then 2 else 3 end) as series(slot_number)
+  union all
+  select 'dev'::text, 'D' || slot_number
+  from generate_series(1, case when lower(a.code) = 'tmu' then 2 else 4 end) as series(slot_number)
+) slots
 where bys.bid_year = 2027
 on conflict (bid_year_id, area_id, slot_date, slot_group, slot_code) do nothing;
 

@@ -197,7 +197,7 @@ const fullLeaveDates = new Set([
 
 const leaveSlotCapacity = {
   cpc: 3,
-  dev: 2,
+  dev: 4,
 };
 
 const selectedWeek = [
@@ -4972,8 +4972,8 @@ function leaveSlotCapacityForDetails(details, bucket) {
 }
 
 function standardLeaveSlotCapacity(area, bucket) {
-  if (bucket === "dev") return leaveSlotCapacity.dev;
-  return area === "TMU" ? 2 : leaveSlotCapacity.cpc;
+  if (area === "TMU") return 2;
+  return leaveSlotCapacity[bucket];
 }
 
 function leaveSlotCapacityOverrideKey(area, key) {
