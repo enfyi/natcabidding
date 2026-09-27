@@ -3616,6 +3616,20 @@ tr.occupied-row .rdo-tag {
   background: var(--gold);
 }
 
+.bid-denial-reason {
+  display: block;
+  margin: 7px 0 0;
+  max-width: 42rem;
+  color: #ffd7d4;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.app-main .bid-denial-reason {
+  color: #991b1b;
+}
+
 .round-pill {
   display: inline-flex;
   min-width: 42px;
