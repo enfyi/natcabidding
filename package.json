@@ -14,6 +14,7 @@
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
+    "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build"
   },

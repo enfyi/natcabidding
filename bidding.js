@@ -28,19 +28,19 @@ const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
 const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
-    detail: "Leave may include up to 2 bid weeks.",
+    detail: "Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.",
   },
   2: {
     label: "8 or 10 days",
-    detail: "Leave may include up to 10 days with two RDOs or 8 days with three RDOs.",
+    detail: "Pick individual dates, up to 10 days with two RDOs or 8 days with three RDOs. Dates do not need to be continuous.",
   },
   3: {
     label: "8 or 10 days",
-    detail: "Leave may include up to 10 days with two RDOs or 8 days with three RDOs.",
+    detail: "Pick individual dates, up to 10 days with two RDOs or 8 days with three RDOs. Dates do not need to be continuous.",
   },
   4: {
     label: "4 or 5 days",
-    detail: "Leave may include up to 5 days with two RDOs or 4 days with three RDOs. Prior holiday and in-lieu bids return to the allowance.",
+    detail: "Pick individual dates, up to 5 days with two RDOs or 4 days with three RDOs. Dates do not need to be continuous. Prior holiday and in-lieu bids return to the allowance.",
   },
   5: {
     label: "5 days",
@@ -146,6 +146,7 @@ let leaveRangeStartKey = "2027-04-08";
 let leaveRangeEndKey = "2027-04-09";
 let leaveRangeSelectionComplete = true;
 let leaveRangePreviewActive = false;
+const selectedLeaveDates = new Set();
 let leavePickerOpen = false;
 let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
@@ -2659,7 +2660,15 @@ function orderedLeaveRangeKeys() {
   return [leaveRangeStartKey, leaveRangeEndKey].sort();
 }
 
+function usesIndividualLeaveDateSelection() {
+  const round = currentRoundNumber();
+  return round >= 1 && round <= 4 && !leaveReplacementRequestId;
+}
+
 function leaveBuilderDateKeys() {
+  if (usesIndividualLeaveDateSelection()) {
+    return [...selectedLeaveDates].sort();
+  }
   if (!leaveRangeStartKey || !leaveRangeEndKey) return [];
   const [startKey, endKey] = orderedLeaveRangeKeys();
   const keys = [];
@@ -2694,6 +2703,21 @@ function formatLeaveRangeFromKeys(keys) {
   return `${fullFormatter.format(start)} - ${fullFormatter.format(end)}`;
 }
 
+function formatIndividualLeaveDates(keys) {
+  const sortedKeys = [...new Set(keys)].sort();
+  if (!sortedKeys.length) return "";
+  const years = new Set(sortedKeys.map((key) => dateFromKey(key).getFullYear()));
+  const showYearOnEachDate = years.size > 1;
+  const labels = sortedKeys.map((key) => dateFromKey(key).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(showYearOnEachDate ? { year: "numeric" } : {}),
+  }));
+  return showYearOnEachDate
+    ? labels.join(", ")
+    : `${labels.join(", ")}, ${[...years][0]}`;
+}
+
 function uiStatusFromDatabase(status) {
   const normalized = String(status || "").toLowerCase();
   const labels = {
@@ -2714,9 +2738,18 @@ function databaseStatusFromUi(status) {
 function syncLeaveBuilderInputs() {
   const keys = leaveBuilderDateKeys();
   const rangeInput = document.querySelector("[data-leave-range-input]");
-  const chargeableDays = chargeableLeaveDatesForInitials(formatLeaveRangeFromKeys(keys), currentUser.initials, currentRoundNumber()).length;
+  const selectionLabel = document.querySelector("[data-leave-selection-label]");
+  const chargeableDays = chargeableLeaveDateKeys(keys, currentUser.initials, currentRoundNumber()).length;
 
-  if (rangeInput) rangeInput.value = formatLeaveRangeFromKeys(keys);
+  if (selectionLabel) selectionLabel.textContent = usesIndividualLeaveDateSelection() ? "Dates" : "Date Range";
+  if (rangeInput) {
+    rangeInput.value = usesIndividualLeaveDateSelection()
+      ? formatIndividualLeaveDates(keys)
+      : formatLeaveRangeFromKeys(keys);
+    rangeInput.placeholder = usesIndividualLeaveDateSelection()
+      ? "Select individual dates"
+      : "Select a date range";
+  }
   setLeaveDaysInput(keys.length ? chargeableDays : NaN);
 }
 
@@ -2737,6 +2770,7 @@ function isLeaveBuilderRangeDate(key) {
 }
 
 function isLeaveBuilderRangeEdge(key) {
+  if (usesIndividualLeaveDateSelection()) return selectedLeaveDates.has(key);
   return key === leaveRangeStartKey || key === leaveRangeEndKey;
 }
 
@@ -2745,6 +2779,69 @@ function isLeavePreviewRangeDate(key) {
 }
 
 function selectLeaveBuilderDate(key) {
+  if (isRdoDateForInitials(key, currentUser.initials)) {
+    setLeaveBuilderStatus(`${formatCalendarDate(key)} is an RDO on your submitted line and cannot be selected for leave.`, "error");
+    return false;
+  }
+
+  if (usesIndividualLeaveDateSelection()) {
+    const round = currentRoundNumber();
+    const nextDates = new Set(selectedLeaveDates);
+    if (nextDates.has(key)) {
+      nextDates.delete(key);
+    } else {
+      nextDates.add(key);
+      if (round === 1) {
+        const projectedWeeks = roundOneProjectedWeekCount([...nextDates]);
+        if (projectedWeeks > roundOneWeekLimit()) {
+          setLeaveBuilderStatus(`That date would create a third Round 1 bid week. Choose a date within either of your two seven-day bid weeks.`, "error");
+          return false;
+        }
+      } else {
+        const committedRoundDays = leaveRoundUsageForInitials(currentUser.initials, round)
+          .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+        const draftRoundDays = leaveDraftQueue
+          .filter((item) => leaveRoundForItem(item) === round)
+          .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+        const selectedDays = chargeableLeaveDateKeys([...nextDates], currentUser.initials, round).length;
+        const projectedDays = committedRoundDays + draftRoundDays + selectedDays;
+        const roundLimit = leaveDayLimitForRound(round);
+        if (projectedDays > roundLimit) {
+          setLeaveBuilderStatus(`Round ${round} can include up to ${roundLimit} charged days. You already have ${committedRoundDays + draftRoundDays} staged or submitted.`, "error");
+          return false;
+        }
+      }
+    }
+
+    selectedLeaveDates.clear();
+    nextDates.forEach((dateKeyValue) => selectedLeaveDates.add(dateKeyValue));
+    const keys = [...selectedLeaveDates].sort();
+    leaveRangeStartKey = keys[0] || key;
+    leaveRangeEndKey = keys[keys.length - 1] || key;
+    leaveRangeSelectionComplete = keys.length > 0;
+    leaveRangePreviewActive = false;
+    selectedLeaveDateKey = key;
+    syncLeaveBuilderInputs();
+    syncLeavePickerMonthToRange();
+
+    if (!keys.length) {
+      setLeaveBuilderStatus(round === 1
+        ? "Select each Round 1 leave date individually. Dates may be skipped within a seven-day bid week."
+        : `Select each Round ${round} leave date individually. Dates do not need to be continuous.`, "info");
+      return true;
+    }
+
+    if (round === 1) {
+      const projectedWeeks = roundOneProjectedWeekCount(keys);
+      setLeaveBuilderStatus(`${keys.length} ${keys.length === 1 ? "date" : "dates"} selected across ${projectedWeeks} of ${roundOneWeekLimit()} bid weeks. Select a date again to remove it.`, "success");
+    } else {
+      const chargedDays = chargeableLeaveDateKeys(keys, currentUser.initials, round).length;
+      setLeaveBuilderStatus(`${chargedDays} of ${leaveDayLimitForRound(round)} Round ${round} days selected. Dates do not need to be continuous. Select a date again to remove it.`, "success");
+    }
+    return true;
+  }
+
+  selectedLeaveDateKey = key;
   leaveRangePreviewActive = false;
 
   if (!leaveRangeSelectionComplete) {
@@ -2774,6 +2871,8 @@ function selectLeaveBuilderDate(key) {
       : "";
     setLeaveBuilderStatus(`${range} selected.${roundOneNote} Select another date to expand the range.`, "info");
   }
+
+  return true;
 }
 
 function renderLeaveDatePicker() {
@@ -2795,9 +2894,16 @@ function renderLeaveDatePicker() {
     const key = dateKey(leavePickerYear, leavePickerMonthIndex + 1, day);
     const isInRange = selectedKeys.has(key);
     const isEdge = isLeaveBuilderRangeEdge(key);
-    const isUnavailable = !isBidLeaveYearDate(key);
+    const isOutsideLeaveYear = !isBidLeaveYearDate(key);
+    const isRdo = isRdoDateForInitials(key, currentUser.initials);
+    const isUnavailable = isOutsideLeaveYear || isRdo;
+    const unavailableLabel = isRdo
+      ? ": RDO on your submitted line; leave bidding unavailable"
+      : isOutsideLeaveYear
+        ? ": leave bidding unavailable"
+        : "";
     cells.push(`
-      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""} ${isUnavailable ? "unavailable" : ""}" type="button" ${isUnavailable ? "disabled" : `data-leave-picker-date="${key}"`} aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}${isUnavailable ? ": leave bidding unavailable" : ""}">
+      <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""} ${isRdo ? "rdo" : ""} ${isUnavailable ? "unavailable" : ""}" type="button" ${isUnavailable ? "disabled" : `data-leave-picker-date="${key}"`} aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}${unavailableLabel}">
         ${day}
       </button>
     `);
@@ -2890,20 +2996,28 @@ function roundOneWeekKeysForDateKeys(dateKeys) {
   return periodKeys.sort();
 }
 
+function leaveDateKeysForItem(item) {
+  if (Array.isArray(item?.dateKeys)) return [...new Set(item.dateKeys)].sort();
+  return datesInLeaveRange(item?.range || "");
+}
+
 function roundOneWeekKeySetForItems(items = []) {
   const roundOneItems = items.filter(isRoundOneLeaveItem);
-  const dateKeys = roundOneItems.flatMap((item) => datesInLeaveRange(item.range));
+  const dateKeys = roundOneItems.flatMap(leaveDateKeysForItem);
   return new Set(roundOneWeekKeysForDateKeys(dateKeys));
 }
 
-function roundOneProjectedWeekCount(range) {
+function roundOneProjectedWeekCount(selection) {
   const committedItems = leaveRoundUsageForInitials(currentUser.initials, 1).filter((item) =>
     submittedLeaveItemKey(item) !== leaveReplacementRequestId
   );
+  const selectionItem = Array.isArray(selection)
+    ? { dateKeys: selection, round: 1 }
+    : { range: selection, round: 1 };
   return roundOneWeekKeySetForItems([
     ...committedItems,
     ...leaveDraftQueue,
-    { range, round: 1 },
+    selectionItem,
   ]).size;
 }
 
@@ -2923,17 +3037,24 @@ function isRoundOneLeaveItem(item) {
   return item?.round === 1 || Number(item?.weekUnits || 0) > 0;
 }
 
-function chargeableLeaveDatesForInitials(range, initials = currentUser.initials, round = currentRoundNumber()) {
-  const keys = datesInLeaveRange(range);
+function chargeableLeaveDateKeys(keys, initials = currentUser.initials, round = currentRoundNumber()) {
   return keys.filter((key) =>
     !isRdoDateForInitials(key, initials) && (round <= 3 || !isHolidayDate(key, initials))
   );
 }
 
-function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
-  return datesInLeaveRange(range).filter((key) =>
+function chargeableLeaveDatesForInitials(range, initials = currentUser.initials, round = currentRoundNumber()) {
+  return chargeableLeaveDateKeys(datesInLeaveRange(range), initials, round);
+}
+
+function leaveSlotDateKeys(keys, initials = currentUser.initials) {
+  return keys.filter((key) =>
     !isRdoDateForInitials(key, initials) && !isHolidayDate(key, initials)
   );
+}
+
+function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
+  return leaveSlotDateKeys(datesInLeaveRange(range), initials);
 }
 
 function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
@@ -3115,13 +3236,13 @@ function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
 function leaveItemChargedDays(item) {
   const days = Number(item.days);
   if (Number.isFinite(days) && days > 0) return days;
-  return chargeableLeaveDatesForInitials(item.range, item.initials || currentUser.initials, leaveRoundForItem(item)).length;
+  return chargeableLeaveDateKeys(leaveDateKeysForItem(item), item.initials || currentUser.initials, leaveRoundForItem(item)).length;
 }
 
 function leaveHolidayDateSet(items) {
   return items.reduce((holidays, item) => {
     const round = leaveRoundForItem(item);
-    chargeableLeaveDatesForInitials(item.range, item.initials || currentUser.initials, round).forEach((key) => {
+    chargeableLeaveDateKeys(leaveDateKeysForItem(item), item.initials || currentUser.initials, round).forEach((key) => {
       if (isHolidayDate(key, item.initials || currentUser.initials)) holidays.add(key);
     });
     return holidays;
@@ -3180,6 +3301,7 @@ function activeLeavePreviewItem() {
 
   return {
     range,
+    dateKeys: leaveBuilderDateKeys(),
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     round: currentRoundNumber(),
@@ -3187,8 +3309,8 @@ function activeLeavePreviewItem() {
 }
 
 function leaveDisplayDatesForItem(item, initials = currentUser.initials) {
-  return chargeableLeaveDatesForInitials(
-    item.range,
+  return chargeableLeaveDateKeys(
+    leaveDateKeysForItem(item),
     item.initials || initials,
     isRoundOneLeaveItem(item) ? 1 : Number(item.round || currentRoundNumber())
   );
@@ -3223,7 +3345,7 @@ function visibleLeaveSlotDetailsFromMap(
   };
   const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
-  if (showCurrentUserOverlay && previewItem && leaveSlotDatesForInitials(previewItem.range, currentUser.initials).includes(key)) {
+  if (showCurrentUserOverlay && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
     const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   }
@@ -3237,7 +3359,7 @@ function visibleLeaveSlotDetailsFromMap(
 
   leaveDraftQueue.forEach((item) => {
     if (!showCurrentUserOverlay) return;
-    if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
+    if (!leaveSlotDateKeys(leaveDateKeysForItem(item), currentUser.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   });
@@ -3297,17 +3419,16 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const { range, notes } = leaveBuilderValues();
+  const { range: rangeValue, notes } = leaveBuilderValues();
   const round = currentRoundNumber();
   const isRoundOne = round === 1;
-  if (!range) {
-    setLeaveBuilderStatus("Enter a date range before adding leave.", "error");
-    return;
-  }
-
-  const dateKeys = datesInLeaveRange(range);
+  const individualDates = usesIndividualLeaveDateSelection();
+  const dateKeys = individualDates ? leaveBuilderDateKeys() : datesInLeaveRange(rangeValue);
+  const selectionDisplay = individualDates ? formatIndividualLeaveDates(dateKeys) : rangeValue;
   if (!dateKeys.length) {
-    setLeaveBuilderStatus("Use a range like Jun 9 - Jun 13, 2027 or a single day like Jun 9, 2027.", "error");
+    setLeaveBuilderStatus(individualDates
+      ? `Select at least one individual Round ${round} leave date.`
+      : "Use a range like Jun 9 - Jun 13, 2027 or a single day like Jun 9, 2027.", "error");
     return;
   }
 
@@ -3321,8 +3442,8 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
-  const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  const chargeableDates = chargeableLeaveDateKeys(dateKeys, currentUser.initials, round);
+  const rdoDates = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
   if (round > 1 && rdoDates.length) {
     setLeaveBuilderStatus(`Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Choose different dates.`, "error");
     return;
@@ -3342,7 +3463,7 @@ function addOrUpdateLeaveSubmission() {
       ...leaveDraftQueue,
     ];
     const existingWeekKeys = roundOneWeekKeySetForItems(existingItems);
-    const combinedWeekKeys = roundOneWeekKeySetForItems([...existingItems, { range, round }]);
+    const combinedWeekKeys = roundOneWeekKeySetForItems([...existingItems, { dateKeys, round }]);
     const combinedWeeks = combinedWeekKeys.size;
     if (combinedWeeks > roundOneWeekLimit()) {
       setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This would use ${combinedWeeks}.`, "error");
@@ -3360,7 +3481,7 @@ function addOrUpdateLeaveSubmission() {
 
   }
 
-  const projectedChargedDays = leaveProjectedChargedDays([{ range, days: chargedDays, round, weekUnits, weekKeys }]);
+  const projectedChargedDays = leaveProjectedChargedDays([{ dateKeys, range: selectionDisplay, days: chargedDays, round, weekUnits, weekKeys }]);
   const allowanceLimit = leaveAllowanceLimitForRound(round);
   if (projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
@@ -3378,37 +3499,57 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const normalizedRange = range.toLowerCase();
-  const matchingBid = leaveBids.find((bid) => bid.range.toLowerCase() === normalizedRange);
-  if (matchingBid?.status === "Approved") {
-    setLeaveBuilderStatus("That date range is already approved in your leave queue. Change the range to add a new request.", "error");
+  const activeDateKeys = new Set(activeLeaveItemsForInitials(currentUser.initials).flatMap(leaveDateKeysForItem));
+  const alreadyBidDates = dateKeys.filter((key) => activeDateKeys.has(key));
+  if (alreadyBidDates.length) {
+    setLeaveBuilderStatus(`You already bid ${formatLeaveConflictDates(alreadyBidDates)}. Select different dates.`, "error");
     return;
   }
 
-  if (draftRangeExists(range)) {
-    setLeaveBuilderStatus("That date range is already in your preview batch.", "error");
+  const draftDates = leaveDraftDateSet();
+  const duplicateDraftDates = dateKeys.filter((key) => draftDates.has(key));
+  if (duplicateDraftDates.length) {
+    setLeaveBuilderStatus(`${formatLeaveConflictDates(duplicateDraftDates)} ${duplicateDraftDates.length === 1 ? "is" : "are"} already in your preview batch.`, "error");
     return;
   }
 
   const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
-  const draft = {
-    id: `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`,
-    range,
-    days: chargedDays,
-    notes,
-    round,
-    weekUnits,
-    weekKeys,
-  };
-  leaveDraftQueue.push(draft);
+  const draftId = `draft-leave-${currentUser.initials.toLowerCase()}-${Date.now()}`;
+  const newDrafts = individualDates
+    ? dateKeys.map((key, index) => ({
+        id: `${draftId}-${index}`,
+        range: formatLeaveRangeFromKeys([key]),
+        dateKeys: [key],
+        days: chargeableLeaveDateKeys([key], currentUser.initials, round).length,
+        notes,
+        round,
+        weekUnits: 0,
+        weekKeys: [],
+      }))
+    : [{
+        id: draftId,
+        range: rangeValue,
+        dateKeys,
+        days: chargedDays,
+        notes,
+        round,
+        weekUnits,
+        weekKeys,
+      }];
+  leaveDraftQueue.push(...newDrafts);
   const leaveNotesInput = document.querySelector("[data-leave-notes-input]");
   if (leaveNotesInput) leaveNotesInput.value = "";
   leaveRangeSelectionComplete = true;
   leaveRangePreviewActive = false;
+  if (individualDates) {
+    selectedLeaveDates.clear();
+    leaveRangeSelectionComplete = false;
+    syncLeaveBuilderInputs();
+  }
 
   refreshLeaveDraftUi([
     ...previousPreviewKeys,
-    ...leaveDisplayDatesForItem(draft, currentUser.initials),
+    ...newDrafts.flatMap((draft) => leaveDisplayDatesForItem(draft, currentUser.initials)),
   ]);
   const roundOneSuffix = isRoundOne
     ? newRoundOneWeeks
@@ -3416,7 +3557,7 @@ function addOrUpdateLeaveSubmission() {
       : ` inside an existing bid week, charging ${chargedDays} ${chargedDays === 1 ? "day" : "days"}`
     : "";
   const rdoSuffix = rdoDates.length ? ` ${formatLeaveConflictDates(rdoDates)} ${rdoDates.length === 1 ? "was" : "were"} removed as RDO ${rdoDates.length === 1 ? "date" : "dates"}.` : "";
-  setLeaveBuilderStatus(`${range} added to the preview batch${roundOneSuffix}.${rdoSuffix} Submit the batch when everything looks right.`, "success");
+  setLeaveBuilderStatus(`${selectionDisplay} added to the preview batch${roundOneSuffix}.${rdoSuffix} Submit the batch when everything looks right.`, "success");
 }
 
 function previewLeaveSubmission() {
@@ -3426,13 +3567,16 @@ function previewLeaveSubmission() {
     return;
   }
 
-  const { range } = leaveBuilderValues();
+  const { range: rangeValue } = leaveBuilderValues();
   const round = currentRoundNumber();
-  const dateKeys = datesInLeaveRange(range);
+  const individualDates = usesIndividualLeaveDateSelection();
+  const dateKeys = individualDates ? leaveBuilderDateKeys() : datesInLeaveRange(rangeValue);
   const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
 
   if (!dateKeys.length) {
-    setLeaveBuilderStatus("Enter a date range before previewing leave.", "error");
+    setLeaveBuilderStatus(individualDates
+      ? `Select at least one individual Round ${round} leave date before previewing.`
+      : "Enter a date range before previewing leave.", "error");
     return;
   }
 
@@ -3450,8 +3594,8 @@ function previewLeaveSubmission() {
     return;
   }
 
-  const chargeableDates = chargeableLeaveDatesForInitials(range, currentUser.initials, round);
-  const rdoDates = leaveRdoDatesForInitials(range, currentUser.initials);
+  const chargeableDates = chargeableLeaveDateKeys(dateKeys, currentUser.initials, round);
+  const rdoDates = dateKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials));
   if (round > 1 && rdoDates.length) {
     setLeaveBuilderStatus(`Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Choose different dates.`, "error");
     return;
@@ -3461,7 +3605,7 @@ function previewLeaveSubmission() {
     setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
-  const weekUnits = round === 1 ? roundOneProjectedWeekCount(range) : 0;
+  const weekUnits = round === 1 ? roundOneProjectedWeekCount(dateKeys) : 0;
 
   if (round === 1 && weekUnits > roundOneWeekLimit()) {
     setLeaveBuilderStatus(`Round 1 can include up to ${roundOneWeekLimit()} bid weeks. This selection would use ${weekUnits}.`, "error");
@@ -3483,7 +3627,7 @@ function previewLeaveSubmission() {
   const rdoSuffix = rdoDates.length ? ` ${formatLeaveConflictDates(rdoDates)} ${rdoDates.length === 1 ? "is" : "are"} removed as RDO ${rdoDates.length === 1 ? "date" : "dates"}.` : "";
   const previewMessage = round === 1
     ? `This selection would use ${weekUnits} of ${roundOneWeekLimit()} Round 1 bid ${weekUnits === 1 ? "week" : "weeks"} with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix}`
-    : `Previewing this range with ${chargeableDates.length} chargeable ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix} Use Add to Batch when you want to stage it.`;
+    : `Previewing ${chargeableDates.length} individually selected ${chargeableDates.length === 1 ? "day" : "days"}.${rdoSuffix} Use Add to Batch when you want to stage them.`;
   setLeaveBuilderStatus(previewMessage, "info");
 }
 
@@ -3506,14 +3650,14 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
 
   for (const draft of drafts) {
     const round = Number(draft.round || currentRoundNumber());
-    const rdoDates = leaveRdoDatesForInitials(draft.range, currentUser.initials);
+    const rdoDates = leaveDateKeysForItem(draft).filter((key) => isRdoDateForInitials(key, currentUser.initials));
     if (round > 1 && rdoDates.length) {
       return `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}. Remove those dates before submitting.`;
     }
   }
 
   drafts.forEach((draft) => {
-    datesInLeaveRange(draft.range).forEach((key) => {
+    leaveDateKeysForItem(draft).forEach((key) => {
       if (requestedDates.has(key)) overlappingDates.add(key);
       requestedDates.set(key, Number(draft.round || currentRoundNumber()));
     });
@@ -3526,7 +3670,7 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
   const previousRoundDates = new Set();
   activeLeaveItemsForInitials(currentUser.initials).forEach((item) => {
     const priorRound = leaveRoundForItem(item);
-    datesInLeaveRange(item.range).forEach((key) => {
+    leaveDateKeysForItem(item).forEach((key) => {
       const requestedRound = requestedDates.get(key);
       if (requestedRound && priorRound <= requestedRound) previousRoundDates.add(key);
     });
@@ -4250,7 +4394,8 @@ async function saveIntakeOverride(id) {
 }
 
 function selectedRdoWeekdays() {
-  const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0] || rdoLines[0];
+  const submittedLine = submittedRdoLineForInitials(currentUser.initials);
+  const line = submittedLine || rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0] || rdoLines[0];
   return rdoWeekdaysForLine(line);
 }
 
@@ -4309,6 +4454,9 @@ function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlot
     rdoWeekdays: showRdo ? selectedRdoWeekdays() : new Set(),
     draftDates: showPersonalLeave ? leaveDraftDateSet() : new Set(),
     previewDates: showPersonalLeave && leaveRangePreviewActive ? new Set(leaveBuilderDateKeys()) : new Set(),
+    builderDates: showPersonalLeave && usesIndividualLeaveDateSelection() && !leaveRangePreviewActive
+      ? new Set(leaveBuilderDateKeys())
+      : new Set(),
     slotMap: leaveSlotMap(area),
     baseSlotDetails: new Map(),
     visibleSlotDetails: new Map(),
@@ -4576,8 +4724,16 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const canShowLeaveState = showVacationLayer && !isRdo && isInsideLeaveYear;
   const isApprovedLeave = leaveStatus === "approved" && canShowLeaveState;
   const isPendingLeave = leaveStatus === "pending" && canShowLeaveState;
-  const isDraftLeave = showVacationLayer && showPersonalLeave && canShowLeaveState && (
-    context ? context.draftDates.has(key) || context.previewDates.has(key) : isDraftLeaveDate(key) || isLeavePreviewRangeDate(key)
+  const isPreviewLeave = showVacationLayer && showPersonalLeave && isInsideLeaveYear && (
+    context ? context.previewDates.has(key) : isLeavePreviewRangeDate(key)
+  );
+  const isDraftLeave = isPreviewLeave || (
+    showVacationLayer && showPersonalLeave && canShowLeaveState && (
+      context ? context.draftDates.has(key) : isDraftLeaveDate(key)
+    )
+  );
+  const isBuilderDate = showVacationLayer && showPersonalLeave && canShowLeaveState && (
+    context ? context.builderDates.has(key) : usesIndividualLeaveDateSelection() && !leaveRangePreviewActive && isLeaveBuilderRangeDate(key)
   );
   const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
@@ -4597,6 +4753,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     holidayKind?.className || "",
     isPreviousLeaveYear ? "previous-leave-year-day" : "",
     isAfterLeaveYear ? "after-leave-year-day" : "",
+    isBuilderDate ? "builder-range-day builder-range-edge" : "",
     isDraftLeave ? "draft-leave-day" : "",
     isPendingLeave ? "pending-leave-day" : "",
     isApprovedLeave ? "leave-day" : "",
@@ -4627,7 +4784,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     : 'aria-disabled="true"';
 
   return `
-    <button class="${className}" type="button" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
+    <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
       ${isFatigueWeekStart ? `<i class="fatigue-week-dot" aria-hidden="true"></i>` : ""}
       ${expandedSlots ? `
         <span class="expanded-day-heading">
@@ -4723,10 +4880,15 @@ function syncMemberCalendarSelection(previousPreviewKeys = []) {
 
   const draftDates = leaveDraftDateSet();
   const previewDates = leaveRangePreviewActive ? new Set(leaveBuilderDateKeys()) : new Set();
-  document.querySelectorAll(".app-shell [data-leave-date]").forEach((button) => {
-    const key = button.dataset.leaveDate;
-    button.classList.toggle("selected-date", key === selectedLeaveDateKey);
+  const builderDates = usesIndividualLeaveDateSelection() && !leaveRangePreviewActive
+    ? new Set(leaveBuilderDateKeys())
+    : new Set();
+  document.querySelectorAll(".app-shell [data-calendar-date]").forEach((button) => {
+    const key = button.dataset.calendarDate;
+    button.classList.toggle("selected-date", key === selectedLeaveDateKey && !button.classList.contains("rdo-day"));
     button.classList.toggle("draft-leave-day", draftDates.has(key) || previewDates.has(key));
+    button.classList.toggle("builder-range-day", builderDates.has(key));
+    button.classList.toggle("builder-range-edge", builderDates.has(key));
   });
 }
 
@@ -7940,6 +8102,10 @@ function openLeaveBuilderForMoreDates() {
   }
 
   leaveReplacementRequestId = "";
+  selectedLeaveDates.clear();
+  leaveRangeSelectionComplete = false;
+  leaveRangePreviewActive = false;
+  syncLeaveBuilderInputs();
   renderSubmittedLeaveManager();
 
   const rangeInput = document.querySelector("[data-leave-range-input]");
@@ -7947,7 +8113,12 @@ function openLeaveBuilderForMoreDates() {
   rangeInput?.focus({ preventScroll: true });
   syncLeavePickerMonthToRange();
   setLeavePickerOpen(true);
-  setLeaveBuilderStatus("Select another date range, add it to the batch, and submit it before your window closes.", "info");
+  const round = currentRoundNumber();
+  setLeaveBuilderStatus(round === 1
+    ? "Select each additional Round 1 date individually, add the selection to the batch, and submit it before your window closes."
+    : round <= 4
+      ? `Select each additional Round ${round} date individually, add the selection to the batch, and submit it before your window closes.`
+      : "Select another date range, add it to the batch, and submit it before your window closes.", "info");
 }
 
 function openSubmittedLeaveForReplacement(itemKey) {
@@ -11858,8 +12029,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
-    selectedLeaveDateKey = leavePickerDateButton.dataset.leavePickerDate;
-    selectLeaveBuilderDate(selectedLeaveDateKey);
+    selectLeaveBuilderDate(leavePickerDateButton.dataset.leavePickerDate);
     syncMemberCalendarSelection(previousPreviewKeys);
     renderLeaveDatePicker();
     return;
@@ -12246,15 +12416,18 @@ document.addEventListener("click", async (event) => {
   const leaveDateButton = event.target.closest("[data-leave-date]");
   if (leaveDateButton) {
     const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
-    selectedLeaveDateKey = leaveDateButton.dataset.leaveDate;
     const isAppCalendar = Boolean(event.target.closest(".app-shell"));
+    const individualDates = isAppCalendar && usesIndividualLeaveDateSelection();
     if (isAppCalendar) {
-      selectLeaveBuilderDate(selectedLeaveDateKey);
+      selectLeaveBuilderDate(leaveDateButton.dataset.leaveDate);
+    } else {
+      selectedLeaveDateKey = leaveDateButton.dataset.leaveDate;
     }
     syncMemberCalendarSelection(previousPreviewKeys);
     if (!isAppCalendar) return;
     syncLeaveBuilderInputs();
     renderLeaveDatePicker();
+    if (individualDates) return;
     openLeaveSlotModal();
     return;
   }
