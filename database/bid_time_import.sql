@@ -13,16 +13,27 @@ stable
 security definer
 set search_path = ''
 as $$
-  select b.id
-  from public.bidders b
+  with ranked_bidders as (
+    select
+      b.id,
+      b.initials,
+      row_number() over (
+        partition by b.area_id
+        order by b.seniority_rank nulls last, b.last_name, b.first_name, b.id
+      )::integer as area_seniority_rank
+    from public.bidders b
+    where b.active
+      and b.bid_role not in ('ADM', 'NB')
+  )
+  select ranked.id
+  from ranked_bidders ranked
+  join public.bidders b on b.id = ranked.id
   where private.is_current_admin()
     and b.area_id = requested_area_id
-    and b.active
-    and b.bid_role not in ('ADM', 'NB')
-    and b.seniority_rank = requested_rank
+    and ranked.area_seniority_rank = requested_rank
     and (
       nullif(trim(requested_initials), '') is null
-      or upper(trim(coalesce(b.initials, ''))) = upper(trim(requested_initials))
+      or upper(trim(coalesce(ranked.initials, ''))) = upper(trim(requested_initials))
     )
   limit 1;
 $$;

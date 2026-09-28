@@ -5,7 +5,7 @@ export async function GET() {
   const config = {
     url,
     publishableKey,
-    authRedirectUrl: getSiteUrl(),
+    authRedirectUrl: `${getSiteUrl()}/bidding.html`,
     environment: process.env.NEXT_PUBLIC_APP_ENVIRONMENT?.trim() || 'production',
   }
 
