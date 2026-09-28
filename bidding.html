@@ -1259,9 +1259,9 @@
                   <form class="roster-form" data-roster-form>
                     <input type="hidden" data-roster-edit-initials />
                     <input type="hidden" data-roster-edit-index />
-                    <label>First Name <input type="text" data-roster-first-name /></label>
-                    <label>Last Name <input type="text" data-roster-last-name /></label>
-                    <label>Initials <input type="text" maxlength="4" data-roster-initials /></label>
+                    <label>First Name <input type="text" name="first_name" autocomplete="given-name" required data-roster-first-name /></label>
+                    <label>Last Name <input type="text" name="last_name" autocomplete="family-name" required data-roster-last-name /></label>
+                    <label>Initials <input type="text" name="initials" autocomplete="off" maxlength="4" required data-roster-initials /></label>
                     <label>Email <input type="email" data-roster-email /></label>
                     <label>Phone <input type="tel" data-roster-phone /></label>
                     <label>Area
