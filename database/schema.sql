@@ -72,6 +72,23 @@ create table if not exists bid_year_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists bidder_bid_year_settings (
+  bid_year_id uuid not null references bid_years(id) on delete cascade,
+  bidder_id uuid not null references bidders(id) on delete cascade,
+  is_ghost_bidder boolean not null default false,
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (bid_year_id, bidder_id)
+);
+
+create index if not exists bidder_bid_year_settings_bidder_idx
+  on bidder_bid_year_settings(bidder_id);
+
+create index if not exists bidder_bid_year_settings_updated_by_idx
+  on bidder_bid_year_settings(updated_by)
+  where updated_by is not null;
+
 create table if not exists rdo_lines (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
@@ -205,6 +222,7 @@ create table if not exists leave_requests (
   reviewed_at timestamptz,
   reviewed_by uuid references bidders(id) on delete set null,
   denial_reason text,
+  is_ghost_bid boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, bidder_id, round_number, priority)
@@ -267,6 +285,7 @@ create table if not exists intake_submissions (
   reviewed_at timestamptz,
   reviewed_by uuid references bidders(id) on delete set null,
   denial_reason text,
+  is_ghost_bid boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

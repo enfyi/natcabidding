@@ -115,15 +115,7 @@ begin
     else 'cpc'
   end;
 
-  select rl.id
-  into target_rdo_line_id
-  from public.rdo_lines rl
-  where rl.bid_year_id = request_row.bid_year_id
-    and rl.area_id = target.area_id
-    and rl.assigned_bidder_id = target.id
-    and rl.status = 'taken'
-  order by rl.updated_at desc, rl.id
-  limit 1;
+  target_rdo_line_id := public.effective_rdo_line_id(request_row.bid_year_id, target.id);
 
   target_rdo_line_id := coalesce(target_rdo_line_id, proposed_rdo_line_id);
   if target_rdo_line_id is null and request_row.status in ('pending','approved') then raise exception 'Select an RDO line before editing leave.'; end if;
@@ -347,14 +339,15 @@ begin
     on bucket.leave_request_id = request_row.id
    and generated_date::date between bucket.bucket_start_date and bucket.bucket_end_date;
 
-  for edit_date in
-    select request_date.leave_date
-    from public.leave_request_dates request_date
-    where request_date.leave_request_id = request_row.id
-      and request_date.charged
-      and request_row.status in ('pending','approved')
-    order by request_date.leave_date
-  loop
+  if not request_row.is_ghost_bid then
+    for edit_date in
+      select request_date.leave_date
+      from public.leave_request_dates request_date
+      where request_date.leave_request_id = request_row.id
+        and request_date.charged
+        and request_row.status in ('pending','approved')
+      order by request_date.leave_date
+    loop
     select count(*)::integer
     into open_slot_count
     from public.leave_slots slot
@@ -375,6 +368,7 @@ begin
       on pending_bidder.id = pending_request.bidder_id
     where pending_request.bid_year_id = request_row.bid_year_id
       and pending_request.status = 'pending'
+      and not pending_request.is_ghost_bid
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
@@ -441,7 +435,8 @@ begin
       raise exception 'No % leave slot is available on %. Select the capacity override to approve this replacement.',
         upper(target_bucket), to_char(edit_date, 'Mon FMDD, YYYY');
     end if;
-  end loop;
+    end loop;
+  end if;
 
   update public.leave_requests request
   set requested_start_date = replacement_start_date,
@@ -518,19 +513,20 @@ returns jsonb language sql stable set search_path = '' as $$
 select jsonb_build_object(
   'bidder_id', target_id,
   'bidder_version', (select b.updated_at from public.bidders b where b.id=target_id),
+  'is_ghost_bidder', public.is_ghost_bidder(year_id, target_id),
   'assignment', (select to_jsonb(x) from (
     select id, line_code, fatigue_group, flex, aws, mid, four_ten, updated_at
     from public.rdo_lines where bid_year_id=year_id and assigned_bidder_id=target_id
       and status='taken' order by updated_at desc,id limit 1
   ) x),
   'rdo', (select to_jsonb(x) from (
-    select id, rdo_line_id, round_number, status, payload, updated_at
+    select id, rdo_line_id, round_number, status, payload, is_ghost_bid, updated_at
     from public.intake_submissions where bid_year_id=year_id and bidder_id=target_id
       and submission_type='rdo' and status in ('pending','approved')
     order by submitted_at desc nulls last,created_at desc,id limit 1
   ) x),
   'leave', coalesce((select jsonb_agg(to_jsonb(x) order by round_number,priority,id) from (
-    select id, round_number, priority, status, requested_start_date, requested_end_date, charged_days, updated_at
+    select id, round_number, priority, status, requested_start_date, requested_end_date, charged_days, is_ghost_bid, updated_at
     from public.leave_requests where bid_year_id=year_id and bidder_id=target_id
   ) x),'[]'::jsonb)
 ) $$;
@@ -544,7 +540,8 @@ begin
   select id into strict year_id from public.bid_years where bid_year=requested_bid_year;
   if target_bidder_id is null then
     select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) into result from (
-      select b.id,b.first_name,b.last_name,b.initials,a.name area,b.bid_role
+      select b.id,b.first_name,b.last_name,b.initials,a.name area,b.bid_role,
+        public.is_ghost_bidder(year_id,b.id) is_ghost_bidder
       from public.bidders b join public.areas a on a.id=b.area_id
       join public.bidders actor on actor.id=actor_id
       where b.active and b.bid_role <> 'ADM' and (actor.role='admin' or b.area_id=actor.area_id)
@@ -572,6 +569,7 @@ declare
   rdo_id uuid; rdo_status text; group_name text; area_max integer; crew_max integer;
   start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer;
   bucket text; d date; r record;
+  ghost_bid boolean;
 begin
   actor_id := private.bidder_editor_actor(target_bidder_id);
   select * into strict target from public.bidders where id=target_bidder_id for update;
@@ -579,6 +577,7 @@ begin
     raise exception 'This profile cannot be edited as a bidder.';
   end if;
   select id into strict year_id from public.bid_years where bid_year=requested_bid_year;
+  ghost_bid := public.is_ghost_bidder(year_id,target.id);
   perform id from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id order by id for update;
   perform id from public.intake_submissions where bid_year_id=year_id and bidder_id=target.id order by id for update;
   perform id from public.leave_requests where bid_year_id=year_id and bidder_id=target.id order by id for update;
@@ -625,7 +624,7 @@ begin
     end if;
     rdo_id := (before_state->'rdo'->>'id')::uuid;
     rdo_status := coalesce(before_state->'rdo'->>'status','approved');
-    if rdo_status='approved' and target.bid_role <> 'GL' then
+    if rdo_status='approved' and target.bid_role <> 'GL' and not ghost_bid then
       update public.rdo_lines set status='open',assigned_bidder_id=null,assigned_initials=null,updated_at=now()
         where bid_year_id=year_id and assigned_bidder_id=target.id and id<>line_row.id;
       update public.rdo_lines set status='taken',assigned_bidder_id=target.id,assigned_initials=target.initials,
@@ -634,14 +633,17 @@ begin
       perform public.refresh_bidder_holiday_in_lieu(year_id,target.id);
     end if;
     entry := jsonb_build_object('line',line_row.line_code,'rdo_line_code',line_row.line_code,'fatigueGroup',group_name,
-      'fatigue_group',group_name,'flex',(line_change->>'flex')::boolean,'aws',(line_change->>'aws')::boolean,'mid',line_change->>'mid','bidAs',target.bid_role);
+      'fatigue_group',group_name,'flex',(line_change->>'flex')::boolean,'aws',(line_change->>'aws')::boolean,
+      'mid',line_change->>'mid','bidAs',target.bid_role,'ghostBid',ghost_bid,
+      'lineLabel',case when ghost_bid then 'Ghost Line' else 'RDO Line' end);
     if rdo_id is null then
-      insert into public.intake_submissions(bid_year_id,area_id,bidder_id,round_number,submission_type,status,rdo_line_id,payload,submitted_at,reviewed_at,reviewed_by)
-      values(year_id,target.area_id,target.id,1,'rdo','approved',line_row.id,entry,now(),now(),actor_id) returning id into rdo_id;
+      insert into public.intake_submissions(bid_year_id,area_id,bidder_id,round_number,submission_type,status,rdo_line_id,payload,submitted_at,reviewed_at,reviewed_by,is_ghost_bid)
+      values(year_id,target.area_id,target.id,1,'rdo','approved',line_row.id,entry,now(),now(),actor_id,ghost_bid) returning id into rdo_id;
     else
-      update public.intake_submissions set rdo_line_id=line_row.id,payload=(payload-'summary')||entry,updated_at=now()
+      update public.intake_submissions set rdo_line_id=line_row.id,is_ghost_bid=ghost_bid,payload=(payload-'summary')||entry,updated_at=now()
         where id=rdo_id;
     end if;
+    if rdo_status='approved' then perform public.refresh_bidder_holiday_in_lieu(year_id,target.id); end if;
   elsif before_state->'rdo' <> 'null'::jsonb or before_state->'assignment' <> 'null'::jsonb then
     raise exception 'Select an RDO line; an existing RDO bid cannot be removed here.';
   end if;

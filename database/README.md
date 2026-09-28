@@ -25,6 +25,20 @@ excluded from seniority bid-window slots, RDO eligibility, and leave bidding.
 Run `database/admin_profile_adm.sql` to mark the standalone Area A admin login
 for `zla.bidding@gmail.com` as `ADM` and clear any bid windows attached to it.
 
+For bid-year-specific ghost bidding, run `database/ghost_bidding.sql` after the
+base schema, then run or re-run `database/transactional_bidding.sql` and
+`database/high_priority_bidding_fixes.sql` (when that migration is part of the
+installation), followed by `database/leave_submission_preflight.sql`,
+`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
+preflight migration after either script that replaces the leave submission
+function so its transactional wrapper remains installed. Intake can designate a controller before the
+controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
+their account and audit history without taking the source line. Their ghost
+leave remains visible in the account and intake queue without reserving or
+consuming an area leave slot. The designation cannot be changed after pending or
+approved RDO/leave bids exist, preventing mixed consuming and non-consuming
+records for the same bid year.
+
 For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
 the admin-only database operation that safely resizes each day's slot inventory.

@@ -111,6 +111,7 @@ let pilotState = {
   lastResetAt: null,
 };
 let leaveSlotCapacityOverrides = {};
+const ghostBidderIds = new Set();
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -1604,6 +1605,8 @@ function rosterEntryToPerson(entry, rank = null, options = {}) {
     phone: seniorityEntryPhone(entry),
     active: seniorityEntryActive(entry),
     leaveSlotAllowance: seniorityEntryLeaveSlotAllowance(entry),
+    profileId: seniorityEntryProfileId(entry),
+    ghostBidder: ghostBidderIds.has(seniorityEntryProfileId(entry)),
   };
 }
 
@@ -2119,9 +2122,11 @@ async function addOrUpdateRdoSubmission() {
 
   const existing = currentUserRdoRequest();
   const round = currentRoundNumber();
+  const ghostBid = Boolean(currentUser.ghostBidder);
   const request = {
     id: existing?.id || `rdo-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     type: "RDO Line",
+    ghostBid,
     area: currentUser.area,
     name: userFullName(),
     initials: currentUser.initials,
@@ -2137,7 +2142,7 @@ async function addOrUpdateRdoSubmission() {
     flex: selectedFlexPreference,
     aws: selectedAwsPreference,
     mid: selectedMidValue(line),
-    summary: `Round ${round} · Line ${line.line} · Group ${selectedFatigueGroup} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${selectedFatigueGroup} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
   try {
@@ -2177,7 +2182,7 @@ function manualBidControllerOptions(selectedInitials, query = "") {
     : matches;
   return visiblePeople.map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
-    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}`;
+    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}${person.ghostBidder ? " · Ghost Bidder" : ""}`;
     return `<option value="${escapeHtml(person.initials)}"${selected}>${escapeHtml(label)}</option>`;
   }).join("");
 }
@@ -2409,6 +2414,7 @@ async function submitManualRdoBid(panel, person, area) {
   const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
   const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
   const submittedAt = formatDateTime(new Date());
+  const ghostBid = Boolean(person.ghostBidder);
   const existing = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
     item.initials === person.initials &&
@@ -2417,12 +2423,14 @@ async function submitManualRdoBid(panel, person, area) {
   const request = {
     id: existing?.id || `manual-rdo-${person.initials.toLowerCase()}-${Date.now()}`,
     type: "RDO Line",
+    ghostBid,
     area,
     name: controllerName(person),
     initials: person.initials,
     bidAs: person.bidAs,
     seniority: person.rank,
     status: "Pending",
+    round: currentRoundNumber(),
     submittedAt,
     approvedBy: "",
     approvedAt: "",
@@ -2435,7 +2443,7 @@ async function submitManualRdoBid(panel, person, area) {
     flex,
     aws,
     mid,
-    summary: `Line ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
+    summary: `${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
 
   setManualBidStatus(panel, `Saving ${person.initials}'s RDO bid to Supabase...`);
@@ -2527,7 +2535,7 @@ async function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
-  const capacityMessage = leaveAreaCapacityMessage(area, person.bidAs, [{
+  const capacityMessage = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{
     area,
     bidAs: person.bidAs,
     initials: person.initials,
@@ -2541,6 +2549,7 @@ async function submitManualLeaveBid(panel, person, area) {
   const request = {
     id: `manual-leave-${person.initials.toLowerCase()}-${Date.now()}`,
     type: "Leave",
+    ghostBid: Boolean(person.ghostBidder),
     area,
     name: controllerName(person),
     initials: person.initials,
@@ -2555,7 +2564,7 @@ async function submitManualLeaveBid(panel, person, area) {
     round,
     weekUnits,
     weekKeys,
-    summary: `${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${person.ghostBidder ? "Ghost Leave · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
 
   setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
@@ -2944,13 +2953,13 @@ function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !item.ghostBid && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !item.ghostBid && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -3265,7 +3274,7 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const capacityMessage = leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
+  const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
     { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials },
   ]);
@@ -3442,7 +3451,7 @@ async function submitLeaveDraftBatch() {
     return;
   }
 
-  const capacityMessage = leaveAreaCapacityMessage(
+  const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(
     currentUser.area,
     currentUserBidAs(),
     leaveDraftQueue.map((draft) => ({
@@ -3463,6 +3472,7 @@ async function submitLeaveDraftBatch() {
   const newRequests = leaveDraftQueue.map((draft) => ({
     id: `leave-${currentUser.initials.toLowerCase()}-${Date.now()}-${draft.id}`,
     type: "Leave",
+    ghostBid: Boolean(currentUser.ghostBidder),
     area: currentUser.area,
     name: userFullName(),
     initials: currentUser.initials,
@@ -3477,7 +3487,7 @@ async function submitLeaveDraftBatch() {
     round: draft.round,
     weekUnits: draft.weekUnits || 0,
     weekKeys: draft.weekKeys || [],
-    summary: `${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
+    summary: `${currentUser.ghostBidder ? "Ghost Leave · " : ""}${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
@@ -3506,6 +3516,7 @@ async function submitLeaveDraftBatch() {
         round: request.round,
         weekUnits: request.weekUnits,
         weekKeys: request.weekKeys,
+        ghostBid: request.ghostBid,
       });
     }
   });
@@ -3589,9 +3600,15 @@ function bidRecipientEmail(item) {
   return recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`;
 }
 
+function bidTypeLabel(item) {
+  if (item?.type === "RDO Line" && item.ghostBid) return "Ghost Line";
+  if (item?.type === "Leave" && item.ghostBid) return "Ghost Leave";
+  return item?.type || "Bid";
+}
+
 function bidEmailDetail(item) {
   if (item.type === "RDO Line") {
-    return `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
+    return `${item.ghostBid ? "Ghost Line" : "RDO Line"} ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
   }
 
   const weekText = item.weekUnits ? `, ${item.weekUnits} bid ${item.weekUnits === 1 ? "week" : "weeks"}` : "";
@@ -3614,9 +3631,9 @@ function queueBidSubmittedEmail(items) {
   const round = bidRound(first);
   const detail = submissions.map((item, index) => {
     const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
-    return `${prefix}${item.type} bid details: ${bidEmailDetail(item)}`;
+    return `${prefix}${bidTypeLabel(item)} bid details: ${bidEmailDetail(item)}`;
   }).join("\n");
-  const subjectType = submissions.length > 1 ? `${submissions.length} leave bids` : `${first.type} bid`;
+  const subjectType = submissions.length > 1 ? `${submissions.length} ${first.ghostBid ? "ghost leave" : "leave"} bids` : `${bidTypeLabel(first)} bid`;
 
   queueNotificationEmail(
     bidRecipientEmail(first),
@@ -3639,7 +3656,7 @@ function queueBidVerifiedEmail(item) {
   queueNotificationEmail(
     bidRecipientEmail(item),
     subject,
-    `Your submitted bid has been approved for Round ${round}.\n\n${item.type} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
+    `Your submitted bid has been approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
     item.area,
     {
       kind: "approved",
@@ -3657,7 +3674,7 @@ function queueBidDeniedEmail(item) {
   queueNotificationEmail(
     bidRecipientEmail(item),
     `Bid denied for ${item.initials} Round ${round} ${BID_YEAR}`,
-    `Your submitted bid was not approved for Round ${round}.\n\n${item.type} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
+    `Your submitted bid was not approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
     item.area,
     {
       kind: "denied",
@@ -3682,14 +3699,14 @@ function applyRdoApproval(item) {
   item.status = "Approved";
   item.approvedBy = currentUser.initials;
   item.approvedAt = formatDateTime(new Date());
-  item.appliedLine = item.bidAs === "GL" ? null : item.line;
+  item.appliedLine = item.bidAs === "GL" || item.ghostBid ? null : item.line;
   syncApprovedRdoItem(item);
   reconcilePendingLeaveForRdo(item.initials, item.area);
   logHistory(
     item.area,
     "RDO bid approved",
-    item.bidAs === "GL"
-      ? `${currentUser.initials} approved ${item.initials}'s ghost-line bid for ${item.summary}. GL bids are logged but do not populate public floor templates.`
+    item.bidAs === "GL" || item.ghostBid
+      ? `${currentUser.initials} approved ${item.initials}'s Ghost Line bid for ${item.summary}. The source line remains available to later bidders.`
       : `${currentUser.initials} approved ${item.initials}'s ${item.summary}. The system applied ${item.initials} to Line ${item.line}.`
   );
   queueBidVerifiedEmail(item);
@@ -3727,7 +3744,7 @@ function reconcilePendingLeaveForRdo(initials, area = currentUser.area) {
 
 function syncApprovedRdoItem(item) {
   const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
-  if (!line || item.bidAs === "GL") return;
+  if (!line || item.bidAs === "GL" || item.ghostBid) return;
 
   rdoLines.forEach((entry) => {
     if (entry !== line && lineForArea(entry, item.area) && entry.cpc === item.initials) {
@@ -3760,8 +3777,12 @@ function applyLeaveApproval(item) {
   item.status = "Approved";
   item.approvedBy = currentUser.initials;
   item.approvedAt = formatDateTime(new Date());
-  item.reviewNote = item.leaveCapacityOverride ? `Approved with override for ${formatLeaveConflictDates(conflicts)}.` : "";
-  logHistory(item.area, "Leave bid approved", `${currentUser.initials} approved ${item.initials}'s leave request for ${item.range}. Leave slots were updated by the system.`);
+  item.reviewNote = item.ghostBid
+    ? "Ghost leave approved. These dates do not count against area capacity."
+    : item.leaveCapacityOverride ? `Approved with override for ${formatLeaveConflictDates(conflicts)}.` : "";
+  logHistory(item.area, "Leave bid approved", item.ghostBid
+    ? `${currentUser.initials} approved ${item.initials}'s ghost leave request for ${item.range}. No area leave slots were consumed.`
+    : `${currentUser.initials} approved ${item.initials}'s leave request for ${item.range}. Leave slots were updated by the system.`);
   queueBidVerifiedEmail(item);
   return true;
 }
@@ -3813,6 +3834,7 @@ function removeInitialsFromLeaveRange(range, initials) {
 function syncApprovedLeaveItem(item) {
   const bid = leaveBidForItem(item);
   if (bid) bid.status = "Approved";
+  if (item.ghostBid) return;
   const bucket = leaveSlotBucketForBidAs(item.bidAs);
   if (!bucket) return;
 
@@ -3835,7 +3857,7 @@ function leaveApprovalBucket(item) {
 }
 
 function leaveApprovalConflicts(item) {
-  if (item.type !== "Leave") return [];
+  if (item.type !== "Leave" || item.ghostBid) return [];
   const bucket = leaveApprovalBucket(item);
 
   return leaveApprovalDates(item).filter((key) => {
@@ -3870,14 +3892,14 @@ function captureIntakeOverrideFields(item) {
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
     item.aws = editor.querySelector("[data-override-aws]")?.value || item.aws;
     item.mid = editor.querySelector("[data-override-mid]")?.value || item.mid;
-    item.summary = `Line ${item.line} · Group ${item.fatigueGroup} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
+    item.summary = `${item.ghostBid ? "Ghost Line" : "Line"} ${item.line} · Group ${item.fatigueGroup} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
     return;
   }
 
   item.range = editor.querySelector("[data-override-range]")?.value || item.range;
   item.days = Number(editor.querySelector("[data-override-days]")?.value || item.days);
   item.leaveCapacityOverride = Boolean(editor.querySelector("[data-override-capacity]")?.checked);
-  item.summary = `${item.range} · ${item.days} days`;
+  item.summary = `${item.ghostBid ? "Ghost Leave · " : ""}${item.range} · ${item.days} days`;
 }
 
 async function supabaseSubmissionIdForIntakeItem(item) {
@@ -4004,7 +4026,7 @@ async function denyIntakeItem(id) {
     }
   }
 
-  logHistory(item.area, `${item.type} denied`, `${currentUser.initials} denied ${item.initials}'s ${item.type} request. Reason: ${reason}`);
+  logHistory(item.area, `${bidTypeLabel(item)} denied`, `${currentUser.initials} denied ${item.initials}'s ${bidTypeLabel(item)} request. Reason: ${reason}`);
   queueBidDeniedEmail(item);
   activeDenialId = null;
   activeOverrideId = null;
@@ -4096,7 +4118,7 @@ async function saveIntakeOverride(id) {
 
   if (item.status === "Approved") {
     if (item.type === "RDO Line") {
-      if (item.bidAs !== "GL" && originalLine !== item.line) {
+      if (item.bidAs !== "GL" && !item.ghostBid && originalLine !== item.line) {
         const oldLine = rdoLines.find((entry) => entry.line === originalLine && lineForArea(entry, item.area));
         if (oldLine?.cpc === item.initials) {
           oldLine.cpc = "";
@@ -4104,7 +4126,7 @@ async function saveIntakeOverride(id) {
         }
       }
       syncApprovedRdoItem(item);
-      item.appliedLine = item.bidAs === "GL" ? null : item.line;
+      item.appliedLine = item.bidAs === "GL" || item.ghostBid ? null : item.line;
     }
     if (item.type === "Leave") {
       removeInitialsFromLeaveRange(originalRange, item.initials);
@@ -4115,7 +4137,7 @@ async function saveIntakeOverride(id) {
   logHistory(
     item.area,
     item.status === "Approved" ? "Admin override applied" : "Intake override saved",
-    `${currentUser.initials} edited ${item.initials}'s ${item.type} request from "${original}" to "${item.summary}".`
+    `${currentUser.initials} edited ${item.initials}'s ${bidTypeLabel(item)} request from "${original}" to "${item.summary}".`
   );
   activeDenialId = null;
   renderApp();
@@ -5130,6 +5152,7 @@ function profileFromSupabase(row) {
     phone: row.phone || "",
     email: row.email || "",
     supabaseProfileId: row.profile_id,
+    ghostBidder: false,
   };
 }
 
@@ -5564,11 +5587,13 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const aws = payload.aws || "";
   const mid = payload.mid || "";
   const round = Number(row.round_number || currentRoundNumber());
+  const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
 
   return {
     id: `supabase-rdo-${row.id}`,
     supabaseSubmissionId: row.id,
     type: "RDO Line",
+    ghostBid,
     area,
     name: controllerName({
       firstName: bidder.first_name || "",
@@ -5588,7 +5613,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     flex,
     aws,
     mid,
-    summary: payload.summary || `Round ${round} · Line ${line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+    summary: payload.summary || `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
   };
 }
 
@@ -5678,11 +5703,13 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   const round = Number(row.round_number || currentRoundNumber());
   const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const days = Number(row.charged_days || 0);
+  const ghostBid = Boolean(row.is_ghost_bid);
 
   return {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
     type: "Leave",
+    ghostBid,
     area,
     name: controllerName({
       firstName: bidder.first_name,
@@ -5704,7 +5731,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     weekUnits: weekKeys.length,
     weekKeys,
     notes: row.notes || "",
-    summary: `${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
+    summary: `${ghostBid ? "Ghost Leave · " : ""}${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
   };
 }
 
@@ -5748,6 +5775,7 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
       round: item.round,
       weekUnits: item.weekUnits,
       weekKeys: item.weekKeys,
+      ghostBid: item.ghostBid,
     });
   });
 }
@@ -5769,6 +5797,8 @@ function resetSupabaseBackedData() {
   intakeTeamInitials.clear();
   holidayOverrides.clear();
   fullLeaveDates.clear();
+  ghostBidderIds.clear();
+  if (currentUser) currentUser.ghostBidder = false;
   selectedLineId = "";
   supabaseState.placeholdersCleared = true;
 }
@@ -5833,6 +5863,16 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
   }
 
   seniority = buildSeniority();
+}
+
+function applyGhostBiddingStatus(rows = []) {
+  ghostBidderIds.clear();
+  rows.forEach((row) => {
+    if (row.is_ghost_bidder && row.bidder_id) ghostBidderIds.add(row.bidder_id);
+  });
+  if (currentUser?.supabaseProfileId) {
+    currentUser.ghostBidder = ghostBidderIds.has(currentUser.supabaseProfileId);
+  }
 }
 
 function applyBidWindowsFromDatabase(rows) {
@@ -5928,8 +5968,13 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
   }
-  const rdoRequest = currentUserRdoRequest();
-  const rdoLine = rdoLineForInitials(currentUser.initials);
+  const targetInitials = options.targetInitials || currentUser.initials;
+  const rdoRequest = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === targetInitials &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  const rdoLine = rdoLineForInitials(targetInitials);
 
   const requestedItems = newRequests.map((request) => {
     const dateKeys = datesInLeaveRange(request.range);
@@ -6008,6 +6053,7 @@ async function loadSupabaseReferenceData() {
       rdoSubmissionsResult,
       leaveSlotsResult,
       leaveRequestsResult,
+      ghostStatusResult,
       intakeSchedulesResult,
       bidYearSettingsResult,
       roundRulesResult,
@@ -6019,9 +6065,10 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
-      supabaseState.authUserId ? client.from("intake_submissions").select("id,area_id,bidder_id,round_number,status,payload,submitted_at,reviewed_at,denial_reason,created_at,bidders:bidder_id(first_name,last_name,initials,bid_role,seniority_rank,area_id),areas(name)").eq("bid_year_id", bidYear.id).eq("submission_type", "rdo").in("status", ["pending", "approved"]).order("submitted_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      supabaseState.authUserId ? client.from("intake_submissions").select("id,area_id,bidder_id,round_number,status,payload,is_ghost_bid,submitted_at,reviewed_at,denial_reason,created_at,bidders:bidder_id(first_name,last_name,initials,bid_role,seniority_rank,area_id),areas(name)").eq("bid_year_id", bidYear.id).eq("submission_type", "rdo").in("status", ["pending", "approved"]).order("submitted_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
+      supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,bid_year_id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").eq("bid_year_id", bidYear.id).order("starts_at") : Promise.resolve({ data: [], error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
@@ -6042,6 +6089,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("RDO submissions", rdoSubmissionsResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
+      isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
@@ -6060,6 +6108,7 @@ async function loadSupabaseReferenceData() {
     if (!rdoSubmissionsResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionsResult.data || [], areaById);
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
+    if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
@@ -6685,11 +6734,12 @@ function renderCurrentUser() {
   setText("[data-admin-grant-window]", adminGrantWindowText());
   setText("[data-admin-grant-scope]", currentUser.adminGrant?.scope || "None");
   setText("[data-admin-grant-granted-by]", currentUser.adminGrant?.grantedBy || "None");
+  setText("[data-profile-ghost-status]", currentUser.ghostBidder ? "Ghost Bidder" : "Standard Bidder");
 
   document.querySelectorAll(".account-pill").forEach((button) => {
     button.classList.remove("bid-as-cpc", "bid-as-gl", "bid-as-r-dev", "bid-as-d-dev");
     button.classList.add(bidAsClassName);
-    button.title = `${currentUser.initials} · ${bidAs}`;
+    button.title = `${currentUser.initials} · ${bidAs}${currentUser.ghostBidder ? " · Ghost Bidder" : ""}`;
   });
 
   document.querySelectorAll("[data-profile-name]").forEach((input) => { input.value = userFullName(); });
@@ -6707,7 +6757,9 @@ function renderCurrentUser() {
   const rdoAssignment = currentUserRdoAssignment();
   const rdoAssignmentLine = rdoAssignment?.line;
   const rdoAssignmentRequest = rdoAssignment?.request;
-  setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line ? `Line ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}` : "No line selected");
+  setText("[data-dashboard-rdo-line]", rdoAssignmentRequest?.line || rdoAssignmentLine?.line
+    ? `${rdoAssignmentRequest?.ghostBid ? "Ghost Line" : "Line"} ${rdoAssignmentRequest?.line || rdoAssignmentLine.line}`
+    : "No line selected");
   setText("[data-dashboard-rdo-summary]", rdoAssignmentRequest?.summary || "Your selected RDO line will appear after you bid.");
   renderDashboardSelectedLineCard(rdoAssignment);
 
@@ -6924,8 +6976,8 @@ function lineMidReferenceValue(line) {
 function selectedLineStatus(line) {
   const request = selectedLineRequest(line);
   const approvedRequest = currentUserRdoRequest();
-  if (request) return "Pending Review";
-  if (approvedRequest?.line === line.line && approvedRequest.status === "Approved") return "Approved";
+  if (request) return request.ghostBid ? "Ghost Line · Pending Review" : "Pending Review";
+  if (approvedRequest?.line === line.line && approvedRequest.status === "Approved") return approvedRequest.ghostBid ? "Ghost Line · Approved" : "Approved";
   if (line.status === "Taken" && line.cpc === currentUser.initials) return "Approved";
   if (line.status === "Taken") return "Taken";
   if (line.status === "Selected") return "Selected";
@@ -6949,7 +7001,7 @@ function renderDashboardSelectedLineCard(assignment) {
     element.textContent = currentUser.initials || "";
   });
   document.querySelectorAll("#dashboard-page [data-selected-line]").forEach((element) => {
-    element.textContent = lineCode ? `Line ${lineCode}` : "No line selected";
+    element.textContent = lineCode ? `${request?.ghostBid ? "Ghost Line" : "Line"} ${lineCode}` : "No line selected";
   });
   document.querySelectorAll("#dashboard-page [data-selected-status]").forEach((element) => {
     element.innerHTML = `<em>Status</em><b>${status || "Not Bid"}</b>`;
@@ -7150,7 +7202,7 @@ function updateSelectedLine() {
     element.textContent =
       !isViewingHomeArea()
         ? `Viewing ${currentViewArea()} for reference. Bidding actions stay limited to your home area.`
-        : request ? `Line ${line.line} is pending intake review.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `Line ${line.line} has been approved.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
+        : request ? `${request.ghostBid ? `Ghost Line ${line.line}` : `Line ${line.line}`} is pending intake review${request.ghostBid ? " and will not consume the source line" : ""}.` : approvedRequest?.line === line.line && approvedRequest.status === "Approved" ? `${approvedRequest.ghostBid ? `Ghost Line ${line.line}` : `Line ${line.line}`} has been approved${approvedRequest.ghostBid ? "; the source line remains open" : ""}.` : line.status === "Taken" ? `Line ${line.line} has been approved.` : `Line ${line.line} is currently selected.`;
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;
@@ -7295,7 +7347,7 @@ function renderLeaveRows(targetId) {
         <tr>
           <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
         </tr>
@@ -7304,7 +7356,7 @@ function renderLeaveRows(targetId) {
         <tr>
           <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
           <td>${bid.notes ? escapeHtml(bid.notes) : "—"}</td>
@@ -7338,7 +7390,7 @@ function renderLeaveDraftQueue() {
       <article class="leave-draft-item">
         <span>${index + 1}</span>
         <div>
-          <strong>${escapeHtml(item.range)}</strong>
+          <strong>${currentUser.ghostBidder ? '<span class="ghost-bid-badge">Ghost Leave</span> ' : ''}${escapeHtml(item.range)}</strong>
           <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged</small>
           ${item.notes ? `<em>${escapeHtml(item.notes)}</em>` : ""}
         </div>
@@ -7978,6 +8030,8 @@ function bueRoster() {
     phone: currentUser.phone,
     bidAs: currentUserBidAs(),
     leaveSlotAllowance: normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance),
+    profileId: currentUser.supabaseProfileId || "",
+    ghostBidder: Boolean(currentUser.ghostBidder),
   };
   const byInitials = new Map();
 
@@ -10064,7 +10118,7 @@ function alertItems() {
   if (isIntake) {
     const intakeAlerts = pendingIntakeItems().map((item) => ({
       category: "Intake",
-      title: `${item.initials} submitted ${item.type}`,
+      title: `${item.initials} submitted ${bidTypeLabel(item)}`,
       detail: `${item.summary} · ${item.area}`,
       action: "Review",
       page: "intake",
@@ -10086,7 +10140,7 @@ function alertItems() {
     .filter((item) => item.initials === currentUser.initials && ["Pending", "Approved", "Denied"].includes(item.status))
     .map((item) => ({
       category: item.status,
-      title: `${item.type} ${item.status.toLowerCase()}`,
+      title: `${bidTypeLabel(item)} ${item.status.toLowerCase()}`,
       detail: item.status === "Denied" ? `${item.summary} · ${item.denialReason || ""}` : item.summary,
       action: item.status === "Pending" ? "Awaiting intake" : item.status === "Denied" ? "Revise and resubmit" : "Approved",
       page: item.type === "Leave" ? "leave" : "rdos",
@@ -10624,10 +10678,10 @@ function renderOverrideEditor(item) {
     <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
     <label>Days <input type="number" value="${item.days}" data-override-days ${pending ? "" : "readonly"} /></label>
     ${pending ? "" : "<small>Charged days are recalculated from the replacement range.</small>"}
-    <label class="override-check">
+    ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : `<label class="override-check">
       <input type="checkbox" data-override-capacity ${item.leaveCapacityOverride ? "checked" : ""} />
       Approve even though one or more dates are full
-    </label>
+    </label>`}
     <div class="button-row">
       <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Replace Approved Dates"}</button>
       ${pending ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">${approveLabel}</button>` : ""}
@@ -10664,7 +10718,7 @@ function intakeItemRound(item) {
 
 function intakeSearchText(item) {
   return [
-    item.type,
+    bidTypeLabel(item),
     item.status,
     item.name,
     item.initials,
@@ -10744,7 +10798,7 @@ function renderIntakeDetailPanel(item, visibleItems) {
       ${detailItems.map((entry) => `
         <article>
           <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
-          <strong>${escapeHtml(entry.type)}</strong>
+          <strong>${escapeHtml(bidTypeLabel(entry))}</strong>
           <p>${escapeHtml(entry.summary)}</p>
           <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
         </article>
@@ -10770,7 +10824,7 @@ function renderIntakeQueue() {
     ? filteredItems.map((item) => `
       <article class="intake-card ${item.status.toLowerCase()} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
-          <span class="intake-type">${item.type}</span>
+          <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <h3>${item.name} · ${item.initials}</h3>
           <p>${item.summary}</p>
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
@@ -10780,6 +10834,7 @@ function renderIntakeQueue() {
             <span>${item.area}</span>
             <span>Seniority #${item.seniority}</span>
             <span>Bid as ${item.bidAs}</span>
+            ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
             ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
             <span>Submitted ${item.submittedAt}</span>
           </div>
@@ -10933,7 +10988,7 @@ function biddingExportRows() {
 
   intakeQueue.forEach((item) => {
     rows.push([
-      item.type,
+      bidTypeLabel(item),
       item.area,
       item.name,
       item.initials,
@@ -10961,13 +11016,13 @@ function biddingExportRows() {
 
   leaveBids.forEach((bid) => {
     rows.push([
-      "Leave Queue",
+      bid.ghostBid ? "Ghost Leave" : "Leave Queue",
       currentUser.area,
       userFullName(),
       currentUser.initials,
       currentUserBidAs(),
       bid.status,
-      `Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
+      `${bid.ghostBid ? "Ghost Leave · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
       "",
       "",
     ]);
@@ -11307,7 +11362,7 @@ async function searchBidderEditor(query) {
     if (generation !== bidderEditor.generation) return;
     if (error) throw error;
     bidderEditor.results = data.bidders;
-    results.innerHTML = data.bidders.map((person) => `<button type="button" data-editor-bidder="${escapeHtml(person.id)}" aria-pressed="${person.id === bidderEditor.person?.id}"><strong>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)}</strong> · ${escapeHtml(person.initials || 'No initials')}<br>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)}</button>`).join('');
+    results.innerHTML = data.bidders.map((person) => `<button type="button" data-editor-bidder="${escapeHtml(person.id)}" aria-pressed="${person.id === bidderEditor.person?.id}"><strong>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)}</strong> · ${escapeHtml(person.initials || 'No initials')}<br>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)}${person.is_ghost_bidder ? ' · Ghost Bidder' : ''}</button>`).join('');
     bidderEditorStatus(data.bidders.length ? `${data.bidders.length} matching bidders${data.bidders.length === 50 ? ' (first 50; refine your search)' : ''}. Select a bidder to edit.` : 'No bidders match this search in your authorized areas.');
   } catch (error) { if (generation === bidderEditor.generation) bidderEditorStatus(error.message || 'Unable to search bidders.', 'error'); }
 }
@@ -11323,9 +11378,15 @@ function renderBidderEditorForm() {
   } : assigned || { fatigue_group: '', flex: false, aws: false, mid: 'No' };
   const select = (label, key, values, value) => `<label>${label}<select data-editor-field="${key}">${values.map(([v,l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(value) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select></label>`;
   const person = bidderEditor.person;
+  const ghostBidder = Boolean(snapshot.is_ghost_bidder ?? person.is_ghost_bidder);
   document.querySelector('[data-bidder-editor-form]').innerHTML = `
     <h3>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)} · ${escapeHtml(person.initials || 'No initials')}</h3>
     <p>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)} · Changes retain each bid’s current approval status.</p>
+    <fieldset class="ghost-bidder-setting"><legend>Ghost bidding · Bid Year ${BID_YEAR}</legend>
+      <label class="override-check"><input type="checkbox" data-editor-ghost-bidder ${ghostBidder ? 'checked' : ''} /> Designate this controller as a ghost bidder</label>
+      <p>A ghost bidder’s selected RDO is saved as a <strong>Ghost Line</strong>. RDO inventory and leave capacity remain available to bidders who follow.</p>
+      <button type="button" class="secondary-action" data-editor-save-ghost>Update ghost bidding status</button>
+    </fieldset>
     <fieldset><legend>RDO bid · ${escapeHtml(snapshot.rdo?.status || (assigned ? 'approved' : 'not yet bid'))}</legend><div class="bidder-editor-fields">
       ${select('RDO line','line_id',[['','Select a line'], ...lines.map(l => [l.id, `${l.line_code} · ${l.pattern}${l.status !== 'open' && l.assigned_bidder_id !== person.id ? ' · unavailable' : ''}`])],lineId)}
       ${select('Fatigue group','fatigue_group',[['','Select a group'],['A','Group A'],['B','Group B'],['C','Group C']],initial.fatigue_group)}
@@ -11420,6 +11481,37 @@ async function processBidderEditor(validateOnly) {
   } catch (error) { bidderEditorStatus(error.message || 'Unable to complete this operation. Reload before retrying.', 'error'); }
   finally { bidderEditorSetBusy(false); }
 }
+async function saveBidderGhostStatus() {
+  if (bidderEditor.busy || !bidderEditor.person || !bidderEditor.record || !hasIntakeAccess()) return;
+  const shouldBeGhost = Boolean(document.querySelector('[data-editor-ghost-bidder]')?.checked);
+  const currentValue = Boolean(bidderEditor.record.snapshot.is_ghost_bidder);
+  if (shouldBeGhost === currentValue) {
+    bidderEditorStatus(`This bidder is already ${shouldBeGhost ? 'a ghost bidder' : 'a standard bidder'} for ${BID_YEAR}.`);
+    return;
+  }
+  if (!window.confirm(`Set ${bidderEditor.person.first_name} ${bidderEditor.person.last_name} as ${shouldBeGhost ? 'a ghost bidder' : 'a standard bidder'} for ${BID_YEAR}? This status must be set before RDO or leave bids are submitted.`)) return;
+  bidderEditorSetBusy(true);
+  bidderEditorStatus('Updating ghost bidding status…');
+  try {
+    const { data, error } = await supabaseClient().rpc('set_ghost_bidding_status', {
+      requested_bid_year: BID_YEAR,
+      target_bidder_id: bidderEditor.person.id,
+      should_be_ghost: shouldBeGhost,
+    });
+    if (error) throw error;
+    bidderEditor.record.snapshot.is_ghost_bidder = Boolean(data?.is_ghost_bidder);
+    bidderEditor.person.is_ghost_bidder = Boolean(data?.is_ghost_bidder);
+    if (bidderEditor.person.id === currentUser.supabaseProfileId) currentUser.ghostBidder = Boolean(data?.is_ghost_bidder);
+    renderBidderEditorForm();
+    bidderEditorStatus(`Ghost bidding status updated for ${BID_YEAR}.`, 'success');
+    await loadSupabaseReferenceData();
+    renderApp();
+  } catch (error) {
+    bidderEditorStatus(error.message || 'Ghost bidding status could not be updated.', 'error');
+  } finally {
+    bidderEditorSetBusy(false);
+  }
+}
 document.addEventListener('input', (event) => {
   if (event.target.matches('[data-bidder-editor-search]')) {
     ++bidderEditor.generation;
@@ -11428,13 +11520,16 @@ document.addEventListener('input', (event) => {
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('change', (event) => {
-  if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
+  if (event.target.matches('[data-editor-ghost-bidder]')) {
+    bidderEditorStatus('Ghost bidding status has not been saved yet. Use the update button in that section.');
+  } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('click', (event) => {
   const bidder = event.target.closest('[data-editor-bidder]');
   if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
   if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
   if (event.target.closest('[data-editor-submit]')) void processBidderEditor(false);
+  if (event.target.closest('[data-editor-save-ghost]')) void saveBidderGhostStatus();
 });
 
 function renderApp() {

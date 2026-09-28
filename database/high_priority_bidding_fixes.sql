@@ -181,6 +181,7 @@ declare
   is_holiday boolean;
   is_in_lieu boolean;
   result_ids jsonb := '[]'::jsonb;
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -204,6 +205,8 @@ begin
       and (target_area_name is null or a.name = target_area_name)
     order by case when b.area_id = actor.area_id then 0 else 1 end, b.id limit 1 for update of b;
   end if;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   -- Validate the inexpensive invariants before expanding ranges into individual
   -- dates so malformed input cannot force an unbounded generate_series call.
@@ -263,8 +266,8 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = public.effective_rdo_line_id(year_row.id, target.id)
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
@@ -334,8 +337,8 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = public.effective_rdo_line_id(year_row.id, target.id)
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
@@ -344,10 +347,10 @@ begin
 
     insert into public.leave_requests (
       bid_year_id, bidder_id, round_number, priority, status,
-      requested_start_date, requested_end_date, charged_days, notes, submitted_at
+      requested_start_date, requested_end_date, charged_days, notes, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.id, round_no, priority_no, 'pending',
-      start_date, end_date, item_charged, nullif(item->>'notes', ''), now()
+      start_date, end_date, item_charged, nullif(item->>'notes', ''), now(), ghost_bid
     ) returning id into request_id;
 
     if round_no = 1 then
@@ -362,8 +365,8 @@ begin
     for leave_date in select gs::date from generate_series(start_date, end_date, interval '1 day') gs loop
       select exists (
         select 1 from public.rdo_lines rl join public.rdo_line_days d on d.rdo_line_id = rl.id
-        where rl.bid_year_id = year_row.id and rl.assigned_bidder_id = target.id
-          and rl.status = 'taken' and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
+        where rl.id = public.effective_rdo_line_id(year_row.id, target.id)
+          and d.is_rdo and d.weekday = extract(dow from leave_date)::smallint
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
@@ -373,12 +376,12 @@ begin
 
     insert into public.intake_submissions (
       bid_year_id, area_id, bidder_id, round_number, leave_request_id,
-      submission_type, status, payload, submitted_at
+      submission_type, status, payload, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.area_id, target.id, round_no, request_id, 'leave', 'pending',
       jsonb_build_object('range', start_date || ' - ' || end_date, 'days', item_charged,
         'startDate', start_date, 'endDate', end_date, 'bidAs', target.bid_role,
-        'notes', nullif(item->>'notes', '')), now()
+        'notes', nullif(item->>'notes', ''), 'ghostBid', ghost_bid), now(), ghost_bid
     ) returning id into submission_id;
 
     result_ids := result_ids || jsonb_build_array(submission_id);
@@ -388,7 +391,8 @@ begin
   values (year_row.id, target.area_id, actor.id, 'leave_batch_submitted', 'intake_submissions',
     jsonb_build_object('target_bidder_id', target.id, 'round', batch_round, 'charged_days', batch_charged, 'submission_ids', result_ids));
 
-  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round, 'charged_days', batch_charged);
+  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round,
+    'charged_days', batch_charged, 'is_ghost_bid', ghost_bid);
 end
 $$;
 
@@ -422,6 +426,7 @@ declare
   crew_used integer;
   target_area_name text;
   capacity_override boolean := coalesce((override_payload->>'leaveCapacityOverride')::boolean, false);
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -435,6 +440,7 @@ begin
   if submission.status <> 'pending' then raise exception 'Only pending submissions can be reviewed.'; end if;
   select * into strict target from public.bidders where id = submission.bidder_id for update;
   select a.name into strict target_area_name from public.areas a where a.id = target.area_id;
+  ghost_bid := submission.is_ghost_bid or public.is_ghost_bidder(submission.bid_year_id, target.id);
 
   if submission.submission_type = 'rdo' then
     if override_payload ? 'line' then
@@ -459,7 +465,7 @@ begin
       raise exception 'RDO line % is not eligible for the bidder''s % role.', line_row.line_code, target.bid_role;
     end if;
 
-    if decision = 'approved' and target.bid_role <> 'GL' then
+    if decision = 'approved' and target.bid_role <> 'GL' and not ghost_bid then
       if line_row.status <> 'open' and line_row.assigned_bidder_id is distinct from target.id then
         raise exception 'RDO line % is already assigned to another bidder.', line_row.line_code;
       end if;
@@ -509,10 +515,11 @@ begin
       ) then raise exception 'Leave after Round 1 cannot include the bidder''s RDO.'; end if;
 
       bucket := case when target.bid_role in ('R-DEV', 'D-DEV', 'DEV') then 'dev' else 'cpc' end;
-      for date_row in
-        select d.leave_date from public.leave_request_dates d
-        where d.leave_request_id = leave_row.id and d.charged order by d.leave_date
-      loop
+      if not ghost_bid then
+        for date_row in
+          select d.leave_date from public.leave_request_dates d
+          where d.leave_request_id = leave_row.id and d.charged order by d.leave_date
+        loop
         select * into slot_row from public.leave_slots s
         where s.bid_year_id = submission.bid_year_id and s.area_id = target.area_id
           and s.slot_date = date_row.leave_date and s.slot_group = bucket and s.status = 'open'
@@ -535,8 +542,9 @@ begin
               source_leave_request_id = leave_row.id, updated_at = now()
           where id = slot_row.id;
         end if;
-        slot_row := null;
-      end loop;
+          slot_row := null;
+        end loop;
+      end if;
 
       update public.leave_requests set status = 'approved', reviewed_at = now(), reviewed_by = actor.id,
         denial_reason = null, updated_at = now() where id = leave_row.id;
@@ -551,12 +559,18 @@ begin
   update public.intake_submissions
   set status = decision, reviewed_at = now(), reviewed_by = actor.id,
       denial_reason = case when decision = 'denied' then denial_reason_text else null end,
-      payload = payload || override_payload, updated_at = now()
+      is_ghost_bid = ghost_bid,
+      payload = payload || override_payload || jsonb_build_object('ghostBid', ghost_bid), updated_at = now()
   where id = submission.id;
+
+  if decision = 'approved' and submission.submission_type = 'rdo' then
+    perform public.refresh_bidder_holiday_in_lieu(submission.bid_year_id, target.id);
+  end if;
 
   insert into public.audit_events (bid_year_id, area_id, actor_id, event_type, entity_table, entity_id, details)
   values (submission.bid_year_id, submission.area_id, actor.id, 'submission_' || decision,
-    'intake_submissions', submission.id, jsonb_build_object('bidder_id', target.id, 'override', override_payload));
+    'intake_submissions', submission.id, jsonb_build_object(
+      'bidder_id', target.id, 'override', override_payload, 'ghost_bid', ghost_bid));
 
   return jsonb_build_object('submission_id', submission.id, 'status', decision);
 end
