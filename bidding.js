@@ -1140,14 +1140,23 @@ const roundDateBlocks = [
 ];
 
 const bidStartTimes = ["0700", "0900", "1100", "1300", "1500", "1700"];
+const databaseBidWindows = new Map();
+const BID_TIME_ZONE = "America/Los_Angeles";
+const bidWindowPartFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: BID_TIME_ZONE,
+  weekday: "short",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 const BID_OFFICE_CLOSED_DATE_KEYS = new Set([
   "2026-10-12",
   "2026-11-11",
 ]);
 
 function roundDateBlocksForArea(area = currentViewArea()) {
-  if (area !== "Area A") return roundDateBlocks;
-
   const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
   return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
 }
@@ -1254,7 +1263,30 @@ function roundWindowDate(parsedWindow, time) {
   return new Date(BID_YEAR - 1, parsedWindow.month - 1, parsedWindow.day, hour, minute);
 }
 
+function databaseBidWindowKey(bidderId, roundNumber) {
+  return `${bidderId}|${roundNumber}`;
+}
+
+function databaseBidWindowForRankRound(area, rank, roundNumber) {
+  const bidderId = seniorityEntryProfileId(activeRosterEntries(area)[rank - 1]);
+  return bidderId ? databaseBidWindows.get(databaseBidWindowKey(bidderId, roundNumber)) || null : null;
+}
+
+function bidWindowDateParts(date) {
+  return Object.fromEntries(bidWindowPartFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+}
+
+function bidWindowScheduleLabel(window) {
+  if (!window?.start || !window?.end) return "";
+  const start = bidWindowDateParts(window.start);
+  const inclusiveEnd = bidWindowDateParts(new Date(window.end.getTime() - 60_000));
+  return `${start.weekday}, ${start.month}/${start.day} · ${start.hour}${start.minute}-${inclusiveEnd.hour}${inclusiveEnd.minute}`;
+}
+
 function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
+  const importedWindow = databaseBidWindowForRankRound(area, rank, roundNumber);
+  if (importedWindow) return importedWindow;
+
   const index = rank - 1;
   const rowBlock = Math.floor(index / bidStartTimes.length);
   const dateLabel = roundDateBlocksForArea(area)[rowBlock]?.[roundNumber - 1];
@@ -1488,12 +1520,11 @@ function buildSeniority(area = currentViewArea()) {
   const openRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const openRound = roundState?.phase === "open" ? roundState.round : null;
   const areaDateBlocks = roundDateBlocksForArea(area);
+  const roundCount = areaDateBlocks[0]?.length || 4;
   return activeRosterEntries(area).map((entry, index) => {
     const [lastName, firstName, bidAs, initials] = entry;
     const normalizedBidAs = normalizeBidRoleForArea(bidAs, area);
     const rank = index + 1;
-    const rowBlock = Math.floor(index / bidStartTimes.length);
-    const start = bidStartTimes[index % bidStartTimes.length];
     const hasActiveBidder = Number.isFinite(openRank);
     const isCurrentBidder = hasActiveBidder && rank === openRank;
 
@@ -1509,7 +1540,10 @@ function buildSeniority(area = currentViewArea()) {
       active: true,
       leaveSlotAllowance: seniorityEntryLeaveSlotAllowance(entry),
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
-      rounds: (areaDateBlocks[rowBlock] || []).map((date) => bidWindowLabel(date, start)),
+      rounds: Array.from({ length: roundCount }, (_, roundIndex) => {
+        const window = bidWindowForRankRound(rank, roundIndex + 1, area);
+        return window ? bidWindowScheduleLabel(window) : "";
+      }),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
       openRound: isCurrentBidder ? openRound : undefined,
     };
@@ -4849,6 +4883,7 @@ function resetSupabaseBackedData() {
   leaveSlotWeeks.splice(0, leaveSlotWeeks.length);
   Object.keys(extraLeaveSlotData).forEach((key) => delete extraLeaveSlotData[key]);
   senioritySource.splice(0, senioritySource.length);
+  databaseBidWindows.clear();
   seniority = [];
   intakeQueue = [];
   helpThreads = [];
@@ -4909,6 +4944,25 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
     }
   }
 
+  seniority = buildSeniority();
+}
+
+function applyBidWindowsFromDatabase(rows) {
+  databaseBidWindows.clear();
+  (rows || []).forEach((row) => {
+    const bidderId = row.bidder_id || "";
+    const round = Number(row.round_number);
+    const start = new Date(row.opens_at);
+    const end = new Date(row.closes_at);
+    if (!bidderId || !Number.isInteger(round) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+
+    databaseBidWindows.set(databaseBidWindowKey(bidderId, round), {
+      round,
+      start,
+      end,
+      status: row.status || "scheduled",
+    });
+  });
   seniority = buildSeniority();
 }
 
@@ -5003,6 +5057,16 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange) {
   return true;
 }
 
+async function loadPublishedBidWindows(client, bidYearId) {
+  const publicResult = await client.rpc("read_public_bid_windows", { requested_bid_year: BID_YEAR });
+  if (!publicResult.error || !supabaseState.authUserId) return publicResult;
+
+  return client
+    .from("bid_windows")
+    .select("bidder_id,round_number,opens_at,closes_at,status")
+    .eq("bid_year_id", bidYearId);
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -5045,6 +5109,7 @@ async function loadSupabaseReferenceData() {
       leaveSlotsResult,
       leaveRequestsResult,
       intakeSchedulesResult,
+      bidWindowsResult,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,bidders:assigned_bidder_id(initials)").eq("bid_year_id", bidYear.id),
@@ -5052,6 +5117,7 @@ async function loadSupabaseReferenceData() {
       client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").order("starts_at") : Promise.resolve({ data: [], error: null }),
+      loadPublishedBidWindows(client, bidYear.id),
     ]);
 
     const loadWarnings = [
@@ -5061,6 +5127,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      isMissingSupabaseRoutine(bidWindowsResult.error) ? null : supabaseLoadWarning("bid windows", bidWindowsResult),
     ].filter(Boolean);
 
     supabaseRows(holidaysResult).forEach((holiday) => {
@@ -5073,11 +5140,12 @@ async function loadSupabaseReferenceData() {
     if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
     if (!leaveRequestsResult.error) upsertLeaveRequestsFromDatabase(leaveRequestsResult.data || [], areaById);
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     await loadSupabaseHelpThreads();
 
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, and ${supabaseRows(intakeSchedulesResult).length} intake schedules.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
