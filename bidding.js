@@ -1847,6 +1847,10 @@ function shouldEnforceBidWindows() {
   return enforceBidWindows;
 }
 
+function isAuthorizedPilotBidder() {
+  return pilotState.database && pilotState.enabled && pilotState.allowed;
+}
+
 function normalizeBidWindowTestRound(value) {
   const round = Number(value);
   return Number.isInteger(round) && round >= 1 && round <= 4 ? round : null;
@@ -1857,6 +1861,7 @@ function activeTestBidRound() {
 }
 
 function bidWindowLockIsBypassed() {
+  if (pilotState.database) return isAuthorizedPilotBidder();
   return !shouldEnforceBidWindows();
 }
 

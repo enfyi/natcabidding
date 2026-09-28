@@ -86,6 +86,10 @@ practice bidding on or off, and reset the year's practice data. Reset keeps the
 roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
 participant list.
 
+Authorized pilot participants can submit practice bids at any time. Pilot
+databases always disable scheduled bid-window enforcement; the selected pilot
+participant list still controls who is allowed to write practice bids.
+
 The database refuses pilot activation and reset unless `pilot_seed.sql` marked
 it as isolated. A reset also turns the pilot off, so the administrator must
 review the clean state and turn it back on for the next run.

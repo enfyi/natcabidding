@@ -11,6 +11,31 @@ alter table public.bid_year_settings
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 
+create or replace function private.disable_pilot_bid_window_enforcement()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if coalesce(new.pilot_database, false) then
+    new.enforce_bid_windows := false;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.disable_pilot_bid_window_enforcement() from public, anon, authenticated;
+
+drop trigger if exists disable_pilot_bid_window_enforcement on public.bid_year_settings;
+create trigger disable_pilot_bid_window_enforcement
+before insert or update on public.bid_year_settings
+for each row execute function private.disable_pilot_bid_window_enforcement();
+
+update public.bid_year_settings
+set enforce_bid_windows = false
+where pilot_database;
+
 create table if not exists public.bid_year_pilot_members (
   bid_year_id uuid not null references public.bid_years(id) on delete cascade,
   bidder_id uuid not null references public.bidders(id) on delete cascade,
@@ -134,6 +159,7 @@ begin
 
   update public.bid_year_settings
   set pilot_enabled = coalesce(should_enable, false),
+      enforce_bid_windows = false,
       pilot_name = coalesce(nullif(trim(requested_pilot_name), ''), 'Bidding Pilot'),
       updated_by = actor_id,
       updated_at = now()
