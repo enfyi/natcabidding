@@ -97,10 +97,9 @@ export function bidWindowOpeningReminderEmail(
   actionUrl: string,
 ): BidWindowReminderEmail {
   const opensAt = displayDateTime(reminder.opens_at)
-  const closesAt = displayDateTime(reminder.closes_at)
   const subject = `Your Round ${reminder.round_number} bid window opens in 15 minutes`
   const message = `Your ${reminder.bid_year} Round ${reminder.round_number} annual leave bid window opens in 15 minutes. Please sign in and be ready to enter your annual bid dates.`
-  const windowLabel = `${opensAt} through ${closesAt}`
+  const windowLabel = `Starts ${opensAt}`
 
   return {
     subject,
@@ -130,10 +129,9 @@ export function bidWindowExpiringReminderEmail(
   reminder: BidWindowReminder,
   actionUrl: string,
 ): BidWindowReminderEmail {
-  const closesAt = displayDateTime(reminder.closes_at)
   const subject = `30 minutes left in your Round ${reminder.round_number} bid window`
   const message = `You have 30 minutes remaining in your ${reminder.bid_year} Round ${reminder.round_number} annual leave bid window. Please enter and submit your annual bid dates before the window closes.`
-  const windowLabel = `Closes ${closesAt}`
+  const windowLabel = `30 minutes remaining`
 
   return {
     subject,

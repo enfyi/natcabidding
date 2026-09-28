@@ -35,7 +35,7 @@ where a.code = 'area-a'
 on conflict do nothing;
 
 insert into bidders (area_id, first_name, last_name, initials, email, role, bid_role, seniority_rank, initials_verified)
-select a.id, 'Main', 'Admin', 'ADM', 'admin@natcazla.local', 'admin', 'CPC', null, true
+select a.id, 'Main', 'Admin', 'ADM', 'zla.bidding@gmail.com', 'admin', 'ADM', null, true
 from areas a
 where a.code = 'area-a'
 on conflict do nothing;

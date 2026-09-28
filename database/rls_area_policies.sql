@@ -87,6 +87,7 @@ as $$
       )::integer as area_seniority_rank
     from bidders area_bidders
     where area_bidders.active
+      and area_bidders.bid_role not in ('ADM', 'NB')
   )
   select
     lr.id,
@@ -157,6 +158,7 @@ alter table rdo_lines enable row level security;
 alter table rdo_line_days enable row level security;
 alter table bid_windows enable row level security;
 alter table holiday_in_lieu_days enable row level security;
+alter table leave_slot_capacities enable row level security;
 alter table leave_slots enable row level security;
 alter table leave_requests enable row level security;
 alter table leave_request_week_buckets enable row level security;
@@ -232,6 +234,12 @@ on leave_slots for select
 to anon
 using (true);
 
+drop policy if exists "public can read leave slot capacities" on leave_slot_capacities;
+create policy "public can read leave slot capacities"
+on leave_slot_capacities for select
+to anon
+using (true);
+
 drop policy if exists "users can read own area" on areas;
 create policy "users can read own area"
 on areas for select
@@ -257,10 +265,28 @@ to authenticated
 using (true);
 
 drop policy if exists "users can read bid windows in own area" on bid_windows;
-create policy "users can read bid windows in own area"
+drop policy if exists "users can read own-area bid windows and admins can read all" on bid_windows;
+create policy "users can read own-area bid windows and admins can read all"
 on bid_windows for select
 to authenticated
-using (public.is_bidder_in_current_area(bidder_id));
+using (
+  (select public.is_current_admin())
+  or public.is_bidder_in_current_area(bidder_id)
+);
+
+alter table bid_year_settings enable row level security;
+
+drop policy if exists "public can read bid year settings" on bid_year_settings;
+create policy "public can read bid year settings"
+on bid_year_settings for select
+to anon
+using (true);
+
+drop policy if exists "users can read bid year settings" on bid_year_settings;
+create policy "users can read bid year settings"
+on bid_year_settings for select
+to authenticated
+using (true);
 
 drop policy if exists "users can read holiday in lieu days in own area" on holiday_in_lieu_days;
 create policy "users can read holiday in lieu days in own area"
@@ -271,6 +297,12 @@ using (public.is_bidder_in_current_area(bidder_id));
 drop policy if exists "users can read leave slots in own area" on leave_slots;
 create policy "users can read leave slots in own area"
 on leave_slots for select
+to authenticated
+using (true);
+
+drop policy if exists "users can read leave slot capacities" on leave_slot_capacities;
+create policy "users can read leave slot capacities"
+on leave_slot_capacities for select
 to authenticated
 using (true);
 

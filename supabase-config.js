@@ -1,5 +1,4 @@
-window.NATCA_SUPABASE_CONFIG = {
-  url: "https://ohufaffutpkjhmkpstpr.supabase.co",
-  publishableKey: "sb_publishable_yRSPVRYC6dQ_GgoIQhJpHA_UvEWh_tr",
-  authRedirectUrl: "auto",
-};
+// The Next.js route at /supabase-config.js supplies deployment-specific values.
+// Keeping this fallback empty prevents a directly opened prototype from silently
+// writing to the production database.
+window.NATCA_SUPABASE_CONFIG = window.NATCA_SUPABASE_CONFIG || {};

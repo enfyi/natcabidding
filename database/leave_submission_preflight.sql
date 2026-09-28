@@ -1,11 +1,25 @@
--- Validate leave availability, prior-round duplicates, and RDO conflicts before
--- a leave batch is inserted into the intake queue.
+-- Validate leave availability, prior-round duplicates, and RDO prerequisites
+-- before a leave batch is inserted into the intake queue.
 --
 -- The existing submit_leave_bid_batch function remains the owner of round rules
 -- and persistence. This migration moves it behind a private wrapper so the
 -- preflight checks and the insert execute in one database transaction.
 
 create schema if not exists private;
+
+create table if not exists public.bid_year_settings (
+  bid_year_id uuid primary key references public.bid_years(id) on delete cascade,
+  enforce_bid_windows boolean not null default true,
+  test_bid_round integer check (test_bid_round between 1 and 4),
+  updated_by uuid references public.bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.bid_year_settings
+  add column if not exists test_bid_round integer;
+
+alter table public.bid_year_settings enable row level security;
 
 do $migration$
 begin
@@ -52,10 +66,20 @@ declare
   target_rdo_line_id uuid;
   submitted_rdo_line_id uuid;
   submitted_rdo_line_code text;
+  rdo_request_line_code text;
   open_bid_window_id uuid;
+  enforce_bid_windows boolean := true;
+  configured_test_round integer;
+  requested_charged_days integer := 0;
+  existing_charged_days integer := 0;
+  leave_hours_per_day integer := 8;
+  available_credit_days integer := 0;
+  maximum_leave_hours integer := 0;
+  projected_leave_hours integer := 0;
+  existing_round_usage integer := 0;
+  round_leave_limit integer := 0;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
-  rdo_conflict_dates date[];
   conflict_date_labels text;
   error_messages text[] := array[]::text[];
 begin
@@ -75,6 +99,13 @@ begin
   into strict year_row
   from public.bid_years bys
   where bys.bid_year = requested_bid_year;
+
+  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
+  into enforce_bid_windows, configured_test_round
+  from public.bid_year_settings settings
+  where settings.bid_year_id = year_row.id;
+
+  enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if requested_items is null
      or jsonb_typeof(requested_items) <> 'array'
@@ -103,6 +134,10 @@ begin
 
   if target.area_id is null then
     raise exception 'The bidder must be assigned to an area before leave can be submitted.';
+  end if;
+
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile is not eligible to submit leave bids.';
   end if;
 
   select a.name
@@ -171,7 +206,17 @@ begin
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
   end if;
 
-  if not manual_entry then
+  if not manual_entry
+     and not enforce_bid_windows
+     and configured_test_round is not null
+     and batch_round <> configured_test_round then
+    error_messages := array_append(
+      error_messages,
+      format('Testing mode is currently set to Round %s.', configured_test_round)
+    );
+  end if;
+
+  if not manual_entry and enforce_bid_windows then
     select bw.id
     into open_bid_window_id
     from public.bid_windows bw
@@ -179,7 +224,7 @@ begin
       and bw.bidder_id = target.id
       and bw.round_number = batch_round
       and now() >= bw.opens_at
-      and now() <= bw.closes_at
+      and now() < bw.closes_at
     order by bw.opens_at desc
     limit 1;
 
@@ -207,6 +252,87 @@ begin
     raise exception 'A leave batch must use one RDO line.';
   end if;
 
+  -- A bidder must have requested an RDO line before leave can be submitted,
+  -- but intake approval is not required yet. Approved RDO patterns are removed
+  -- from charged leave by the underlying submitter and reconciliation trigger.
+  select rl.id
+  into target_rdo_line_id
+  from public.rdo_lines rl
+  where rl.bid_year_id = year_row.id
+    and rl.area_id = target.area_id
+    and rl.assigned_bidder_id = target.id
+    and rl.status = 'taken'
+  order by rl.updated_at desc, rl.id
+  limit 1;
+
+  if target_rdo_line_id is null then
+    select coalesce(
+      nullif(submission.payload ->> 'rdo_line_code', ''),
+      nullif(submission.payload ->> 'line', '')
+    )
+    into rdo_request_line_code
+    from public.intake_submissions submission
+    where submission.bid_year_id = year_row.id
+      and submission.bidder_id = target.id
+      and submission.submission_type = 'rdo'
+      and submission.status in ('pending', 'approved')
+      and coalesce(
+        nullif(submission.payload ->> 'rdo_line_code', ''),
+        nullif(submission.payload ->> 'line', '')
+      ) is not null
+    order by submission.reviewed_at desc nulls last, submission.submitted_at desc nulls last, submission.created_at desc
+    limit 1;
+  end if;
+
+  if target_rdo_line_id is null
+     and submitted_rdo_line_code is not null
+     and rdo_request_line_code is not null
+     and submitted_rdo_line_code <> rdo_request_line_code then
+    error_messages := array_append(
+      error_messages,
+      'Submit leave with the same RDO line that is pending intake review.'
+    );
+  end if;
+
+  submitted_rdo_line_code := coalesce(submitted_rdo_line_code, rdo_request_line_code);
+
+  if target_rdo_line_id is null and submitted_rdo_line_code is not null then
+    select rl.id
+    into submitted_rdo_line_id
+    from public.rdo_lines rl
+    where rl.bid_year_id = year_row.id
+      and rl.area_id = target.area_id
+      and rl.line_code = submitted_rdo_line_code
+    for update;
+
+    if submitted_rdo_line_id is null then
+      error_messages := array_append(
+        error_messages,
+        format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
+      );
+    elsif exists (
+      select 1
+      from public.rdo_lines rl
+      where rl.id = submitted_rdo_line_id
+        and not (
+          rl.status = 'open'
+          or (rl.status = 'taken' and rl.assigned_bidder_id = target.id)
+        )
+    ) then
+      error_messages := array_append(
+        error_messages,
+        format('RDO Line %s is no longer available.', submitted_rdo_line_code)
+      );
+    end if;
+  end if;
+
+  if target_rdo_line_id is null and rdo_request_line_code is null then
+    error_messages := array_append(
+      error_messages,
+      'Submit your RDO request before submitting leave. Intake approval is not required first.'
+    );
+  end if;
+
   -- Serialize submissions that compete for the same role/area/date. The first
   -- transaction to commit becomes visible to the next capacity check.
   for leave_date in
@@ -230,6 +356,11 @@ begin
           and h.bidder_id = target.id
           and h.in_lieu_date = gs::date
       )
+      and not (batch_round = 1 and exists (
+        select 1 from public.rdo_line_days day
+        where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+          and day.weekday = extract(dow from gs::date)::smallint and day.is_rdo
+      ))
     order by gs::date
   loop
     perform pg_advisory_xact_lock(
@@ -263,6 +394,11 @@ begin
           and h.bidder_id = target.id
           and h.in_lieu_date = gs::date
       )
+      and not (batch_round = 1 and exists (
+        select 1 from public.rdo_line_days day
+        where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+          and day.weekday = extract(dow from gs::date)::smallint and day.is_rdo
+      ))
   ),
   open_slots as (
     select s.slot_date as leave_date, count(*)::integer as slot_count
@@ -286,6 +422,7 @@ begin
       and b.area_id = target.area_id
       and lr.status = 'pending'
       and d.charged
+      and b.bid_role not in ('ADM', 'NB')
       and case
         when b.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
@@ -310,7 +447,8 @@ begin
     );
   end if;
 
-  -- A date already submitted in an earlier round cannot consume another slot.
+  -- A date already submitted in this or an earlier round cannot consume
+  -- another slot.
   with requested_dates as (
     select distinct gs::date as leave_date
     from jsonb_array_elements(requested_items) requested(item)
@@ -327,7 +465,7 @@ begin
   join requested_dates requested on requested.leave_date = d.leave_date
   where lr.bid_year_id = year_row.id
     and lr.bidder_id = target.id
-    and lr.round_number < batch_round
+    and lr.round_number <= batch_round
     and lr.status in ('pending', 'approved');
 
   if cardinality(duplicate_conflict_dates) > 0 then
@@ -337,117 +475,113 @@ begin
 
     error_messages := array_append(
       error_messages,
-      format('You already bid the same date in a previous round: %s. Each date may be bid only once across rounds.', conflict_date_labels)
+      format('You already bid one or more of these dates: %s. Each date may be bid only once.', conflict_date_labels)
     );
   end if;
 
-  -- Prefer an already populated line. Otherwise use the line submitted with
-  -- the leave batch or the latest pending/approved RDO intake payload and
-  -- atomically stamp it as assigned if it is still available.
-  select rl.id
-  into target_rdo_line_id
-  from public.rdo_lines rl
-  where rl.bid_year_id = year_row.id
-    and rl.area_id = target.area_id
-    and rl.assigned_bidder_id = target.id
-    and rl.status = 'taken'
-  order by rl.updated_at desc, rl.id
-  limit 1;
+  -- Enforce the bidder's configured leave allowance on the server. The browser
+  -- shows the same projection, but this is the authoritative protection against
+  -- submitting additional ranges beyond the member's allotted hours.
+  select case when coalesce(line.four_ten, false) then 10 else 8 end
+  into leave_hours_per_day
+  from public.rdo_lines line
+  where line.id = coalesce(target_rdo_line_id, submitted_rdo_line_id);
 
-  if target_rdo_line_id is null and submitted_rdo_line_code is null then
-    select coalesce(
-      nullif(submission.payload ->> 'rdo_line_code', ''),
-      nullif(submission.payload ->> 'line', '')
-    )
-    into submitted_rdo_line_code
-    from public.intake_submissions submission
-    where submission.bid_year_id = year_row.id
-      and submission.bidder_id = target.id
-      and submission.submission_type = 'rdo'
-      and submission.status in ('pending', 'approved')
-      and coalesce(
-        nullif(submission.payload ->> 'rdo_line_code', ''),
-        nullif(submission.payload ->> 'line', '')
-      ) is not null
-    order by submission.reviewed_at desc nulls last, submission.submitted_at desc nulls last, submission.created_at desc
-    limit 1;
-  end if;
+  leave_hours_per_day := coalesce(leave_hours_per_day, 8);
 
-  if target_rdo_line_id is null and submitted_rdo_line_code is not null then
-    select rl.id
-    into submitted_rdo_line_id
-    from public.rdo_lines rl
-    where rl.bid_year_id = year_row.id
-      and rl.area_id = target.area_id
-      and rl.line_code = submitted_rdo_line_code
-    for update;
-
-    if submitted_rdo_line_id is null then
-      error_messages := array_append(
-        error_messages,
-        format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
-      );
-    elsif exists (
+  select count(*)::integer
+  into requested_charged_days
+  from jsonb_array_elements(requested_items) requested(item)
+  cross join lateral pg_catalog.generate_series(
+    (requested.item ->> 'start_date')::date::timestamp,
+    (requested.item ->> 'end_date')::date::timestamp,
+    interval '1 day'
+  ) generated_date
+  where (batch_round <= 3 or (not exists (
       select 1
-      from public.rdo_lines rl
-      where rl.id = submitted_rdo_line_id
-        and not (
-          rl.status = 'open'
-          or (rl.status = 'taken' and rl.assigned_bidder_id = target.id)
-        )
-    ) then
+      from public.holidays holiday
+      where holiday.bid_year_id = year_row.id
+        and holiday.holiday_date = generated_date::date
+    )
+    and not exists (
+      select 1
+      from public.holiday_in_lieu_days in_lieu
+      where in_lieu.bid_year_id = year_row.id
+        and in_lieu.bidder_id = target.id
+        and in_lieu.in_lieu_date = generated_date::date
+    )))
+    and not (batch_round = 1 and exists (
+      select 1 from public.rdo_line_days day
+      where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+        and day.weekday = extract(dow from generated_date::date)::smallint and day.is_rdo
+    ));
+
+  select coalesce(sum(request.charged_days), 0)::integer
+  into existing_charged_days
+  from public.leave_requests request
+  where request.bid_year_id = year_row.id
+    and request.bidder_id = target.id
+    and request.status in ('pending', 'approved');
+
+  -- The private submitter builds Round 1's actual seven-day buckets, including
+  -- dates that fit an existing bucket; a per-range estimate rejects those.
+  if batch_round <> 1 then
+    round_leave_limit := case when batch_round in (2, 3) then 10 else 5 end;
+
+    select coalesce(sum(request.charged_days), 0)::integer
+    into existing_round_usage
+    from public.leave_requests request
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number = batch_round
+      and request.status in ('pending', 'approved');
+
+    if existing_round_usage + requested_charged_days > round_leave_limit then
       error_messages := array_append(
         error_messages,
-        format('RDO Line %s is no longer available.', submitted_rdo_line_code)
+        format(
+          'Round %s can include no more than %s charged leave days. This batch would bring you to %s.',
+          batch_round,
+          round_leave_limit,
+          existing_round_usage + requested_charged_days
+        )
       );
-    else
-      update public.rdo_lines
-      set status = 'taken',
-          assigned_bidder_id = target.id,
-          updated_at = now()
-      where id = submitted_rdo_line_id
-        and (
-          status = 'open'
-          or (status = 'taken' and assigned_bidder_id = target.id)
-        );
-
-      target_rdo_line_id := submitted_rdo_line_id;
     end if;
   end if;
 
-  if target_rdo_line_id is null then
+  if batch_round >= 4 then
+    select count(distinct request_date.leave_date)::integer
+    into available_credit_days
+    from public.leave_request_dates request_date
+    join public.leave_requests request on request.id = request_date.leave_request_id
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number between 1 and 3
+      and request.status in ('pending', 'approved')
+      and request_date.charged
+      and (request_date.is_holiday or request_date.is_holiday_in_lieu);
+
+    select available_credit_days + coalesce(sum(credit.credit_days), 0)::integer
+    into available_credit_days
+    from public.leave_credit_events credit
+    where credit.bid_year_id = year_row.id
+      and credit.bidder_id = target.id
+      and credit.round_number <= batch_round
+      and credit.source = 'manual_adjustment';
+  end if;
+
+  maximum_leave_hours := target.leave_slot_allowance + (available_credit_days * leave_hours_per_day);
+  projected_leave_hours := (existing_charged_days + requested_charged_days) * leave_hours_per_day;
+
+  if projected_leave_hours > maximum_leave_hours then
     error_messages := array_append(
       error_messages,
-      'Choose an available RDO line before submitting leave so the system can check RDO conflicts.'
+      format(
+        'This batch would use %s leave hours, above your %s-hour allowance.',
+        projected_leave_hours,
+        maximum_leave_hours
+      )
     );
-  else
-    with requested_dates as (
-      select distinct gs::date as leave_date
-      from jsonb_array_elements(requested_items) requested(item)
-      cross join lateral generate_series(
-        (requested.item ->> 'start_date')::date,
-        (requested.item ->> 'end_date')::date,
-        interval '1 day'
-      ) gs
-    )
-    select array_agg(requested.leave_date order by requested.leave_date)
-    into rdo_conflict_dates
-    from requested_dates requested
-    join public.rdo_line_days line_day
-      on line_day.rdo_line_id = target_rdo_line_id
-     and line_day.is_rdo
-     and line_day.weekday = extract(dow from requested.leave_date)::smallint;
-
-    if cardinality(rdo_conflict_dates) > 0 then
-      select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
-      into conflict_date_labels
-      from unnest(rdo_conflict_dates) date_value;
-
-      error_messages := array_append(
-        error_messages,
-        format('These dates are RDOs on your approved bid line: %s.', conflict_date_labels)
-      );
-    end if;
   end if;
 
   if cardinality(error_messages) > 0 then
@@ -470,4 +604,76 @@ grant execute on function public.submit_leave_bid_batch(integer, jsonb, text, te
   to authenticated;
 
 comment on function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean) is
-  'Atomically validates bid windows, role-specific daily capacity, prior-round duplicate dates, and bid-line RDOs before submitting a leave batch for intake review.';
+  'Atomically validates bid windows, leave-hour allowance, role-specific daily capacity, prior-round duplicate dates, and RDO request prerequisites before submitting a leave batch for intake review.';
+
+create or replace function private.recalculate_pending_leave_after_rdo_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+begin
+  if new.status <> 'taken' or new.assigned_bidder_id is null then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.status = new.status
+       and old.assigned_bidder_id is not distinct from new.assigned_bidder_id then
+      return new;
+    end if;
+  end if;
+
+  update public.leave_request_dates lrd
+  set is_rdo = exists (
+        select 1
+        from public.rdo_line_days line_day
+        where line_day.rdo_line_id = new.id
+          and line_day.is_rdo
+          and line_day.weekday = extract(dow from lrd.leave_date)::smallint
+      ),
+      charged = not (
+          lr.round_number = 1
+          and exists (
+            select 1
+            from public.rdo_line_days line_day
+            where line_day.rdo_line_id = new.id
+              and line_day.is_rdo
+              and line_day.weekday = extract(dow from lrd.leave_date)::smallint
+          )
+        )
+        and (lr.round_number <= 3
+          or (not lrd.is_holiday and not lrd.is_holiday_in_lieu))
+  from public.leave_requests lr
+  where lrd.leave_request_id = lr.id
+    and lr.bid_year_id = new.bid_year_id
+    and lr.bidder_id = new.assigned_bidder_id
+    and lr.status = 'pending';
+
+  update public.leave_requests lr
+  set charged_days = coalesce((
+        select count(*)::integer
+        from public.leave_request_dates lrd
+        where lrd.leave_request_id = lr.id
+          and lrd.charged
+      ), 0),
+      updated_at = now()
+  where lr.bid_year_id = new.bid_year_id
+    and lr.bidder_id = new.assigned_bidder_id
+    and lr.status = 'pending';
+
+  return new;
+end
+$function$;
+
+drop trigger if exists recalculate_pending_leave_after_rdo_assignment on public.rdo_lines;
+create trigger recalculate_pending_leave_after_rdo_assignment
+after insert or update of status, assigned_bidder_id on public.rdo_lines
+for each row
+execute function private.recalculate_pending_leave_after_rdo_assignment();
+
+comment on function private.recalculate_pending_leave_after_rdo_assignment() is
+  'Recalculates pending leave charge dates when an RDO line is assigned to a bidder.';
+
+revoke all on function private.recalculate_pending_leave_after_rdo_assignment()
+  from public, anon, authenticated;
