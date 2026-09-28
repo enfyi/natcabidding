@@ -1749,6 +1749,15 @@ function pendingCurrentUserRdoRequest() {
   );
 }
 
+function pendingCurrentUserLeaveRequests(round = null) {
+  return intakeQueue.filter((item) =>
+    item.type === "Leave" &&
+    item.initials === currentUser.initials &&
+    item.status === "Pending" &&
+    (round === null || leaveRoundForItem(item) === round)
+  );
+}
+
 function latestCurrentUserDeniedRdoRequest() {
   const latestRequest = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
@@ -2173,17 +2182,35 @@ async function addOrUpdateRdoSubmission() {
     summary: `Round ${round} · Line ${line.line} · Group ${selectedFatigueGroup} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
+  const isChange = Boolean(existing)
+    && String(existing.line ?? "") !== String(request.line ?? "");
+  if (isChange && pendingCurrentUserLeaveRequests(1).length) {
+    alert("Your Round 1 leave dates are awaiting an intake decision. Wait until they are approved or denied before changing your RDO bid.");
+    return;
+  }
+  if (isChange && !window.confirm(
+    "Are you sure you want to change your RDO bid? All approved Round 1 leave dates will expire, and you will have to bid your two weeks of leave again. Pending RDO or leave requests must be approved or denied before you can make this change."
+  )) return;
+
   try {
-    await saveSupabaseRdoRequest(request);
+    const saved = await saveSupabaseRdoRequest(request);
+    if (saved) await loadSupabaseReferenceData();
   } catch (error) {
     alert(error.message || "Your RDO request could not be saved. Please try again before submitting leave.");
     return;
   }
 
-  if (existing) {
-    Object.assign(existing, request);
-  } else {
-    intakeQueue.unshift(request);
+  if (!supabaseState.connected) {
+    if (isChange) {
+      [...intakeQueue, ...leaveBids].forEach((item) => {
+        if (item.type === "RDO Line") return;
+        if ((!item.initials || item.initials === currentUser.initials)
+          && leaveRoundForItem(item) === 1
+          && item.status === "Approved") item.status = "Expired";
+      });
+    }
+    if (existing) Object.assign(existing, request);
+    else intakeQueue.unshift(request);
   }
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is still required before the line is populated.`);
@@ -2738,6 +2765,7 @@ function uiStatusFromDatabase(status) {
     approved: "Approved",
     denied: "Denied",
     cancelled: "Cancelled",
+    expired: "Expired",
   };
   return labels[normalized] || "Pending";
 }
@@ -6298,8 +6326,8 @@ async function ensureSupabaseBidYearId() {
 
 async function saveSupabaseRdoRequest(request) {
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) return false;
-  const { error } = await client.rpc("submit_rdo_bid", {
+  if (!client || !currentUser.supabaseProfileId) return null;
+  const { data, error } = await client.rpc("submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
     requested_fatigue_group: request.fatigueGroup,
@@ -6312,7 +6340,7 @@ async function saveSupabaseRdoRequest(request) {
     manual_entry: false,
   });
   if (error) throw error;
-  return true;
+  return data;
 }
 
 async function saveSupabaseManualRdoRequest(request, person, area) {
@@ -8217,6 +8245,10 @@ function openBidChangeModal() {
     setSubmittedLeaveStatus("There are no submitted bid dates to change in this round.", "error");
     return;
   }
+  if (items.some((item) => item.status === "Pending")) {
+    setSubmittedLeaveStatus("Your leave dates are awaiting an intake decision. Wait until they are approved or denied before changing them.", "error");
+    return;
+  }
   if (items.some((item) => !item.supabaseRequestId)) {
     setSubmittedLeaveStatus("Reload the saved bids before changing dates.", "error");
     return;
@@ -8362,6 +8394,10 @@ function renderSubmittedLeaveManager() {
   const now = new Date();
   const round = editableLeaveRound(now) || currentRoundNumber();
   const items = submittedLeaveItemsForCurrentRound(now);
+  const pendingItems = items.filter((item) => item.status === "Pending");
+  const pendingDecisionMessage = pendingItems.length
+    ? "Your leave dates are awaiting an intake decision. Wait until they are approved or denied before changing or removing them."
+    : "";
   const hasSubmittedThisRound = leaveBids.some((item) =>
     leaveRoundForItem(item) === round &&
     (!item.initials || item.initials === currentUser.initials) &&
@@ -8391,8 +8427,8 @@ function renderSubmittedLeaveManager() {
   addButton.dataset.constraintError = constraintError;
   addButton.disabled = Boolean(addError) || Boolean(leaveManagementPendingId);
   addButton.title = addError;
-  changeButton.disabled = Boolean(windowError) || Boolean(leaveManagementPendingId) || !items.length || items.some((item) => !item.supabaseRequestId);
-  changeButton.title = windowError;
+  changeButton.disabled = Boolean(windowError) || Boolean(pendingDecisionMessage) || Boolean(leaveManagementPendingId) || !items.length || items.some((item) => !item.supabaseRequestId);
+  changeButton.title = windowError || pendingDecisionMessage;
   usage.innerHTML = `
     <div><span>This round</span><strong>${round === 1 ? `${roundWeeks} / ${roundOneWeekLimit()} bid weeks` : `${roundDays} / ${leaveDayLimitForRound(round)} days`}</strong></div>
     <div><span>Allotted hours left</span><strong>${formatEstimatedLeaveDays(remainingHours)} / ${formatEstimatedLeaveDays(maximumHours)} hours</strong></div>
@@ -8408,12 +8444,12 @@ function renderSubmittedLeaveManager() {
           <strong>${escapeHtml(item.range)}</strong>
           <small>${formatEstimatedLeaveDays(leaveItemChargedDays(item) * hoursPerDay)} leave hours · Priority ${Number(item.priority || 0)}</small>
         </div>
-        <button class="secondary-action danger small" type="button" data-remove-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId ? "disabled" : ""} title="${escapeHtml(windowError)}">${isSaving ? "Removing…" : "Remove"}</button>
+        <button class="secondary-action danger small" type="button" data-remove-submitted-leave="${escapeHtml(itemKey)}" ${windowError || pendingDecisionMessage || leaveManagementPendingId || item.status !== "Approved" ? "disabled" : ""} title="${escapeHtml(windowError || (item.status === "Pending" ? pendingDecisionMessage : ""))}">${isSaving ? "Removing…" : item.status === "Pending" ? "Awaiting Decision" : "Remove"}</button>
       </article>
     `;
   }).join("") : '<p class="empty-state small">You do not currently have active leave dates in this round. Use Add More Dates to submit another range.</p>';
 
-  if (windowError) setSubmittedLeaveStatus(windowError, "error");
+  if (windowError || pendingDecisionMessage) setSubmittedLeaveStatus(windowError || pendingDecisionMessage, "error");
 }
 
 function openLeaveBuilderForMoreDates() {
@@ -8456,6 +8492,10 @@ function openSubmittedLeaveForReplacement(itemKey) {
     setSubmittedLeaveStatus(windowError || "This leave request cannot be changed here.", "error");
     return;
   }
+  if (item.status !== "Approved") {
+    setSubmittedLeaveStatus("This leave request is awaiting an intake decision. Wait until it is approved or denied before changing it.", "error");
+    return;
+  }
   if (leaveDraftQueue.length) {
     setSubmittedLeaveStatus("Submit or remove the preview batch before changing submitted dates.", "error");
     return;
@@ -8487,6 +8527,10 @@ async function replaceSubmittedLeaveRequest() {
   const windowError = leaveBidWindowErrorMessage();
   if (!item || !item.supabaseRequestId || windowError) {
     setLeaveBuilderStatus(windowError || "This leave request cannot be changed here.", "error");
+    return;
+  }
+  if (item.status !== "Approved") {
+    setLeaveBuilderStatus("This leave request is awaiting an intake decision. Wait until it is approved or denied before changing it.", "error");
     return;
   }
   const { range, notes } = leaveBuilderValues();
@@ -8565,6 +8609,11 @@ async function removeSubmittedLeaveRequest(itemKey) {
   const now = new Date();
   const item = submittedLeaveItemsForCurrentRound(now).find((entry) => submittedLeaveItemKey(entry) === itemKey);
   if (!item) return;
+
+  if (item.status !== "Approved") {
+    setSubmittedLeaveStatus("This leave request is awaiting an intake decision. Wait until it is approved or denied before removing it.", "error");
+    return;
+  }
 
   const windowError = leaveBidWindowErrorMessage(now);
   if (windowError) {
@@ -11489,9 +11538,10 @@ function renderIntakeQueue() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">Approve</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">Deny</button>
           ` : ""}
-          ${canReview && item.status !== "Denied" ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
+          ${canReview && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
+          ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
         </div>
       </article>
     `).join("")

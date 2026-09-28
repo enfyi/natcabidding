@@ -3611,6 +3611,12 @@ tr.occupied-row .rdo-tag {
   background: var(--coral);
 }
 
+.status.expired,
+.status.cancelled {
+  color: #ffffff;
+  background: #64748b;
+}
+
 .status.selected {
   color: var(--deep);
   background: var(--gold);
@@ -3804,6 +3810,11 @@ tr.occupied-row .rdo-tag {
 
 .intake-card.approved {
   opacity: 0.82;
+}
+
+.intake-card.expired {
+  border-style: dashed;
+  opacity: 0.72;
 }
 
 .intake-card h3 {

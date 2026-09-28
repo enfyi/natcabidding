@@ -19,6 +19,11 @@ the shared RDO-line eligibility rule used by member and admin bidding flows.
 Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL
 to prevent bidders from replacing an RDO request while it is pending intake.
 Intake and administrators can still edit, approve, or deny the pending request.
+The migration `20260928030000_expire_round_one_leave_on_rdo_change.sql` keeps
+pending RDO and leave requests locked to the bidder. After those decisions are
+complete, changing an approved RDO expires all approved Round 1 leave, releases
+its leave slots, and keeps the former dates visible as Expired in Intake so the
+bidder can submit two new Round 1 weeks.
 Admin-only login profiles can use `bid_role = 'ADM'`; those profiles still get
 admin access from `role = 'admin'`, but are excluded from BUE roster, seniority,
 bid-window, RDO eligibility, and leave-bidding mechanics.
