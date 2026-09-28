@@ -6,7 +6,9 @@ getSupabaseEnv()
 
 const nextConfig: NextConfig = {
   basePath: getBasePath(),
-  output: 'standalone',
+  // Next.js 16.3 cannot combine standalone output with Vercel's build adapter.
+  // Vercel packages the app itself; retain standalone output only for self-hosting.
+  output: process.env.VERCEL ? undefined : 'standalone',
   outputFileTracingIncludes: {
     '/*': [
       './bidding.html',
