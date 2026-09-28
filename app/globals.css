@@ -119,6 +119,9 @@ h1 {
 .primary { color: white; background: var(--green); }
 .primary:hover { background: var(--green-dark); }
 .secondary { border-color: var(--line); color: var(--ink); background: transparent; }
+.button.danger { border-color: #d9aaa6; color: #8b2d28; background: #fff4f2; }
+.button.danger:hover:not(:disabled) { border-color: #b85b52; color: #fff; background: #9d2e2e; }
+.button.compact { min-height: 36px; padding: 0 16px; font-size: 0.8rem; }
 
 .notice { margin: 24px 0 0; border-radius: 12px; padding: 12px 14px; font-size: 0.9rem; line-height: 1.45; }
 .notice.error { color: var(--red); background: #fff1f0; }
@@ -251,6 +254,22 @@ h1 {
 .import-issues h2 { font-size: 1.15rem; }
 .import-issues ul { margin: 12px 0 0; padding-left: 20px; }
 .import-preview { margin-top: 20px; }
+.import-line-manager { margin-top: 20px; }
+.import-delete-note { margin: 20px 0 0; border-radius: 12px; padding: 12px 14px; color: #762a23; background: #fff1ef; line-height: 1.5; }
+.import-inline-status { margin: 14px 0 0; color: var(--muted); line-height: 1.5; }
+.import-empty-state { margin: 24px 0 0; color: var(--muted); }
+.import-line-manager-table { max-height: 420px; }
+.import-line-manager-table table { min-width: 680px; }
+.import-line-action-cell { text-align: right; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
 .import-count {
   display: grid;
   min-width: 56px;
