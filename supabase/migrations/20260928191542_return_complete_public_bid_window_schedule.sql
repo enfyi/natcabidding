@@ -1,5 +1,5 @@
--- Public, read-only bid-window schedule used by the front-page area lists.
--- Contact details and submission data are intentionally excluded.
+-- Return the full schedule as one JSON value so PostgREST's row limit cannot
+-- truncate later areas from the public front-page response.
 
 drop function if exists public.read_public_bid_windows(integer);
 
@@ -36,4 +36,4 @@ revoke all on function public.read_public_bid_windows(integer) from public, anon
 grant execute on function public.read_public_bid_windows(integer) to anon, authenticated;
 
 comment on function public.read_public_bid_windows(integer) is
-  'Returns the published bid-window schedule for public area bid-time lists without exposing private bidder data.';
+  'Returns the complete public bid-window schedule as one JSON payload without exposing private bidder data.';
