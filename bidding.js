@@ -8106,6 +8106,33 @@ function bidChangeCount() {
   return bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey).length;
 }
 
+function bidChangeDraftSelection() {
+  const changedRows = bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey);
+  const affectedRequestIds = new Set(changedRows.map((row) => row.itemKey));
+  if (bidChangeRound === 1) {
+    changedRows.forEach((row) => {
+      bidChangeRows.filter((candidate) => candidate.groupKey === row.groupKey)
+        .forEach((candidate) => affectedRequestIds.add(candidate.itemKey));
+    });
+  }
+  const replacementRows = bidChangeRows
+    .filter((row) => affectedRequestIds.has(row.itemKey))
+    .map((row) => ({ ...row, newKey: row.newKey || row.oldKey }));
+  return { changedRows, affectedRequestIds, replacementRows };
+}
+
+function bidChangeRowValidationMessage(row, replacementRows, affectedRequestIds) {
+  if (!row.newKey || row.newKey === row.oldKey) return "";
+  if (!isBidLeaveYearDate(row.newKey)) return "Outside the bidding leave year.";
+  if (bidChangeRound > 1 && isRdoDateForInitials(row.newKey, currentUser.initials)) return "This is one of your RDO dates.";
+  if (replacementRows.filter((candidate) => candidate.newKey === row.newKey).length > 1) return "This date is selected more than once.";
+
+  const overlapsAnotherBid = leaveRoundUsageForInitials(currentUser.initials, bidChangeRound)
+    .filter((item) => !affectedRequestIds.has(submittedLeaveItemKey(item)))
+    .some((item) => leaveDateKeysForItem(item).includes(row.newKey));
+  return overlapsAnotherBid ? "You already have another active bid on this date." : "";
+}
+
 function renderBidChangeModal() {
   const modal = document.querySelector("[data-bid-change-modal]");
   const rowsTarget = document.querySelector("[data-bid-change-rows]");
@@ -8113,6 +8140,10 @@ function renderBidChangeModal() {
   if (!modal || modal.hidden || !rowsTarget || !saveButton) return;
 
   const isRoundOne = bidChangeRound === 1;
+  const selection = bidChangeDraftSelection();
+  const validationMessage = selection.changedRows.length
+    ? bidChangeValidationMessage(selection.replacementRows, selection.affectedRequestIds)
+    : "";
   const groupedRows = new Map();
   bidChangeRows.forEach((row) => {
     const groupKey = isRoundOne ? row.groupKey : "individual";
@@ -8125,23 +8156,29 @@ function renderBidChangeModal() {
     ? "Move a submitted bid week while your Round 1 window is open. Every date in that week moves together."
     : `Change one or more submitted Round ${bidChangeRound} dates while your bid window is open.`;
   document.querySelector("[data-bid-change-guidance]").textContent = isRoundOne
-    ? "Choose a new start date for each week you want to move. All dates in that week will be filled in automatically—even dates that stay the same must be included in the week change."
-    : "Enter a new date only beside the bid date you want to change. Leave a row blank to keep its current date.";
+    ? "Choose a new start date for each week you want to move. All dates in that week will be filled in automatically. RDOs, duplicates, the two-week limit, and other rules are checked as you choose."
+    : "Enter a new date only beside the bid date you want to change. Leave a row blank to keep its current date. RDOs, duplicates, and round limits are checked immediately.";
 
   rowsTarget.innerHTML = [...groupedRows.entries()].map(([groupKey, rows], groupIndex) => {
-    const rowMarkup = rows.map((row) => `
-      <div class="bid-change-row ${row.newKey && row.newKey !== row.oldKey ? "changed" : ""}">
+    const rowMarkup = rows.map((row) => {
+      const rowError = bidChangeRowValidationMessage(row, selection.replacementRows, selection.affectedRequestIds);
+      return `
+      <div class="bid-change-row ${row.newKey && row.newKey !== row.oldKey ? "changed" : ""} ${rowError ? "invalid" : ""}">
         <time datetime="${row.oldKey}">${escapeHtml(bidChangeDateLabel(row.oldKey))}</time>
         <span class="bid-change-arrow" aria-hidden="true">→</span>
-        <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${row.newKey}" data-bid-change-date="${escapeHtml(row.id)}" aria-label="New date for ${escapeHtml(bidChangeDateLabel(row.oldKey))}" ${isRoundOne ? "readonly tabindex=\"-1\"" : ""} />
+        <span class="bid-change-field">
+          <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${row.newKey}" data-bid-change-date="${escapeHtml(row.id)}" aria-label="New date for ${escapeHtml(bidChangeDateLabel(row.oldKey))}" aria-invalid="${Boolean(rowError)}" ${isRoundOne ? "readonly tabindex=\"-1\"" : ""} />
+          ${rowError ? `<small>${escapeHtml(rowError)}</small>` : ""}
+        </span>
       </div>
-    `).join("");
+    `;
+    }).join("");
     if (!isRoundOne) return rowMarkup;
     const selectedStart = rows[0]?.newKey
       ? addDaysToDateKey(rows[0].newKey, -Math.round((dateFromKey(rows[0].oldKey) - dateFromKey(groupKey)) / 86400000))
       : "";
     return `
-      <section class="bid-change-week">
+      <section class="bid-change-week ${rows.some((row) => bidChangeRowValidationMessage(row, selection.replacementRows, selection.affectedRequestIds)) ? "invalid" : ""}">
         <div class="bid-change-week-head">
           <div><strong>Bid week ${groupIndex + 1}</strong><small>${escapeHtml(bidChangeDateLabel(groupKey))} through ${escapeHtml(bidChangeDateLabel(addDaysToDateKey(groupKey, 6)))}</small></div>
           <label>New week begins
@@ -8154,12 +8191,19 @@ function renderBidChangeModal() {
   }).join("");
 
   const changed = bidChangeCount();
-  saveButton.disabled = !changed || Boolean(leaveManagementPendingId);
+  saveButton.disabled = !changed || Boolean(validationMessage) || Boolean(leaveManagementPendingId);
   saveButton.textContent = leaveManagementPendingId
     ? "Saving Changes…"
     : changed
       ? `Review & Save ${changed} ${changed === 1 ? "Change" : "Changes"}`
       : "Review & Save Changes";
+  if (validationMessage) {
+    setBidChangeStatus(validationMessage, "error");
+  } else if (changed) {
+    setBidChangeStatus(`${changed} ${changed === 1 ? "date is" : "dates are"} ready to save. Database availability will be confirmed when you save.`, "success");
+  } else {
+    setBidChangeStatus("");
+  }
 }
 
 function openBidChangeModal() {
@@ -8216,15 +8260,11 @@ function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
     return { ...row, newKey: addDaysToDateKey(newStartKey, offset) };
   });
   renderBidChangeModal();
-  const changed = bidChangeCount();
-  setBidChangeStatus(changed ? `${changed} dates will move with this bid week.` : "");
 }
 
 function updateIndividualBidChange(rowId, newKey) {
   bidChangeRows = bidChangeRows.map((row) => row.id === rowId ? { ...row, newKey } : row);
   renderBidChangeModal();
-  const changed = bidChangeCount();
-  setBidChangeStatus(changed ? `${changed} ${changed === 1 ? "date" : "dates"} selected to change.` : "");
 }
 
 function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
@@ -8250,27 +8290,26 @@ function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
       return `Round ${bidChangeRound} can include up to ${leaveDayLimitForRound(bidChangeRound)} charged days. These changes would use ${chargedDays}.`;
     }
   }
+
+  const affectedItems = leaveRoundUsageForInitials(currentUser.initials, bidChangeRound)
+    .filter((item) => affectedRequestIds.has(submittedLeaveItemKey(item)));
+  const affectedChargedDays = affectedItems.reduce((total, item) => total + leaveItemChargedDays(item), 0);
+  const replacementChargedDays = chargeableLeaveDateKeys(newKeys, currentUser.initials, bidChangeRound).length;
+  const projectedChargedDays = leaveCommittedChargedDays() - affectedChargedDays + replacementChargedDays;
+  if (projectedChargedDays > leaveAllowanceLimitForRound(bidChangeRound)) {
+    return `These changes would exceed your Round ${bidChangeRound} leave allowance.`;
+  }
   return "";
 }
 
 async function saveBidDateChanges() {
   if (leaveManagementPendingId) return;
-  const changedRows = bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey);
+  const { changedRows, affectedRequestIds, replacementRows } = bidChangeDraftSelection();
   if (!changedRows.length) {
     setBidChangeStatus("Choose at least one new date before saving.", "error");
     return;
   }
 
-  const affectedRequestIds = new Set(changedRows.map((row) => row.itemKey));
-  if (bidChangeRound === 1) {
-    changedRows.forEach((row) => {
-      bidChangeRows.filter((candidate) => candidate.groupKey === row.groupKey)
-        .forEach((candidate) => affectedRequestIds.add(candidate.itemKey));
-    });
-  }
-  const replacementRows = bidChangeRows
-    .filter((row) => affectedRequestIds.has(row.itemKey))
-    .map((row) => ({ ...row, newKey: row.newKey || row.oldKey }));
   const validationMessage = bidChangeValidationMessage(replacementRows, affectedRequestIds);
   if (validationMessage) {
     setBidChangeStatus(validationMessage, "error");
