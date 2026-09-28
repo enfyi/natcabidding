@@ -14,6 +14,11 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
+Run `database/public_bid_windows_read.sql` so signed-out visitors can load the
+saved bid-window schedule shown on each public area Bid Time page. The read-only
+function exposes window times and bidder IDs only; names and initials continue to
+come from the existing public roster read model.
+
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
 Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL
@@ -32,6 +37,20 @@ Employees who remain on the roster but should not bid can use `bid_role = 'NB'`.
 excluded from seniority bid-window slots, RDO eligibility, and leave bidding.
 Run `database/admin_profile_adm.sql` to mark the standalone Area A admin login
 for `zla.bidding@gmail.com` as `ADM` and clear any bid windows attached to it.
+
+For bid-year-specific ghost bidding, run `database/ghost_bidding.sql` after the
+base schema, then run or re-run `database/transactional_bidding.sql` and
+`database/high_priority_bidding_fixes.sql` (when that migration is part of the
+installation), followed by `database/leave_submission_preflight.sql`,
+`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
+preflight migration after either script that replaces the leave submission
+function so its transactional wrapper remains installed. Intake can designate a controller before the
+controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
+their account and audit history without taking the source line. Their ghost
+leave remains visible in the account and intake queue without reserving or
+consuming an area leave slot. The designation cannot be changed after pending or
+approved RDO/leave bids exist, preventing mixed consuming and non-consuming
+records for the same bid year.
 
 For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
@@ -235,6 +254,15 @@ fatigue settings, date bounds, overlapping leave, RDO conflicts, round limits,
 leave-hour allowance, and daily capacity. Administrative corrections can update
 past rounds without an open bidding window, matching manual intake entry. Capacity
 overrides are not accepted by this editor.
+
+## Bid Window Builder
+
+Run `database/bid_window_builder.sql` after the base schema and authentication
+functions. It installs the admin-only schedule generator used by the Bid Window
+Builder in the Admin Console. The generator assigns every active bidding employee
+in area seniority order, uses Pacific local time, skips blocked dates, reserves the
+configured review days between rounds, updates `bid_rounds`, and records one audit
+event for the completed schedule.
 
 Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
 data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed

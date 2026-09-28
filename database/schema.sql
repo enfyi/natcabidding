@@ -66,10 +66,29 @@ create table if not exists bid_year_settings (
   bid_year_id uuid primary key references bid_years(id) on delete cascade,
   enforce_bid_windows boolean not null default true,
   test_bid_round integer check (test_bid_round between 1 and 4),
+  round_rules jsonb not null default '{}'::jsonb,
+  approval_rules jsonb,
   updated_by uuid references bidders(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create table if not exists bidder_bid_year_settings (
+  bid_year_id uuid not null references bid_years(id) on delete cascade,
+  bidder_id uuid not null references bidders(id) on delete cascade,
+  is_ghost_bidder boolean not null default false,
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (bid_year_id, bidder_id)
+);
+
+create index if not exists bidder_bid_year_settings_bidder_idx
+  on bidder_bid_year_settings(bidder_id);
+
+create index if not exists bidder_bid_year_settings_updated_by_idx
+  on bidder_bid_year_settings(updated_by)
+  where updated_by is not null;
 
 create table if not exists rdo_lines (
   id uuid primary key default gen_random_uuid(),
@@ -204,6 +223,7 @@ create table if not exists leave_requests (
   reviewed_at timestamptz,
   reviewed_by uuid references bidders(id) on delete set null,
   denial_reason text,
+  is_ghost_bid boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, bidder_id, round_number, priority)
@@ -266,6 +286,7 @@ create table if not exists intake_submissions (
   reviewed_at timestamptz,
   reviewed_by uuid references bidders(id) on delete set null,
   denial_reason text,
+  is_ghost_bid boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -275,6 +296,7 @@ create index if not exists intake_submissions_queue_idx
 
 create table if not exists intake_schedules (
   id uuid primary key default gen_random_uuid(),
+  bid_year_id uuid references bid_years(id) on delete cascade,
   area_id uuid references areas(id) on delete set null,
   intake_user_id uuid not null references bidders(id) on delete cascade,
   starts_at timestamptz not null,
@@ -283,6 +305,9 @@ create table if not exists intake_schedules (
   created_at timestamptz not null default now(),
   check (ends_at > starts_at)
 );
+
+create index if not exists intake_schedules_bid_year_start_idx
+  on intake_schedules(bid_year_id, starts_at);
 
 create table if not exists help_threads (
   id uuid primary key default gen_random_uuid(),

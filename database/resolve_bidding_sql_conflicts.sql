@@ -42,6 +42,7 @@ declare
   crew_used integer;
   enforce_bid_windows boolean := true;
   configured_test_round integer;
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -91,6 +92,8 @@ begin
     limit 1;
     if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
   end if;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   select * into strict line_row
   from public.rdo_lines rl
@@ -142,22 +145,25 @@ begin
   if submission_id is null then
     insert into public.intake_submissions (
       bid_year_id, area_id, bidder_id, round_number, rdo_line_id,
-      submission_type, status, payload, submitted_at
+      submission_type, status, payload, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.area_id, target.id, resolved_round, line_row.id,
       'rdo', 'pending', jsonb_build_object(
         'line', line_row.line_code, 'fatigueGroup', requested_fatigue_group,
         'flex', requested_flex, 'aws', requested_aws, 'mid', requested_mid,
-        'bidAs', target.bid_role
-      ), now()
+        'bidAs', target.bid_role, 'ghostBid', ghost_bid,
+        'lineLabel', case when ghost_bid then 'Ghost Line' else 'RDO Line' end
+      ), now(), ghost_bid
     ) returning id into submission_id;
   else
     update public.intake_submissions
     set rdo_line_id = line_row.id,
+        is_ghost_bid = ghost_bid,
         payload = jsonb_build_object(
           'line', line_row.line_code, 'fatigueGroup', requested_fatigue_group,
           'flex', requested_flex, 'aws', requested_aws, 'mid', requested_mid,
-          'bidAs', target.bid_role
+          'bidAs', target.bid_role, 'ghostBid', ghost_bid,
+          'lineLabel', case when ghost_bid then 'Ghost Line' else 'RDO Line' end
         ), submitted_at = now(), updated_at = now()
     where id = submission_id;
   end if;
@@ -166,7 +172,8 @@ begin
   values (year_row.id, target.area_id, actor.id, 'rdo_bid_submitted', 'intake_submissions', submission_id,
     jsonb_build_object('target_bidder_id', target.id, 'line_code', line_row.line_code, 'round', resolved_round));
 
-  return jsonb_build_object('submission_id', submission_id, 'round', resolved_round);
+  return jsonb_build_object('submission_id', submission_id, 'round', resolved_round,
+    'is_ghost_bid', ghost_bid);
 end
 $$;
 
@@ -208,6 +215,7 @@ declare
   is_in_lieu boolean;
   effective_rdo_line_id uuid;
   result_ids jsonb := '[]'::jsonb;
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -236,6 +244,8 @@ begin
       and (target_area_name is null or a.name = target_area_name)
     order by case when b.area_id = actor.area_id then 0 else 1 end, b.id limit 1 for update of b;
   end if;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   -- Validate the inexpensive invariants before expanding ranges into individual
   -- dates so malformed input cannot force an unbounded generate_series call.
@@ -385,10 +395,10 @@ begin
 
     insert into public.leave_requests (
       bid_year_id, bidder_id, round_number, priority, status,
-      requested_start_date, requested_end_date, charged_days, notes, submitted_at
+      requested_start_date, requested_end_date, charged_days, notes, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.id, round_no, priority_no, 'pending',
-      start_date, end_date, item_charged, nullif(item->>'notes', ''), now()
+      start_date, end_date, item_charged, nullif(item->>'notes', ''), now(), ghost_bid
     ) returning id into request_id;
 
     if round_no = 1 then
@@ -414,12 +424,12 @@ begin
 
     insert into public.intake_submissions (
       bid_year_id, area_id, bidder_id, round_number, leave_request_id,
-      submission_type, status, payload, submitted_at
+      submission_type, status, payload, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.area_id, target.id, round_no, request_id, 'leave', 'pending',
       jsonb_build_object('range', start_date || ' - ' || end_date, 'days', item_charged,
         'startDate', start_date, 'endDate', end_date, 'bidAs', target.bid_role,
-        'notes', nullif(item->>'notes', '')), now()
+        'notes', nullif(item->>'notes', ''), 'ghostBid', ghost_bid), now(), ghost_bid
     ) returning id into submission_id;
 
     result_ids := result_ids || jsonb_build_array(submission_id);
@@ -429,7 +439,8 @@ begin
   values (year_row.id, target.area_id, actor.id, 'leave_batch_submitted', 'intake_submissions',
     jsonb_build_object('target_bidder_id', target.id, 'round', batch_round, 'charged_days', batch_charged, 'submission_ids', result_ids));
 
-  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round, 'charged_days', batch_charged);
+  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round,
+    'charged_days', batch_charged, 'is_ghost_bid', ghost_bid);
 end
 $$;
 

@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -1165,6 +1165,7 @@
         <section class="page" id="admin-page" data-page-panel="admin">
           <nav class="admin-section-nav" aria-label="Admin console sections">
             <button type="button" data-admin-section-target="admin-capacity-section">Capacity</button>
+            <button type="button" data-admin-section-target="admin-bid-window-section">Bid windows</button>
             <button type="button" data-admin-section-target="admin-roster-section">Roster</button>
             <button type="button" data-admin-section-target="admin-access-section">Access</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
@@ -1236,6 +1237,72 @@
                   <span class="status open" data-slot-capacity-change-count>0 changed dates</span>
                 </div>
                 <div class="slot-capacity-change-grid" data-slot-capacity-changes></div>
+              </section>
+              <section class="bid-window-builder admin-section-target" id="admin-bid-window-section" tabindex="-1" aria-label="Bid window schedule builder">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Bid Window Builder</h3>
+                    <p>Build all four rounds from the active seniority roster, office hours, and blocked dates.</p>
+                  </div>
+                  <span class="status open" data-bid-window-builder-summary>Ready to build</span>
+                </div>
+                <form class="bid-window-builder-form" data-bid-window-builder-form>
+                  <label class="toggle-row bid-window-consistency-toggle">
+                    <input type="checkbox" data-bid-window-builder-consistent checked />
+                    <span>Start all areas together</span>
+                  </label>
+                  <label>
+                    Area
+                    <select data-bid-window-builder-area>
+                      <option>Area A</option>
+                      <option>Area B</option>
+                      <option>Area C</option>
+                      <option>Area D</option>
+                      <option>Area E</option>
+                      <option>Area F</option>
+                      <option>TMU</option>
+                    </select>
+                  </label>
+                  <label>
+                    Round 1 start date
+                    <input type="date" min="2026-01-01" max="2027-12-31" value="2026-10-01" data-bid-window-builder-start />
+                  </label>
+                  <label>
+                    Office opens
+                    <input type="time" step="900" data-bid-window-builder-open />
+                  </label>
+                  <label>
+                    Office closes
+                    <input type="time" step="900" data-bid-window-builder-close />
+                  </label>
+                  <label>
+                    Window length
+                    <select data-bid-window-builder-length>
+                      <option value="30">30 minutes</option>
+                      <option value="60">1 hour</option>
+                      <option value="90">1.5 hours</option>
+                      <option value="120" selected>2 hours</option>
+                      <option value="180">3 hours</option>
+                      <option value="240">4 hours</option>
+                    </select>
+                  </label>
+                  <label>
+                    Review days between rounds
+                    <input type="number" min="0" max="14" step="1" inputmode="numeric" data-bid-window-builder-gap />
+                  </label>
+                  <div class="bid-window-blackout-control">
+                    <label>
+                      Block out a date
+                      <input type="date" data-bid-window-builder-blackout />
+                    </label>
+                    <button class="secondary-action small" type="button" data-add-bid-window-blackout>Add date</button>
+                  </div>
+                  <button class="primary-action small" type="submit">Build Preview</button>
+                  <p class="bid-window-builder-help">Blocked dates are skipped completely. Review days reserve full office days between rounds.</p>
+                  <p class="form-status" data-bid-window-builder-status aria-live="polite"></p>
+                </form>
+                <div class="bid-window-blackout-list" data-bid-window-blackout-list aria-label="Blocked bidding dates"></div>
+                <div class="bid-window-builder-preview" data-bid-window-builder-preview></div>
               </section>
               <section class="roster-manager admin-section-target" id="admin-roster-section" tabindex="-1" aria-label="BUE roster manager">
                 <div class="panel-header compact">
@@ -1401,6 +1468,7 @@
                   </div>
                 </div>
                 <div class="round-rule-editor" data-round-rule-editor></div>
+                <p class="form-status" data-round-rule-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel editable-rule-card">
                 <div class="panel-header compact">
@@ -1414,6 +1482,7 @@
                   <input type="text" data-approval-rule-input placeholder="Add approval rule">
                   <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
                 </div>
+                <p class="form-status" data-approval-rule-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel admin-section-target" id="admin-schedule-section" tabindex="-1">
                 <h3>Schedule Intake Rep</h3>
@@ -1667,6 +1736,7 @@
                 <dl class="rule-list">
                   <div><dt>Seniority</dt><dd data-user-seniority-long>#5 of 45</dd></div>
                   <div><dt>Bid Year</dt><dd>2027</dd></div>
+                  <div><dt>Bidding Status</dt><dd data-profile-ghost-status>Standard Bidder</dd></div>
                   <div><dt>Bid Window</dt><dd data-bid-window-text>Checking</dd></div>
                   <div><dt>Time Remaining</dt><dd data-bid-window-countdown>--:--:--</dd></div>
                 </dl>
@@ -1768,7 +1838,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-pilot-window-bypass"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

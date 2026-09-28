@@ -35,6 +35,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             required
           />
 
+          <Link className="auth-help-link" href="/forgot-password">
+            Forgot your password?
+          </Link>
+
           <div className="button-row">
             <button className="button primary" formAction={login}>Sign in</button>
             <button className="button secondary" formAction={signup}>Create account</button>
