@@ -19,6 +19,10 @@ saved bid-window schedule shown on each public area Bid Time page. The read-only
 function exposes window times and bidder IDs only; names and initials continue to
 come from the existing public roster read model.
 
+Run `database/public_leave_slots_read.sql` so leave calendars load the complete
+saved slot schedule and daily capacity adjustments from Supabase without the
+Data API row limit truncating later dates or areas.
+
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
 Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL
@@ -55,6 +59,8 @@ records for the same bid year.
 For the admin daily CPC/DEV capacity control, also run
 `database/leave_slot_capacity_admin.sql`. It creates the capacity overrides and
 the admin-only database operation that safely resizes each day's slot inventory.
+Install `database/public_leave_slots_read.sql` afterward so those adjustments are
+the authoritative calendar values for both signed-out and signed-in views.
 
 For public FAQ and MOU publishing, also run `database/faq_mous.sql`. It creates
 admin-managed FAQ rows, a public MOU document list, and the public Supabase
