@@ -1298,10 +1298,9 @@ function bidWindowDateParts(date) {
 }
 
 function bidWindowScheduleLabel(window) {
-  if (!window?.start || !window?.end) return "";
+  if (!window?.start) return "";
   const start = bidWindowDateParts(window.start);
-  const inclusiveEnd = bidWindowDateParts(new Date(window.end.getTime() - 60_000));
-  return `${start.weekday}, ${start.month}/${start.day} · ${start.hour}${start.minute}-${inclusiveEnd.hour}${inclusiveEnd.minute}`;
+  return `${start.weekday}, ${start.month}/${start.day} · ${start.hour}${start.minute}`;
 }
 
 function publicBidTimeLabel(roundLabel) {
@@ -1863,7 +1862,7 @@ function currentUserBidWindowStatus(date = new Date()) {
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date <= window.end))),
+    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
   };
 }
 
@@ -1875,7 +1874,7 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
   if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
   if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window closed ${formatDateTime(window.end)}.`;
+  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window is no longer open.`;
 }
 
 function leaveBidWindowErrorMessage(date = new Date()) {
@@ -6625,6 +6624,16 @@ function formatDateRange(start, end) {
   return `${dateFormatter.format(start)} · ${timeFormatter.format(start)} - ${timeFormatter.format(end)}`;
 }
 
+function formatBidWindowStart(start) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(start);
+}
+
 function latestAreaRound(date = new Date(), roundState = areaBidRoundState(date)) {
   if (roundState) return roundState.round;
 
@@ -7491,8 +7500,8 @@ function updateBidWindow(force = false) {
 
   setText("[data-bid-window-text]", statusText);
   setText("[data-bid-window-countdown-label]", countdownLabel);
-  setText("[data-bid-window-close]", personalBidWindow ? formatDateTime(personalBidWindow.end) : "Not scheduled");
-  setText("[data-bid-window-range]", personalBidWindow ? formatDateRange(personalBidWindow.start, personalBidWindow.end) : "Not scheduled");
+  setText("[data-bid-window-close]", personalBidWindow ? "Scheduled" : "Not scheduled");
+  setText("[data-bid-window-range]", personalBidWindow ? formatBidWindowStart(personalBidWindow.start) : "Not scheduled");
   setText("[data-next-bid-window-round]", isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
   setText("[data-next-bid-window-rule-round]", `Round ${currentRound}`);
   setText("[data-next-bid-window-rule]", currentRoundRule.label);
@@ -10277,13 +10286,14 @@ function nextBidWindowBuilderOpenDate(key, blackouts) {
 
 function bidWindowBuilderSettings() {
   const area = document.querySelector("[data-bid-window-builder-area]")?.value || currentViewArea();
+  const keepAreasConsistent = Boolean(document.querySelector("[data-bid-window-builder-consistent]")?.checked);
   const startDate = document.querySelector("[data-bid-window-builder-start]")?.value || "";
   const opensAt = document.querySelector("[data-bid-window-builder-open]")?.value || "";
   const closesAt = document.querySelector("[data-bid-window-builder-close]")?.value || "";
   const windowMinutes = Number(document.querySelector("[data-bid-window-builder-length]")?.value);
   const reviewDays = Number(document.querySelector("[data-bid-window-builder-gap]")?.value);
   const blackoutDates = [...bidWindowBuilderBlackoutDates].sort();
-  return { area, startDate, opensAt, closesAt, windowMinutes, reviewDays, blackoutDates };
+  return { area, keepAreasConsistent, startDate, opensAt, closesAt, windowMinutes, reviewDays, blackoutDates };
 }
 
 function bidWindowBuilderSignature(settings) {
@@ -10293,6 +10303,11 @@ function bidWindowBuilderSignature(settings) {
 function validateBidWindowBuilderSettings(settings) {
   if (!ZLA_AREAS.includes(settings.area)) return "Choose a valid area.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(settings.startDate)) return "Choose the Round 1 start date.";
+  const earliestStartDate = `${BID_YEAR - 1}-01-01`;
+  const latestStartDate = `${BID_YEAR}-12-31`;
+  if (settings.startDate < earliestStartDate || settings.startDate > latestStartDate) {
+    return `Choose a Round 1 start date from ${BID_YEAR - 1} or ${BID_YEAR}.`;
+  }
 
   const openingMinutes = bidWindowBuilderMinutes(settings.opensAt);
   const closingMinutes = bidWindowBuilderMinutes(settings.closesAt);
@@ -10315,34 +10330,46 @@ function generateBidWindowBuilderPreview(settings) {
   const validationMessage = validateBidWindowBuilderSettings(settings);
   if (validationMessage) throw new Error(validationMessage);
 
-  const roster = activeRosterEntries(settings.area).map((entry, index) => rosterEntryToPerson(entry, index + 1));
-  if (!roster.length) throw new Error(`Add active bidding employees to ${settings.area} before building its schedule.`);
+  const scheduledAreas = settings.keepAreasConsistent ? ZLA_AREAS : [settings.area];
+  const areaSchedules = scheduledAreas.map((area) => ({
+    area,
+    rows: activeRosterEntries(area).map((entry, index) => ({ person: rosterEntryToPerson(entry, index + 1), rounds: [] })),
+  }));
+  const largestAreaSchedule = areaSchedules.reduce((largest, schedule) => (
+    !largest || schedule.rows.length > largest.rows.length ? schedule : largest
+  ), null);
+  if (!largestAreaSchedule?.rows.length) {
+    throw new Error(settings.keepAreasConsistent
+      ? "Add active bidding employees before building the all-area schedule."
+      : `Add active bidding employees to ${settings.area} before building its schedule.`);
+  }
 
   const openingMinutes = bidWindowBuilderMinutes(settings.opensAt);
   const closingMinutes = bidWindowBuilderMinutes(settings.closesAt);
   const blackouts = new Set(settings.blackoutDates);
-  const rows = roster.map((person) => ({ person, rounds: [] }));
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
   for (let round = 1; round <= 4; round += 1) {
-    let scheduleDate = roundStartDate;
-    let startMinutes = openingMinutes;
+    lastScheduledDate = roundStartDate;
+    areaSchedules.forEach((schedule) => {
+      let scheduleDate = roundStartDate;
+      let startMinutes = openingMinutes;
 
-    rows.forEach((row) => {
-      if (startMinutes + settings.windowMinutes > closingMinutes) {
-        scheduleDate = nextBidWindowBuilderOpenDate(addDaysToDateKey(scheduleDate), blackouts);
-        startMinutes = openingMinutes;
-      }
+      schedule.rows.forEach((row) => {
+        if (startMinutes + settings.windowMinutes > closingMinutes) {
+          scheduleDate = nextBidWindowBuilderOpenDate(addDaysToDateKey(scheduleDate), blackouts);
+          startMinutes = openingMinutes;
+        }
 
-      row.rounds.push({
-        round,
-        date: scheduleDate,
-        startMinutes,
-        endMinutes: startMinutes + settings.windowMinutes,
+        row.rounds.push({
+          round,
+          date: scheduleDate,
+          startMinutes,
+        });
+        startMinutes += settings.windowMinutes;
       });
-      lastScheduledDate = scheduleDate;
-      startMinutes += settings.windowMinutes;
+      if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
     if (round < 4) {
@@ -10355,17 +10382,25 @@ function generateBidWindowBuilderPreview(settings) {
     }
   }
 
+  const scheduledRows = areaSchedules.flatMap((schedule) => schedule.rows);
+  const firstWindow = scheduledRows.map((row) => row.rounds[0]).filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.startMinutes - b.startMinutes)[0];
+  const lastWindow = scheduledRows.map((row) => row.rounds.at(-1)).filter(Boolean)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.startMinutes - a.startMinutes)[0];
+
   return {
     settings,
     signature: bidWindowBuilderSignature(settings),
-    rows,
-    firstWindow: rows[0].rounds[0],
-    lastWindow: rows.at(-1).rounds.at(-1),
+    areaSchedules,
+    largestArea: largestAreaSchedule.area,
+    totalBues: scheduledRows.length,
+    firstWindow,
+    lastWindow,
   };
 }
 
 function bidWindowBuilderWindowLabel(window) {
-  return `${formatCalendarDate(window.date)} · ${bidWindowBuilderClock(window.startMinutes)}–${bidWindowBuilderClock(window.endMinutes)}`;
+  return `${formatCalendarDate(window.date)} · ${bidWindowBuilderClock(window.startMinutes)}`;
 }
 
 function renderBidWindowBuilderBlackouts() {
@@ -10394,48 +10429,58 @@ function renderBidWindowBuilderPreview() {
     return;
   }
 
-  const { rows, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = rows.length * 4;
-  summary.textContent = `${rows.length} BUEs · ${windowCount} windows`;
+  const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
+  const windowCount = totalBues * 4;
+  const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
+  summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
     <div class="bid-window-builder-preview-header">
       <div>
-        <h4>${escapeHtml(settings.area)} Schedule Preview</h4>
-        <p>${escapeHtml(bidWindowBuilderWindowLabel(firstWindow))} through ${escapeHtml(bidWindowBuilderWindowLabel(lastWindow))}</p>
+        <h4>${escapeHtml(scheduleHeading)}</h4>
+        <p>${escapeHtml(bidWindowBuilderWindowLabel(firstWindow))} through ${escapeHtml(bidWindowBuilderWindowLabel(lastWindow))}${settings.keepAreasConsistent ? ` · ${escapeHtml(largestArea)} sets the round spacing` : ""}</p>
       </div>
       <button class="primary-action small" type="button" data-save-bid-window-schedule ${bidWindowBuilderSaving ? "disabled" : ""}>${bidWindowBuilderSaving ? "Saving…" : "Save Schedule"}</button>
     </div>
-    <div class="bid-window-builder-table-wrap">
-      <table class="bid-window-builder-table">
-        <thead>
-          <tr><th>#</th><th>Name</th><th>Bid As</th><th>Round 1</th><th>Round 2</th><th>Round 3</th><th>Round 4</th></tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => `
-            <tr>
-              <td>${row.person.rank}</td>
-              <td><strong>${escapeHtml(personDisplayName(row.person))}</strong> · ${escapeHtml(row.person.initials)}</td>
-              <td>${escapeHtml(row.person.bidAs)}</td>
-              ${row.rounds.map((window) => `<td>${escapeHtml(bidWindowBuilderWindowLabel(window))}</td>`).join("")}
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
+    ${areaSchedules.map(({ area, rows }) => `
+      <section class="bid-window-builder-area-preview">
+        <h5>${escapeHtml(area)} · ${rows.length} BUE${rows.length === 1 ? "" : "s"}</h5>
+        ${rows.length ? `
+          <div class="bid-window-builder-table-wrap">
+            <table class="bid-window-builder-table">
+              <thead>
+                <tr><th>#</th><th>Name</th><th>Bid As</th><th>Round 1</th><th>Round 2</th><th>Round 3</th><th>Round 4</th></tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => `
+                  <tr>
+                    <td>${row.person.rank}</td>
+                    <td><strong>${escapeHtml(personDisplayName(row.person))}</strong> · ${escapeHtml(row.person.initials)}</td>
+                    <td>${escapeHtml(row.person.bidAs)}</td>
+                    ${row.rounds.map((window) => `<td>${escapeHtml(bidWindowBuilderWindowLabel(window))}</td>`).join("")}
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p class="slot-capacity-no-changes">No active bidding employees.</p>'}
+      </section>
+    `).join("")}
   `;
 }
 
 function syncBidWindowBuilder() {
   const areaInput = document.querySelector("[data-bid-window-builder-area]");
+  const consistentInput = document.querySelector("[data-bid-window-builder-consistent]");
   const startInput = document.querySelector("[data-bid-window-builder-start]");
   const openInput = document.querySelector("[data-bid-window-builder-open]");
   const closeInput = document.querySelector("[data-bid-window-builder-close]");
   const lengthInput = document.querySelector("[data-bid-window-builder-length]");
   const gapInput = document.querySelector("[data-bid-window-builder-gap]");
   const blackoutInput = document.querySelector("[data-bid-window-builder-blackout]");
-  if (!areaInput || !startInput || !openInput || !closeInput || !lengthInput || !gapInput || !blackoutInput) return;
+  if (!areaInput || !consistentInput || !startInput || !openInput || !closeInput || !lengthInput || !gapInput || !blackoutInput) return;
 
   if (!ZLA_AREAS.includes(areaInput.value)) areaInput.value = currentViewArea();
+  areaInput.disabled = consistentInput.checked;
   if (!startInput.value) startInput.value = `${BID_YEAR - 1}-10-01`;
   startInput.min = `${BID_YEAR - 1}-01-01`;
   startInput.max = `${BID_YEAR}-12-31`;
@@ -10455,8 +10500,8 @@ function buildBidWindowPreviewFromForm(event) {
   try {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
-    const { rows, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${rows.length * 4} windows are ready to save for ${settings.area}. Review the schedule below.`, "success");
+    const { totalBues, settings } = bidWindowBuilderPreview;
+    setBidWindowBuilderStatus(`${totalBues * 4} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -10514,9 +10559,11 @@ async function saveBidWindowBuilderSchedule() {
   setBidWindowBuilderStatus("Saving the bid-window schedule…");
 
   const settings = bidWindowBuilderPreview.settings;
-  const { data, error } = await client.rpc("generate_bid_window_schedule", {
+  const routine = settings.keepAreasConsistent
+    ? "generate_consistent_bid_window_schedules"
+    : "generate_bid_window_schedule";
+  const parameters = {
     requested_bid_year: BID_YEAR,
-    requested_area_code: AREA_CODE_BY_NAME[settings.area] || settings.area,
     requested_start_date: settings.startDate,
     requested_office_opens: settings.opensAt,
     requested_office_closes: settings.closesAt,
@@ -10524,14 +10571,19 @@ async function saveBidWindowBuilderSchedule() {
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
     requested_round_count: 4,
-  });
+  };
+  if (!settings.keepAreasConsistent) {
+    parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
+  }
+
+  const { data, error } = await client.rpc(routine, parameters);
 
   if (error) {
     bidWindowBuilderSaving = false;
     renderBidWindowBuilderPreview();
     setBidWindowBuilderStatus(
       isMissingSupabaseRoutine(error)
-        ? "The Bid Window Builder database support is not installed yet. Run database/bid_window_builder.sql."
+        ? `The Bid Window Builder database support is not installed yet. Run database/${settings.keepAreasConsistent ? "consistent_bid_window_builder" : "bid_window_builder"}.sql.`
         : error.message || "The bid-window schedule could not be saved.",
       "error"
     );
@@ -10541,7 +10593,10 @@ async function saveBidWindowBuilderSchedule() {
   await loadSupabaseReferenceData();
   bidWindowBuilderSaving = false;
   renderApp();
-  setBidWindowBuilderStatus(`${data?.windows_processed || bidWindowBuilderPreview.rows.length * 4} bid windows saved for ${settings.area}.`, "success");
+  setBidWindowBuilderStatus(
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 4} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    "success"
+  );
 }
 
 function renderAdminConsole() {
@@ -13597,8 +13652,9 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
-  if (event.target.closest("[data-bid-window-builder-area], [data-bid-window-builder-start], [data-bid-window-builder-open], [data-bid-window-builder-close], [data-bid-window-builder-length], [data-bid-window-builder-gap]")) {
+  if (event.target.closest("[data-bid-window-builder-consistent], [data-bid-window-builder-area], [data-bid-window-builder-start], [data-bid-window-builder-open], [data-bid-window-builder-close], [data-bid-window-builder-length], [data-bid-window-builder-gap]")) {
     bidWindowBuilderPreview = null;
+    syncBidWindowBuilder();
     renderBidWindowBuilderPreview();
     setBidWindowBuilderStatus("Settings changed. Build a new preview.");
     return;

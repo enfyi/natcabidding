@@ -1247,6 +1247,10 @@
                   <span class="status open" data-bid-window-builder-summary>Ready to build</span>
                 </div>
                 <form class="bid-window-builder-form" data-bid-window-builder-form>
+                  <label class="toggle-row bid-window-consistency-toggle">
+                    <input type="checkbox" data-bid-window-builder-consistent checked />
+                    <span>Start all areas together</span>
+                  </label>
                   <label>
                     Area
                     <select data-bid-window-builder-area>
@@ -1261,7 +1265,7 @@
                   </label>
                   <label>
                     Round 1 start date
-                    <input type="date" data-bid-window-builder-start />
+                    <input type="date" min="2026-01-01" max="2027-12-31" value="2026-10-01" data-bid-window-builder-start />
                   </label>
                   <label>
                     Office opens
