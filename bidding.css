@@ -5249,7 +5249,8 @@ tr.occupied-row .rdo-tag {
   z-index: 85;
   display: grid;
   gap: 7px;
-  min-width: 190px;
+  width: 250px;
+  min-width: 250px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 10px;
@@ -5290,28 +5291,60 @@ tr.occupied-row .rdo-tag {
   font-weight: 900;
 }
 
-.schedule-tooltip span {
+.schedule-tooltip-list {
   display: grid;
-  grid-template-columns: 38px 1fr;
-  gap: 8px;
-  align-items: center;
+  gap: 6px;
+  min-height: 0;
 }
 
-.schedule-tooltip b {
+.schedule-tooltip-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 0;
+  border-top: 1px solid #dbe3eb;
+  padding-top: 6px;
+}
+
+.schedule-tooltip-row time {
   display: inline-grid;
-  min-height: 22px;
+  min-height: 24px;
   place-items: center;
   border-radius: 7px;
   color: #0f766e;
   background: #dff7f4;
   font-family: "JetBrains Mono", monospace;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
-.schedule-tooltip small {
-  color: #475569;
+.schedule-tooltip-rep {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 2px;
+}
+
+.schedule-tooltip-rep b {
+  overflow: hidden;
+  color: #172033;
   font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-tooltip-rep small {
+  overflow: hidden;
+  color: #475569;
+  font-size: 0.62rem;
   font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {
@@ -5427,6 +5460,84 @@ tr.occupied-row .rdo-tag {
   font: inherit;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.intake-shift-presets {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.intake-shift-presets legend {
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.intake-shift-preset-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  border: 1px solid #cbd8e6;
+  border-radius: 9px;
+  padding: 4px;
+  background: #f8fafc;
+}
+
+.intake-shift-preset-buttons button {
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px;
+  color: #475569;
+  background: transparent;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.intake-shift-preset-buttons button.active {
+  color: #ffffff;
+  background: #2b7f86;
+  box-shadow: 0 3px 10px rgba(43, 127, 134, 0.2);
+}
+
+.intake-shift-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.intake-shift-fields label:first-child {
+  grid-column: 1 / -1;
+}
+
+.schedule-duration-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  padding-right: 10px;
+  background: #ffffff;
+}
+
+.schedule-form .schedule-duration-input input {
+  border: 0;
+}
+
+.schedule-duration-input > span {
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.schedule-form input[readonly] {
+  color: #475569;
+  background: #f1f5f9;
 }
 
 .schedule-form select:disabled,

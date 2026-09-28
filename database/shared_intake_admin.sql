@@ -22,6 +22,57 @@ using (
   or public.is_bidder_in_current_area(intake_user_id)
 );
 
+create or replace function public.read_intake_schedules(
+  requested_bid_year integer
+)
+returns table (
+  id uuid,
+  bid_year_id uuid,
+  area_id uuid,
+  intake_user_id uuid,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  scope text,
+  first_name text,
+  last_name text,
+  initials text,
+  area_name text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null or not public.is_current_intake_or_admin() then
+    raise exception 'Intake or admin access is required to read intake schedules.';
+  end if;
+
+  return query
+  select
+    schedules.id,
+    schedules.bid_year_id,
+    schedules.area_id,
+    schedules.intake_user_id,
+    schedules.starts_at,
+    schedules.ends_at,
+    schedules.scope,
+    bidders.first_name,
+    bidders.last_name,
+    bidders.initials,
+    areas.name as area_name
+  from public.intake_schedules schedules
+  join public.bid_years bid_years on bid_years.id = schedules.bid_year_id
+  join public.bidders bidders on bidders.id = schedules.intake_user_id
+  left join public.areas areas on areas.id = schedules.area_id
+  where bid_years.bid_year = requested_bid_year
+  order by schedules.starts_at;
+end;
+$$;
+
+revoke all on function public.read_intake_schedules(integer) from public, anon, authenticated;
+grant execute on function public.read_intake_schedules(integer) to authenticated;
+revoke select on table public.intake_schedules from authenticated;
+
 create or replace function public.set_intake_team_member(
   requested_initials text,
   should_enable boolean
