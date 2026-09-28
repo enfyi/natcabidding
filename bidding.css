@@ -9724,6 +9724,147 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
   .public-main .expanded-slots-calendar .month-grid > button[aria-disabled="true"] { min-height: 52px; height: auto; }
 }
 
+/* Print the public bid-time roster as the desktop table, regardless of the
+   narrow preview viewport used by the browser's print renderer. */
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.2in;
+  }
+
+  html,
+  body {
+    width: auto !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    color: #0f172a !important;
+    background: #ffffff !important;
+  }
+
+  .pilot-environment-banner,
+  .public-rail,
+  .public-tabs,
+  .public-login,
+  .mobile-bid-time-search,
+  .mobile-bid-time-cards,
+  .public-date-sheet,
+  .rdo-floating-header {
+    display: none !important;
+  }
+
+  .login-screen.public-shell {
+    display: block !important;
+    min-height: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .public-main {
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .public-topbar {
+    position: static !important;
+    min-height: 0 !important;
+    margin: 0 0 12px !important;
+    border-bottom: 2px solid #2b7f86;
+    padding: 0 0 10px !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .public-topbar .eyebrow {
+    display: block !important;
+    margin: 0 0 3px;
+    color: #526273 !important;
+    font-size: 8pt;
+  }
+
+  .public-topbar h1 {
+    margin: 0;
+    color: #0f172a !important;
+    font-size: 17pt !important;
+  }
+
+  .public-calendar-panel,
+  .public-main .public-calendar-panel.table-view,
+  .public-info-message.table-view {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .public-info-message.table-view > * {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .desktop-bid-times,
+  .public-table-wrap.flat {
+    display: block !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .public-table-heading.flat {
+    margin: 0 0 8px;
+  }
+
+  .public-table-heading.flat small {
+    color: #475569 !important;
+    font-size: 8pt;
+  }
+
+  .public-bid-time-table {
+    width: 100% !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+    color: #172033 !important;
+    font-size: 7.5pt;
+  }
+
+  .public-bid-time-table thead {
+    display: table-header-group;
+  }
+
+  .public-bid-time-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .public-bid-time-table th,
+  .public-bid-time-table td {
+    border: 1px solid #aab7c4 !important;
+    padding: 2px 5px !important;
+    color: #172033 !important;
+    background: #ffffff !important;
+    line-height: 1.1;
+  }
+
+  .public-bid-time-table th {
+    position: static !important;
+    color: #143f45 !important;
+    background: #e7f1f2 !important;
+    font-weight: 900;
+  }
+
+  .public-bid-time-table .bid-as {
+    border: 1px solid #9aa7b5;
+    padding: 1px 5px;
+    color: #0f172a !important;
+    background: #ffffff !important;
+  }
+}
+
 /* Authenticated phone workflows. */
 .leave-slot-modal-panel h2,
 .leave-slot-modal-panel h3 {
