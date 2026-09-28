@@ -14,6 +14,11 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
+Run `database/public_bid_windows_read.sql` so signed-out visitors can load the
+saved bid-window schedule shown on each public area Bid Time page. The read-only
+function exposes window times and bidder IDs only; names and initials continue to
+come from the existing public roster read model.
+
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
 Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL

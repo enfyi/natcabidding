@@ -1235,8 +1235,6 @@ let bidWindowBuilderPreview = null;
 let bidWindowBuilderSaving = false;
 
 function roundDateBlocksForArea(area = currentViewArea()) {
-  if (area !== "Area A") return roundDateBlocks;
-
   const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
   return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
 }
@@ -1644,7 +1642,8 @@ function buildSeniority(area = currentViewArea()) {
       leaveSlotAllowance: seniorityEntryLeaveSlotAllowance(entry),
       status: !hasActiveBidder ? "waiting" : rank < openRank ? "done" : isCurrentBidder ? "active" : "waiting",
       rounds: Array.from({ length: roundCount }, (_, roundIndex) => {
-        return bidWindowScheduleLabel(bidWindowForRankRound(rank, roundIndex + 1, area));
+        const window = bidWindowForRankRound(rank, roundIndex + 1, area);
+        return window ? bidWindowScheduleLabel(window) : "";
       }),
       completed: hasActiveBidder && rank < openRank ? [1] : [],
       openRound: isCurrentBidder ? openRound : undefined,
@@ -6476,6 +6475,16 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {
   return true;
 }
 
+async function loadPublishedBidWindows(client, bidYearId) {
+  const publicResult = await client.rpc("read_public_bid_windows", { requested_bid_year: BID_YEAR });
+  if (!publicResult.error || !supabaseState.authUserId) return publicResult;
+
+  return client
+    .from("bid_windows")
+    .select("bidder_id,round_number,opens_at,closes_at,status")
+    .eq("bid_year_id", bidYearId);
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -6538,9 +6547,7 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId
         ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
         : Promise.resolve({ data: null, error: null }),
-      supabaseState.authUserId
-        ? client.from("bid_windows").select("bidder_id,round_number,opens_at,closes_at,status").eq("bid_year_id", bidYear.id)
-        : Promise.resolve({ data: [], error: null }),
+      loadPublishedBidWindows(client, bidYear.id),
       client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
       client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
       loadSupabaseHelpThreads(),
@@ -6557,7 +6564,7 @@ async function loadSupabaseReferenceData() {
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
       isMissingSupabaseRoutine(approvalRulesResult.error) ? null : supabaseLoadWarning("approval rules", approvalRulesResult),
       isMissingSupabaseRoutine(pilotSettingsResult.error) ? null : supabaseLoadWarning("pilot settings", pilotSettingsResult),
-      supabaseLoadWarning("bid windows", bidWindowsResult),
+      isMissingSupabaseRoutine(bidWindowsResult.error) ? null : supabaseLoadWarning("bid windows", bidWindowsResult),
       isMissingSupabaseColumn(faqEntriesResult.error) ? null : supabaseLoadWarning("FAQ entries", faqEntriesResult),
       isMissingSupabaseColumn(mouDocumentsResult.error) ? null : supabaseLoadWarning("MOU documents", mouDocumentsResult),
     ].filter(Boolean);
