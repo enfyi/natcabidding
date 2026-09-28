@@ -5876,6 +5876,25 @@ tr.occupied-row .rdo-tag {
   background: #ecfdf5;
 }
 
+.schedule-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.schedule-list-actions button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 0.68rem;
+}
+
+.schedule-list-actions .danger-action {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff7f7;
+}
+
 .schedule-list-section strong {
   color: #0f172a;
   font-size: 0.78rem;
@@ -5891,6 +5910,15 @@ tr.occupied-row .rdo-tag {
   display: grid;
   gap: 10px;
   margin-top: 12px;
+}
+
+.schedule-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.schedule-form-actions > button {
+  flex: 1 1 0;
 }
 
 .schedule-form label {
