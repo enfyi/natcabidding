@@ -35,20 +35,10 @@ where a.code = 'area-a'
 on conflict do nothing;
 
 insert into bidders (area_id, first_name, last_name, initials, email, role, bid_role, seniority_rank, initials_verified)
-select a.id, 'Main', 'Admin', 'ADM', 'admin@natcazla.local', 'admin', 'CPC', null, true
+select a.id, 'Main', 'Admin', 'ADM', 'zla.bidding@gmail.com', 'admin', 'ADM', null, true
 from areas a
 where a.code = 'area-a'
 on conflict do nothing;
-
-insert into app_login_accounts (username, password_hash, bidder_id)
-select 'admin', extensions.crypt('admin1', extensions.gen_salt('bf')), b.id
-from bidders b
-where b.email = 'admin@natcazla.local'
-on conflict (username) do update
-set password_hash = excluded.password_hash,
-    bidder_id = excluded.bidder_id,
-    active = true,
-    updated_at = now();
 
 insert into holidays (bid_year_id, holiday_date, name, is_observed)
 select bys.id, holiday_date, name, false

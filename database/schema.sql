@@ -32,8 +32,9 @@ create table if not exists bidders (
   email text,
   phone text,
   role text not null default 'controller' check (role in ('controller', 'intake', 'admin')),
-  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV')),
+  bid_role text not null default 'CPC' check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV', 'ADM', 'NB')),
   seniority_rank integer,
+  seniority_date date,
   leave_slot_allowance integer not null default 4 check (leave_slot_allowance >= 0),
   active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -48,9 +49,29 @@ create unique index if not exists bidders_email_unique
   on bidders(lower(email))
   where active and email is not null;
 
-create unique index if not exists bidders_area_seniority_unique
+drop index if exists bidders_area_seniority_unique;
+
+create unique index bidders_area_seniority_unique
   on bidders(area_id, seniority_rank)
-  where active and seniority_rank is not null;
+  where active and seniority_rank is not null and bid_role not in ('ADM', 'NB');
+
+alter table bidders
+  drop constraint if exists bidders_bid_role_check;
+
+alter table bidders
+  add constraint bidders_bid_role_check
+  check (bid_role in ('CPC', 'GL', 'R-DEV', 'D-DEV', 'TMC', 'DEV', 'ADM', 'NB'));
+
+create table if not exists bid_year_settings (
+  bid_year_id uuid primary key references bid_years(id) on delete cascade,
+  enforce_bid_windows boolean not null default true,
+  test_bid_round integer check (test_bid_round between 1 and 4),
+  round_rules jsonb not null default '{}'::jsonb,
+  approval_rules jsonb,
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 create table if not exists rdo_lines (
   id uuid primary key default gen_random_uuid(),
@@ -59,13 +80,14 @@ create table if not exists rdo_lines (
   line_code text not null,
   line_type text not null default 'CPC' check (line_type in ('CPC', 'DEV')),
   pattern text not null,
-  fatigue_group text check (fatigue_group in ('A', 'B', 'C', 'C only')),
+  fatigue_group text check (fatigue_group in ('A', 'B', 'C', 'C only', 'B only')),
   mid text not null default 'No',
   aws boolean not null default false,
   four_ten boolean not null default false,
   flex boolean not null default false,
   status text not null default 'open' check (status in ('open', 'taken', 'locked')),
   assigned_bidder_id uuid references bidders(id) on delete set null,
+  assigned_initials text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, area_id, line_code)
@@ -126,6 +148,28 @@ create table if not exists holiday_in_lieu_days (
   unique (bid_year_id, bidder_id, holiday_id)
 );
 
+create table if not exists leave_slot_capacities (
+  id uuid primary key default gen_random_uuid(),
+  bid_year_id uuid not null references bid_years(id) on delete cascade,
+  area_id uuid not null references areas(id) on delete cascade,
+  slot_date date not null,
+  cpc_capacity integer not null default 3 check (cpc_capacity between 0 and 99),
+  dev_capacity integer not null default 4 check (dev_capacity between 0 and 99),
+  updated_by uuid references bidders(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (bid_year_id, area_id, slot_date)
+);
+
+create index if not exists leave_slot_capacities_date_idx
+  on leave_slot_capacities(bid_year_id, area_id, slot_date);
+
+create index if not exists leave_slot_capacities_area_idx
+  on leave_slot_capacities(area_id);
+
+create index if not exists leave_slot_capacities_updated_by_idx
+  on leave_slot_capacities(updated_by);
+
 create table if not exists leave_slots (
   id uuid primary key default gen_random_uuid(),
   bid_year_id uuid not null references bid_years(id) on delete cascade,
@@ -152,7 +196,7 @@ create table if not exists leave_requests (
   round_number integer not null check (round_number between 1 and 5),
   priority integer not null check (priority > 0),
   leave_type text not null default 'Annual Leave',
-  status text not null default 'draft' check (status in ('draft', 'preview', 'pending', 'approved', 'denied', 'cancelled')),
+  status text not null default 'draft' check (status in ('draft', 'preview', 'pending', 'approved', 'denied', 'cancelled', 'expired')),
   requested_start_date date,
   requested_end_date date,
   charged_days integer not null default 0 check (charged_days >= 0),
@@ -214,8 +258,11 @@ create table if not exists intake_submissions (
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   area_id uuid references areas(id) on delete set null,
   bidder_id uuid references bidders(id) on delete set null,
+  round_number integer check (round_number between 1 and 5),
+  rdo_line_id uuid references rdo_lines(id) on delete set null,
+  leave_request_id uuid references leave_requests(id) on delete cascade,
   submission_type text not null check (submission_type in ('rdo', 'leave', 'override', 'help')),
-  status text not null default 'pending' check (status in ('draft', 'pending', 'approved', 'denied', 'cancelled')),
+  status text not null default 'pending' check (status in ('draft', 'pending', 'approved', 'denied', 'cancelled', 'expired')),
   payload jsonb not null default '{}'::jsonb,
   submitted_at timestamptz,
   reviewed_at timestamptz,
@@ -230,6 +277,7 @@ create index if not exists intake_submissions_queue_idx
 
 create table if not exists intake_schedules (
   id uuid primary key default gen_random_uuid(),
+  bid_year_id uuid references bid_years(id) on delete cascade,
   area_id uuid references areas(id) on delete set null,
   intake_user_id uuid not null references bidders(id) on delete cascade,
   starts_at timestamptz not null,
@@ -238,6 +286,9 @@ create table if not exists intake_schedules (
   created_at timestamptz not null default now(),
   check (ends_at > starts_at)
 );
+
+create index if not exists intake_schedules_bid_year_start_idx
+  on intake_schedules(bid_year_id, starts_at);
 
 create table if not exists help_threads (
   id uuid primary key default gen_random_uuid(),
@@ -302,25 +353,36 @@ select
   lr.bidder_id,
   lr.round_number,
   lr.status,
-  count(lrd.id) filter (where lrd.charged) as charged_days,
-  count(lrd.id) filter (where lrd.is_holiday) as holiday_days,
-  count(lrd.id) filter (where lrd.is_holiday_in_lieu) as holiday_in_lieu_days,
-  count(distinct lrwb.id) as round_one_week_buckets
-from leave_requests lr
-left join leave_request_dates lrd on lrd.leave_request_id = lr.id
-left join leave_request_week_buckets lrwb on lrwb.leave_request_id = lr.id
-group by lr.id, lr.bid_year_id, lr.bidder_id, lr.round_number, lr.status;
+  (select count(*) from leave_request_dates d where d.leave_request_id = lr.id and d.charged) as charged_days,
+  (select count(*) from leave_request_dates d where d.leave_request_id = lr.id and d.is_holiday) as holiday_days,
+  (select count(*) from leave_request_dates d where d.leave_request_id = lr.id and d.is_holiday_in_lieu) as holiday_in_lieu_days,
+  (select count(*) from leave_request_week_buckets bucket where bucket.leave_request_id = lr.id) as round_one_week_buckets
+from leave_requests lr;
 
 create or replace view bidder_leave_summary as
 select
   bys.id as bid_year_id,
   b.id as bidder_id,
   bys.annual_leave_allowance_days,
-  coalesce(sum(lrt.charged_days) filter (where lrt.status in ('pending', 'approved')), 0) as leave_days_bid,
-  coalesce(sum(lrt.holiday_days + lrt.holiday_in_lieu_days) filter (where lrt.status in ('pending', 'approved')), 0) as holiday_related_days_bid,
-  coalesce(sum(lce.credit_days), 0) as holiday_credit_days_available
+  coalesce((select sum(lrt.charged_days)
+            from leave_request_totals lrt
+            where lrt.bid_year_id = bys.id and lrt.bidder_id = b.id
+              and lrt.status in ('pending', 'approved')), 0) as leave_days_bid,
+  coalesce((select sum(lrt.holiday_days + lrt.holiday_in_lieu_days)
+            from leave_request_totals lrt
+            where lrt.bid_year_id = bys.id and lrt.bidder_id = b.id
+              and lrt.status in ('pending', 'approved')), 0) as holiday_related_days_bid,
+  (coalesce((select count(distinct d.leave_date)
+             from leave_request_dates d
+             join leave_requests lr on lr.id = d.leave_request_id
+             where lr.bid_year_id = bys.id and lr.bidder_id = b.id
+               and lr.round_number between 1 and 3
+               and lr.status in ('pending', 'approved') and d.charged
+               and (d.is_holiday or d.is_holiday_in_lieu)), 0)
+   + coalesce((select sum(lce.credit_days)
+               from leave_credit_events lce
+               where lce.bid_year_id = bys.id and lce.bidder_id = b.id
+                 and lce.source = 'manual_adjustment'), 0))::bigint
+    as holiday_credit_days_available
 from bid_years bys
-cross join bidders b
-left join leave_request_totals lrt on lrt.bid_year_id = bys.id and lrt.bidder_id = b.id
-left join leave_credit_events lce on lce.bid_year_id = bys.id and lce.bidder_id = b.id
-group by bys.id, b.id, bys.annual_leave_allowance_days;
+cross join bidders b;

@@ -1,5 +1,6 @@
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
+import { dashboardPathForRole } from '@/lib/auth-landing'
 import { createClient } from '@/lib/supabase/server'
 
 export async function GET(request: NextRequest) {
@@ -11,7 +12,19 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
 
     if (!error) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      const { data, error: profileError } = await supabase.rpc('claim_current_bidder_profile')
+      const profile = Array.isArray(data) ? data[0] : data
+
+      if (!profileError && profile && typeof profile === 'object') {
+        const role = (profile as { role?: unknown }).role
+        return NextResponse.redirect(
+          new URL(dashboardPathForRole(typeof role === 'string' ? role : null), request.url),
+        )
+      }
+
+      return NextResponse.redirect(
+        new URL('/login?error=No+BUE+profile+matches+that+login+email+yet.', request.url),
+      )
     }
   }
 
