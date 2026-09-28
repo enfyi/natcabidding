@@ -113,7 +113,6 @@ let pilotState = {
   memberIds: [],
   lastResetAt: null,
 };
-let leaveSlotCapacityOverrides = {};
 const ghostBidderIds = new Set();
 const now = Date.now();
 const testAccounts = {
@@ -5022,8 +5021,7 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
   };
   const holidayInLieu = details.holidayInLieu || isHolidayInLieuDate(key);
 
-  const override = leaveSlotCapacityOverride(area, key);
-  const result = {
+  return {
     ...details,
     area: details.area || area,
     cpc: details.cpc || [],
@@ -5031,15 +5029,6 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
     holiday: details.holiday || isHolidayDate(key),
     holidayInLieu,
   };
-
-  if (override) {
-    result.cpcCapacity = override.cpc;
-    result.devCapacity = override.dev;
-    result.cpcOpen = Math.max(0, override.cpc - result.cpc.length);
-    result.devOpen = Math.max(0, override.dev - result.dev.length);
-  }
-
-  return result;
 }
 
 function leaveSlotsForDate(key, area = currentUser.area) {
@@ -5049,7 +5038,7 @@ function leaveSlotsForDate(key, area = currentUser.area) {
 function leaveSlotCapacityForDetails(details, bucket) {
   const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
   if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
-  return standardLeaveSlotCapacity(details?.area || currentViewArea(), bucket);
+  return 0;
 }
 
 function standardLeaveSlotCapacity(area, bucket) {
@@ -5059,19 +5048,6 @@ function standardLeaveSlotCapacity(area, bucket) {
 
 function leaveSlotCapacityOverrideKey(area, key) {
   return `${area}|${key}`;
-}
-
-function leaveSlotCapacityOverride(area, key) {
-  const value = leaveSlotCapacityOverrides[leaveSlotCapacityOverrideKey(area, key)];
-  if (!value || typeof value !== "object") return null;
-  const cpc = Number(value.cpc);
-  const dev = Number(value.dev);
-  if (!Number.isInteger(cpc) || cpc < 0 || !Number.isInteger(dev) || dev < 0) return null;
-  return { cpc, dev };
-}
-
-function setLeaveSlotCapacityOverride(area, key, cpc, dev) {
-  leaveSlotCapacityOverrides[leaveSlotCapacityOverrideKey(area, key)] = { cpc, dev };
 }
 
 function leaveSlotOpenCountForDetails(details, bucket) {
@@ -6158,72 +6134,28 @@ function attachSubmissionIdsToLeaveRequests(rows, submissions) {
   });
 }
 
-function upsertLeaveSlotsFromDatabase(rows, areaById) {
-  const grouped = new Map();
+function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
+  Object.keys(extraLeaveSlotData).forEach((key) => delete extraLeaveSlotData[key]);
 
   rows.forEach((row) => {
     const area = areaNameForRow(row, areaById);
-    const key = `${area}:${row.slot_date}`;
-    const details = grouped.get(key) || {
+    const date = row.slot_date;
+    if (!area || !date) return;
+
+    const cpcCapacity = Math.max(0, Number(row.cpc_capacity) || 0);
+    const devCapacity = Math.max(0, Number(row.dev_capacity) || 0);
+    extraLeaveSlotData[extraLeaveSlotStorageKey(date, area)] = {
       area,
-      date: row.slot_date,
-      label: formatCalendarDate(row.slot_date),
-      cpc: [],
-      dev: [],
-      cpcCapacity: 0,
-      devCapacity: 0,
-      cpcOpen: 0,
-      devOpen: 0,
-      cpcConfiguredCapacity: null,
-      devConfiguredCapacity: null,
-      unavailable: false,
-    };
-    const bucket = row.slot_group === "dev" ? "dev" : "cpc";
-    const value = row.slot_initials || "";
-
-    const capacityMarker = String(row.slot_code || "").match(/^CAPACITY-(\d+)$/);
-    if (capacityMarker) {
-      details[`${bucket}ConfiguredCapacity`] = Number(capacityMarker[1]);
-      grouped.set(key, details);
-      return;
-    }
-
-    details[`${bucket}Capacity`] += 1;
-    if (row.status === "open" && !row.bidder_id && !row.source_leave_request_id) {
-      details[`${bucket}Open`] += 1;
-    }
-    if (row.status === "unavailable") details.unavailable = true;
-    if (["approved", "pending", "held"].includes(row.status) && value) {
-      details[bucket].push({ code: row.slot_code, initials: value });
-    }
-
-    grouped.set(key, details);
-  });
-
-  grouped.forEach((details) => {
-    const sortSlots = (items) => items
-      .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
-      .map((item) => item.initials);
-    const storageKey = extraLeaveSlotStorageKey(details.date, details.area);
-    const existing = extraLeaveSlotData[storageKey] || {};
-    const cpcCapacity = Number.isInteger(details.cpcConfiguredCapacity)
-      ? details.cpcConfiguredCapacity
-      : Math.max(details.cpcCapacity, standardLeaveSlotCapacity(details.area, "cpc"));
-    const devCapacity = Number.isInteger(details.devConfiguredCapacity)
-      ? details.devConfiguredCapacity
-      : Math.max(details.devCapacity, standardLeaveSlotCapacity(details.area, "dev"));
-    extraLeaveSlotData[storageKey] = {
-      ...existing,
-      ...details,
-      cpc: sortSlots(details.cpc),
-      dev: sortSlots(details.dev),
+      date,
+      label: formatCalendarDate(date),
+      cpc: Array.isArray(row.cpc_initials) ? row.cpc_initials.filter(Boolean) : [],
+      dev: Array.isArray(row.dev_initials) ? row.dev_initials.filter(Boolean) : [],
       cpcCapacity,
       devCapacity,
-      cpcOpen: Math.max(0, cpcCapacity - details.cpc.length),
-      devOpen: Math.max(0, devCapacity - details.dev.length),
+      cpcOpen: Math.min(cpcCapacity, Math.max(0, Number(row.cpc_open) || 0)),
+      devOpen: Math.min(devCapacity, Math.max(0, Number(row.dev_open) || 0)),
+      unavailable: Boolean(row.unavailable),
     };
-    delete extraLeaveSlotData[storageKey].cpcConfiguredCapacity;
-    delete extraLeaveSlotData[storageKey].devConfiguredCapacity;
   });
 }
 
@@ -6638,6 +6570,10 @@ async function loadPublishedBidWindows(client, bidYearId) {
     .eq("bid_year_id", bidYearId);
 }
 
+async function loadPublishedLeaveSlots(client) {
+  return client.rpc("read_public_leave_slots", { requested_bid_year: BID_YEAR });
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -6692,7 +6628,7 @@ async function loadSupabaseReferenceData() {
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
-      client.from("leave_slots").select("area_id,slot_date,slot_group,slot_code,status,slot_initials,bidder_id,source_leave_request_id").eq("bid_year_id", bidYear.id),
+      loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.from("intake_schedules").select("id,bid_year_id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").eq("bid_year_id", bidYear.id).order("starts_at") : Promise.resolve({ data: [], error: null }),
@@ -6738,7 +6674,7 @@ async function loadSupabaseReferenceData() {
       && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())
     ));
     if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
-    if (!leaveSlotsResult.error) upsertLeaveSlotsFromDatabase(leaveSlotsResult.data || [], areaById);
+    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!leaveRequestsResult.error) {
       upsertLeaveRequestsFromDatabase(
         attachSubmissionIdsToLeaveRequests(
@@ -6759,7 +6695,7 @@ async function loadSupabaseReferenceData() {
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${rdoSubmissionRows.length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave slots, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${rdoSubmissionRows.length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave-slot days, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
@@ -10908,19 +10844,6 @@ function slotCapacitySummaryEntries() {
     });
   });
 
-  Object.entries(leaveSlotCapacityOverrides).forEach(([storageKey, value]) => {
-    const separatorIndex = storageKey.lastIndexOf("|");
-    if (separatorIndex < 0 || !value || typeof value !== "object") return;
-    const area = storageKey.slice(0, separatorIndex);
-    const key = storageKey.slice(separatorIndex + 1);
-    const cpc = Number(value.cpc);
-    const dev = Number(value.dev);
-    if (!ZLA_AREAS.includes(area) || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
-    if (key < BID_LEAVE_YEAR_START_KEY || key > BID_LEAVE_YEAR_END_KEY) return;
-    if (!Number.isInteger(cpc) || cpc < 0 || !Number.isInteger(dev) || dev < 0) return;
-    capacityByAreaAndDate.set(storageKey, { area, key, cpc, dev });
-  });
-
   return [...capacityByAreaAndDate.values()]
     .filter((entry) => (
       entry.cpc !== standardLeaveSlotCapacity(entry.area, "cpc")
@@ -11089,7 +11012,8 @@ async function saveSlotCapacity(event) {
     return;
   }
 
-  range.keys.forEach((key) => setLeaveSlotCapacityOverride(area, key, cpc, dev));
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
   logHistory(area, "Leave capacity range updated", `${currentUser.initials} set ${formatCalendarDate(startKey)} through ${formatCalendarDate(endKey)} to ${cpc} CPC and ${dev} DEV slots per day.`);
   renderApp();
   setSlotCapacityStatus(`${range.keys.length} ${range.keys.length === 1 ? "day" : "days"} saved for ${area}: ${cpc} CPC and ${dev} DEV slots per day.`, "success");
