@@ -8949,11 +8949,12 @@ function editRosterEntryByIndex(index) {
   setRosterStatus(`Editing ${personDisplayName(person)}.`);
 }
 
-function rosterFormValues() {
-  const value = (selector) => document.querySelector(selector)?.value.trim() || "";
+function rosterFormValues(form = document.querySelector("[data-roster-form]")) {
+  const value = (selector) => form?.querySelector(selector)?.value.trim() || "";
   const area = value("[data-roster-area]") || selectedRosterArea();
   const bidAs = normalizeBidRoleForArea(value("[data-roster-bid-as]") || defaultBidRoleForArea(area), area);
   const rank = Number(value("[data-roster-rank]"));
+  const editIndex = value("[data-roster-edit-index]");
   const participatesInBidding = bidRoleParticipatesInBidding(bidAs);
   return {
     editInitials: value("[data-roster-edit-initials]").toUpperCase(),
@@ -8966,7 +8967,7 @@ function rosterFormValues() {
     rank: participatesInBidding && Number.isFinite(rank) ? rank : null,
     bidAs,
     leaveSlotAllowance: bidRoleKeepsLeaveAllowance(bidAs) ? normalizeLeaveSlotAllowance(value("[data-roster-leave-slots]")) : 0,
-    editIndex: Number(value("[data-roster-edit-index]")),
+    editIndex: editIndex ? Number(editIndex) : null,
     active: true,
   };
 }
@@ -9205,7 +9206,10 @@ async function saveRosterEntry(event) {
   event.preventDefault();
   if (!hasSystemAdminAccess()) return;
 
-  const values = rosterFormValues();
+  const form = event.currentTarget;
+  if (form.contains(document.activeElement)) document.activeElement.blur();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  const values = rosterFormValues(form);
   if (!values.firstName || !values.lastName || !values.initials) {
     setRosterStatus("First name, last name, and initials are required.", "error");
     return;
