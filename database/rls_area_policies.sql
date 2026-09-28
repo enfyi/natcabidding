@@ -265,10 +265,14 @@ to authenticated
 using (true);
 
 drop policy if exists "users can read bid windows in own area" on bid_windows;
-create policy "users can read bid windows in own area"
+drop policy if exists "users can read own-area bid windows and admins can read all" on bid_windows;
+create policy "users can read own-area bid windows and admins can read all"
 on bid_windows for select
 to authenticated
-using (public.is_bidder_in_current_area(bidder_id));
+using (
+  (select public.is_current_admin())
+  or public.is_bidder_in_current_area(bidder_id)
+);
 
 alter table bid_year_settings enable row level security;
 

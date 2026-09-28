@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
       './bidding.js',
       './supabase-config.js',
       './assets/logo-5v2a.png',
+      './node_modules/@supabase/supabase-js/dist/umd/supabase.js',
     ],
   },
 }

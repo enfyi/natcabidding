@@ -16,6 +16,14 @@ Use Supabase/Postgres first. It gives us a real database, login support, permiss
 
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
+Run `database/pending_rdo_bidder_lock.sql` after the transactional bidding SQL
+to prevent bidders from replacing an RDO request while it is pending intake.
+Intake and administrators can still edit, approve, or deny the pending request.
+The migration `20260928030000_expire_round_one_leave_on_rdo_change.sql` keeps
+pending RDO and leave requests locked to the bidder. After those decisions are
+complete, changing an approved RDO expires all approved Round 1 leave, releases
+its leave slots, and keeps the former dates visible as Expired in Intake so the
+bidder can submit two new Round 1 weeks.
 Admin-only login profiles can use `bid_role = 'ADM'`; those profiles still get
 admin access from `role = 'admin'`, but are excluded from BUE roster, seniority,
 bid-window, RDO eligibility, and leave-bidding mechanics.
@@ -46,12 +54,54 @@ request only while that request's round bid window is open, releases any assigne
 slots, and records the change in the audit log. Re-run
 `database/leave_submission_preflight.sql` as part of this update so added ranges
 are checked against the member's allotted leave hours and current-round limits.
+Run `database/member_leave_request_replacement.sql` after the holiday round
+rules to enable Change Dates. It cancels the old request and submits the
+replacement in one transaction, so validation counts only the surviving bids.
+If the replacement is invalid, the old request and its assigned slots remain.
+The migration `20260928021500_atomic_member_leave_batch_replacement.sql` adds the
+bidder-facing Change Bid Dates modal endpoint. It moves every selected Round 1
+week date together or replaces selected Round 2–4 dates in one transaction, so
+a failed multi-date change leaves the entire existing bid untouched.
+Run `database/reject_unchanged_leave_rebid.sql` after that migration to reject
+an exact repeat of dates the bidder removed in the same round, whether through
+Change Dates or a later new batch. The bidder must choose a different range.
+Run `database/round_one_flexible_week_buckets.sql` after the leave submission
+and admin editor SQL to make Round 1 buckets movable when dates are added,
+removed, or replaced. It also rebuilds the saved bucket links for active bids
+and updates admin editor routines only where those routines are installed.
 
 For the shared admin bid-window testing switch, also run
 `database/bid_window_testing_admin.sql`, then re-run
 `database/leave_submission_preflight.sql`. The testing switch lets admins allow
 all logged-in BUEs to submit outside their assigned bid windows while testing,
 with an optional shared test round for checking Round 1-4 rules individually.
+
+For databases that already have the transactional bidding, high-priority fixes,
+and leave preflight functions installed, run
+`database/resolve_bidding_sql_conflicts.sql` once in the SQL editor. It updates
+the RDO submitter, private leave submitter, and public leave preflight together.
+The per-bidder leave allowance is measured in hours; Round 1 RDO dates use the
+pending or approved RDO request; and the shared testing setting applies to both
+RDO and leave submissions. Existing bids and assignments are preserved. A local
+regression test is available with `PGLITE_MODULE` set to an installed PGlite
+module: `node scripts/test-bidding-sql-conflicts.mjs`.
+
+Run `database/holiday_leave_round_rules.sql` after that upgrade to charge bid
+holidays and holiday-in-lieu dates against the member's leave days and hours in
+Rounds 1–3. In Round 4,
+each distinct holiday or in-lieu date actually charged in an active Round 1–3
+request returns one day of leave allowance (8 or 10 hours for the selected
+line). In-lieu dates are calculated from a pending RDO request so leave can be
+submitted before intake approves that line. The normal five-day Round 4 bid
+limit still applies. The migration
+recalculates older saved holiday charges and updates the leave-summary views.
+
+Run `database/holiday_slot_reservations.sql` after the holiday rules and the
+Round 2–4 allowance upgrades. Charged holiday and holiday-in-lieu bids then hold
+normal CPC/DEV daily inventory while pending, display the bidder's initials in
+the calendar, and remain assigned when approved. Existing active holiday bids
+are backfilled into open slots; the migration stops on a real capacity conflict
+instead of silently increasing the configured capacity.
 
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database
@@ -89,7 +139,21 @@ Run `database/rls_area_policies.sql` after `database/schema.sql`.
 
 Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line importer. The import RPC validates every row, adds or updates `rdo_lines` and `rdo_line_days` atomically without deleting omitted lines, preserves existing assignments and status, and records an audit event. Fatigue group, AWS, and Flex are optional: blank values preserve existing lines and use C, No, and Yes for new lines.
 
-Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and seniority rank, treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status.
+Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and the displayed area seniority rank (the same rank shown in the bidding UI), treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status. Reapply this script to pilot databases after roster changes so appended tester rows and rank gaps continue to resolve to the bidder shown in the preview.
+
+Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, imports each bidder's leave allowance in hours, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
+
+Run `database/seniority_roster_export.sql` to enable the system-admin seniority-roster export. The Admin Console exports the selected area's active seniority roster in the same workbook and column order accepted by the importer.
+
+Run `database/admin_roster_deactivation.sql` to enable reliable admin deletion
+from the roster editor. It deactivates the selected bidder by immutable profile
+ID, clears their active seniority rank, and preserves historical bids, leave
+records, and the authentication link for auditability or later restoration.
+
+Run `database/admin_roster_management.sql` to enable atomic roster editing from
+the Admin Console. It saves names, initials, contact information, area, bid role,
+seniority rank, leave allowance, and active status by immutable bidder ID, while
+also supporting the older initials-based payload during deployment rollout.
 
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 
@@ -101,12 +165,14 @@ Server-side admin actions using the Supabase service role can still manage all a
 
 Round 1 is stored with `leave_request_week_buckets`.
 
-A bucket is a consecutive period of up to 7 calendar days. Any number of selected leave dates inside that bucket counts as 1 bid week, but only the charged dates spend leave. RDOs, holidays, and holiday in-lieu days can be stored on `leave_request_dates` without charging leave.
+A bid week is a span of 7 consecutive calendar dates containing the bidder's selected leave dates and one occurrence of each RDO weekday. A bidder may skip dates inside the span. The earliest selected date starts a bucket; another selected date more than 6 days later starts the next bucket. Adding or removing a bid may move the bucket start, so active Round 1 dates are regrouped before enforcing the two-week limit. Only charged dates spend leave. Round 1 RDO dates are uncharged; holidays and holiday-in-lieu dates count against the bidder's allowance in Round 1.
 
 That lets the app support cases like:
 
 - June 1 alone counts as 1 bid week and 1 charged leave day.
 - June 9 through June 16 spans more than 7 calendar days, so it needs 2 Round 1 buckets.
+- With Friday–Saturday RDOs, Monday, Tuesday, Thursday, and the immediately following Sunday fit within Monday–Sunday and count as 1 bid week; a Sunday one week later starts a second.
+- With the same RDOs, Wednesday–Tuesday may also count as 1 bid week when all selected dates fit that seven-date span.
 - A BUE can use up to 2 Round 1 buckets, even if those buckets only spend a few charged leave days.
 
 ## Browser Adapter
@@ -128,7 +194,7 @@ The remaining write-support work includes:
 
 ## Seniority Imports
 
-Seniority spreadsheets should land in `staging_seniority_roster` first.
+Administrators can use `/admin/roster-import` to validate, preview, and apply a cleaned Excel or CSV roster. Raw source spreadsheets can still land in `staging_seniority_roster` first when initials or other identity fields need manual cleanup.
 
 The current seniority workbook does not include reliable BUE initials. The cleaned import file keeps an empty `initials` column and marks `needs_initials = Yes`. Initials should be filled manually or collected from each user's profile before promoting the staging rows into the live `bidders` table.
 
