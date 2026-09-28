@@ -9863,6 +9863,170 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
     color: #0f172a !important;
     background: #ffffff !important;
   }
+
+  /* Annual calendar: keep the complete desktop year view together as a
+     compact four-column poster and omit controls that do not help on paper. */
+  .public-calendar-panel:not(.table-view) > .panel-header,
+  .public-calendar-panel:not(.table-view) .calendar-layout-tabs,
+  .public-calendar-panel:not(.table-view) .calendar-layout-description,
+  .public-calendar-panel:not(.table-view) .calendar-toolbar,
+  .public-calendar-panel:not(.table-view) .mobile-calendar-controls {
+    display: none !important;
+  }
+
+  .public-calendar-panel:not(.table-view) {
+    width: 100% !important;
+    margin: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .public-calendar-panel:not(.table-view)::before {
+    display: none !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .year-calendar,
+  .public-calendar-panel:not(.table-view) .year-calendar.large {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    overflow: visible !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .month-card,
+  .public-calendar-panel:not(.table-view) .mobile-single-month > [data-calendar-month] {
+    display: block !important;
+    min-width: 0 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #b9c7d3 !important;
+    border-radius: 4px;
+    padding: 5px !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .month-card h3 {
+    margin: 0 0 4px !important;
+    color: #0f172a !important;
+    font-size: 7pt !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .month-grid {
+    gap: 2px !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .month-grid span,
+  .public-calendar-panel:not(.table-view) .month-grid button {
+    min-height: 16px !important;
+    border-radius: 2px !important;
+    font-size: 5.5pt !important;
+    line-height: 1 !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .month-grid .dow {
+    min-height: 12px !important;
+    font-size: 4.8pt !important;
+  }
+
+  .public-calendar-panel:not(.table-view) .legend {
+    gap: 4px 8px;
+    margin-top: 6px;
+    font-size: 6pt;
+  }
+
+  /* RDO schedules: print the comparison tables rather than phone cards,
+     remove interactive filters, and let each section continue naturally. */
+  .public-rdo-panel > .panel-header,
+  .public-rdo-panel > .filter-bar,
+  .public-rdo-panel .mobile-rdo-view,
+  .public-rdo-panel .mobile-table-hint,
+  .public-rdo-panel .mobile-rdo-cards {
+    display: none !important;
+  }
+
+  .public-main .public-rdo-panel,
+  .public-main .public-rdo-sections,
+  .public-main .public-rdo-line-section,
+  .public-main .public-rdo-line-section .table-wrap {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .public-main .public-rdo-line-section {
+    margin: 0 0 8px;
+    border: 1px solid #8fa3b5;
+    border-radius: 0;
+  }
+
+  .public-main .public-rdo-line-section-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+    padding: 5px 7px;
+    color: #ffffff !important;
+    background: #14335f !important;
+  }
+
+  .public-main .public-rdo-line-section-heading h3,
+  .public-main .public-rdo-line-section-heading span {
+    color: #ffffff !important;
+    font-size: 7pt;
+  }
+
+  .public-main .public-rdo-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 6.5pt;
+  }
+
+  .public-main .public-rdo-table thead {
+    display: table-header-group;
+  }
+
+  .public-main .public-rdo-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .public-main .public-rdo-table th,
+  .public-main .public-rdo-table td,
+  .public-main .public-rdo-table th:first-child,
+  .public-main .public-rdo-table td:first-child {
+    position: static !important;
+    border: 1px solid #b5c2ce !important;
+    padding: 3px 4px !important;
+    white-space: nowrap;
+    box-shadow: none !important;
+  }
+
+  .public-main .public-rdo-table th:nth-child(1),
+  .public-main .public-rdo-table td:nth-child(1) {
+    width: 7% !important;
+    min-width: 0 !important;
+  }
+
+  .public-main .public-rdo-table th:nth-child(2),
+  .public-main .public-rdo-table td:nth-child(2) {
+    left: auto !important;
+    width: 10% !important;
+    min-width: 0 !important;
+  }
+
+  .public-main .public-rdo-table .shift,
+  .public-main .public-rdo-table .rdo-tag {
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-size: 6pt;
+  }
 }
 
 /* Authenticated phone workflows. */
