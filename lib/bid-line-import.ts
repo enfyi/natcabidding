@@ -202,7 +202,10 @@ function rowReference(row: number | string) {
 
 function booleanValue(rawValue: string, label: string, row: number | string, issues: string[]) {
   const normalized = rawValue.trim().toLowerCase()
-  if (!normalized) return false
+  if (!normalized) {
+    issues.push(`${rowReference(row)}: ${label} must be Yes or No.`)
+    return false
+  }
   if (['yes', 'y', 'true', '1'].includes(normalized)) return true
   if (['no', 'n', 'false', '0'].includes(normalized)) return false
   issues.push(`${rowReference(row)}: ${label} must be Yes or No.`)
@@ -258,7 +261,7 @@ export async function parseBidLineImport(file: File): Promise<BidLineImportPrevi
 
     const headers = rows[headerIndex].map(normalizeHeader)
     const headerMap = new Map(headers.map((header, index) => [header, index]))
-    const requiredHeaders = ['line_code', ...(group === 'CPC' || group === 'LEGACY' ? ['pattern'] : []), ...DAY_HEADERS]
+    const requiredHeaders = ['line_code', 'four_ten', ...(group === 'CPC' || group === 'LEGACY' ? ['pattern'] : []), ...DAY_HEADERS]
     const missingHeaders = requiredHeaders.filter((header) => !headerMap.has(header))
     if (missingHeaders.length) {
       issues.push(`${sheet.name}: missing required columns: ${missingHeaders.join(', ')}.`)
