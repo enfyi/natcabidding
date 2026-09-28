@@ -1215,6 +1215,9 @@ const BID_OFFICE_CLOSED_DATE_KEYS = new Set([
   "2026-10-12",
   "2026-11-11",
 ]);
+const bidWindowBuilderBlackoutDates = new Set(BID_OFFICE_CLOSED_DATE_KEYS);
+let bidWindowBuilderPreview = null;
+let bidWindowBuilderSaving = false;
 
 function roundDateBlocksForArea(area = currentViewArea()) {
   if (area !== "Area A") return roundDateBlocks;
@@ -8802,11 +8805,312 @@ function renderEmailLog() {
     : '<p class="empty-state small">No notification emails have been queued yet.</p>';
 }
 
+function setBidWindowBuilderStatus(message, status = "info") {
+  const target = document.querySelector("[data-bid-window-builder-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function bidWindowBuilderMinutes(value) {
+  const match = String(value || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function bidWindowBuilderClock(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function addDaysToDateKey(key, days = 1) {
+  const date = dateFromKey(key);
+  date.setDate(date.getDate() + days);
+  return dateKeyFromDate(date);
+}
+
+function nextBidWindowBuilderOpenDate(key, blackouts) {
+  let nextKey = key;
+  while (blackouts.has(nextKey)) nextKey = addDaysToDateKey(nextKey);
+  return nextKey;
+}
+
+function bidWindowBuilderSettings() {
+  const area = document.querySelector("[data-bid-window-builder-area]")?.value || currentViewArea();
+  const startDate = document.querySelector("[data-bid-window-builder-start]")?.value || "";
+  const opensAt = document.querySelector("[data-bid-window-builder-open]")?.value || "";
+  const closesAt = document.querySelector("[data-bid-window-builder-close]")?.value || "";
+  const windowMinutes = Number(document.querySelector("[data-bid-window-builder-length]")?.value);
+  const reviewDays = Number(document.querySelector("[data-bid-window-builder-gap]")?.value);
+  const blackoutDates = [...bidWindowBuilderBlackoutDates].sort();
+  return { area, startDate, opensAt, closesAt, windowMinutes, reviewDays, blackoutDates };
+}
+
+function bidWindowBuilderSignature(settings) {
+  return JSON.stringify(settings);
+}
+
+function validateBidWindowBuilderSettings(settings) {
+  if (!ZLA_AREAS.includes(settings.area)) return "Choose a valid area.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(settings.startDate)) return "Choose the Round 1 start date.";
+
+  const openingMinutes = bidWindowBuilderMinutes(settings.opensAt);
+  const closingMinutes = bidWindowBuilderMinutes(settings.closesAt);
+  if (!Number.isInteger(openingMinutes) || !Number.isInteger(closingMinutes) || closingMinutes <= openingMinutes) {
+    return "Office closing time must be later than the opening time.";
+  }
+  if (!Number.isInteger(settings.windowMinutes) || settings.windowMinutes < 15 || settings.windowMinutes > 480) {
+    return "Choose a bid-window length from 15 minutes through 8 hours.";
+  }
+  if (settings.windowMinutes > closingMinutes - openingMinutes) {
+    return "The bid window must fit within one office day.";
+  }
+  if (!Number.isInteger(settings.reviewDays) || settings.reviewDays < 0 || settings.reviewDays > 14) {
+    return "Review days must be a whole number from 0 through 14.";
+  }
+  return "";
+}
+
+function generateBidWindowBuilderPreview(settings) {
+  const validationMessage = validateBidWindowBuilderSettings(settings);
+  if (validationMessage) throw new Error(validationMessage);
+
+  const roster = activeRosterEntries(settings.area).map((entry, index) => rosterEntryToPerson(entry, index + 1));
+  if (!roster.length) throw new Error(`Add active bidding employees to ${settings.area} before building its schedule.`);
+
+  const openingMinutes = bidWindowBuilderMinutes(settings.opensAt);
+  const closingMinutes = bidWindowBuilderMinutes(settings.closesAt);
+  const blackouts = new Set(settings.blackoutDates);
+  const rows = roster.map((person) => ({ person, rounds: [] }));
+  let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
+  let lastScheduledDate = roundStartDate;
+
+  for (let round = 1; round <= 4; round += 1) {
+    let scheduleDate = roundStartDate;
+    let startMinutes = openingMinutes;
+
+    rows.forEach((row) => {
+      if (startMinutes + settings.windowMinutes > closingMinutes) {
+        scheduleDate = nextBidWindowBuilderOpenDate(addDaysToDateKey(scheduleDate), blackouts);
+        startMinutes = openingMinutes;
+      }
+
+      row.rounds.push({
+        round,
+        date: scheduleDate,
+        startMinutes,
+        endMinutes: startMinutes + settings.windowMinutes,
+      });
+      lastScheduledDate = scheduleDate;
+      startMinutes += settings.windowMinutes;
+    });
+
+    if (round < 4) {
+      roundStartDate = addDaysToDateKey(lastScheduledDate);
+      for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
+        roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
+        roundStartDate = addDaysToDateKey(roundStartDate);
+      }
+      roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
+    }
+  }
+
+  return {
+    settings,
+    signature: bidWindowBuilderSignature(settings),
+    rows,
+    firstWindow: rows[0].rounds[0],
+    lastWindow: rows.at(-1).rounds.at(-1),
+  };
+}
+
+function bidWindowBuilderWindowLabel(window) {
+  return `${formatCalendarDate(window.date)} · ${bidWindowBuilderClock(window.startMinutes)}–${bidWindowBuilderClock(window.endMinutes)}`;
+}
+
+function renderBidWindowBuilderBlackouts() {
+  const target = document.querySelector("[data-bid-window-blackout-list]");
+  if (!target) return;
+
+  const dates = [...bidWindowBuilderBlackoutDates].sort();
+  target.innerHTML = dates.length
+    ? dates.map((key) => `
+      <span class="bid-window-blackout-chip">
+        ${escapeHtml(formatCalendarDate(key))}
+        <button type="button" data-remove-bid-window-blackout="${escapeHtml(key)}" aria-label="Remove ${escapeHtml(formatCalendarDate(key))}" title="Remove blocked date">×</button>
+      </span>
+    `).join("")
+    : '<span class="slot-capacity-no-changes">No dates are blocked.</span>';
+}
+
+function renderBidWindowBuilderPreview() {
+  const target = document.querySelector("[data-bid-window-builder-preview]");
+  const summary = document.querySelector("[data-bid-window-builder-summary]");
+  if (!target || !summary) return;
+
+  if (!bidWindowBuilderPreview) {
+    summary.textContent = "Ready to build";
+    target.innerHTML = "";
+    return;
+  }
+
+  const { rows, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
+  const windowCount = rows.length * 4;
+  summary.textContent = `${rows.length} BUEs · ${windowCount} windows`;
+  target.innerHTML = `
+    <div class="bid-window-builder-preview-header">
+      <div>
+        <h4>${escapeHtml(settings.area)} Schedule Preview</h4>
+        <p>${escapeHtml(bidWindowBuilderWindowLabel(firstWindow))} through ${escapeHtml(bidWindowBuilderWindowLabel(lastWindow))}</p>
+      </div>
+      <button class="primary-action small" type="button" data-save-bid-window-schedule ${bidWindowBuilderSaving ? "disabled" : ""}>${bidWindowBuilderSaving ? "Saving…" : "Save Schedule"}</button>
+    </div>
+    <div class="bid-window-builder-table-wrap">
+      <table class="bid-window-builder-table">
+        <thead>
+          <tr><th>#</th><th>Name</th><th>Bid As</th><th>Round 1</th><th>Round 2</th><th>Round 3</th><th>Round 4</th></tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${row.person.rank}</td>
+              <td><strong>${escapeHtml(personDisplayName(row.person))}</strong> · ${escapeHtml(row.person.initials)}</td>
+              <td>${escapeHtml(row.person.bidAs)}</td>
+              ${row.rounds.map((window) => `<td>${escapeHtml(bidWindowBuilderWindowLabel(window))}</td>`).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function syncBidWindowBuilder() {
+  const areaInput = document.querySelector("[data-bid-window-builder-area]");
+  const startInput = document.querySelector("[data-bid-window-builder-start]");
+  const openInput = document.querySelector("[data-bid-window-builder-open]");
+  const closeInput = document.querySelector("[data-bid-window-builder-close]");
+  const lengthInput = document.querySelector("[data-bid-window-builder-length]");
+  const gapInput = document.querySelector("[data-bid-window-builder-gap]");
+  const blackoutInput = document.querySelector("[data-bid-window-builder-blackout]");
+  if (!areaInput || !startInput || !openInput || !closeInput || !lengthInput || !gapInput || !blackoutInput) return;
+
+  if (!ZLA_AREAS.includes(areaInput.value)) areaInput.value = currentViewArea();
+  if (!startInput.value) startInput.value = `${BID_YEAR - 1}-10-01`;
+  startInput.min = `${BID_YEAR - 1}-01-01`;
+  startInput.max = `${BID_YEAR}-12-31`;
+  blackoutInput.min = startInput.min;
+  blackoutInput.max = startInput.max;
+  if (!openInput.value) openInput.value = "07:00";
+  if (!closeInput.value) closeInput.value = "19:00";
+  if (!lengthInput.value) lengthInput.value = "120";
+  if (!gapInput.value) gapInput.value = "1";
+
+  renderBidWindowBuilderBlackouts();
+  renderBidWindowBuilderPreview();
+}
+
+function buildBidWindowPreviewFromForm(event) {
+  event?.preventDefault();
+  try {
+    bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
+    renderBidWindowBuilderPreview();
+    const { rows, settings } = bidWindowBuilderPreview;
+    setBidWindowBuilderStatus(`${rows.length * 4} windows are ready to save for ${settings.area}. Review the schedule below.`, "success");
+  } catch (error) {
+    bidWindowBuilderPreview = null;
+    renderBidWindowBuilderPreview();
+    setBidWindowBuilderStatus(error.message || "The schedule could not be built.", "error");
+  }
+}
+
+function addBidWindowBuilderBlackout() {
+  const input = document.querySelector("[data-bid-window-builder-blackout]");
+  const key = input?.value || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    setBidWindowBuilderStatus("Choose a date to block out.", "error");
+    return;
+  }
+
+  bidWindowBuilderBlackoutDates.add(key);
+  input.value = "";
+  bidWindowBuilderPreview = null;
+  renderBidWindowBuilderBlackouts();
+  renderBidWindowBuilderPreview();
+  setBidWindowBuilderStatus(`${formatCalendarDate(key)} will be skipped.`);
+}
+
+function removeBidWindowBuilderBlackout(key) {
+  bidWindowBuilderBlackoutDates.delete(key);
+  bidWindowBuilderPreview = null;
+  renderBidWindowBuilderBlackouts();
+  renderBidWindowBuilderPreview();
+  setBidWindowBuilderStatus(`${formatCalendarDate(key)} is available for bidding again.`);
+}
+
+async function saveBidWindowBuilderSchedule() {
+  if (!hasSystemAdminAccess() || bidWindowBuilderSaving) return;
+  if (!bidWindowBuilderPreview) {
+    setBidWindowBuilderStatus("Build and review the schedule before saving.", "error");
+    return;
+  }
+
+  const currentSettings = bidWindowBuilderSettings();
+  if (bidWindowBuilderPreview.signature !== bidWindowBuilderSignature(currentSettings)) {
+    bidWindowBuilderPreview = null;
+    renderBidWindowBuilderPreview();
+    setBidWindowBuilderStatus("The settings changed. Build a new preview before saving.", "error");
+    return;
+  }
+
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) {
+    setBidWindowBuilderStatus("Connect to Supabase before saving the schedule.", "error");
+    return;
+  }
+
+  bidWindowBuilderSaving = true;
+  renderBidWindowBuilderPreview();
+  setBidWindowBuilderStatus("Saving the bid-window schedule…");
+
+  const settings = bidWindowBuilderPreview.settings;
+  const { data, error } = await client.rpc("generate_bid_window_schedule", {
+    requested_bid_year: BID_YEAR,
+    requested_area_code: AREA_CODE_BY_NAME[settings.area] || settings.area,
+    requested_start_date: settings.startDate,
+    requested_office_opens: settings.opensAt,
+    requested_office_closes: settings.closesAt,
+    requested_window_minutes: settings.windowMinutes,
+    requested_blackout_dates: settings.blackoutDates,
+    requested_review_days: settings.reviewDays,
+    requested_round_count: 4,
+  });
+
+  if (error) {
+    bidWindowBuilderSaving = false;
+    renderBidWindowBuilderPreview();
+    setBidWindowBuilderStatus(
+      isMissingSupabaseRoutine(error)
+        ? "The Bid Window Builder database support is not installed yet. Run database/bid_window_builder.sql."
+        : error.message || "The bid-window schedule could not be saved.",
+      "error"
+    );
+    return;
+  }
+
+  await loadSupabaseReferenceData();
+  bidWindowBuilderSaving = false;
+  renderApp();
+  setBidWindowBuilderStatus(`${data?.windows_processed || bidWindowBuilderPreview.rows.length * 4} bid windows saved for ${settings.area}.`, "success");
+}
+
 function renderAdminConsole() {
   syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
   syncSlotCapacityForm();
   renderSlotCapacitySummary();
+  syncBidWindowBuilder();
   renderRosterManager();
   renderEmailLog();
 
@@ -11376,6 +11680,22 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (event.target.closest("[data-add-bid-window-blackout]")) {
+    addBidWindowBuilderBlackout();
+    return;
+  }
+
+  const removeBidWindowBlackout = event.target.closest("[data-remove-bid-window-blackout]");
+  if (removeBidWindowBlackout) {
+    removeBidWindowBuilderBlackout(removeBidWindowBlackout.dataset.removeBidWindowBlackout);
+    return;
+  }
+
+  if (event.target.closest("[data-save-bid-window-schedule]")) {
+    await saveBidWindowBuilderSchedule();
+    return;
+  }
+
   if (event.target.closest("[data-roster-new]")) {
     resetRosterForm();
     syncRosterDeleteSelectedButton();
@@ -11697,6 +12017,7 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
+document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -11784,6 +12105,13 @@ document.addEventListener("change", async (event) => {
   if (event.target.closest("[data-slot-capacity-area], [data-slot-capacity-start], [data-slot-capacity-end]")) {
     syncSlotCapacityForm();
     setSlotCapacityStatus("");
+    return;
+  }
+
+  if (event.target.closest("[data-bid-window-builder-area], [data-bid-window-builder-start], [data-bid-window-builder-open], [data-bid-window-builder-close], [data-bid-window-builder-length], [data-bid-window-builder-gap]")) {
+    bidWindowBuilderPreview = null;
+    renderBidWindowBuilderPreview();
+    setBidWindowBuilderStatus("Settings changed. Build a new preview.");
     return;
   }
 

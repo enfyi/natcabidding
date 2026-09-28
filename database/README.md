@@ -170,6 +170,15 @@ leave-hour allowance, and daily capacity. Administrative corrections can update
 past rounds without an open bidding window, matching manual intake entry. Capacity
 overrides are not accepted by this editor.
 
+## Bid Window Builder
+
+Run `database/bid_window_builder.sql` after the base schema and authentication
+functions. It installs the admin-only schedule generator used by the Bid Window
+Builder in the Admin Console. The generator assigns every active bidding employee
+in area seniority order, uses Pacific local time, skips blocked dates, reserves the
+configured review days between rounds, updates `bid_rounds`, and records one audit
+event for the completed schedule.
+
 Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
 data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed
 `@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
