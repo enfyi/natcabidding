@@ -95,6 +95,13 @@ h1 {
   outline: none;
 }
 .auth-form input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(31, 111, 74, 0.12); }
+.auth-help-link {
+  justify-self: end;
+  margin-top: 4px;
+  color: var(--green-dark);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
 
 .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
 .button {
