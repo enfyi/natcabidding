@@ -20,6 +20,7 @@ const LEAVE_SLOT_HOURS_PER_DAY = 8;
 const CWS_LEAVE_HOURS_PER_DAY = 10;
 const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
+const NO_FATIGUE_PREFERENCE = "No preference";
 const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
 const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
@@ -2143,7 +2144,7 @@ async function addOrUpdateRdoSubmission() {
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
   if (!line || line.status === "Taken") return;
   if (!selectedFatigueGroup) {
-    alert("Choose a fatigue group before submitting this RDO bid.");
+    alert("Choose a fatigue group or No preference before submitting this RDO bid.");
     return;
   }
   if (!isForcedMid(line) && !selectedMidPreference) {
@@ -2161,6 +2162,8 @@ async function addOrUpdateRdoSubmission() {
 
   const existing = currentUserRdoRequest();
   const round = currentRoundNumber();
+  const requestedFatigueGroup = selectedFatigueGroup === NO_FATIGUE_PREFERENCE ? "" : selectedFatigueGroup;
+  const fatigueGroupSummary = requestedFatigueGroup || NO_FATIGUE_PREFERENCE;
   const request = {
     id: existing?.id || `rdo-${currentUser.initials.toLowerCase()}-${Date.now()}`,
     type: "RDO Line",
@@ -2175,11 +2178,11 @@ async function addOrUpdateRdoSubmission() {
     approvedBy: "",
     approvedAt: "",
     line: line.line,
-    fatigueGroup: selectedFatigueGroup,
+    fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
     aws: selectedAwsPreference,
     mid: selectedMidValue(line),
-    summary: `Round ${round} · Line ${line.line} · Group ${selectedFatigueGroup} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    summary: `Round ${round} · Line ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
   const isChange = Boolean(existing)
@@ -3907,7 +3910,7 @@ function bidRecipientEmail(item) {
 
 function bidEmailDetail(item) {
   if (item.type === "RDO Line") {
-    return `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
+    return `RDO Line ${item.line}, Fatigue Group ${item.fatigueGroup || NO_FATIGUE_PREFERENCE}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
   }
 
   const weekText = item.weekUnits ? `, ${item.weekUnits} bid ${item.weekUnits === 1 ? "week" : "weeks"}` : "";
@@ -4233,6 +4236,13 @@ async function approveIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !["A", "B", "C"].includes(item.fatigueGroup)) {
+    item.reviewNote = "Choose a fatigue group before approving this RDO bid.";
+    activeOverrideId = id;
+    renderApp();
+    setPage("intake");
+    return;
+  }
   let persisted = false;
   try {
     persisted = await persistIntakeDecision(item, "approved");
@@ -5939,7 +5949,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     flex,
     aws,
     mid,
-    summary: payload.summary || `Round ${round} · Line ${line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+    summary: payload.summary || `Round ${round} · Line ${line} · Group ${fatigueGroup || NO_FATIGUE_PREFERENCE} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
   };
 }
 
@@ -6330,7 +6340,7 @@ async function saveSupabaseRdoRequest(request) {
   const { data, error } = await client.rpc("submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
-    requested_fatigue_group: request.fatigueGroup,
+    requested_fatigue_group: request.fatigueGroup || null,
     requested_flex: request.flex === true || request.flex === "Yes",
     requested_aws: request.aws === true || request.aws === "Yes",
     requested_mid: request.mid,
@@ -7668,7 +7678,7 @@ function renderDashboardSelectedLineCard(assignment) {
 function selectedLineReadinessItems(line) {
   const existingRequest = currentUserRdoRequest();
   const requestMatchesLine = existingRequest?.line === line.line;
-  const fatigueGroup = selectedFatigueGroup || (requestMatchesLine ? existingRequest.fatigueGroup : "");
+  const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
   const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
   const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
@@ -7678,7 +7688,7 @@ function selectedLineReadinessItems(line) {
 
   return [
     { label: "Selected line open", checked: selectedLineOpen },
-    { label: "Fatigue group selected", checked: Boolean(fatigueGroup) },
+    { label: "Fatigue preference selected", checked: fatiguePreferenceSelected },
     { label: "Preferences complete", checked: preferencesComplete },
     { label: "Leave within allowance", checked: true },
   ];
@@ -7761,7 +7771,9 @@ function renderRdoLines() {
     const isSelected = line.line === selectedLineId;
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
-    const groupValue = isSelected ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>` : "";
+    const groupValue = isSelected && selectedFatigueGroup !== NO_FATIGUE_PREFERENCE
+      ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>`
+      : "";
     const midValue = lineMidReferenceValue(line);
 
     rows.push(`
@@ -7825,6 +7837,9 @@ function updateSelectedLine() {
   const lineSchedule = lineScheduleLabel(line);
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
+  const lineRequest = selectedLineRequest(line);
+  const displayedFatiguePreference = selectedFatigueGroup
+    || (lineRequest ? (lineRequest.fatigueGroup || NO_FATIGUE_PREFERENCE) : "");
 
   document.querySelectorAll("[data-selected-line]").forEach((element) => {
     element.textContent = `Line ${line.line}`;
@@ -7853,7 +7868,7 @@ function updateSelectedLine() {
         <em>Fatigue Group</em>
         <span class="fatigue-options">
           ${fatigueCapacity.map((item) => {
-            const isSelected = selectedFatigueGroup === item.group;
+            const isSelected = displayedFatiguePreference === item.group;
             const available = canChooseGroup(item, isSelected);
             return `
               <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
@@ -7862,6 +7877,10 @@ function updateSelectedLine() {
               </button>
             `;
           }).join("")}
+          <button class="fatigue-option no-preference ${displayedFatiguePreference === NO_FATIGUE_PREFERENCE ? "active" : ""}" type="button" data-fatigue-group="${NO_FATIGUE_PREFERENCE}" ${bidderSelectionLocked ? "disabled" : ""} title="Leave the fatigue group blank for intake to assign later.">
+            <strong>No preference</strong>
+            <small>Intake assigns later</small>
+          </button>
         </span>
       </span>
       <span class="flex-picker">
@@ -11330,6 +11349,7 @@ function renderOverrideEditor(item) {
       </label>
       <label>Fatigue Group
         <select data-override-group>
+          <option value="" ${item.fatigueGroup ? "" : "selected"} disabled>Select fatigue group</option>
           ${["A", "B", "C"].map((group) => `<option ${group === item.fatigueGroup ? "selected" : ""}>${group}</option>`).join("")}
         </select>
       </label>
