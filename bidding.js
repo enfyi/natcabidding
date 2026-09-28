@@ -4122,10 +4122,36 @@ function formatCalendarDate(key) {
   }).format(new Date(year, month - 1, day));
 }
 
+function adoptParentSupabaseAuthHash() {
+  if (window.self === window.top || window.location.hash) return;
+
+  let parentUrl;
+  try {
+    parentUrl = new URL(window.top.location.href);
+  } catch {
+    return;
+  }
+
+  const authParams = new URLSearchParams(parentUrl.hash.slice(1));
+  const isSupabaseAuthResponse = authParams.has("access_token")
+    || authParams.has("error_description");
+  if (!isSupabaseAuthResponse) return;
+
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${parentUrl.hash}`
+  );
+
+  parentUrl.hash = "";
+  window.top.history.replaceState(null, "", parentUrl.toString());
+}
+
 function supabaseClient() {
   const config = window.NATCA_SUPABASE_CONFIG;
   if (!config?.url || !config?.publishableKey || !window.supabase?.createClient) return null;
   if (!supabaseState.client) {
+    adoptParentSupabaseAuthHash();
     supabaseState.client = window.supabase.createClient(config.url, config.publishableKey, {
       auth: {
         persistSession: true,
