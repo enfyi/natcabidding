@@ -1149,13 +1149,34 @@
                     Intake Team Member
                     <select data-schedule-rep></select>
                   </label>
+                  <fieldset class="intake-shift-presets">
+                    <legend>Base Shift</legend>
+                    <div class="intake-shift-preset-buttons">
+                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
+                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
+                    </div>
+                  </fieldset>
+                  <div class="intake-shift-fields">
+                    <label>
+                      Start Date
+                      <input type="date" data-intake-shift-date />
+                    </label>
+                    <label>
+                      Start Time
+                      <input type="time" step="900" data-intake-shift-time />
+                    </label>
+                    <label>
+                      Shift Length
+                      <span class="schedule-duration-input">
+                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
+                        <span>hours</span>
+                      </span>
+                    </label>
+                  </div>
+                  <input type="hidden" data-schedule-start />
                   <label>
-                    Starts
-                    <input type="datetime-local" data-schedule-start />
-                  </label>
-                  <label>
-                    Ends
-                    <input type="datetime-local" data-schedule-end />
+                    Calculated End
+                    <input type="datetime-local" data-schedule-end readonly />
                   </label>
                   <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
                   <p class="form-status" data-schedule-status></p>
@@ -1495,13 +1516,34 @@
                     Intake Team Member
                     <select data-admin-schedule-rep></select>
                   </label>
+                  <fieldset class="intake-shift-presets">
+                    <legend>Base Shift</legend>
+                    <div class="intake-shift-preset-buttons">
+                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
+                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
+                    </div>
+                  </fieldset>
+                  <div class="intake-shift-fields">
+                    <label>
+                      Start Date
+                      <input type="date" data-intake-shift-date />
+                    </label>
+                    <label>
+                      Start Time
+                      <input type="time" step="900" data-intake-shift-time />
+                    </label>
+                    <label>
+                      Shift Length
+                      <span class="schedule-duration-input">
+                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
+                        <span>hours</span>
+                      </span>
+                    </label>
+                  </div>
+                  <input type="hidden" data-admin-schedule-start />
                   <label>
-                    Starts
-                    <input type="datetime-local" data-admin-schedule-start />
-                  </label>
-                  <label>
-                    Ends
-                    <input type="datetime-local" data-admin-schedule-end />
+                    Calculated End
+                    <input type="datetime-local" data-admin-schedule-end readonly />
                   </label>
                   <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
                   <p class="form-status" data-admin-schedule-status></p>
@@ -1841,7 +1883,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

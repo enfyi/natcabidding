@@ -164,25 +164,7 @@ let bidChangeReturnFocus = null;
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
-
-const intakeSchedules = [
-  {
-    id: "sched-oc-1",
-    initials: "OC",
-    name: "Michael Schoelen",
-    area: INTAKE_SCHEDULE_AREA,
-    start: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    end: new Date(Date.now() + 26 * 60 * 60 * 1000),
-  },
-  {
-    id: "sched-oc-2",
-    initials: "OC",
-    name: "Michael Schoelen",
-    area: INTAKE_SCHEDULE_AREA,
-    start: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000),
-    end: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000),
-  },
-];
+const intakeSchedules = [];
 
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
@@ -614,7 +596,7 @@ let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().
 const annualMobileCalendars = new Set();
 let publicRdoPresentation = "cards";
 let scheduleCalendarView = "month";
-let scheduleActiveDate = new Date(BID_YEAR, 0, 1);
+let scheduleActiveDate = new Date();
 const rdoFilters = {
   search: "",
   openOnly: false,
@@ -656,6 +638,7 @@ const supabaseState = {
   authEmail: "",
   authUserId: "",
   pendingAuthEmail: "",
+  intakeSchedulesError: "",
   placeholdersCleared: false,
   referenceDataLoaded: false,
 };
@@ -6421,6 +6404,11 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
   });
 }
 
+function loadIntakeSchedules(client) {
+  if (!supabaseState.authUserId) return Promise.resolve({ data: [], error: null });
+  return client.rpc("read_intake_schedules", { requested_bid_year: BID_YEAR });
+}
+
 async function ensureSupabaseBidYearId() {
   if (supabaseState.bidYearId) return supabaseState.bidYearId;
   const client = supabaseClient();
@@ -6564,6 +6552,7 @@ async function loadPublishedBidWindows(client, bidYearId) {
   const publicResult = await client.rpc("read_public_bid_windows", { requested_bid_year: BID_YEAR });
   if (!publicResult.error || !supabaseState.authUserId) return publicResult;
 
+  // Keep signed-in installations working while the public read migration is being applied.
   return client
     .from("bid_windows")
     .select("bidder_id,round_number,opens_at,closes_at,status")
@@ -6588,6 +6577,7 @@ async function loadSupabaseReferenceData() {
 
   supabaseState.enabled = true;
   supabaseState.loading = true;
+  supabaseState.intakeSchedulesError = "";
   supabaseState.message = "Loading bidding data from Supabase...";
 
   try {
@@ -6631,7 +6621,7 @@ async function loadSupabaseReferenceData() {
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      supabaseState.authUserId ? client.from("intake_schedules").select("id,bid_year_id,area_id,intake_user_id,starts_at,ends_at,scope,bidders:intake_user_id(first_name,last_name,initials),areas(name)").eq("bid_year_id", bidYear.id).order("starts_at") : Promise.resolve({ data: [], error: null }),
+      loadIntakeSchedules(client),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
       client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
@@ -6685,6 +6675,7 @@ async function loadSupabaseReferenceData() {
       );
     }
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
+    supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
@@ -6743,6 +6734,57 @@ function formatDateTime(date) {
 function formatDateTimeLocalValue(date) {
   const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return offsetDate.toISOString().slice(0, 16);
+}
+
+const DEFAULT_INTAKE_SHIFT_START = "06:45";
+const DEFAULT_INTAKE_SHIFT_HOURS = 8;
+
+function syncIntakeShiftForm(form, options = {}) {
+  if (!form) return;
+
+  const dateInput = form.querySelector("[data-intake-shift-date]");
+  const timeInput = form.querySelector("[data-intake-shift-time]");
+  const durationInput = form.querySelector("[data-intake-shift-duration]");
+  const startInput = form.querySelector("[data-schedule-start], [data-admin-schedule-start]");
+  const endInput = form.querySelector("[data-schedule-end], [data-admin-schedule-end]");
+  if (!dateInput || !timeInput || !durationInput || !startInput || !endInput) return;
+
+  if (!dateInput.value) {
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + (options.defaultOffsetDays ?? 5));
+    dateInput.value = formatDateTimeLocalValue(defaultDate).slice(0, 10);
+  }
+  if (!timeInput.value) timeInput.value = DEFAULT_INTAKE_SHIFT_START;
+  if (!durationInput.value) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+
+  const durationHours = Number(durationInput.value);
+  const start = new Date(`${dateInput.value}T${timeInput.value}`);
+  const hasValidRange = !Number.isNaN(start.getTime()) && Number.isFinite(durationHours) && durationHours > 0 && durationHours <= 24;
+
+  if (hasValidRange) {
+    const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+    startInput.value = formatDateTimeLocalValue(start);
+    endInput.value = formatDateTimeLocalValue(end);
+  } else {
+    startInput.value = "";
+    endInput.value = "";
+  }
+
+  form.querySelectorAll("[data-intake-shift-preset]").forEach((button) => {
+    const isActive = button.dataset.intakeShiftPreset === timeInput.value && durationHours === DEFAULT_INTAKE_SHIFT_HOURS;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function applyIntakeShiftPreset(button) {
+  const form = button.closest(".schedule-form");
+  if (!form) return;
+  const timeInput = form.querySelector("[data-intake-shift-time]");
+  const durationInput = form.querySelector("[data-intake-shift-duration]");
+  if (timeInput) timeInput.value = button.dataset.intakeShiftPreset || DEFAULT_INTAKE_SHIFT_START;
+  if (durationInput) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  syncIntakeShiftForm(form);
 }
 
 function formatDateRange(start, end) {
@@ -9280,15 +9322,7 @@ function renderLeaveBucketCards() {
 }
 
 function syncAdminScheduleFormDefaults() {
-  const startInput = document.querySelector("[data-admin-schedule-start]");
-  const endInput = document.querySelector("[data-admin-schedule-end]");
-  if (!startInput || !endInput) return;
-
-  const defaultStart = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
-  defaultStart.setMinutes(0, 0, 0);
-  const defaultEnd = new Date(defaultStart.getTime() + 4 * 60 * 60 * 1000);
-  if (!startInput.value) startInput.value = formatDateTimeLocalValue(defaultStart);
-  if (!endInput.value) endInput.value = formatDateTimeLocalValue(defaultEnd);
+  syncIntakeShiftForm(document.querySelector("[data-admin-schedule-start]")?.closest(".schedule-form"));
 }
 
 function setAdminScheduleStatus(message, status = "info") {
@@ -11081,21 +11115,30 @@ async function addAdminScheduleFromForm() {
 function schedulesForDateKey(key) {
   return intakeSchedules
     .filter((schedule) => dateKeyFromDate(schedule.start) === key)
-    .sort((a, b) => a.start - b.start);
+    .sort((a, b) => {
+      const startDifference = a.start.getTime() - b.start.getTime();
+      if (startDifference !== 0) return startDifference;
+      return (a.name || a.initials).localeCompare(b.name || b.initials);
+    });
 }
 
 function renderScheduleTooltip(key) {
   const schedules = schedulesForDateKey(key);
   if (!schedules.length) return "";
   return `
-    <span class="schedule-tooltip" role="tooltip">
+    <span class="schedule-tooltip" role="tooltip" aria-label="Intake representatives scheduled for ${formatCalendarDate(key)}">
       <strong>${formatCalendarDate(key)}</strong>
-      ${schedules.map((schedule) => `
-        <span>
-          <b>${escapeHtml(schedule.initials)}</b>
-          <small>${escapeHtml(formatDateRange(schedule.start, schedule.end))}</small>
-        </span>
-      `).join("")}
+      <span class="schedule-tooltip-list">
+        ${schedules.map((schedule) => `
+          <span class="schedule-tooltip-row">
+            <time datetime="${schedule.start.toISOString()}">${escapeHtml(formatScheduleStartTime(schedule.start))}</time>
+            <span class="schedule-tooltip-rep">
+              <b>${escapeHtml(schedule.name || schedule.initials)}</b>
+              <small>${escapeHtml(schedule.initials)} · until ${escapeHtml(formatScheduleStartTime(schedule.end))}</small>
+            </span>
+          </span>
+        `).join("")}
+      </span>
     </span>
   `;
 }
@@ -11255,6 +11298,10 @@ function renderIntakeSchedule() {
 
   const sortedSchedules = [...intakeSchedules].sort((a, b) => a.start - b.start);
   const userSchedules = sortedSchedules.filter((schedule) => schedule.initials === currentUser.initials);
+  if (supabaseState.intakeSchedulesError) {
+    list.innerHTML = '<p class="empty-state small">Intake assignments could not be loaded from Supabase. Refresh the page and try again.</p>';
+    return;
+  }
   list.innerHTML = `
     <div class="schedule-list-section">
       <h3>Your Intake Assignments</h3>
@@ -11280,15 +11327,7 @@ function renderIntakeSchedule() {
 }
 
 function syncScheduleFormDefaults() {
-  const startInput = document.querySelector("[data-schedule-start]");
-  const endInput = document.querySelector("[data-schedule-end]");
-  if (!startInput || !endInput) return;
-
-  const defaultStart = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-  defaultStart.setMinutes(0, 0, 0);
-  const defaultEnd = new Date(defaultStart.getTime() + 4 * 60 * 60 * 1000);
-  if (!startInput.value) startInput.value = formatDateTimeLocalValue(defaultStart);
-  if (!endInput.value) endInput.value = formatDateTimeLocalValue(defaultEnd);
+  syncIntakeShiftForm(document.querySelector("[data-schedule-start]")?.closest(".schedule-form"));
 }
 
 function setScheduleFormStatus(message, status = "info") {
@@ -13344,6 +13383,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const intakeShiftPreset = event.target.closest("[data-intake-shift-preset]");
+  if (intakeShiftPreset) {
+    applyIntakeShiftPreset(intakeShiftPreset);
+    return;
+  }
+
   const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
   if (scheduleViewButton) {
     scheduleCalendarView = scheduleViewButton.dataset.scheduleCalendarView || "month";
@@ -13729,6 +13774,11 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
+    syncIntakeShiftForm(event.target.closest(".schedule-form"));
+    return;
+  }
+
   if (event.target.matches("[data-mobile-bid-search]")) {
     const query = event.target.value.trim().toLowerCase();
     let matches = 0;
@@ -13782,6 +13832,11 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
+    syncIntakeShiftForm(event.target.closest(".schedule-form"));
+    return;
+  }
+
   const bidChangeWeekStart = event.target.closest("[data-bid-change-week-start]");
   if (bidChangeWeekStart) {
     updateRoundOneBidChangeWeek(bidChangeWeekStart.dataset.bidChangeWeekStart, bidChangeWeekStart.value);
