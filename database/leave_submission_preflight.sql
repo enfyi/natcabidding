@@ -22,12 +22,27 @@ alter table public.bid_year_settings
 alter table public.bid_year_settings enable row level security;
 
 do $migration$
+declare
+  public_function_source text;
 begin
-  if to_regprocedure('private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)') is null then
-    if to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)') is null then
-      raise exception 'public.submit_leave_bid_batch(integer,jsonb,text,text,boolean) must exist before applying this migration';
-    end if;
+  if to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)') is null then
+    raise exception 'public.submit_leave_bid_batch(integer,jsonb,text,text,boolean) must exist before applying this migration';
+  end if;
 
+  select procedure.prosrc
+  into public_function_source
+  from pg_catalog.pg_proc procedure
+  where procedure.oid = to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)');
+
+  if to_regprocedure('private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)') is null then
+    alter function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean)
+      rename to submit_leave_bid_batch_unchecked;
+    alter function public.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean)
+      set schema private;
+  elsif position('private.submit_leave_bid_batch_unchecked' in coalesce(public_function_source, '')) = 0 then
+    -- A newer transactional migration replaced the public wrapper. Promote that
+    -- implementation so this migration can safely install a fresh preflight wrapper.
+    drop function private.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean);
     alter function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean)
       rename to submit_leave_bid_batch_unchecked;
     alter function public.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean)
@@ -82,6 +97,7 @@ declare
   duplicate_conflict_dates date[];
   conflict_date_labels text;
   error_messages text[] := array[]::text[];
+  ghost_bid boolean;
 begin
   select b.*
   into actor
@@ -149,6 +165,8 @@ begin
     when target.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
     else 'cpc'
   end;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   -- Validate bounded, parseable input before expanding ranges.
   for item in
@@ -255,15 +273,7 @@ begin
   -- A bidder must have requested an RDO line before leave can be submitted,
   -- but intake approval is not required yet. Approved RDO patterns are removed
   -- from charged leave by the underlying submitter and reconciliation trigger.
-  select rl.id
-  into target_rdo_line_id
-  from public.rdo_lines rl
-  where rl.bid_year_id = year_row.id
-    and rl.area_id = target.area_id
-    and rl.assigned_bidder_id = target.id
-    and rl.status = 'taken'
-  order by rl.updated_at desc, rl.id
-  limit 1;
+  target_rdo_line_id := public.effective_rdo_line_id(year_row.id, target.id);
 
   if target_rdo_line_id is null then
     select coalesce(
@@ -310,7 +320,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif exists (
+    elsif not ghost_bid and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id
@@ -371,9 +381,12 @@ begin
     );
   end loop;
 
-  -- A configured row is one daily slot. Approved/held slots are already removed
-  -- from the open count; pending requests are subtracted as reservations.
-  with requested_dates as (
+  -- Ghost leave remains visible to the bidder and intake, but never reserves
+  -- or consumes an area slot.
+  if not ghost_bid then
+    -- A configured row is one daily slot. Approved/held slots are already removed
+    -- from the open count; pending requests are subtracted as reservations.
+    with requested_dates as (
     select distinct gs::date as leave_date
     from jsonb_array_elements(requested_items) requested(item)
     cross join lateral generate_series(
@@ -421,6 +434,7 @@ begin
     where lr.bid_year_id = year_row.id
       and b.area_id = target.area_id
       and lr.status = 'pending'
+      and not lr.is_ghost_bid
       and d.charged
       and b.bid_role not in ('ADM', 'NB')
       and case
@@ -436,15 +450,16 @@ begin
   left join pending_reservations pending on pending.leave_date = requested.leave_date
   where coalesce(available.slot_count, 0) - coalesce(pending.reservation_count, 0) < 1;
 
-  if cardinality(capacity_conflict_dates) > 0 then
-    select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
-    into conflict_date_labels
-    from unnest(capacity_conflict_dates) date_value;
+    if cardinality(capacity_conflict_dates) > 0 then
+      select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
+      into conflict_date_labels
+      from unnest(capacity_conflict_dates) date_value;
 
-    error_messages := array_append(
-      error_messages,
-      format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
-    );
+      error_messages := array_append(
+        error_messages,
+        format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
+      );
+    end if;
   end if;
 
   -- A date already submitted in this or an earlier round cannot consume

@@ -31,6 +31,7 @@ declare
   crew_used integer;
   enforce_bid_windows boolean := true;
   configured_test_round integer;
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -80,6 +81,8 @@ begin
     limit 1;
     if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
   end if;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   select * into strict line_row
   from public.rdo_lines rl
@@ -131,22 +134,25 @@ begin
   if submission_id is null then
     insert into public.intake_submissions (
       bid_year_id, area_id, bidder_id, round_number, rdo_line_id,
-      submission_type, status, payload, submitted_at
+      submission_type, status, payload, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.area_id, target.id, resolved_round, line_row.id,
       'rdo', 'pending', jsonb_build_object(
         'line', line_row.line_code, 'fatigueGroup', requested_fatigue_group,
         'flex', requested_flex, 'aws', requested_aws, 'mid', requested_mid,
-        'bidAs', target.bid_role
-      ), now()
+        'bidAs', target.bid_role, 'ghostBid', ghost_bid,
+        'lineLabel', case when ghost_bid then 'Ghost Line' else 'RDO Line' end
+      ), now(), ghost_bid
     ) returning id into submission_id;
   else
     update public.intake_submissions
     set rdo_line_id = line_row.id,
+        is_ghost_bid = ghost_bid,
         payload = jsonb_build_object(
           'line', line_row.line_code, 'fatigueGroup', requested_fatigue_group,
           'flex', requested_flex, 'aws', requested_aws, 'mid', requested_mid,
-          'bidAs', target.bid_role
+          'bidAs', target.bid_role, 'ghostBid', ghost_bid,
+          'lineLabel', case when ghost_bid then 'Ghost Line' else 'RDO Line' end
         ), submitted_at = now(), updated_at = now()
     where id = submission_id;
   end if;
@@ -157,7 +163,11 @@ begin
   values (year_row.id, target.area_id, actor.id, 'rdo_bid_submitted', 'intake_submissions', submission_id,
     jsonb_build_object('target_bidder_id', target.id, 'line_code', line_row.line_code, 'round', resolved_round));
 
-  return jsonb_build_object('submission_id', submission_id, 'round', resolved_round);
+  return jsonb_build_object(
+    'submission_id', submission_id,
+    'round', resolved_round,
+    'is_ghost_bid', ghost_bid
+  );
 end
 $$;
 

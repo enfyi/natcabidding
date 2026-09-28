@@ -6,7 +6,7 @@ const db=new PGlite();
 await db.exec(`create role anon; create role authenticated; create schema auth; create schema private;
 create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
 create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email',current_setting('test.email',true))$$;`);
-for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql','round_two_three_rdo_limits.sql','round_four_holiday_allowances.sql','holiday_slot_reservations.sql']) {
+for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bidding.sql','high_priority_bidding_fixes.sql','rdo_line_eligibility.sql','leave_submission_preflight.sql','resolve_bidding_sql_conflicts.sql','holiday_leave_round_rules.sql','member_leave_request_management.sql','member_leave_request_replacement.sql','reject_unchanged_leave_rebid.sql','admin_leave_request_edit.sql','admin_bidder_editor.sql','round_one_flexible_week_buckets.sql','round_two_three_rdo_limits.sql','round_four_holiday_allowances.sql','holiday_slot_reservations.sql']) {
  let sql=fs.readFileSync(root+file,'utf8').replaceAll('create extension if not exists pgcrypto;','').replaceAll('create extension if not exists pgcrypto with schema extensions;','');
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
@@ -356,3 +356,39 @@ const preparedAllowances=(await db.query(`select count(*)::integer as ready from
   where bid_year_id=$1 and bidder_id in ('00000000-0000-0000-0000-000000000281','00000000-0000-0000-0000-000000000291')
     and rdo_line_id is not null and total_hours is not null`,[year])).rows[0].ready;
 if(preparedAllowances!==2) throw new Error('Round 4 allowances were not calculated for both line types');
+
+const ghostBidder='00000000-0000-0000-0000-000000000301';
+const ghostAuth='00000000-0000-0000-0000-000000000302';
+const ghostLine='00000000-0000-0000-0000-000000000303';
+await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,leave_slot_allowance)
+ values('${ghostBidder}','${ghostAuth}','${bidder.area_id}','Ghost','Tester','GH','ghost@example.test','CPC',80);
+ insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
+ values('${ghostLine}','${year}','${bidder.area_id}','GHOST-TEST','CPC','S/S','open');
+ insert into rdo_line_days(rdo_line_id,weekday,shift_code)
+ select '${ghostLine}',weekday,case when weekday in (0,6) then 'RDO' else '0700' end
+ from generate_series(0,6) weekday;
+ insert into bidder_bid_year_settings(bid_year_id,bidder_id,is_ghost_bidder)
+ values('${year}','${ghostBidder}',true);
+ set test.uid='${ghostAuth}'; set test.email='ghost@example.test';
+ update bid_year_settings set enforce_bid_windows=false,test_bid_round=1 where bid_year_id='${year}';`);
+const ghostRdo=(await db.query("select public.submit_rdo_bid(2027,'GHOST-TEST','A',true,false,'No',1) as result")).rows[0].result;
+if(!ghostRdo.is_ghost_bid) throw new Error('Ghost RDO submission was not annotated');
+await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+await db.query("select public.review_bidding_submission($1,'approved')",[ghostRdo.submission_id]);
+const openGhostLine=(await db.query('select status,assigned_bidder_id from rdo_lines where id=$1',[ghostLine])).rows[0];
+if(openGhostLine.status!=='open' || openGhostLine.assigned_bidder_id) throw new Error('Ghost Line consumed its source RDO line');
+await db.exec(`set test.uid='${ghostAuth}'; set test.email='ghost@example.test';`);
+const ghostLeave=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
+  [JSON.stringify([{start_date:'2027-09-01',end_date:'2027-09-01',round:1,rdo_line_code:'GHOST-TEST'}])])).rows[0].result;
+if(!ghostLeave.is_ghost_bid) throw new Error('Ghost leave submission was not annotated');
+await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+await db.query("select public.review_bidding_submission($1,'approved')",[ghostLeave.submission_ids[0]]);
+const ghostLeaveRequest=(await db.query('select id,status,is_ghost_bid from leave_requests where bidder_id=$1',[ghostBidder])).rows[0];
+const ghostSlots=(await db.query('select count(*)::integer as total from leave_slots where source_leave_request_id=$1',[ghostLeaveRequest.id])).rows[0].total;
+if(ghostLeaveRequest.status!=='approved' || !ghostLeaveRequest.is_ghost_bid || ghostSlots!==0)
+  throw new Error('Ghost leave consumed area capacity or lost its annotation');
+const ghostState=(await db.query('select public.read_bidding_state(2027) as state')).rows[0].state.submissions
+  .filter(item=>item.initials==='GH');
+if(ghostState.length!==2 || ghostState.some(item=>!item.is_ghost_bid))
+  throw new Error('Ghost annotations were not exposed in bidding state');
+console.log('PASS Ghost Line stays open and Ghost Leave consumes no area capacity');

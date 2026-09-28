@@ -164,6 +164,7 @@ declare
   is_in_lieu boolean;
   effective_rdo_line_id uuid;
   result_ids jsonb := '[]'::jsonb;
+  ghost_bid boolean;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -192,6 +193,8 @@ begin
       and (target_area_name is null or a.name = target_area_name)
     order by case when b.area_id = actor.area_id then 0 else 1 end, b.id limit 1 for update of b;
   end if;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   -- Validate the inexpensive invariants before expanding ranges into individual
   -- dates so malformed input cannot force an unbounded generate_series call.
@@ -345,10 +348,10 @@ begin
 
     insert into public.leave_requests (
       bid_year_id, bidder_id, round_number, priority, status,
-      requested_start_date, requested_end_date, charged_days, notes, submitted_at
+      requested_start_date, requested_end_date, charged_days, notes, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.id, round_no, priority_no, 'pending',
-      start_date, end_date, item_charged, nullif(item->>'notes', ''), now()
+      start_date, end_date, item_charged, nullif(item->>'notes', ''), now(), ghost_bid
     ) returning id into request_id;
 
     if round_no = 1 then
@@ -377,12 +380,12 @@ begin
 
     insert into public.intake_submissions (
       bid_year_id, area_id, bidder_id, round_number, leave_request_id,
-      submission_type, status, payload, submitted_at
+      submission_type, status, payload, submitted_at, is_ghost_bid
     ) values (
       year_row.id, target.area_id, target.id, round_no, request_id, 'leave', 'pending',
       jsonb_build_object('range', start_date || ' - ' || end_date, 'days', item_charged,
         'startDate', start_date, 'endDate', end_date, 'bidAs', target.bid_role,
-        'notes', nullif(item->>'notes', '')), now()
+        'notes', nullif(item->>'notes', ''), 'ghostBid', ghost_bid), now(), ghost_bid
     ) returning id into submission_id;
 
     result_ids := result_ids || jsonb_build_array(submission_id);
@@ -396,7 +399,8 @@ begin
     perform private.rebuild_round_one_week_buckets(year_row.id, target.id);
   end if;
 
-  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round, 'charged_days', batch_charged);
+  return jsonb_build_object('submission_ids', result_ids, 'round', batch_round,
+    'charged_days', batch_charged, 'is_ghost_bid', ghost_bid);
 end
 $$;
 
