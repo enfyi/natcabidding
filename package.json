@@ -15,6 +15,7 @@
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
     "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs",
+    "test:bid-change-modal": "node scripts/test-bid-change-modal.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build"
   },

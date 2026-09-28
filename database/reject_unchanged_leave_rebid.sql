@@ -12,6 +12,12 @@ begin
     return new;
   end if;
 
+  -- The atomic bidder replacement endpoint resubmits the complete changed
+  -- Round 1 week, including dates that remain in place.
+  if coalesce(current_setting('zla.leave_replacement', true), '') = 'on' then
+    return new;
+  end if;
+
   -- Reviewer and administrator entries for another bidder are unaffected.
   if not exists (
     select 1 from public.bidders bidder
