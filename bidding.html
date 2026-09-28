@@ -1421,18 +1421,18 @@
               <section class="panel bid-window-testing-card" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Bid Window Testing</h3>
-                    <p data-bid-window-enforcement-copy>BUEs can submit only during their assigned bid window.</p>
+                    <h3>Bid Window Policy</h3>
+                    <p data-bid-window-enforcement-copy>BUEs can submit only during their assigned bid window. This cannot be bypassed.</p>
                   </div>
-                  <span class="pill open" data-bid-window-enforcement-state>Strict Windows On</span>
+                  <span class="pill open" data-bid-window-enforcement-state>Strict Windows Required</span>
                 </div>
                 <label class="toggle-row">
-                  <input type="checkbox" data-bid-window-enforcement-toggle checked />
-                  <span>Require assigned bid window for BUE submissions</span>
+                  <input type="checkbox" data-bid-window-enforcement-toggle checked disabled />
+                  <span>Assigned bid window required for BUE submissions</span>
                 </label>
                 <label class="testing-select-row">
-                  Test Round
-                  <select data-bid-window-test-round>
+                  Test Round (window rules still apply)
+                  <select data-bid-window-test-round disabled>
                     <option value="">Actual Schedule</option>
                     <option value="1">Round 1</option>
                     <option value="2">Round 2</option>

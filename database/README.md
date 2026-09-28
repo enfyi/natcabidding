@@ -89,11 +89,11 @@ and admin editor SQL to make Round 1 buckets movable when dates are added,
 removed, or replaced. It also rebuilds the saved bucket links for active bids
 and updates admin editor routines only where those routines are installed.
 
-For the shared admin bid-window testing switch, also run
+For shared bid-window settings, also run
 `database/bid_window_testing_admin.sql`, then re-run
-`database/leave_submission_preflight.sql`. The testing switch lets admins allow
-all logged-in BUEs to submit outside their assigned bid windows while testing,
-with an optional shared test round for checking Round 1-4 rules individually.
+`database/leave_submission_preflight.sql`. Assigned BUE windows are mandatory;
+neither testing settings nor system administrators can unlock BUE self-service
+outside the bidder's personal window.
 
 For databases that already have the transactional bidding, high-priority fixes,
 and leave preflight functions installed, run
@@ -251,9 +251,10 @@ round, and inactive requests retain their status when their dates are corrected.
 
 Checks include line eligibility/availability, fatigue capacity, required Mid and
 fatigue settings, date bounds, overlapping leave, RDO conflicts, round limits,
-leave-hour allowance, and daily capacity. Administrative corrections can update
-past rounds without an open bidding window, matching manual intake entry. Capacity
-overrides are not accepted by this editor.
+leave-hour allowance, and daily capacity. Manual intake entry can bypass a BUE's
+personal window only while that same round remains open for the area. After the
+area advances to a later round, closed rounds cannot accept new BUE, intake, or
+administrator bid submissions. Capacity overrides are not accepted by this editor.
 
 ## Bid Window Builder
 

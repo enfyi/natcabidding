@@ -300,6 +300,11 @@ begin
     batch_charged := batch_charged + item_charged;
   end loop;
 
+  if enforce_bid_windows
+     and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
+    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', batch_round;
+  end if;
+
   if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at

@@ -83,8 +83,6 @@ declare
   submitted_rdo_line_code text;
   rdo_request_line_code text;
   open_bid_window_id uuid;
-  enforce_bid_windows boolean := true;
-  configured_test_round integer;
   requested_charged_days integer := 0;
   existing_charged_days integer := 0;
   leave_hours_per_day integer := 8;
@@ -98,6 +96,7 @@ declare
   conflict_date_labels text;
   error_messages text[] := array[]::text[];
   ghost_bid boolean;
+  enforce_bid_windows boolean := true;
 begin
   select b.*
   into actor
@@ -116,11 +115,10 @@ begin
   from public.bid_years bys
   where bys.bid_year = requested_bid_year;
 
-  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
-  into enforce_bid_windows, configured_test_round
+  select coalesce(settings.enforce_bid_windows, true)
+  into enforce_bid_windows
   from public.bid_year_settings settings
   where settings.bid_year_id = year_row.id;
-
   enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if requested_items is null
@@ -224,13 +222,11 @@ begin
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
   end if;
 
-  if not manual_entry
-     and not enforce_bid_windows
-     and configured_test_round is not null
-     and batch_round <> configured_test_round then
+  if enforce_bid_windows
+     and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
     error_messages := array_append(
       error_messages,
-      format('Testing mode is currently set to Round %s.', configured_test_round)
+      format('Round %s is not currently open for this area. Closed rounds cannot accept bids.', batch_round)
     );
   end if;
 

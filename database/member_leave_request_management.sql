@@ -22,8 +22,6 @@ declare
   actor public.bidders%rowtype;
   request_row public.leave_requests%rowtype;
   year_row public.bid_years%rowtype;
-  enforce_bid_windows boolean := true;
-  configured_test_round integer;
   affected_date date;
 begin
   select bidder.*
@@ -61,14 +59,7 @@ begin
   from public.bid_years bid_year
   where bid_year.id = request_row.bid_year_id;
 
-  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
-  into enforce_bid_windows, configured_test_round
-  from public.bid_year_settings settings
-  where settings.bid_year_id = request_row.bid_year_id;
-
-  enforce_bid_windows := coalesce(enforce_bid_windows, true);
-
-  if enforce_bid_windows and not exists (
+  if not exists (
     select 1
     from public.bid_windows bid_window
     where bid_window.bid_year_id = request_row.bid_year_id
@@ -79,12 +70,6 @@ begin
   ) then
     raise exception 'Leave can only be changed during your allotted Round % bid window.',
       request_row.round_number;
-  end if;
-
-  if not enforce_bid_windows
-     and configured_test_round is not null
-     and configured_test_round <> request_row.round_number then
-    raise exception 'Testing mode is currently set to Round %.', configured_test_round;
   end if;
 
   -- Use the same per-area/date lock key as submissions and admin replacements
