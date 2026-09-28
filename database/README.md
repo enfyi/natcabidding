@@ -141,7 +141,9 @@ Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line
 
 Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and the displayed area seniority rank (the same rank shown in the bidding UI), treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status. Reapply this script to pilot databases after roster changes so appended tester rows and rank gaps continue to resolve to the bidder shown in the preview.
 
-Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
+Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, imports each bidder's leave allowance in hours, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
+
+Run `database/seniority_roster_export.sql` to enable the system-admin seniority-roster export. The Admin Console exports the selected area's active seniority roster in the same workbook and column order accepted by the importer.
 
 Run `database/admin_roster_deactivation.sql` to enable reliable admin deletion
 from the roster editor. It deactivates the selected bidder by immutable profile

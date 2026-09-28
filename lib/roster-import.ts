@@ -23,6 +23,9 @@ const HEADER_ALIASES: Record<string, string> = {
   role: 'bid_role',
   bid_as: 'bid_role',
   date_of_seniority: 'seniority_date',
+  leave_allowance: 'leave_slot_allowance',
+  leave_allowance_hours: 'leave_slot_allowance',
+  leave_slots: 'leave_slot_allowance',
 }
 
 export class RosterImportError extends Error {
@@ -133,6 +136,8 @@ export async function parseRosterImport(file: File): Promise<RosterImportPreview
       const rawDate = valueFor(row, 'seniority_date')
       const seniorityDate = parsedDate(rawDate)
       const active = parsedBoolean(valueFor(row, 'active'), true, rowLabel, issues)
+      const rawLeaveAllowance = valueFor(row, 'leave_slot_allowance')
+      const leaveSlotAllowance = Number(rawLeaveAllowance)
 
       if (profileId && !UUID_PATTERN.test(profileId)) issues.push(`${rowLabel}: profile_id must be a valid UUID or blank.`)
       if (!/^(A|B|C|D|E|F|TMU)$/.test(areaCode)) issues.push(`${rowLabel}: area_code must be A through F or TMU.`)
@@ -145,6 +150,9 @@ export async function parseRosterImport(file: File): Promise<RosterImportPreview
       if (areaCode !== 'TMU' && ['TMC', 'DEV'].includes(bidRole)) issues.push(`${rowLabel}: Areas A–F must use CPC, GL, R-DEV, or D-DEV.`)
       if (email && !EMAIL_PATTERN.test(email)) issues.push(`${rowLabel}: email is not valid.`)
       if (rawDate && !seniorityDate) issues.push(`${rowLabel}: seniority_date must be a valid date.`)
+      if (!/^\d{1,5}$/.test(rawLeaveAllowance) || !Number.isInteger(leaveSlotAllowance)) {
+        issues.push(`${rowLabel}: leave_allowance_hours must be a non-negative whole number of hours.`)
+      }
 
       const rankKey = `${areaCode}:${rank}`
       if (seenInitials.has(initials)) issues.push(`${rowLabel}: initials ${initials} appear more than once.`)
@@ -160,6 +168,7 @@ export async function parseRosterImport(file: File): Promise<RosterImportPreview
         sourceRow, sourceSheet: sheet.name, profile_id: profileId, area_code: areaCode,
         seniority_rank: rank, first_name: firstName, last_name: lastName, initials,
         email, phone, bid_role: bidRole as RosterImportRow['bid_role'], seniority_date: seniorityDate, active,
+        leave_slot_allowance: leaveSlotAllowance,
       })
     }
   }

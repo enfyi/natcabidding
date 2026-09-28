@@ -18,6 +18,7 @@ type ExistingBidder = {
   bid_role: string
   seniority_rank: number | null
   area_name: string
+  leave_slot_allowance: number
   active: boolean
 }
 type PreviewRow = RosterImportRow & { action: RosterImportAction; changes: string[] }
@@ -55,6 +56,7 @@ function compareRow(row: RosterImportRow, match: ExistingBidder | null): Preview
   if (row.email) compare('Email', match.email, row.email)
   if (row.phone) compare('Phone', match.phone, row.phone)
   compare('Bid role', match.bid_role, row.bid_role)
+  compare('Leave allowance', match.leave_slot_allowance, row.leave_slot_allowance)
   compare('Active', match.active, row.active)
   const action = !match.active && row.active ? 'reactivate' : changes.length ? 'update' : 'unchanged'
   return { ...row, action, changes: changes.length ? changes : ['No changes'] }
@@ -205,7 +207,7 @@ export function RosterImporter() {
         <input type="file" accept=".xlsx,.csv" onChange={(event) => resetPreview(event.target.files?.[0] || null)} />
         <small>{file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : 'Maximum file size: 8 MB'}</small>
       </label></div>
-      <p className="import-safety-note"><strong>Safe update:</strong> Existing bidders are matched by profile ID or initials. Their account links, submitted bids, and leave records stay attached. Blank email and phone cells keep the current values. Omitted bidders remain unchanged.</p>
+      <p className="import-safety-note"><strong>Safe update:</strong> Existing bidders are matched by profile ID or initials. Their account links, submitted bids, and leave records stay attached. Leave allowance is imported in hours. Blank email and phone cells keep the current values. Omitted bidders remain unchanged.</p>
       <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>{busy && !preview ? 'Validating…' : 'Preview import'}</button>
     </section>
     {status ? <p className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} role="status">{status}</p> : null}
@@ -215,8 +217,8 @@ export function RosterImporter() {
         <p>{preview.fileName} · {counts.add} add · {counts.update} update · {counts.reactivate} reactivate · {counts.unchanged} unchanged</p></div></div><strong className="import-count">{preview.rows.length}</strong></div>
       {preview.warnings.length ? <ul className="import-warnings">{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
       {previewValidation.conflicts.length ? <div className="import-issues"><h2>Resolve these roster conflicts</h2><ul>{previewValidation.conflicts.map((conflict, index) => <li key={`${index}-${conflict}`}>{conflict}</li>)}</ul></div> : null}
-      <div className="import-table-wrap roster-import-table"><table><thead><tr><th>Action</th><th>Area</th><th>Rank</th><th>Name</th><th>Initials</th><th>Bid role</th><th>Email</th><th>Changes</th></tr></thead>
-        <tbody>{previewRows.map((row) => <tr key={`${row.sourceSheet}-${row.sourceRow}`}><td><span className={`import-action ${row.action}`}>{actionLabel(row.action)}</span></td><td>{row.area_code}</td><td><strong>{row.seniority_rank}</strong></td><td>{row.first_name} {row.last_name}</td><td>{row.initials}</td><td>{row.bid_role}</td><td>{row.email || 'Keep current'}</td><td className="import-changes">{row.changes.join('; ')}</td></tr>)}</tbody>
+      <div className="import-table-wrap roster-import-table"><table><thead><tr><th>Action</th><th>Area</th><th>Rank</th><th>Name</th><th>Initials</th><th>Bid role</th><th>Leave allowance</th><th>Email</th><th>Phone</th><th>Changes</th></tr></thead>
+        <tbody>{previewRows.map((row) => <tr key={`${row.sourceSheet}-${row.sourceRow}`}><td><span className={`import-action ${row.action}`}>{actionLabel(row.action)}</span></td><td>{row.area_code}</td><td><strong>{row.seniority_rank}</strong></td><td>{row.first_name} {row.last_name}</td><td>{row.initials}</td><td>{row.bid_role}</td><td>{row.leave_slot_allowance} hours</td><td>{row.email || 'Keep current'}</td><td>{row.phone || 'Keep current'}</td><td className="import-changes">{row.changes.join('; ')}</td></tr>)}</tbody>
       </table></div>
       <div className="import-actions"><button className="button secondary" type="button" disabled={busy} onClick={() => resetPreview(file)}>Choose another file</button><button className="button primary" type="button" disabled={busy || previewValidation.conflicts.length > 0} onClick={() => void commitImport()}>{busy ? 'Saving…' : `Import ${preview.rows.length} roster rows`}</button></div>
     </section> : null}

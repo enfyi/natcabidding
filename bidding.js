@@ -9127,6 +9127,38 @@ function selectedRosterArea() {
   return document.querySelector("[data-roster-area-filter]")?.value || currentViewArea();
 }
 
+async function exportSeniorityRoster() {
+  if (!hasSystemAdminAccess()) return;
+  const button = document.querySelector("[data-export-seniority-roster]");
+  const area = selectedRosterArea();
+  if (button) button.disabled = true;
+  setRosterStatus(`Preparing the ${area} seniority roster…`);
+
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session?.access_token) throw new Error("Sign in with a Supabase admin account before exporting.");
+
+    const response = await fetch(`/api/admin/roster/export?area=${encodeURIComponent(area)}`, {
+      headers: { Authorization: `Bearer ${data.session.access_token}` },
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || "The seniority roster could not be exported.");
+    }
+
+    const disposition = response.headers.get("content-disposition") || "";
+    const filename = disposition.match(/filename="([^"]+)"/i)?.[1] || `zla-seniority-roster-${area.toLowerCase().replace(/\s+/g, "-")}.xlsx`;
+    downloadBlob(filename, await response.blob());
+    setRosterStatus(`${area} exported in the seniority import template.`, "success");
+  } catch (error) {
+    setRosterStatus(error.message || "The seniority roster could not be exported.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function rosterEntryInitials(entry) {
   return entry[3] || "";
 }
@@ -12650,6 +12682,11 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-roster-new]")) {
     resetRosterForm();
     syncRosterDeleteSelectedButton();
+    return;
+  }
+
+  if (event.target.closest("[data-export-seniority-roster]")) {
+    void exportSeniorityRoster();
     return;
   }
 

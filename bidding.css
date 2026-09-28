@@ -6064,7 +6064,8 @@ tr.occupied-row .rdo-tag {
   gap: 10px;
 }
 
-.roster-header-actions > a {
+.roster-header-actions > a,
+.roster-header-actions > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;

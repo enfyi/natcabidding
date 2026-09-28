@@ -12,6 +12,7 @@ export type RosterImportRow = {
   bid_role: 'CPC' | 'GL' | 'R-DEV' | 'D-DEV' | 'TMC' | 'DEV'
   seniority_date: string | null
   active: boolean
+  leave_slot_allowance: number
 }
 
 export type RosterImportPreview = {

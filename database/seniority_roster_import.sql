@@ -39,6 +39,7 @@ declare
   phone_value text;
   bid_role_value text;
   seniority_date_value date;
+  allowance_value integer;
   active_value boolean;
   matching_count integer;
   row_number integer := 0;
@@ -81,6 +82,11 @@ begin
     phone_value := nullif(trim(coalesce(roster_item ->> 'phone', '')), '');
     bid_role_value := upper(trim(coalesce(roster_item ->> 'bid_role', '')));
     active_value := coalesce((roster_item ->> 'active')::boolean, true);
+
+    if coalesce(roster_item ->> 'leave_slot_allowance', '') !~ '^\d{1,5}$' then
+      raise exception 'Row % requires a non-negative leave allowance in hours.', row_number;
+    end if;
+    allowance_value := (roster_item ->> 'leave_slot_allowance')::integer;
 
     if coalesce(roster_item ->> 'seniority_rank', '') !~ '^\d{1,4}$' then
       raise exception 'Row % has an invalid seniority_rank.', row_number;
@@ -149,6 +155,7 @@ begin
         or current_bidder.phone is distinct from coalesce(phone_value, current_bidder.phone)
         or current_bidder.bid_role is distinct from bid_role_value
         or current_bidder.seniority_date is distinct from coalesce(seniority_date_value, current_bidder.seniority_date)
+        or current_bidder.leave_slot_allowance is distinct from allowance_value
         or current_bidder.active is distinct from active_value;
       update public.bidders set seniority_rank = null where id = target_profile_id;
       imported_target_ids := array_append(imported_target_ids, target_profile_id);
@@ -173,18 +180,20 @@ begin
     phone_value := nullif(trim(coalesce(roster_item ->> 'phone', '')), '');
     bid_role_value := upper(trim(roster_item ->> 'bid_role'));
     active_value := coalesce((roster_item ->> 'active')::boolean, true);
+    allowance_value := (roster_item ->> 'leave_slot_allowance')::integer;
     seniority_date_value := nullif(trim(coalesce(roster_item ->> 'seniority_date', '')), '')::date;
 
     if target_profile_id is null then
-      insert into public.bidders (area_id, first_name, last_name, initials, email, phone, bid_role, seniority_rank, seniority_date, active)
-      values (target_area_id, first_name_value, last_name_value, initials_value, email_value, phone_value, bid_role_value, rank_value, seniority_date_value, active_value);
+      insert into public.bidders (area_id, first_name, last_name, initials, email, phone, bid_role, seniority_rank, seniority_date, leave_slot_allowance, active)
+      values (target_area_id, first_name_value, last_name_value, initials_value, email_value, phone_value, bid_role_value, rank_value, seniority_date_value, allowance_value, active_value);
       added_count := added_count + 1;
     else
       update public.bidders
       set area_id = target_area_id, first_name = first_name_value, last_name = last_name_value,
           initials = initials_value, email = coalesce(email_value, email), phone = coalesce(phone_value, phone),
           bid_role = bid_role_value, seniority_rank = rank_value,
-          seniority_date = coalesce(seniority_date_value, seniority_date), active = active_value, updated_at = now()
+          seniority_date = coalesce(seniority_date_value, seniority_date),
+          leave_slot_allowance = allowance_value, active = active_value, updated_at = now()
       where id = target_profile_id;
       if changed_rows[row_index] then updated_count := updated_count + 1; else unchanged_count := unchanged_count + 1; end if;
     end if;
