@@ -5327,6 +5327,88 @@ function setAuthStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
+const supportedEmailTokenTypes = new Set([
+  "email",
+  "signup",
+  "magiclink",
+  "recovery",
+  "invite",
+  "email_change",
+]);
+
+function pendingSupabaseEmailToken() {
+  const url = new URL(window.location.href);
+  const tokenHash = url.searchParams.get("token_hash");
+  if (!tokenHash) return null;
+
+  const type = url.searchParams.get("type") || "email";
+  return {
+    tokenHash,
+    type,
+    valid: supportedEmailTokenTypes.has(type),
+  };
+}
+
+function clearSupabaseEmailTokenFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("token_hash");
+  url.searchParams.delete("type");
+  window.history.replaceState({}, document.title, url.toString());
+}
+
+function showPendingSupabaseEmailConfirmation(client, pendingToken) {
+  const confirmButton = document.querySelector("[data-confirm-email-token]");
+  const loginMenu = document.querySelector("[data-public-login-menu]");
+  const loginToggle = document.querySelector("[data-public-login-toggle]");
+
+  if (loginMenu) loginMenu.hidden = false;
+  loginToggle?.setAttribute("aria-expanded", "true");
+  clearSupabaseEmailTokenFromUrl();
+
+  if (!confirmButton || !pendingToken.valid) {
+    setAuthStatus("This email confirmation link is invalid. Request a new login link.", "error");
+    return false;
+  }
+
+  confirmButton.hidden = false;
+  setAuthStatus(
+    "Your email is ready to confirm. Select the button below to finish signing in.",
+    "info"
+  );
+
+  confirmButton.addEventListener("click", async () => {
+    confirmButton.disabled = true;
+    setAuthStatus("Confirming your email…", "info");
+
+    let error;
+    try {
+      ({ error } = await client.auth.verifyOtp({
+        token_hash: pendingToken.tokenHash,
+        type: pendingToken.type,
+      }));
+    } catch (requestError) {
+      confirmButton.disabled = false;
+      setAuthStatus(friendlyAuthFailure(requestError), "error");
+      return;
+    }
+
+    if (error) {
+      confirmButton.hidden = true;
+      setAuthStatus(
+        "This confirmation link is invalid or expired. Request a new login link.",
+        "error"
+      );
+      return;
+    }
+
+    confirmButton.hidden = true;
+    setAuthStatus("Email confirmed. Signing you in…", "success");
+    await restoreSupabaseSession();
+  });
+
+  return true;
+}
+
 function friendlyAuthFailure(error) {
   const message = error?.message || String(error || "");
   if (/load failed|failed to fetch|network/i.test(message)) {
@@ -5564,6 +5646,12 @@ async function initializeSupabaseAuth() {
     }
     if (event === "SIGNED_OUT") clearSupabaseAccountState();
   });
+
+  const pendingToken = pendingSupabaseEmailToken();
+  if (pendingToken) {
+    showPendingSupabaseEmailConfirmation(client, pendingToken);
+    return false;
+  }
 
   return restoreSupabaseSession();
 }
