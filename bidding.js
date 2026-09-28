@@ -3182,25 +3182,32 @@ function leaveItemBidAs(item) {
   return person?.bidAs || currentUserBidAs();
 }
 
+function isGhostLeaveItem(item) {
+  if (item?.ghostBid) return true;
+  const initials = String(item?.initials || "").trim().toUpperCase();
+  const person = initials ? bueByInitials(initials) : null;
+  return Boolean(person?.ghostBidder || (!initials && currentUser.ghostBidder));
+}
+
 function leaveSlotUnitsForItem() {
   return 1;
 }
 
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
-    .filter((person) => person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
+    .filter((person) => !person.ghostBidder && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
     .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !item.ghostBid && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !item.ghostBid && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -3391,13 +3398,14 @@ function visibleLeaveSlotDetailsFromMap(
   };
   const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
-  if (showCurrentUserOverlay && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
+  if (showCurrentUserOverlay && !currentUser.ghostBidder && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
     const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
   }
 
   leaveBids.forEach((item) => {
     if (!showCurrentUserOverlay) return;
+    if (isGhostLeaveItem(item)) return;
     if (!["Pending", "Approved"].includes(item.status)) return;
     if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
     showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
@@ -3405,6 +3413,7 @@ function visibleLeaveSlotDetailsFromMap(
 
   leaveDraftQueue.forEach((item) => {
     if (!showCurrentUserOverlay) return;
+    if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDateKeys(leaveDateKeysForItem(item), currentUser.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
     showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
@@ -3413,6 +3422,7 @@ function visibleLeaveSlotDetailsFromMap(
   intakeQueue.forEach((item) => {
     if (item.area !== area) return;
     if (item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)) return;
+    if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDatesForInitials(item.range, item.initials).includes(key)) return;
     const bucket = leaveSlotBucketForBidAs(item.bidAs);
     showInitialsInVisibleSlot(visible, bucket, item.initials);
