@@ -42,4 +42,14 @@ for (const relativePath of requiredSqlFiles) {
   assert.match(sql, /is_area_bid_round_open\(year_row\.id, target\.area_id, (?:resolved_round|batch_round)\)/, `${relativePath} must enforce the area's active round`);
 }
 
+const preflightSql = await readFile(new URL("../database/leave_submission_preflight.sql", import.meta.url), "utf8");
+assert.match(preflightSql, /if not manual_entry then\s+select bw\.id/, "BUE leave submissions must always require the personal window");
+assert.doesNotMatch(preflightSql, /not enforce_bid_windows/, "testing settings must not bypass the personal window");
+
+const memberManagementSql = await readFile(new URL("../database/member_leave_request_management.sql", import.meta.url), "utf8");
+assert.match(memberManagementSql, /if not exists \(\s+select 1\s+from public\.bid_windows/, "BUE leave changes must always require the personal window");
+
+const testingAdminSql = await readFile(new URL("../database/bid_window_testing_admin.sql", import.meta.url), "utf8");
+assert.match(testingAdminSql, /Assigned bid windows are required and cannot be bypassed/, "admin settings must reject personal-window bypasses");
+
 console.log("PASS open-round submission enforcement");

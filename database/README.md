@@ -61,11 +61,11 @@ slots, and records the change in the audit log. Re-run
 `database/leave_submission_preflight.sql` as part of this update so added ranges
 are checked against the member's allotted leave hours and current-round limits.
 
-For the shared admin bid-window testing switch, also run
+For shared bid-window settings, also run
 `database/bid_window_testing_admin.sql`, then re-run
-`database/leave_submission_preflight.sql`. The testing switch lets admins allow
-all logged-in BUEs to submit outside their assigned bid windows while testing,
-with an optional shared test round for checking Round 1-4 rules individually.
+`database/leave_submission_preflight.sql`. Assigned BUE windows are mandatory;
+neither testing settings nor system administrators can unlock BUE self-service
+outside the bidder's personal window.
 
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database

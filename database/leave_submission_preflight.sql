@@ -83,8 +83,6 @@ declare
   submitted_rdo_line_code text;
   rdo_request_line_code text;
   open_bid_window_id uuid;
-  enforce_bid_windows boolean := true;
-  configured_test_round integer;
   requested_charged_days integer := 0;
   existing_charged_days integer := 0;
   leave_hours_per_day integer := 8;
@@ -116,13 +114,6 @@ begin
   into strict year_row
   from public.bid_years bys
   where bys.bid_year = requested_bid_year;
-
-  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
-  into enforce_bid_windows, configured_test_round
-  from public.bid_year_settings settings
-  where settings.bid_year_id = year_row.id;
-
-  enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if requested_items is null
      or jsonb_typeof(requested_items) <> 'array'
@@ -232,17 +223,7 @@ begin
     );
   end if;
 
-  if not manual_entry
-     and not enforce_bid_windows
-     and configured_test_round is not null
-     and batch_round <> configured_test_round then
-    error_messages := array_append(
-      error_messages,
-      format('Testing mode is currently set to Round %s.', configured_test_round)
-    );
-  end if;
-
-  if not manual_entry and enforce_bid_windows then
+  if not manual_entry then
     select bw.id
     into open_bid_window_id
     from public.bid_windows bw
