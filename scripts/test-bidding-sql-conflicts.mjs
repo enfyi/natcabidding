@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','transactional_bidding.sql','high_pri
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
@@ -29,10 +29,14 @@ const bidder=(await db.query("select id,area_id from bidders where initials='SH'
 const line=(await db.query("select id,line_code from rdo_lines where bid_year_id=$1 and area_id=$2 and line_type='CPC' and status='open' limit 1",[year,bidder.area_id])).rows[0];
 if(!line) throw new Error('No open CPC line');
 await db.exec(`update bidders set auth_user_id='00000000-0000-0000-0000-000000000111', leave_slot_allowance=208 where id='${bidder.id}'; set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
-const rdo=()=>db.query('select public.submit_rdo_bid(2027,$1,\'A\',true,false,\'No\',1)',[line.line_code]);
+const rdo=(fatigueGroup='A')=>db.query('select public.submit_rdo_bid(2027,$1,$2,true,false,\'No\',1)',[line.line_code,fatigueGroup]);
 try {await rdo();throw new Error('RDO strict window unexpectedly passed')} catch(e) {if(!e.message.includes('bidding window')) throw e;console.log('PASS strict RDO window rejects')}
 await db.exec(`insert into bid_year_settings(bid_year_id,enforce_bid_windows,test_bid_round) values('${year}',false,1) on conflict (bid_year_id) do update set enforce_bid_windows=false,test_bid_round=1`);
-await rdo();console.log('PASS RDO testing bypass submits');
+await rdo(null);
+const noPreference=(await db.query(`select payload->>'fatigueGroup' as fatigue_group
+  from intake_submissions where bidder_id=$1 and submission_type='rdo' and status='pending'`,[bidder.id])).rows[0];
+if(!noPreference || noPreference.fatigue_group!==null) throw new Error('No-preference RDO did not keep the fatigue group blank');
+console.log('PASS RDO testing bypass submits with no fatigue preference');
 try {await db.query('select public.submit_rdo_bid(2027,$1,\'A\',true,false,\'No\',2)',[line.line_code]);throw new Error('Wrong test round unexpectedly passed')} catch(e) {if(!e.message.includes('Testing mode')) throw e;console.log('PASS RDO test round is enforced')}
 const days=(await db.query('select weekday,is_rdo from rdo_line_days where rdo_line_id=$1 order by weekday',[line.id])).rows;
 const start=new Date('2027-06-01T12:00:00Z');let first=null;
