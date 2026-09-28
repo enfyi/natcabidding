@@ -597,6 +597,8 @@ const annualMobileCalendars = new Set();
 let publicRdoPresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
+let editingIntakeScheduleId = "";
+let intakeScheduleMutationPending = false;
 const rdoFilters = {
   search: "",
   openOnly: false,
@@ -11053,21 +11055,127 @@ async function saveSlotCapacity(event) {
   setSlotCapacityStatus(`${range.keys.length} ${range.keys.length === 1 ? "day" : "days"} saved for ${area}: ${cpc} CPC and ${dev} DEV slots per day.`, "success");
 }
 
-async function saveIntakeScheduleToSupabase(initials, start, end) {
+async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "") {
   const client = supabaseClient();
   if (!client || !supabaseState.connected) {
     throw new Error("The intake schedule could not reach the database. Check the connection and try again.");
   }
-  const { error } = await client.rpc("create_intake_schedule", {
+  const routine = scheduleId ? "update_intake_schedule" : "create_intake_schedule";
+  const parameters = {
     requested_bid_year: BID_YEAR,
     requested_initials: initials,
     requested_starts_at: start.toISOString(),
     requested_ends_at: end.toISOString(),
     requested_scope: INTAKE_SCHEDULE_AREA,
-  });
+  };
+  if (scheduleId) parameters.requested_schedule_id = scheduleId;
+
+  const { error } = await client.rpc(routine, parameters);
   if (error) throw error;
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
+}
+
+function setIntakeScheduleMutationPending(isPending) {
+  intakeScheduleMutationPending = isPending;
+  document.querySelectorAll("[data-add-intake-schedule], [data-edit-intake-schedule], [data-delete-intake-schedule], [data-cancel-intake-schedule-edit]").forEach((button) => {
+    button.disabled = isPending;
+  });
+}
+
+function syncIntakeScheduleEditorControls() {
+  const saveButton = document.querySelector("[data-add-intake-schedule]");
+  const cancelButton = document.querySelector("[data-cancel-intake-schedule-edit]");
+  if (saveButton) {
+    saveButton.textContent = editingIntakeScheduleId ? "Update Intake Shift" : "Add Intake Shift";
+    saveButton.disabled = intakeScheduleMutationPending;
+  }
+  if (cancelButton) {
+    cancelButton.hidden = !editingIntakeScheduleId;
+    cancelButton.disabled = intakeScheduleMutationPending;
+  }
+}
+
+function resetIntakeScheduleEditor(options = {}) {
+  editingIntakeScheduleId = "";
+  const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
+  if (options.resetValues && form) {
+    form.querySelector("[data-intake-shift-date]").value = "";
+    form.querySelector("[data-intake-shift-time]").value = "";
+    form.querySelector("[data-intake-shift-duration]").value = "";
+    syncIntakeShiftForm(form);
+  }
+  syncIntakeScheduleEditorControls();
+}
+
+function beginIntakeScheduleEdit(scheduleId) {
+  if (intakeScheduleMutationPending) return;
+  const schedule = intakeSchedules.find((entry) => entry.id === scheduleId);
+  const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
+  if (!schedule || !form) {
+    setScheduleFormStatus("That intake shift is no longer available. Refresh and try again.", "error");
+    return;
+  }
+
+  editingIntakeScheduleId = schedule.id;
+  form.querySelector("[data-schedule-rep]").value = schedule.initials;
+  const localStart = formatDateTimeLocalValue(schedule.start);
+  form.querySelector("[data-intake-shift-date]").value = localStart.slice(0, 10);
+  form.querySelector("[data-intake-shift-time]").value = localStart.slice(11, 16);
+  const durationHours = (schedule.end.getTime() - schedule.start.getTime()) / (60 * 60 * 1000);
+  form.querySelector("[data-intake-shift-duration]").value = String(Math.round(durationHours * 100) / 100);
+  syncIntakeShiftForm(form);
+  syncIntakeScheduleEditorControls();
+  setScheduleFormStatus(`Editing ${schedule.name}'s ${formatDateRange(schedule.start, schedule.end)} shift.`);
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function deleteIntakeSchedule(scheduleId) {
+  if (intakeScheduleMutationPending) return;
+  if (!hasIntakeAccess()) {
+    setScheduleFormStatus("Only active intake/admin users can delete intake shifts.", "error");
+    return;
+  }
+
+  const schedule = intakeSchedules.find((entry) => entry.id === scheduleId);
+  if (!schedule) {
+    setScheduleFormStatus("That intake shift is no longer available. Refresh and try again.", "error");
+    return;
+  }
+  if (!window.confirm(`Delete ${schedule.name}'s intake shift on ${formatDateRange(schedule.start, schedule.end)}?`)) return;
+
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) {
+    setScheduleFormStatus("The intake schedule could not reach the database. Check the connection and try again.", "error");
+    return;
+  }
+
+  setIntakeScheduleMutationPending(true);
+  setScheduleFormStatus(`Deleting ${schedule.name}'s intake shift...`);
+  try {
+    const { error } = await client.rpc("delete_intake_schedule", {
+      requested_bid_year: BID_YEAR,
+      requested_schedule_id: schedule.id,
+    });
+    if (error) throw error;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    if (editingIntakeScheduleId === schedule.id) resetIntakeScheduleEditor({ resetValues: true });
+    logHistory(schedule.area, "Intake shift deleted", `${currentUser.initials} deleted ${schedule.name}'s ${formatDateRange(schedule.start, schedule.end)} intake shift.`);
+    renderApp();
+    setPage("intake-schedule");
+    setScheduleFormStatus(`${schedule.name}'s intake shift was deleted from Supabase.`, "success");
+  } catch (error) {
+    setScheduleFormStatus(
+      isMissingSupabaseRoutine(error)
+        ? "Shift editing has not been installed in Supabase yet."
+        : error.message || "The intake shift could not be deleted.",
+      "error"
+    );
+  } finally {
+    setIntakeScheduleMutationPending(false);
+    syncIntakeScheduleEditorControls();
+  }
 }
 
 async function addAdminScheduleFromForm() {
@@ -11298,6 +11406,10 @@ function renderIntakeSchedule() {
 
   const sortedSchedules = [...intakeSchedules].sort((a, b) => a.start - b.start);
   const userSchedules = sortedSchedules.filter((schedule) => schedule.initials === currentUser.initials);
+  if (editingIntakeScheduleId && !sortedSchedules.some((schedule) => schedule.id === editingIntakeScheduleId)) {
+    resetIntakeScheduleEditor();
+  }
+  syncIntakeScheduleEditorControls();
   if (supabaseState.intakeSchedulesError) {
     list.innerHTML = '<p class="empty-state small">Intake assignments could not be loaded from Supabase. Refresh the page and try again.</p>';
     return;
@@ -11316,18 +11428,23 @@ function renderIntakeSchedule() {
     </div>
     <div class="schedule-list-section">
       <h3>All Intake Coverage</h3>
-      ${sortedSchedules.map((schedule) => `
+      ${sortedSchedules.length ? sortedSchedules.map((schedule) => `
         <article class="${schedule.initials === currentUser.initials ? "mine" : ""}">
           <strong>${escapeHtml(schedule.name)} · ${escapeHtml(schedule.initials)}</strong>
           <span>${escapeHtml(formatDateRange(schedule.start, schedule.end))} · ${escapeHtml(schedule.area)}</span>
+          <div class="schedule-list-actions">
+            <button class="secondary-action small" type="button" data-edit-intake-schedule="${escapeHtml(schedule.id)}">Edit</button>
+            <button class="secondary-action small danger-action" type="button" data-delete-intake-schedule="${escapeHtml(schedule.id)}">Delete</button>
+          </div>
         </article>
-      `).join("")}
+      `).join("") : '<p class="empty-state small">No intake coverage has been scheduled for this bidding year.</p>'}
     </div>
   `;
 }
 
 function syncScheduleFormDefaults() {
   syncIntakeShiftForm(document.querySelector("[data-schedule-start]")?.closest(".schedule-form"));
+  syncIntakeScheduleEditorControls();
 }
 
 function setScheduleFormStatus(message, status = "info") {
@@ -11338,6 +11455,7 @@ function setScheduleFormStatus(message, status = "info") {
 }
 
 async function addIntakeScheduleFromForm() {
+  if (intakeScheduleMutationPending) return;
   if (!hasIntakeAccess()) {
     setScheduleFormStatus("Only active intake/admin users can assign intake shifts.", "error");
     return;
@@ -11368,15 +11486,27 @@ async function addIntakeScheduleFromForm() {
   const person = bueByInitials(initials);
   const name = personDisplayName(person) || initials;
 
-  setScheduleFormStatus(`Saving ${name}'s intake shift...`);
+  const scheduleId = editingIntakeScheduleId;
+  const actionLabel = scheduleId ? "Updating" : "Saving";
+  setIntakeScheduleMutationPending(true);
+  setScheduleFormStatus(`${actionLabel} ${name}'s intake shift...`);
   try {
-    await saveIntakeScheduleToSupabase(initials, start, end);
-    logHistory(area, "Intake shift assigned", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
+    await saveIntakeScheduleToSupabase(initials, start, end, scheduleId);
+    logHistory(area, scheduleId ? "Intake shift updated" : "Intake shift assigned", `${currentUser.initials} ${scheduleId ? "updated" : "scheduled"} ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
+    resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
     setPage("intake-schedule");
-    setScheduleFormStatus(`${name} is scheduled in Supabase for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
+    setScheduleFormStatus(`${name}'s intake shift was ${scheduleId ? "updated" : "scheduled"} in Supabase for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
   } catch (error) {
-    setScheduleFormStatus(error.message || "The intake shift could not be saved.", "error");
+    setScheduleFormStatus(
+      scheduleId && isMissingSupabaseRoutine(error)
+        ? "Shift editing has not been installed in Supabase yet."
+        : error.message || "The intake shift could not be saved.",
+      "error"
+    );
+  } finally {
+    setIntakeScheduleMutationPending(false);
+    syncIntakeScheduleEditorControls();
   }
 }
 
@@ -13370,6 +13500,24 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-export-google-sheet]")) {
     downloadBiddingCsv();
+    return;
+  }
+
+  const editIntakeScheduleButton = event.target.closest("[data-edit-intake-schedule]");
+  if (editIntakeScheduleButton) {
+    beginIntakeScheduleEdit(editIntakeScheduleButton.dataset.editIntakeSchedule);
+    return;
+  }
+
+  const deleteIntakeScheduleButton = event.target.closest("[data-delete-intake-schedule]");
+  if (deleteIntakeScheduleButton) {
+    await deleteIntakeSchedule(deleteIntakeScheduleButton.dataset.deleteIntakeSchedule);
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-intake-schedule-edit]")) {
+    resetIntakeScheduleEditor({ resetValues: true });
+    setScheduleFormStatus("Shift editing canceled.");
     return;
   }
 
