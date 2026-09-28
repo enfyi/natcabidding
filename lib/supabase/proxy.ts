@@ -39,6 +39,17 @@ export async function updateSession(request: NextRequest) {
     || path === '/forgot-password'
     || path.startsWith('/auth/')
 
+  if (request.method === 'GET' && path === '/' && data?.claims) {
+    const dashboardUrl = new URL('/dashboard', request.url)
+    const redirectResponse = NextResponse.redirect(dashboardUrl)
+
+    response.cookies.getAll().forEach(({ name, value, ...options }) => {
+      redirectResponse.cookies.set(name, value, options)
+    })
+
+    return redirectResponse
+  }
+
   if (isPilot && !data?.claims && !isPilotPublicRoute) {
     const loginUrl = new URL(withBasePath('/login'), request.url)
     const redirectResponse = NextResponse.redirect(loginUrl)
