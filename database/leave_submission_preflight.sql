@@ -225,6 +225,13 @@ begin
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
   end if;
 
+  if not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
+    error_messages := array_append(
+      error_messages,
+      format('Round %s is not currently open for this area. Closed rounds cannot accept bids.', batch_round)
+    );
+  end if;
+
   if not manual_entry
      and not enforce_bid_windows
      and configured_test_round is not null

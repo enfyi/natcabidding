@@ -180,9 +180,10 @@ round, and inactive requests retain their status when their dates are corrected.
 
 Checks include line eligibility/availability, fatigue capacity, required Mid and
 fatigue settings, date bounds, overlapping leave, RDO conflicts, round limits,
-leave-hour allowance, and daily capacity. Administrative corrections can update
-past rounds without an open bidding window, matching manual intake entry. Capacity
-overrides are not accepted by this editor.
+leave-hour allowance, and daily capacity. Manual intake entry can bypass a BUE's
+personal window only while that same round remains open for the area. After the
+area advances to a later round, closed rounds cannot accept new BUE, intake, or
+administrator bid submissions. Capacity overrides are not accepted by this editor.
 
 ## Bid Window Builder
 

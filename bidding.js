@@ -51,6 +51,8 @@ const DEFAULT_ROUND_RULES = {
     detail: "Leave may include up to 5 charged days.",
   },
 };
+const MANUAL_AFTER_WINDOW_RULE = "After a BUE's personal window closes, intake or an administrator may enter the bid manually only while that same round remains open.";
+const CLOSED_ROUND_RULE = "Once the round is closed, no BUE, intake user, or administrator may enter a bid for that round.";
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
   "Filled leave days require an explicit override before approval.",
@@ -58,8 +60,8 @@ const DEFAULT_APPROVAL_RULES = [
   "GL bidders do not populate public floor templates.",
   "Developmentals bid against developmental slots.",
   "BUEs may not bid before the start of their Bid Window.",
-  "BUEs may bid after their window has closed when bidding during Intake Hours: 7a-7p Monday-Sunday, excluding holidays.",
-  "Once the round is closed, BUEs may not make bids or adjustments for that round.",
+  MANUAL_AFTER_WINDOW_RULE,
+  CLOSED_ROUND_RULE,
   "BUEs may not make changes once they have bid and their window is closed. Changes are only allowed during the change period.",
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
@@ -1438,6 +1440,18 @@ function areaBidRoundState(date = new Date(), area = currentViewArea()) {
   return null;
 }
 
+function openAreaBidRound(date = new Date(), area = currentViewArea()) {
+  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
+  for (let round = 1; round <= roundCount; round += 1) {
+    const windows = roundWindows(round, area);
+    if (!windows.length) continue;
+    const startsAt = windows.reduce((earliest, window) => window.start < earliest ? window.start : earliest, windows[0].start);
+    const endsAt = windows.reduce((latest, window) => window.end > latest ? window.end : latest, windows[0].end);
+    if (date >= startsAt && date < endsAt) return round;
+  }
+  return null;
+}
+
 function downloadBidWindowsIcs(rank = null) {
   const requestedRank = Number(rank);
   const hasRequestedRank = rank !== null && rank !== undefined && rank !== "" && Number.isFinite(requestedRank);
@@ -1816,8 +1830,11 @@ function normalizeBidWindowTestRound(value) {
   return Number.isInteger(round) && round >= 1 && round <= 4 ? round : null;
 }
 
-function activeTestBidRound() {
-  return bidWindowLockIsBypassed() ? bidWindowTestRound : null;
+function activeTestBidRound(date = new Date(), area = currentViewArea()) {
+  if (!bidWindowLockIsBypassed()) return null;
+  const openRound = openAreaBidRound(date, area);
+  if (!openRound) return null;
+  return bidWindowTestRound === null || bidWindowTestRound === openRound ? openRound : null;
 }
 
 function bidWindowLockIsBypassed() {
@@ -1829,7 +1846,7 @@ function currentUserBidWindowStatus(date = new Date()) {
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date <= window.end))),
+    isOpen: Boolean(inHomeArea && (activeTestBidRound(date, currentUser.area) || (window && date >= window.start && date <= window.end))),
   };
 }
 
@@ -2279,6 +2296,12 @@ function renderManualBidPanel(panel) {
   };
   const selectedPerson = manualBidSelectedPerson(values.controller);
   const lockedArea = selectedPerson.area || currentViewArea();
+  const openRound = openAreaBidRound(new Date(), lockedArea);
+  const submitButton = panel.querySelector("[data-manual-bid-submit]");
+  if (submitButton) {
+    submitButton.disabled = !openRound;
+    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open for this area.";
+  }
 
   const controllerSearch = panel.querySelector("[data-manual-controller-search]");
   const controllerQuery = controllerSearch?.value.trim() || "";
@@ -2375,7 +2398,14 @@ function renderManualBidPanel(panel) {
   if (endInput) endInput.value = values.leaveEnd;
   const daysInput = panel.querySelector("[data-manual-leave-days]");
   const roundSelect = panel.querySelector("[data-manual-leave-round]");
-  if (roundSelect) roundSelect.value = ["1", "2", "3", "4", "5", "6"].includes(values.round) ? values.round : String(currentRoundNumber());
+  if (roundSelect) {
+    Array.from(roundSelect.options).forEach((option) => {
+      option.disabled = !openRound || Number(option.value) !== openRound;
+    });
+    roundSelect.value = openRound ? String(openRound) : "";
+    roundSelect.disabled = !openRound;
+    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open for this area.";
+  }
   if (daysInput) {
     const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
     const dateInputRange = manualLeaveRangeFromDateInputs(panel);
@@ -2391,6 +2421,11 @@ function renderManualBidEntry() {
 }
 
 async function submitManualRdoBid(panel, person, area) {
+  const openRound = openAreaBidRound(new Date(), area);
+  if (!openRound) {
+    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
+    return;
+  }
   const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
@@ -2430,7 +2465,7 @@ async function submitManualRdoBid(panel, person, area) {
     bidAs: person.bidAs,
     seniority: person.rank,
     status: "Pending",
-    round: currentRoundNumber(),
+    round: openRound,
     submittedAt,
     approvedBy: "",
     approvedAt: "",
@@ -2499,6 +2534,15 @@ function manualLeaveValidationMessage({ person, area, range, dateKeys, round, da
 async function submitManualLeaveBid(panel, person, area) {
   const range = manualLeaveRangeValue(panel);
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
+  const openRound = openAreaBidRound(new Date(), area);
+  if (!openRound) {
+    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
+    return;
+  }
+  if (round !== openRound) {
+    setManualBidStatus(panel, `Round ${round} is closed. Only Round ${openRound} can accept bids for ${area}.`, "error");
+    return;
+  }
   const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
   const dateKeys = datesInLeaveRange(range);
   if (!dateKeys.length) {
@@ -7611,6 +7655,11 @@ function normalizeApprovalRules(value) {
   return value
     .filter((rule) => typeof rule === "string")
     .map((rule) => rule.trim())
+    .map((rule) => rule === "BUEs may bid after their window has closed when bidding during Intake Hours: 7a-7p Monday-Sunday, excluding holidays."
+      ? MANUAL_AFTER_WINDOW_RULE
+      : rule === "Once the round is closed, BUEs may not make bids or adjustments for that round."
+        ? CLOSED_ROUND_RULE
+        : rule)
     .filter(Boolean);
 }
 

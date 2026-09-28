@@ -408,6 +408,34 @@ $$;
 
 revoke all on function public.refresh_bidder_holiday_in_lieu(uuid, uuid) from public, anon, authenticated;
 
+create or replace function public.is_area_bid_round_open(
+  requested_bid_year_id uuid,
+  requested_area_id uuid,
+  requested_round integer,
+  checked_at timestamptz default now()
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    checked_at >= min(bid_window.opens_at)
+    and checked_at < max(bid_window.closes_at),
+    false
+  )
+  from public.bid_windows bid_window
+  join public.bidders scheduled_bidder on scheduled_bidder.id = bid_window.bidder_id
+  where bid_window.bid_year_id = requested_bid_year_id
+    and bid_window.round_number = requested_round
+    and scheduled_bidder.area_id = requested_area_id
+    and scheduled_bidder.active;
+$$;
+
+revoke all on function public.is_area_bid_round_open(uuid, uuid, integer, timestamptz) from public, anon;
+grant execute on function public.is_area_bid_round_open(uuid, uuid, integer, timestamptz) to authenticated;
+
 create or replace function public.submit_rdo_bid(
   requested_bid_year integer,
   requested_line_code text,
@@ -473,6 +501,10 @@ begin
     order by bw.round_number
     limit 1;
     if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
+  end if;
+
+  if not public.is_area_bid_round_open(year_row.id, target.area_id, resolved_round) then
+    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', resolved_round;
   end if;
 
   ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
@@ -690,6 +722,10 @@ begin
     end loop;
     batch_charged := batch_charged + item_charged;
   end loop;
+
+  if not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
+    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', batch_round;
+  end if;
 
   if not manual_entry and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
