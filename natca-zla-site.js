@@ -46,24 +46,6 @@ const fullDateFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
-function storedList(key, fallback) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(key) || "null");
-    return Array.isArray(stored) ? stored : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function storedObject(key, fallback) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(key) || "null");
-    return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function eventStart(event) {
   const [hour = "00", minute = "00"] = event.time?.match(/\d{2}/g) || [];
   return new Date(`${event.date}T${hour}:${minute}:00`);
@@ -79,7 +61,7 @@ function upcomingEvents(events) {
 }
 
 function renderEvents() {
-  const events = storedList("zlaEvents", window.zlaEvents || []);
+  const events = window.zlaEvents || [];
   if (!eventList || !Array.isArray(events)) return;
 
   const nextEvents = upcomingEvents(events);
@@ -155,7 +137,7 @@ function resourceRow(resource) {
 }
 
 function renderResources() {
-  const resources = storedList("zlaTrainingResources", window.zlaTrainingResources || []);
+  const resources = window.zlaTrainingResources || [];
   const homeList = document.querySelector("#home-resource-list");
   const trainingGrid = document.querySelector("#training-resource-grid");
 
@@ -169,7 +151,7 @@ function renderResources() {
 }
 
 function renderSocialLinks() {
-  const links = storedObject("zlaSocialLinks", window.zlaSocialLinks || {});
+  const links = window.zlaSocialLinks || {};
   document.querySelectorAll("[data-social-link]").forEach((link) => {
     const key = link.dataset.socialLink;
     const value = links[key];

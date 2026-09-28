@@ -17,6 +17,8 @@ This maps the current front-end test data to the database tables.
 | `leaveDraftQueue` | `leave_requests` with `draft` or `preview` status |
 | `intakeSchedules` | `intake_schedules` |
 | RDO/leave intake forms | `intake_submissions` |
+| Bid-year ghost designation | `bidder_bid_year_settings` |
+| Ghost RDO/leave annotations | `intake_submissions.is_ghost_bid`, `leave_requests.is_ghost_bid` |
 | `history` | `audit_events` |
 | Help/admin messages | `help_threads`, `help_messages` |
 
