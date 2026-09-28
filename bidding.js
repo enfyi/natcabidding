@@ -1218,6 +1218,7 @@ const databaseBidWindows = new Map();
 const BID_TIME_ZONE = "America/Los_Angeles";
 const bidWindowPartFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: BID_TIME_ZONE,
+  year: "numeric",
   weekday: "short",
   month: "2-digit",
   day: "2-digit",
@@ -1327,8 +1328,9 @@ function escapeIcsText(value) {
     .replace(/\n/g, "\\n");
 }
 
-function icsDateTime(year, month, day, time) {
-  return `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}T${time}00`;
+function bidWindowIcsDateTime(date) {
+  const parts = bidWindowDateParts(date);
+  return `${parts.year}${parts.month}${parts.day}T${parts.hour}${parts.minute}00`;
 }
 
 function icsTimestamp(date = new Date()) {
@@ -1455,14 +1457,13 @@ function downloadBidWindowsIcs(rank = null) {
     : seniority.find(personMatchesCurrentUser) || buildSeniority(currentUser.area).find(personMatchesCurrentUser);
   if (!person) return;
 
-  const calendarYear = BID_YEAR - 1;
   const stamp = icsTimestamp();
   const owner = person.initials || currentUser.initials;
   const events = person.rounds
     .map((roundLabel, index) => {
-      const round = parseRoundWindow(roundLabel);
-      if (!round) return "";
       const roundNumber = index + 1;
+      const window = bidWindowForRankRound(person.rank, roundNumber, person.area);
+      if (!window) return "";
       const summary = `NATCA ZLA ${BID_YEAR} Bidding - Round ${roundNumber}`;
       const description = [
         `${person.firstName} ${person.lastName} (${owner})`,
@@ -1474,8 +1475,8 @@ function downloadBidWindowsIcs(rank = null) {
         "BEGIN:VEVENT",
         `UID:natca-zla-${BID_YEAR}-${owner.toLowerCase()}-r${roundNumber}@zlabidding.local`,
         `DTSTAMP:${stamp}`,
-        `DTSTART;TZID=America/Los_Angeles:${icsDateTime(calendarYear, round.month, round.day, round.start)}`,
-        `DTEND;TZID=America/Los_Angeles:${icsDateTime(calendarYear, round.month, round.day, round.end)}`,
+        `DTSTART;TZID=America/Los_Angeles:${bidWindowIcsDateTime(window.start)}`,
+        `DTEND;TZID=America/Los_Angeles:${bidWindowIcsDateTime(window.end)}`,
         `SUMMARY:${escapeIcsText(summary)}`,
         `DESCRIPTION:${escapeIcsText(description)}`,
         "LOCATION:NATCA ZLA Bidding Website",
