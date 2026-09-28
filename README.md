@@ -55,13 +55,18 @@ and add these Additional Redirect URLs for development and Vercel previews:
 
 If the Vercel team slug changes, update the preview wildcard to match it. When a
 custom confirmation email template uses `token_hash`, send it directly to the
-selected callback so the deployment origin is preserved:
+selected redirect so the deployment origin is preserved:
 
 ```html
 <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">
   Confirm email address
 </a>
 ```
+
+The public bidding page recognizes this token-hash URL and presents a separate
+`Confirm email and sign in` button before calling `verifyOtp`. The extra user
+gesture prevents Microsoft Safe Links and similar email scanners from consuming
+the one-time token merely by previewing the link.
 
 ## Vercel environment variables
 
