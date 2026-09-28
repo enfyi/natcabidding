@@ -152,6 +152,9 @@ let leavePickerYear = 2027;
 let leavePickerMonthIndex = 3;
 let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
+let bidChangeRows = [];
+let bidChangeRound = 0;
+let bidChangeReturnFocus = null;
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
@@ -8054,13 +8057,268 @@ function setSubmittedLeaveStatus(message, status = "info") {
   target.dataset.status = status;
 }
 
+function bidChangeDateLabel(key) {
+  return dateFromKey(key).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function addDaysToDateKey(key, days) {
+  const date = dateFromKey(key);
+  date.setDate(date.getDate() + days);
+  return dateKeyFromDate(date);
+}
+
+function submittedLeaveDateRows(items = submittedLeaveItemsForCurrentRound()) {
+  const rows = items.flatMap((item) => leaveDateKeysForItem(item).map((oldKey) => ({
+    id: `${submittedLeaveItemKey(item)}|${oldKey}`,
+    itemKey: submittedLeaveItemKey(item),
+    requestId: item.supabaseRequestId || "",
+    notes: item.notes || "",
+    oldKey,
+    newKey: "",
+    groupKey: "",
+  })));
+  const sortedRows = rows.sort((left, right) => left.oldKey.localeCompare(right.oldKey));
+  if (bidChangeRound !== 1) return sortedRows;
+
+  const weekStarts = roundOneWeekKeysForDateKeys(sortedRows.map((row) => row.oldKey));
+  return sortedRows.map((row) => ({
+    ...row,
+    groupKey: weekStarts.find((startKey) => {
+      const endKey = addDaysToDateKey(startKey, 6);
+      return row.oldKey >= startKey && row.oldKey <= endKey;
+    }) || row.oldKey,
+  }));
+}
+
+function setBidChangeStatus(message, status = "info") {
+  const target = document.querySelector("[data-bid-change-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+function bidChangeCount() {
+  return bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey).length;
+}
+
+function renderBidChangeModal() {
+  const modal = document.querySelector("[data-bid-change-modal]");
+  const rowsTarget = document.querySelector("[data-bid-change-rows]");
+  const saveButton = document.querySelector("[data-bid-change-save]");
+  if (!modal || modal.hidden || !rowsTarget || !saveButton) return;
+
+  const isRoundOne = bidChangeRound === 1;
+  const groupedRows = new Map();
+  bidChangeRows.forEach((row) => {
+    const groupKey = isRoundOne ? row.groupKey : "individual";
+    if (!groupedRows.has(groupKey)) groupedRows.set(groupKey, []);
+    groupedRows.get(groupKey).push(row);
+  });
+
+  document.querySelector("[data-bid-change-round]").textContent = `Round ${bidChangeRound}`;
+  document.querySelector("[data-bid-change-description]").textContent = isRoundOne
+    ? "Move a submitted bid week while your Round 1 window is open. Every date in that week moves together."
+    : `Change one or more submitted Round ${bidChangeRound} dates while your bid window is open.`;
+  document.querySelector("[data-bid-change-guidance]").textContent = isRoundOne
+    ? "Choose a new start date for each week you want to move. All dates in that week will be filled in automatically—even dates that stay the same must be included in the week change."
+    : "Enter a new date only beside the bid date you want to change. Leave a row blank to keep its current date.";
+
+  rowsTarget.innerHTML = [...groupedRows.entries()].map(([groupKey, rows], groupIndex) => {
+    const rowMarkup = rows.map((row) => `
+      <div class="bid-change-row ${row.newKey && row.newKey !== row.oldKey ? "changed" : ""}">
+        <time datetime="${row.oldKey}">${escapeHtml(bidChangeDateLabel(row.oldKey))}</time>
+        <span class="bid-change-arrow" aria-hidden="true">→</span>
+        <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${row.newKey}" data-bid-change-date="${escapeHtml(row.id)}" aria-label="New date for ${escapeHtml(bidChangeDateLabel(row.oldKey))}" ${isRoundOne ? "readonly tabindex=\"-1\"" : ""} />
+      </div>
+    `).join("");
+    if (!isRoundOne) return rowMarkup;
+    const selectedStart = rows[0]?.newKey
+      ? addDaysToDateKey(rows[0].newKey, -Math.round((dateFromKey(rows[0].oldKey) - dateFromKey(groupKey)) / 86400000))
+      : "";
+    return `
+      <section class="bid-change-week">
+        <div class="bid-change-week-head">
+          <div><strong>Bid week ${groupIndex + 1}</strong><small>${escapeHtml(bidChangeDateLabel(groupKey))} through ${escapeHtml(bidChangeDateLabel(addDaysToDateKey(groupKey, 6)))}</small></div>
+          <label>New week begins
+            <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${selectedStart}" data-bid-change-week-start="${groupKey}" />
+          </label>
+        </div>
+        ${rowMarkup}
+      </section>
+    `;
+  }).join("");
+
+  const changed = bidChangeCount();
+  saveButton.disabled = !changed || Boolean(leaveManagementPendingId);
+  saveButton.textContent = leaveManagementPendingId
+    ? "Saving Changes…"
+    : changed
+      ? `Review & Save ${changed} ${changed === 1 ? "Change" : "Changes"}`
+      : "Review & Save Changes";
+}
+
+function openBidChangeModal() {
+  const windowError = leaveBidWindowErrorMessage();
+  const items = submittedLeaveItemsForCurrentRound();
+  if (windowError) {
+    setSubmittedLeaveStatus(windowError, "error");
+    return;
+  }
+  if (!items.length) {
+    setSubmittedLeaveStatus("There are no submitted bid dates to change in this round.", "error");
+    return;
+  }
+  if (items.some((item) => !item.supabaseRequestId)) {
+    setSubmittedLeaveStatus("Reload the saved bids before changing dates.", "error");
+    return;
+  }
+  if (leaveDraftQueue.length) {
+    setSubmittedLeaveStatus("Submit or remove the preview batch before changing submitted dates.", "error");
+    return;
+  }
+
+  bidChangeRound = leaveRoundForItem(items[0]);
+  bidChangeRows = submittedLeaveDateRows(items);
+  const modal = document.querySelector("[data-bid-change-modal]");
+  if (!modal) return;
+  bidChangeReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  renderBidChangeModal();
+  const panel = modal.querySelector(".bid-change-modal-panel");
+  if (panel) panel.scrollTop = 0;
+  setBidChangeStatus("");
+  window.requestAnimationFrame(() => modal.querySelector("input, [data-bid-change-close]")?.focus());
+}
+
+function closeBidChangeModal({ restoreFocus = true } = {}) {
+  const modal = document.querySelector("[data-bid-change-modal]");
+  if (!modal || leaveManagementPendingId) return;
+  const wasOpen = !modal.hidden;
+  modal.hidden = true;
+  bidChangeRows = [];
+  bidChangeRound = 0;
+  document.body.classList.remove("modal-open");
+  if (wasOpen && restoreFocus && bidChangeReturnFocus?.isConnected) bidChangeReturnFocus.focus();
+  bidChangeReturnFocus = null;
+}
+
+function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
+  bidChangeRows = bidChangeRows.map((row) => {
+    if (row.groupKey !== groupKey) return row;
+    if (!newStartKey) return { ...row, newKey: "" };
+    const offset = Math.round((dateFromKey(row.oldKey) - dateFromKey(groupKey)) / 86400000);
+    return { ...row, newKey: addDaysToDateKey(newStartKey, offset) };
+  });
+  renderBidChangeModal();
+  const changed = bidChangeCount();
+  setBidChangeStatus(changed ? `${changed} dates will move with this bid week.` : "");
+}
+
+function updateIndividualBidChange(rowId, newKey) {
+  bidChangeRows = bidChangeRows.map((row) => row.id === rowId ? { ...row, newKey } : row);
+  renderBidChangeModal();
+  const changed = bidChangeCount();
+  setBidChangeStatus(changed ? `${changed} ${changed === 1 ? "date" : "dates"} selected to change.` : "");
+}
+
+function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
+  const newKeys = replacementRows.map((row) => row.newKey || row.oldKey);
+  if (newKeys.some((key) => !isBidLeaveYearDate(key))) return "All new dates must be inside the bidding leave year.";
+  if (new Set(newKeys).size !== newKeys.length) return "Two bid dates cannot be changed to the same date.";
+  const rdoDates = bidChangeRound > 1 ? newKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials)) : [];
+  if (rdoDates.length) return `Round ${bidChangeRound} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}.`;
+
+  const unaffectedItems = leaveRoundUsageForInitials(currentUser.initials, bidChangeRound)
+    .filter((item) => !affectedRequestIds.has(submittedLeaveItemKey(item)));
+  const unaffectedKeys = unaffectedItems.flatMap(leaveDateKeysForItem);
+  const collisions = newKeys.filter((key) => unaffectedKeys.includes(key));
+  if (collisions.length) return `${formatLeaveConflictDates(collisions)} is already in another active bid.`;
+
+  if (bidChangeRound === 1) {
+    const weeks = roundOneWeekKeySetForItems([...unaffectedItems, { round: 1, dateKeys: newKeys }]).size;
+    if (weeks > roundOneWeekLimit()) return `Round 1 can include up to ${roundOneWeekLimit()} bid weeks. These changes would use ${weeks}.`;
+  } else {
+    const chargedDays = unaffectedItems.reduce((total, item) => total + leaveItemChargedDays(item), 0)
+      + chargeableLeaveDateKeys(newKeys, currentUser.initials, bidChangeRound).length;
+    if (chargedDays > leaveDayLimitForRound(bidChangeRound)) {
+      return `Round ${bidChangeRound} can include up to ${leaveDayLimitForRound(bidChangeRound)} charged days. These changes would use ${chargedDays}.`;
+    }
+  }
+  return "";
+}
+
+async function saveBidDateChanges() {
+  if (leaveManagementPendingId) return;
+  const changedRows = bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey);
+  if (!changedRows.length) {
+    setBidChangeStatus("Choose at least one new date before saving.", "error");
+    return;
+  }
+
+  const affectedRequestIds = new Set(changedRows.map((row) => row.itemKey));
+  if (bidChangeRound === 1) {
+    changedRows.forEach((row) => {
+      bidChangeRows.filter((candidate) => candidate.groupKey === row.groupKey)
+        .forEach((candidate) => affectedRequestIds.add(candidate.itemKey));
+    });
+  }
+  const replacementRows = bidChangeRows
+    .filter((row) => affectedRequestIds.has(row.itemKey))
+    .map((row) => ({ ...row, newKey: row.newKey || row.oldKey }));
+  const validationMessage = bidChangeValidationMessage(replacementRows, affectedRequestIds);
+  if (validationMessage) {
+    setBidChangeStatus(validationMessage, "error");
+    return;
+  }
+
+  leaveManagementPendingId = "bid-date-change";
+  renderBidChangeModal();
+  setBidChangeStatus("Checking availability and saving all date changes…");
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const replacementItems = replacementRows.map((row) => ({
+      start_date: row.newKey,
+      end_date: row.newKey,
+      round: bidChangeRound,
+      notes: row.notes,
+    }));
+    const { error } = await client.rpc("replace_own_leave_request_batch", {
+      requested_leave_request_ids: [...affectedRequestIds],
+      replacement_items: replacementItems,
+    });
+    if (error) {
+      if (/function|schema cache|replace_own_leave_request_batch/i.test(error.message || "")) {
+        throw new Error("Bid-date changes are not installed yet. Run the latest database migration, then try again.");
+      }
+      throw error;
+    }
+    await loadSupabaseReferenceData();
+    leaveManagementPendingId = "";
+    closeBidChangeModal({ restoreFocus: false });
+    renderApp();
+    setSubmittedLeaveStatus(`${changedRows.length} ${changedRows.length === 1 ? "bid date was" : "bid dates were"} changed and sent to intake review.`, "success");
+  } catch (error) {
+    leaveManagementPendingId = "";
+    renderBidChangeModal();
+    setBidChangeStatus(error.message || "The bid dates could not be changed. Your current dates are still in place.", "error");
+  }
+}
+
 function renderSubmittedLeaveManager() {
   const panel = document.querySelector("[data-submitted-leave-manager]");
   const list = document.querySelector("[data-submitted-leave-list]");
   const usage = document.querySelector("[data-submitted-leave-usage]");
   const roundLabel = document.querySelector("[data-submitted-leave-round]");
   const addButton = document.querySelector("[data-add-more-leave-dates]");
-  if (!panel || !list || !usage || !roundLabel || !addButton) return;
+  const changeButton = document.querySelector("[data-change-all-submitted-leave]");
+  if (!panel || !list || !usage || !roundLabel || !addButton || !changeButton) return;
 
   const now = new Date();
   const round = editableLeaveRound(now) || currentRoundNumber();
@@ -8094,6 +8352,8 @@ function renderSubmittedLeaveManager() {
   addButton.dataset.constraintError = constraintError;
   addButton.disabled = Boolean(addError) || Boolean(leaveManagementPendingId);
   addButton.title = addError;
+  changeButton.disabled = Boolean(windowError) || Boolean(leaveManagementPendingId) || !items.length || items.some((item) => !item.supabaseRequestId);
+  changeButton.title = windowError;
   usage.innerHTML = `
     <div><span>This round</span><strong>${round === 1 ? `${roundWeeks} / ${roundOneWeekLimit()} bid weeks` : `${roundDays} / ${leaveDayLimitForRound(round)} days`}</strong></div>
     <div><span>Allotted hours left</span><strong>${formatEstimatedLeaveDays(remainingHours)} / ${formatEstimatedLeaveDays(maximumHours)} hours</strong></div>
@@ -8109,7 +8369,6 @@ function renderSubmittedLeaveManager() {
           <strong>${escapeHtml(item.range)}</strong>
           <small>${formatEstimatedLeaveDays(leaveItemChargedDays(item) * hoursPerDay)} leave hours · Priority ${Number(item.priority || 0)}</small>
         </div>
-        <button class="secondary-action small" type="button" data-change-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId || !item.supabaseRequestId ? "disabled" : ""}>${leaveReplacementRequestId === itemKey ? "Cancel Change" : "Change Dates"}</button>
         <button class="secondary-action danger small" type="button" data-remove-submitted-leave="${escapeHtml(itemKey)}" ${windowError || leaveManagementPendingId ? "disabled" : ""} title="${escapeHtml(windowError)}">${isSaving ? "Removing…" : "Remove"}</button>
       </article>
     `;
@@ -12203,6 +12462,26 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (event.target.closest("[data-change-all-submitted-leave]")) {
+    openBidChangeModal();
+    return;
+  }
+
+  if (event.target.closest("[data-bid-change-close], [data-bid-change-cancel]")) {
+    closeBidChangeModal();
+    return;
+  }
+
+  if (event.target.matches("[data-bid-change-modal]")) {
+    closeBidChangeModal();
+    return;
+  }
+
+  if (event.target.closest("[data-bid-change-save]")) {
+    await saveBidDateChanges();
+    return;
+  }
+
   const changeSubmittedLeave = event.target.closest("[data-change-submitted-leave]");
   if (changeSubmittedLeave) {
     openSubmittedLeaveForReplacement(changeSubmittedLeave.dataset.changeSubmittedLeave);
@@ -12503,6 +12782,7 @@ document.addEventListener("keydown", (event) => {
     document.querySelector(".mobile-app-menu")?.removeAttribute("open");
     if (activeOverrideId || activeDenialId) closeIntakeEditor();
     closeLeaveSlotModal();
+    closeBidChangeModal();
   }
 
   if (event.key === "Enter" && event.target.closest("[data-approval-rule-input]")) {
@@ -12650,6 +12930,18 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  const bidChangeWeekStart = event.target.closest("[data-bid-change-week-start]");
+  if (bidChangeWeekStart) {
+    updateRoundOneBidChangeWeek(bidChangeWeekStart.dataset.bidChangeWeekStart, bidChangeWeekStart.value);
+    return;
+  }
+
+  const bidChangeDate = event.target.closest("[data-bid-change-date]");
+  if (bidChangeDate && !bidChangeDate.readOnly) {
+    updateIndividualBidChange(bidChangeDate.dataset.bidChangeDate, bidChangeDate.value);
+    return;
+  }
+
   if (event.target.matches("[data-mobile-public-area]")) {
     renderPublicPage(event.target.value, publicState.section);
     return;

@@ -53,6 +53,10 @@ Run `database/member_leave_request_replacement.sql` after the holiday round
 rules to enable Change Dates. It cancels the old request and submits the
 replacement in one transaction, so validation counts only the surviving bids.
 If the replacement is invalid, the old request and its assigned slots remain.
+The migration `20260928021500_atomic_member_leave_batch_replacement.sql` adds the
+bidder-facing Change Bid Dates modal endpoint. It moves every selected Round 1
+week date together or replaces selected Round 2–4 dates in one transaction, so
+a failed multi-date change leaves the entire existing bid untouched.
 Run `database/reject_unchanged_leave_rebid.sql` after that migration to reject
 an exact repeat of dates the bidder removed in the same round, whether through
 Change Dates or a later new batch. The bidder must choose a different range.

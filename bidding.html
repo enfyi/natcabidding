@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-mobile-seven-day-full-calendar-mobile-initials-only" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -769,9 +769,12 @@
                     <div>
                       <span class="eyebrow" data-submitted-leave-round>Round 1</span>
                       <h3>Manage Submitted Bid Dates</h3>
-                      <p>Add more dates or remove a submitted range while your bid window is open.</p>
+                      <p>Add dates, change submitted dates, or remove a bid while your bid window is open.</p>
                     </div>
-                    <button class="secondary-action small" type="button" data-add-more-leave-dates>Add More Dates</button>
+                    <div class="submitted-leave-actions">
+                      <button class="secondary-action small" type="button" data-change-all-submitted-leave>Change Bid Dates</button>
+                      <button class="secondary-action small" type="button" data-add-more-leave-dates>Add More Dates</button>
+                    </div>
                   </div>
                   <div class="submitted-leave-usage" data-submitted-leave-usage></div>
                   <div class="submitted-leave-list" data-submitted-leave-list></div>
@@ -1733,13 +1736,37 @@
       </div>
     </div>
 
+    <div class="bid-change-modal" data-bid-change-modal hidden role="dialog" aria-modal="true" aria-labelledby="bid-change-modal-title" aria-describedby="bid-change-modal-description">
+      <div class="bid-change-modal-panel">
+        <header class="bid-change-modal-header">
+          <div>
+            <span class="eyebrow" data-bid-change-round>Round 1</span>
+            <h2 id="bid-change-modal-title">Change Bid Dates</h2>
+            <p id="bid-change-modal-description" data-bid-change-description></p>
+          </div>
+          <button class="bid-change-close" type="button" data-bid-change-close aria-label="Close change bid dates">×</button>
+        </header>
+        <div class="bid-change-guidance" data-bid-change-guidance></div>
+        <div class="bid-change-table-head" aria-hidden="true">
+          <span>Current bid date</span>
+          <span>New bid date</span>
+        </div>
+        <div class="bid-change-rows" data-bid-change-rows></div>
+        <p class="bid-change-status" data-bid-change-status role="status" aria-live="polite"></p>
+        <footer class="bid-change-footer">
+          <button class="secondary-action" type="button" data-bid-change-cancel>Keep Current Dates</button>
+          <button class="primary-action" type="button" data-bid-change-save disabled>Review &amp; Save Changes</button>
+        </footer>
+      </div>
+    </div>
+
     <dialog class="public-date-sheet" aria-labelledby="public-date-title" data-public-date-sheet>
       <header><h2 id="public-date-title">Leave slots</h2><button type="button" data-public-date-close>Close</button></header>
       <div data-public-date-content></div>
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-mobile-seven-day-full-calendar-area-af-four-dev-default"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
