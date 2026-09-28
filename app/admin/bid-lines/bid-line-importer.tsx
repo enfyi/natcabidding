@@ -7,10 +7,18 @@ import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-impo
 import { getSupabaseEnv } from '@/lib/env'
 import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
 
-type AreaOption = { code: string; name: string }
-type BidYearOption = { bid_year: number; status: string }
+type AreaOption = { id: string; code: string; name: string }
+type BidYearOption = { id: string; bid_year: number; status: string }
 type ImportResult = { inserted: number; updated: number; processed: number }
 type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
+type ExistingBidLine = {
+  id: string
+  line_code: string
+  line_type: 'CPC' | 'DEV'
+  pattern: string
+  status: 'open' | 'taken' | 'locked'
+  assigned_bidder_id: string | null
+}
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -52,6 +60,11 @@ export function BidLineImporter() {
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [existingLines, setExistingLines] = useState<ExistingBidLine[]>([])
+  const [linesLoading, setLinesLoading] = useState(false)
+  const [lineManagementStatus, setLineManagementStatus] = useState('')
+  const [deletingLineId, setDeletingLineId] = useState<string | null>(null)
+  const [linesReloadToken, setLinesReloadToken] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -80,8 +93,8 @@ export function BidLineImporter() {
       }
 
       const [areasResult, yearsResult] = await Promise.all([
-        client.from('areas').select('code,name').order('display_order'),
-        client.from('bid_years').select('bid_year,status').order('bid_year', { ascending: false }),
+        client.from('areas').select('id,code,name').order('display_order'),
+        client.from('bid_years').select('id,bid_year,status').order('bid_year', { ascending: false }),
       ])
       if (!active) return
       if (areasResult.error || yearsResult.error) {
@@ -101,6 +114,39 @@ export function BidLineImporter() {
     void initialize()
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    const areaId = areas.find((area) => area.code === areaCode)?.id
+    const bidYearId = bidYears.find((year) => String(year.bid_year) === bidYear)?.id
+    if (!supabase || access !== 'admin' || !areaId || !bidYearId) {
+      setExistingLines([])
+      setLinesLoading(false)
+      return
+    }
+
+    let active = true
+    setLinesLoading(true)
+    setLineManagementStatus('')
+
+    void supabase
+      .from('rdo_lines')
+      .select('id,line_code,line_type,pattern,status,assigned_bidder_id')
+      .eq('bid_year_id', bidYearId)
+      .eq('area_id', areaId)
+      .order('line_code')
+      .then(({ data, error }) => {
+        if (!active) return
+        if (error) {
+          setExistingLines([])
+          setLineManagementStatus(error.message)
+        } else {
+          setExistingLines((data || []) as ExistingBidLine[])
+        }
+        setLinesLoading(false)
+      })
+
+    return () => { active = false }
+  }, [access, areaCode, areas, bidYear, bidYears, linesReloadToken, supabase])
 
   function resetPreview(nextFile: File | null) {
     setFile(nextFile)
@@ -175,6 +221,7 @@ export function BidLineImporter() {
       const imported = data as ImportResult
       setResult(imported)
       setStatus(`Import complete: ${imported.inserted} added and ${imported.updated} updated.`)
+      setLinesReloadToken((value) => value + 1)
     } catch (error) {
       if (requestTimeout.didExpire()) setPreview(null)
       setStatus(requestTimeout.didExpire()
@@ -183,6 +230,30 @@ export function BidLineImporter() {
     } finally {
       requestTimeout.clear()
       setBusy(false)
+    }
+  }
+
+  async function deleteBidLine(line: ExistingBidLine) {
+    if (!supabase) return
+    const confirmed = window.confirm(
+      `Permanently delete RDO line ${line.line_code}?\n\nThis is only allowed when the line is open, unassigned, and has no bidding history. This action cannot be undone.`,
+    )
+    if (!confirmed) return
+
+    setDeletingLineId(line.id)
+    setLineManagementStatus(`Deleting line ${line.line_code}…`)
+
+    try {
+      const { error } = await supabase.rpc('admin_delete_bid_line', { target_line_id: line.id })
+      if (error) throw error
+      setExistingLines((lines) => lines.filter((candidate) => candidate.id !== line.id))
+      setLineManagementStatus(`Line ${line.line_code} was deleted.`)
+      setPreview(null)
+      setResult(null)
+    } catch (error) {
+      setLineManagementStatus(error instanceof Error ? error.message : `Line ${line.line_code} could not be deleted.`)
+    } finally {
+      setDeletingLineId(null)
     }
   }
 
@@ -271,6 +342,56 @@ export function BidLineImporter() {
         <section className="import-issues" aria-label="Workbook errors">
           <h2>Fix these workbook rows</h2>
           <ul>{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+        </section>
+      ) : null}
+
+      {areaCode && bidYear ? (
+        <section className="import-card import-line-manager" aria-labelledby="line-manager-heading">
+          <div className="import-section-heading">
+            <div>
+              <div>
+                <h2 id="line-manager-heading">Manage existing lines</h2>
+                <p>Delete an unused line from {selectedArea} for the {bidYear} bid year.</p>
+              </div>
+            </div>
+            <strong className="import-count">{existingLines.length}</strong>
+          </div>
+
+          <p className="import-delete-note">Assigned, taken, locked, or historically referenced lines are protected and cannot be deleted.</p>
+          {lineManagementStatus ? <p className="import-inline-status" role="status">{lineManagementStatus}</p> : null}
+          {linesLoading ? <p className="import-empty-state">Loading existing lines…</p> : existingLines.length ? (
+            <div className="import-table-wrap import-line-manager-table">
+              <table>
+                <thead>
+                  <tr><th>Line</th><th>Section</th><th>Pattern</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+                </thead>
+                <tbody>
+                  {existingLines.map((line) => {
+                    const protectedLine = line.status !== 'open' || Boolean(line.assigned_bidder_id)
+                    return (
+                      <tr key={line.id}>
+                        <td><strong>{line.line_code}</strong></td>
+                        <td>{line.line_type === 'CPC' ? 'CPC' : line.pattern === 'D-DEV' ? 'D-Dev' : 'R-Dev'}</td>
+                        <td>{line.pattern}</td>
+                        <td>{protectedLine ? `${line.status} · protected` : 'Open'}</td>
+                        <td className="import-line-action-cell">
+                          <button
+                            className="button danger compact"
+                            type="button"
+                            disabled={protectedLine || deletingLineId !== null}
+                            title={protectedLine ? 'Assigned, taken, and locked lines cannot be deleted.' : `Delete line ${line.line_code}`}
+                            onClick={() => void deleteBidLine(line)}
+                          >
+                            {deletingLineId === line.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="import-empty-state">No bid lines exist for this year and area.</p>}
         </section>
       ) : null}
 
