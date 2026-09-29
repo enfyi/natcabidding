@@ -7241,7 +7241,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
           `).join("")}
         </div>
         <div class="table-wrap rdo-page-table-wrap" tabindex="0" role="region" aria-label="${section} schedule comparison table, scroll horizontally">
-          <table class="line-table public-rdo-table">
+          <table class="line-table public-rdo-table public-mobile-rdo-table">
             <thead>
               <tr>
                 <th>Line #</th>
