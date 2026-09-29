@@ -9836,10 +9836,22 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
   .public-bid-time-results[data-presentation="cards"] .mobile-bid-time-cards { display: grid; gap: 12px; }
   .public-bid-time-results[data-presentation="list"] .mobile-bid-time-cards { display: none; }
   .public-bid-time-results[data-presentation="list"] .desktop-bid-times { display: block; }
+  .public-bid-time-results { min-width: 0; }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-list-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   .mobile-bid-time-view { display: flex; gap: 8px; margin: 12px 0; }
   .mobile-bid-time-view button { flex: 1; min-height: 44px; border: 1px solid #b8cbce; border-radius: 8px; padding: 8px; color: #19464b; background: #fff; font: inherit; font-size: .875rem; }
   .mobile-bid-time-view button[aria-pressed="true"] { background: #28656c; color: #fff; }
-  .public-bid-time-results[data-presentation="list"] .public-bid-time-table { min-width: 760px; }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table {
+    min-width: 980px;
+    table-layout: fixed;
+  }
   .mobile-bid-time-card { min-width: 0; padding: 16px; border: 1px solid #d3dfe7; border-radius: 12px; background: white; }
   .mobile-bid-time-card h3 { color: #152d3b; display: flex; align-items: start; justify-content: space-between; gap: 10px; margin: 0; font-size: 1rem; line-height: 1.5; }
   .mobile-bid-time-card h3 > span:first-child { min-width: 0; overflow-wrap: anywhere; }
