@@ -594,6 +594,8 @@ const calendarLayouts = {
 let displayedCalendarYear = BID_YEAR;
 let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
 const annualMobileCalendars = new Set();
+let calendarRenderRevision = 0;
+let pendingPageCalendarFrame = 0;
 let publicRdoPresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
@@ -3776,8 +3778,7 @@ function previewLeaveSubmission() {
   selectedLeaveDateKey = dateKeys[0];
   displayedCalendarYear = previewYear;
   if (calendarYearChanged) {
-    updateCalendarYearLabels();
-    makeCalendar("leave-calendar");
+    renderCalendars({ includePublic: false });
   } else {
     syncMemberCalendarSelection([...previousPreviewKeys, ...dateKeys]);
   }
@@ -4887,12 +4888,19 @@ function openPublicDateSheet(button) {
   sheet.showModal();
 }
 
-function makeCalendar(targetId) {
+function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   const target = document.getElementById(targetId);
   if (!target) return;
   const isPublicCalendar = targetId === "public-calendar";
   const ownerPage = target.closest(".page");
   if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
+  if (
+    reuseCurrent &&
+    target.childElementCount > 0 &&
+    Number(target.dataset.calendarRevision) === calendarRenderRevision
+  ) {
+    return;
+  }
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
@@ -4907,7 +4915,38 @@ function makeCalendar(targetId) {
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
+  const renderKey = [
+    displayedCalendarYear,
+    calendarMode,
+    area,
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip,
+    expandedSlots,
+  ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
+
+  syncMobileCalendarControls(target);
+  target.classList.remove("month-view", "week-view");
+  target.classList.toggle("expanded-slots-calendar", expandedSlots);
+
+  if (reuseCurrent) {
+    const reusableCalendar = [...document.querySelectorAll(".app-shell .year-calendar[id]")].find(
+      (calendar) =>
+        calendar !== target &&
+        calendar.childElementCount > 0 &&
+        Number(calendar.dataset.calendarRevision) === calendarRenderRevision &&
+        calendar.dataset.calendarRenderKey === renderKey
+    );
+    if (reusableCalendar) {
+      target.replaceChildren(...[...reusableCalendar.childNodes].map((node) => node.cloneNode(true)));
+      syncMobileCalendarMonths(target);
+      target.dataset.calendarRevision = String(calendarRenderRevision);
+      target.dataset.calendarRenderKey = renderKey;
+      return;
+    }
+  }
+
   const context = makeCalendarRenderContext({
     area,
     showRdo,
@@ -4915,10 +4954,6 @@ function makeCalendar(targetId) {
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
   });
-
-  syncMobileCalendarControls(target);
-  target.classList.remove("month-view", "week-view");
-  target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
   target.innerHTML = monthIndexes
     .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, {
@@ -4938,6 +4973,8 @@ function makeCalendar(targetId) {
       context,
     });
   syncMobileCalendarMonths(target);
+  target.dataset.calendarRevision = String(calendarRenderRevision);
+  target.dataset.calendarRenderKey = renderKey;
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -5132,37 +5169,70 @@ function updateCalendarViewControls() {
   });
 }
 
-function renderCalendars({ includePublic = true, includeMember = true } = {}) {
+function renderCalendars({ includePublic = true, includeMember = true, reuseCurrent = false } = {}) {
+  if (!reuseCurrent) calendarRenderRevision += 1;
   updateCalendarViewControls();
   updateCalendarYearLabels();
-  if (includePublic) makeCalendar("public-calendar");
+  if (includePublic) makeCalendar("public-calendar", { reuseCurrent });
   if (includeMember) {
-    makeCalendar("dashboard-calendar");
-    makeCalendar("leave-calendar");
-    makeCalendar("full-calendar");
+    makeCalendar("dashboard-calendar", { reuseCurrent });
+    makeCalendar("leave-calendar", { reuseCurrent });
+    makeCalendar("full-calendar", { reuseCurrent });
   }
 }
 
-function renderMemberCalendarForPage(pageName) {
+function memberCalendarForPage(pageName) {
   const calendarIds = {
     dashboard: "dashboard-calendar",
     leave: "leave-calendar",
     calendar: "full-calendar",
   };
   const calendarId = calendarIds[pageName];
-  if (!calendarId) return;
-  updateCalendarViewControls();
-  updateCalendarYearLabels();
-  makeCalendar(calendarId);
+  return calendarId ? document.getElementById(calendarId) : null;
 }
 
-function refreshMemberCalendarDates(dateKeys = []) {
+function memberPageCalendarNeedsRender(pageName) {
+  const calendar = memberCalendarForPage(pageName);
+  return Boolean(
+    calendar && (
+      calendar.childElementCount === 0 ||
+      Number(calendar.dataset.calendarRevision) !== calendarRenderRevision
+    )
+  );
+}
+
+function renderMemberCalendarForPage(pageName, { defer = false } = {}) {
+  if (pendingPageCalendarFrame) {
+    window.cancelAnimationFrame(pendingPageCalendarFrame);
+    pendingPageCalendarFrame = 0;
+  }
+
+  const render = () => {
+    pendingPageCalendarFrame = 0;
+    if (document.querySelector(".page.active")?.dataset.pagePanel !== pageName) return;
+    renderCalendars({ includePublic: false, reuseCurrent: true });
+    memberCalendarForPage(pageName)?.removeAttribute("aria-busy");
+  };
+
+  if (defer) {
+    memberCalendarForPage(pageName)?.setAttribute("aria-busy", "true");
+    pendingPageCalendarFrame = window.requestAnimationFrame(() => {
+      pendingPageCalendarFrame = window.requestAnimationFrame(render);
+    });
+    return;
+  }
+
+  render();
+}
+
+function refreshMemberCalendarDates(dateKeys = [], { includeInactive = false } = {}) {
   const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
   if (!uniqueKeys.length) return;
 
   document.querySelectorAll(".app-shell .year-calendar[id]").forEach((calendar) => {
+    if (!calendar.childElementCount) return;
     const ownerPage = calendar.closest(".page");
-    if (ownerPage && !ownerPage.classList.contains("active")) return;
+    if (!includeInactive && ownerPage && !ownerPage.classList.contains("active")) return;
 
     const area = currentViewArea();
     const showPersonalState = area === currentUser.area;
@@ -5181,7 +5251,7 @@ function refreshMemberCalendarDates(dateKeys = []) {
     });
 
     uniqueKeys.forEach((key) => {
-      const button = calendar.querySelector(`[data-leave-date="${key}"]`);
+      const button = calendar.querySelector(`[data-calendar-date="${key}"]`);
       if (!button) return;
       const date = dateFromKey(key);
       button.outerHTML = renderCalendarDay(date.getMonth(), date.getDate(), false, date.getFullYear(), {
@@ -5194,6 +5264,23 @@ function refreshMemberCalendarDates(dateKeys = []) {
       });
     });
   });
+}
+
+function refreshMemberCalendarRdoPattern(previousWeekdays = new Set()) {
+  const nextWeekdays = selectedRdoWeekdays();
+  const changedWeekdays = new Set(
+    [...previousWeekdays, ...nextWeekdays].filter(
+      (weekday) => previousWeekdays.has(weekday) !== nextWeekdays.has(weekday)
+    )
+  );
+  if (!changedWeekdays.size) return;
+
+  const affectedDateKeys = new Set();
+  document.querySelectorAll(".app-shell .year-calendar [data-calendar-date]").forEach((button) => {
+    const key = button.dataset.calendarDate;
+    if (key && changedWeekdays.has(dateFromKey(key).getDay())) affectedDateKeys.add(key);
+  });
+  refreshMemberCalendarDates([...affectedDateKeys], { includeInactive: true });
 }
 
 function syncMemberCalendarSelection(previousPreviewKeys = []) {
@@ -12822,7 +12909,10 @@ function setPage(pageName) {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
-    renderMemberCalendarForPage(pageName);
+    const needsFullRender = memberPageCalendarNeedsRender(pageName);
+    renderMemberCalendarForPage(pageName, {
+      defer: activePageName !== pageName && needsFullRender,
+    });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
   }
 }
@@ -14090,6 +14180,7 @@ document.addEventListener("click", async (event) => {
   const row = event.target.closest("[data-line-id]");
   if (row && !row.classList.contains("occupied-row")) {
     const previousLineId = selectedLineId;
+    const previousRdoWeekdays = selectedRdoWeekdays();
     selectedLineId = row.dataset.lineId;
     const selectedLine = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
@@ -14097,6 +14188,7 @@ document.addEventListener("click", async (event) => {
     }
     renderRdoLines();
     updateSelectedLine();
+    refreshMemberCalendarRdoPattern(previousRdoWeekdays);
     return;
   }
 
