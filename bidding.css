@@ -4789,6 +4789,13 @@ tr.occupied-row .rdo-tag {
 }
 
 /* Minimal/full calendar detail tabs and permanently expanded annual slot view. */
+.calendar-view-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .calendar-layout-tabs {
   display: inline-flex;
   gap: 4px;
@@ -4797,6 +4804,14 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
   padding: 4px;
   background: #f1f5f9;
+}
+
+.calendar-workforce-tabs {
+  flex: 0 0 auto;
+}
+
+.calendar-workforce-tabs button {
+  min-width: 92px;
 }
 
 .calendar-layout-tabs button {
@@ -4929,7 +4944,19 @@ tr.occupied-row .rdo-tag {
 }
 
 @media (max-width: 720px) {
+  .calendar-view-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
   .calendar-layout-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .calendar-workforce-tabs,
+  .public-main .calendar-workforce-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
@@ -8149,6 +8176,11 @@ video {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
+  }
+
+  .public-main .calendar-workforce-tabs,
+  .calendar-workforce-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .public-main .segmented button,
