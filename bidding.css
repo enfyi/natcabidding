@@ -691,26 +691,46 @@ button.seniority-pill {
 
 .public-main .public-rdo-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 0;
+  table-layout: fixed;
 }
 
 .public-main .public-rdo-table th,
 .public-main .public-rdo-table td {
-  padding: 9px 8px;
+  padding: 9px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .public-main .public-rdo-table th:nth-child(1),
 .public-main .public-rdo-table td:nth-child(1) {
-  width: auto;
-  min-width: 70px;
+  width: 6%;
+  min-width: 0;
 }
 
 .public-main .public-rdo-table th:nth-child(2),
 .public-main .public-rdo-table td:nth-child(2) {
-  left: 70px;
-  width: auto;
-  min-width: 78px;
+  left: 6%;
+  width: 10%;
+  min-width: 0;
+}
+
+.public-main .public-rdo-table th:nth-last-child(2),
+.public-main .public-rdo-table td:nth-last-child(2) {
+  width: 6%;
+}
+
+.public-main .public-rdo-table th:last-child,
+.public-main .public-rdo-table td:last-child {
+  width: 9%;
+}
+
+.public-main .public-rdo-table .shift,
+.public-main .public-rdo-table .rdo-tag {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 3px;
 }
 
 .public-main .public-rdo-panel {
@@ -9901,6 +9921,7 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
   .mobile-line-week dt { font-size: .875rem; color: #526273; }
   .mobile-line-week dd { margin: 0; font-size: 1rem; }
   .mobile-rdo-card > p { padding: 0 14px 14px; font-size: .875rem; }
+  .public-main .public-rdo-table { min-width: 980px; table-layout: auto; }
   .public-rdo-table th:first-child, .public-rdo-table td:first-child { position: sticky; left: 0; z-index: 1; background: #f0f6f7; }
   .public-rdo-table th[colspan] { position: static; }
   .public-rdo-panel .filter-bar input[type="search"], .public-rdo-panel .filter-bar select { min-height: 44px; font-size: 16px; }
