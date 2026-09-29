@@ -5359,6 +5359,17 @@ tr.occupied-row .rdo-tag {
   font-weight: 900;
 }
 
+.account-form label small {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.account-password-current {
+  grid-column: 1 / -1;
+}
+
 .account-form input {
   width: 100%;
 }
