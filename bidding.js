@@ -2118,8 +2118,12 @@ function manualBidControllerMatches(person, query) {
   return searchable.includes(query.toLowerCase());
 }
 
+function manualBidControllerRoster() {
+  return bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs));
+}
+
 function manualBidControllerOptions(selectedInitials, query = "") {
-  const roster = bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs));
+  const roster = manualBidControllerRoster();
   const matches = roster.filter((person) => manualBidControllerMatches(person, query));
   const selectedPerson = roster.find((person) => person.initials === selectedInitials);
   const visiblePeople = selectedPerson && !matches.includes(selectedPerson)
@@ -2132,6 +2136,22 @@ function manualBidControllerOptions(selectedInitials, query = "") {
   }).join("");
 }
 
+function manualBidControllerResults(query) {
+  if (!query) return "";
+  return manualBidControllerRoster()
+    .filter((person) => manualBidControllerMatches(person, query))
+    .map((person) => {
+      const name = controllerName(person);
+      const details = `#${person.rank} · ${person.initials} · ${person.area}`;
+      return `
+        <button type="button" role="option" data-manual-controller-result="${escapeHtml(person.initials)}">
+          <strong>${escapeHtml(name)}</strong>
+          <span>${escapeHtml(details)}</span>
+        </button>
+      `;
+    }).join("");
+}
+
 function manualBidAreaOptions(selectedArea) {
   return Object.values(AREA_NAME_BY_CODE).map((area) => {
     const selected = area === selectedArea ? " selected" : "";
@@ -2140,7 +2160,7 @@ function manualBidAreaOptions(selectedArea) {
 }
 
 function manualBidSelectedPerson(selectedInitials) {
-  const roster = bueRoster().filter((person) => bidRoleParticipatesInBidding(person.bidAs));
+  const roster = manualBidControllerRoster();
   return roster.find((person) => person.initials === selectedInitials) || roster[0] || {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
@@ -2177,8 +2197,9 @@ function manualLeaveRangeValue(panel) {
 }
 
 function manualFatigueGroupIsAvailable(line, group, allowOverride = false) {
-  if (allowOverride) return Boolean(line && group);
-  if (!line || !group) return false;
+  if (!line) return false;
+  if (!group) return true;
+  if (allowOverride) return true;
   const capacity = fatigueCapacityForLine(line, null, "").find((item) => item.group === group);
   return Boolean(capacity && isGroupAvailable(capacity));
 }
@@ -2186,7 +2207,7 @@ function manualFatigueGroupIsAvailable(line, group, allowOverride = false) {
 function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
   if (!line) return "";
 
-  return fatigueCapacityForLine(line, null, "").map((item) => {
+  const groupOptions = fatigueCapacityForLine(line, null, "").map((item) => {
     const isSelected = item.group === selectedGroup;
     const isAvailable = isGroupAvailable(item);
     const isSelectable = isAvailable || allowOverride;
@@ -2195,6 +2216,11 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
     const suffix = isAvailable ? "" : allowOverride ? " - Full, override" : " - Full";
     return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isSelectable ? "" : " disabled"}>${label}${suffix} (${capacity})</option>`;
   }).join("");
+  return `<option value=""${selectedGroup ? "" : " selected"}>No preference — assign later</option>${groupOptions}`;
+}
+
+function fatigueGroupPreferenceLabel(group) {
+  return group ? `Group ${group}` : "No preference";
 }
 
 function rdoLineOptionLabel(line) {
@@ -2210,7 +2236,9 @@ function renderManualBidPanel(panel) {
     type: panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line",
     area: panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(),
     line: panel.querySelector("[data-manual-rdo-line]")?.value || selectedLineId,
-    fatigueGroup: panel.querySelector("[data-manual-fatigue-group]")?.value || selectedFatigueGroup || "A",
+    fatigueGroup: panel.querySelector("[data-manual-fatigue-group]")
+      ? panel.querySelector("[data-manual-fatigue-group]").value
+      : selectedFatigueGroup || "A",
     fatigueOverride: Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked),
     flex: panel.querySelector("[data-manual-flex]")?.value || selectedFlexPreference || "Yes",
     aws: panel.querySelector("[data-manual-aws]")?.value || selectedAwsPreference || "No",
@@ -2235,14 +2263,19 @@ function renderManualBidPanel(panel) {
   const controllerQuery = controllerSearch?.value.trim() || "";
   const controllerSelect = panel.querySelector("[data-manual-bid-controller]");
   if (controllerSelect) {
-    const roster = bueRoster();
+    const roster = manualBidControllerRoster();
     const matchCount = roster.filter((person) => manualBidControllerMatches(person, controllerQuery)).length;
     controllerSelect.innerHTML = manualBidControllerOptions(values.controller, controllerQuery);
     controllerSelect.value = roster.some((person) => person.initials === values.controller) ? values.controller : roster[0]?.initials || "";
+    const searchResults = panel.querySelector("[data-manual-controller-results]");
+    if (searchResults) {
+      searchResults.innerHTML = manualBidControllerResults(controllerQuery);
+      searchResults.hidden = !controllerQuery || matchCount === 0;
+    }
     const searchStatus = panel.querySelector("[data-manual-controller-search-status]");
     if (searchStatus) {
       searchStatus.textContent = controllerQuery
-        ? `${matchCount} ${matchCount === 1 ? "match" : "matches"}${matchCount === 0 ? "; current selection remains available" : ""}`
+        ? `${matchCount} ${matchCount === 1 ? "match" : "matches"}${matchCount === 0 ? "; current selection remains available" : "; select a controller below"}`
         : `${roster.length} active controllers`;
     }
   }
@@ -2279,23 +2312,25 @@ function renderManualBidPanel(panel) {
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
-  const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
-  if (fatigueOverrideInput) {
-    fatigueOverrideInput.checked = values.fatigueOverride;
-  }
   const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
   if (fatigueSelect) {
-    const requestedGroup = ["A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
+    const requestedGroup = ["", "A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
     const availableGroups = selectedLine
       ? fatigueCapacityForLine(selectedLine, null, "")
         .filter((item) => values.fatigueOverride || isGroupAvailable(item))
         .map((item) => item.group)
       : [];
-    const resolvedGroup = availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
+    const resolvedGroup = requestedGroup === "" ? "" : availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
     fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride);
     fatigueSelect.value = resolvedGroup;
-    fatigueSelect.disabled = !resolvedGroup;
-    fatigueSelect.title = resolvedGroup ? "" : "No fatigue groups are available for this line.";
+    fatigueSelect.disabled = !selectedLine;
+    fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
+    const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
+    if (fatigueOverrideInput) {
+      fatigueOverrideInput.checked = resolvedGroup ? values.fatigueOverride : false;
+      fatigueOverrideInput.disabled = !resolvedGroup;
+      fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
+    }
   }
   const midSelect = panel.querySelector("[data-manual-mid]");
   if (midSelect) {
@@ -2365,10 +2400,11 @@ async function submitManualRdoBid(panel, person, area) {
     return;
   }
 
-  const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value || "A";
-  const fatigueOverride = Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked);
-  const fatigueGroupClosed = !manualFatigueGroupIsAvailable(line, fatigueGroup);
-  if (!manualFatigueGroupIsAvailable(line, fatigueGroup, fatigueOverride)) {
+  const fatigueGroup = panel.querySelector("[data-manual-fatigue-group]")?.value ?? "A";
+  const hasFatiguePreference = Boolean(fatigueGroup);
+  const fatigueOverride = hasFatiguePreference && Boolean(panel.querySelector("[data-manual-fatigue-override]")?.checked);
+  const fatigueGroupClosed = hasFatiguePreference && !manualFatigueGroupIsAvailable(line, fatigueGroup);
+  if (hasFatiguePreference && !manualFatigueGroupIsAvailable(line, fatigueGroup, fatigueOverride)) {
     setManualBidStatus(panel, `Group ${fatigueGroup} is full for Line ${line.line}. Choose an available fatigue group before adding this bid.`, "error");
     return;
   }
@@ -2406,7 +2442,7 @@ async function submitManualRdoBid(panel, person, area) {
     flex,
     aws,
     mid,
-    summary: `${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
+    summary: `${ghostBid ? "Ghost Line" : "Line"} ${line.line} · ${fatigueGroupPreferenceLabel(fatigueGroup)} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
 
   setManualBidStatus(panel, `Saving ${person.initials}'s RDO bid to Supabase...`);
@@ -3580,7 +3616,7 @@ function bidTypeLabel(item) {
 
 function bidEmailDetail(item) {
   if (item.type === "RDO Line") {
-    return `${item.ghostBid ? "Ghost Line" : "RDO Line"} ${item.line}, Fatigue Group ${item.fatigueGroup}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
+    return `${item.ghostBid ? "Ghost Line" : "RDO Line"} ${item.line}, Fatigue: ${fatigueGroupPreferenceLabel(item.fatigueGroup)}, Flex: ${item.flex}, AWS: ${item.aws}, Mid: ${item.mid}.`;
   }
 
   const weekText = item.weekUnits ? `, ${item.weekUnits} bid ${item.weekUnits === 1 ? "week" : "weeks"}` : "";
@@ -3860,11 +3896,11 @@ function captureIntakeOverrideFields(item) {
 
   if (item.type === "RDO Line") {
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
-    item.fatigueGroup = editor.querySelector("[data-override-group]")?.value || item.fatigueGroup;
+    item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
     item.aws = editor.querySelector("[data-override-aws]")?.value || item.aws;
     item.mid = editor.querySelector("[data-override-mid]")?.value || item.mid;
-    item.summary = `${item.ghostBid ? "Ghost Line" : "Line"} ${item.line} · Group ${item.fatigueGroup} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
+    item.summary = `${item.ghostBid ? "Ghost Line" : "Line"} ${item.line} · ${fatigueGroupPreferenceLabel(item.fatigueGroup)} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
     return;
   }
 
@@ -3917,6 +3953,13 @@ async function approveIntakeItem(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item || item.status !== "Pending") return;
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
+    item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
+    activeOverrideId = id;
+    renderApp();
+    setPage("intake");
+    return;
+  }
   let persisted = false;
   try {
     persisted = await persistIntakeDecision(item, "approved");
@@ -4037,6 +4080,28 @@ async function saveSupabaseApprovedLeaveEdit(item) {
   return true;
 }
 
+async function saveSupabasePendingRdoEdit(item) {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase is not configured on this page.");
+  if (!item?.supabaseSubmissionId) throw new Error("This pending RDO bid has not been saved to Supabase.");
+
+  const { error } = await client.rpc("update_pending_rdo_submission", {
+    submission_to_update: item.supabaseSubmissionId,
+    requested_line_code: item.line,
+    requested_fatigue_group: item.fatigueGroup || null,
+    requested_flex: item.flex === true || item.flex === "Yes",
+    requested_aws: item.aws === true || item.aws === "Yes",
+    requested_mid: item.mid,
+  });
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) {
+      throw new Error("Pending RDO editing is not installed. Run database/transactional_bidding.sql in Supabase.");
+    }
+    throw error;
+  }
+  return true;
+}
+
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
@@ -4046,7 +4111,41 @@ async function saveIntakeOverride(id) {
   const originalRange = item.range;
   const originalDays = item.days;
   const originalCapacityOverride = item.leaveCapacityOverride;
+  const originalFatigueGroup = item.fatigueGroup;
+  const originalFlex = item.flex;
+  const originalAws = item.aws;
+  const originalMid = item.mid;
   captureIntakeOverrideFields(item);
+
+  if (item.status === "Pending" && item.type === "RDO Line" && supabaseState.connected) {
+    try {
+      await saveSupabasePendingRdoEdit(item);
+      logHistory(
+        item.area,
+        "Intake override saved",
+        `${currentUser.initials} edited ${item.initials}'s ${bidTypeLabel(item)} request from "${original}" to "${item.summary}".`
+      );
+      activeOverrideId = null;
+      activeDenialId = null;
+      supabaseState.placeholdersCleared = false;
+      await loadSupabaseReferenceData();
+      renderApp();
+      setPage("intake");
+      return;
+    } catch (error) {
+      item.line = originalLine;
+      item.fatigueGroup = originalFatigueGroup;
+      item.flex = originalFlex;
+      item.aws = originalAws;
+      item.mid = originalMid;
+      item.summary = original;
+      item.reviewNote = error.message || "The pending RDO changes could not be saved.";
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+      return;
+    }
+  }
 
   if (item.status === "Approved" && item.type === "Leave" && supabaseState.connected && !item.supabaseRequestId) {
     item.range = originalRange;
@@ -5585,7 +5684,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     flex,
     aws,
     mid,
-    summary: payload.summary || `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line} · Group ${fatigueGroup} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
+    summary: payload.summary || `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line} · ${fatigueGroupPreferenceLabel(fatigueGroup)} · Flex ${flex} · AWS ${aws} · Mid ${mid}`,
   };
 }
 
@@ -5927,7 +6026,7 @@ async function saveSupabaseRdoRequest(request, options = {}) {
   const { error } = await client.rpc("submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
-    requested_fatigue_group: request.fatigueGroup,
+    requested_fatigue_group: request.fatigueGroup || null,
     requested_flex: request.flex === true || request.flex === "Yes",
     requested_aws: request.aws === true || request.aws === "Yes",
     requested_mid: request.mid,
@@ -10666,7 +10765,7 @@ function renderOverrideEditor(item) {
       </label>
       <label>Fatigue Group
         <select data-override-group>
-          ${["A", "B", "C"].map((group) => `<option ${group === item.fatigueGroup ? "selected" : ""}>${group}</option>`).join("")}
+          ${[["", "No preference — assign later"], ["A", "A"], ["B", "B"], ["C", "C"]].map(([value, label]) => `<option value="${value}" ${value === item.fatigueGroup ? "selected" : ""}>${label}</option>`).join("")}
         </select>
       </label>
       <label>Flex
@@ -11612,6 +11711,22 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const manualControllerResult = event.target.closest("[data-manual-controller-result]");
+  if (manualControllerResult) {
+    const panel = manualControllerResult.closest("[data-manual-bid-panel]");
+    const controllerSelect = panel?.querySelector("[data-manual-bid-controller]");
+    const controllerSearch = panel?.querySelector("[data-manual-controller-search]");
+    if (panel && controllerSelect) {
+      controllerSelect.value = manualControllerResult.dataset.manualControllerResult;
+      if (controllerSearch) controllerSearch.value = "";
+      renderManualBidPanel(panel);
+      const person = manualBidSelectedPerson(controllerSelect.value);
+      setManualBidStatus(panel, `Selected ${controllerName(person)} (${person.initials}).`);
+      controllerSelect.focus();
+    }
+    return;
+  }
+
   const mobileAppMenu = event.target.closest(".mobile-app-menu");
   if (mobileAppMenu && event.target.closest("button")) mobileAppMenu.removeAttribute("open");
 
@@ -12491,7 +12606,7 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
-  const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
+  const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);
     return;

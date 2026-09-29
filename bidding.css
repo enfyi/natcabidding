@@ -5610,6 +5610,53 @@ tr.occupied-row .rdo-tag {
   text-transform: none;
 }
 
+.manual-controller-results {
+  display: grid;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #cbd8e6;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.manual-controller-results[hidden] {
+  display: none;
+}
+
+.manual-controller-results button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  color: #172033;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-controller-results button:last-child {
+  border-bottom: 0;
+}
+
+.manual-controller-results button:hover,
+.manual-controller-results button:focus-visible {
+  outline: none;
+  background: #e8f7f8;
+}
+
+.manual-controller-results strong {
+  font-size: 0.84rem;
+}
+
+.manual-controller-results span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .admin-section-nav {
   display: flex;
   gap: 8px;
