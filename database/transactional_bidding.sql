@@ -55,6 +55,65 @@ create unique index if not exists intake_submissions_one_pending_rdo_idx
   on public.intake_submissions(bid_year_id, bidder_id, round_number)
   where submission_type = 'rdo' and status = 'pending';
 
+-- A bidder cannot replace or create another RDO submission while their own
+-- RDO submission is still pending intake review. Intake/admin decisions and
+-- reviewer edits remain available.
+create or replace function public.enforce_pending_rdo_bidder_lock()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid;
+  actor_role text;
+begin
+  select bidder.id, bidder.role
+  into actor_id, actor_role
+  from public.bidders bidder
+  where bidder.auth_user_id = auth.uid()
+    and lower(bidder.email) = lower(auth.jwt() ->> 'email')
+    and bidder.active
+  limit 1;
+
+  if actor_id is null or actor_role in ('admin', 'intake') then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.submission_type = 'rdo'
+       and old.status = 'pending'
+       and old.bidder_id = actor_id then
+      raise exception 'Your RDO bid is awaiting an intake decision. You can submit another change after it is approved or denied.';
+    end if;
+  elsif tg_op = 'INSERT' then
+    if new.submission_type = 'rdo'
+       and new.status = 'pending'
+       and new.bidder_id = actor_id
+       and exists (
+         select 1
+         from public.intake_submissions submission
+         where submission.bid_year_id = new.bid_year_id
+           and submission.bidder_id = actor_id
+           and submission.submission_type = 'rdo'
+           and submission.status = 'pending'
+       ) then
+      raise exception 'Your RDO bid is awaiting an intake decision. You can submit another change after it is approved or denied.';
+    end if;
+  end if;
+
+  return new;
+end
+$$;
+
+revoke all on function public.enforce_pending_rdo_bidder_lock() from public, anon, authenticated;
+
+drop trigger if exists enforce_pending_rdo_bidder_lock on public.intake_submissions;
+create trigger enforce_pending_rdo_bidder_lock
+before insert or update on public.intake_submissions
+for each row execute function public.enforce_pending_rdo_bidder_lock();
+
+
 create index if not exists bid_windows_open_lookup_idx
   on public.bid_windows(bidder_id, opens_at, closes_at, round_number);
 
@@ -357,52 +416,94 @@ begin
 
   line_id := public.effective_rdo_line_id(target_bid_year_id, target_bidder_id);
 
-  if line_id is null then return; end if;
+  if line_id is null then
+    select submission.rdo_line_id into line_id
+    from public.intake_submissions submission
+    where submission.bid_year_id = target_bid_year_id
+      and submission.bidder_id = target_bidder_id
+      and submission.submission_type = 'rdo'
+      and submission.status = 'pending'
+    order by submission.submitted_at desc nulls last, submission.created_at desc
+    limit 1;
+  end if;
 
-  select min(rld.weekday) into first_rdo
-  from public.rdo_line_days rld
-  where rld.rdo_line_id = line_id and rld.is_rdo;
+  if line_id is not null then
+    select min(rld.weekday) into first_rdo
+    from public.rdo_line_days rld
+    where rld.rdo_line_id = line_id and rld.is_rdo;
 
-  for holiday_row in
-    select h.*
-    from public.holidays h
-    where h.bid_year_id = target_bid_year_id
-    order by h.holiday_date, h.id
-  loop
-    if not exists (
-      select 1 from public.rdo_line_days rld
-      where rld.rdo_line_id = line_id
-        and rld.is_rdo
-        and rld.weekday = extract(dow from holiday_row.holiday_date)::smallint
-    ) then
-      continue;
-    end if;
+    for holiday_row in
+      select h.*
+      from public.holidays h
+      where h.bid_year_id = target_bid_year_id
+      order by h.holiday_date, h.id
+    loop
+      if not exists (
+        select 1 from public.rdo_line_days rld
+        where rld.rdo_line_id = line_id
+          and rld.is_rdo
+          and rld.weekday = extract(dow from holiday_row.holiday_date)::smallint
+      ) then
+        continue;
+      end if;
 
-    direction := case when extract(dow from holiday_row.holiday_date)::smallint = first_rdo then 1 else -1 end;
-    candidate := holiday_row.holiday_date + direction;
+      direction := case when extract(dow from holiday_row.holiday_date)::smallint = first_rdo then 1 else -1 end;
+      candidate := holiday_row.holiday_date + direction;
 
-    while exists (
-      select 1 from public.rdo_line_days rld
-      where rld.rdo_line_id = line_id and rld.is_rdo
-        and rld.weekday = extract(dow from candidate)::smallint
-    ) or exists (
-      select 1 from public.holidays h
-      where h.bid_year_id = target_bid_year_id and h.holiday_date = candidate
-    ) or exists (
-      select 1 from public.holiday_in_lieu_days hil
-      where hil.bid_year_id = target_bid_year_id
-        and hil.bidder_id = target_bidder_id
-        and hil.in_lieu_date = candidate
-    ) loop
-      candidate := candidate + direction;
+      while exists (
+        select 1 from public.rdo_line_days rld
+        where rld.rdo_line_id = line_id and rld.is_rdo
+          and rld.weekday = extract(dow from candidate)::smallint
+      ) or exists (
+        select 1 from public.holidays h
+        where h.bid_year_id = target_bid_year_id and h.holiday_date = candidate
+      ) or exists (
+        select 1 from public.holiday_in_lieu_days hil
+        where hil.bid_year_id = target_bid_year_id
+          and hil.bidder_id = target_bidder_id
+          and hil.in_lieu_date = candidate
+      ) loop
+        candidate := candidate + direction;
+      end loop;
+
+      insert into public.holiday_in_lieu_days (
+        bid_year_id, bidder_id, holiday_id, in_lieu_date, source_rdo_line_id
+      ) values (
+        target_bid_year_id, target_bidder_id, holiday_row.id, candidate, line_id
+      );
     end loop;
+  end if;
 
-    insert into public.holiday_in_lieu_days (
-      bid_year_id, bidder_id, holiday_id, in_lieu_date, source_rdo_line_id
-    ) values (
-      target_bid_year_id, target_bidder_id, holiday_row.id, candidate, line_id
-    );
-  end loop;
+  update public.leave_request_dates request_date
+  set is_holiday_in_lieu = exists (
+        select 1 from public.holiday_in_lieu_days in_lieu
+        where in_lieu.bid_year_id = target_bid_year_id
+          and in_lieu.bidder_id = target_bidder_id
+          and in_lieu.in_lieu_date = request_date.leave_date
+      ),
+      charged = not (request.round_number = 1 and request_date.is_rdo)
+        and (request.round_number <= 3 or (
+          not request_date.is_holiday
+          and not exists (
+            select 1 from public.holiday_in_lieu_days in_lieu
+            where in_lieu.bid_year_id = target_bid_year_id
+              and in_lieu.bidder_id = target_bidder_id
+              and in_lieu.in_lieu_date = request_date.leave_date
+          )
+        ))
+  from public.leave_requests request
+  where request_date.leave_request_id = request.id
+    and request.bid_year_id = target_bid_year_id
+    and request.bidder_id = target_bidder_id
+    and request.status = 'pending';
+
+  update public.leave_requests request
+  set charged_days = (select count(*)::integer from public.leave_request_dates request_date
+                      where request_date.leave_request_id = request.id and request_date.charged),
+      updated_at = now()
+  where request.bid_year_id = target_bid_year_id
+    and request.bidder_id = target_bidder_id
+    and request.status = 'pending';
 end
 $$;
 
@@ -465,6 +566,8 @@ declare
   area_used integer;
   crew_used integer;
   ghost_bid boolean;
+  enforce_bid_windows boolean := true;
+  configured_test_round integer;
 begin
   requested_fatigue_group := nullif(trim(requested_fatigue_group), '');
 
@@ -476,6 +579,12 @@ begin
   if actor.id is null then raise exception 'Authenticated bidder profile required.'; end if;
 
   select * into strict year_row from public.bid_years where bid_year = requested_bid_year;
+
+  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
+  into enforce_bid_windows, configured_test_round
+  from public.bid_year_settings settings
+  where settings.bid_year_id = year_row.id;
+  enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if target_initials is null then
     target := actor;
@@ -495,6 +604,12 @@ begin
   if manual_entry then
     resolved_round := requested_round;
     if resolved_round not between 1 and 4 then raise exception 'Round must be between 1 and 4.'; end if;
+  elsif not enforce_bid_windows then
+    resolved_round := coalesce(configured_test_round, requested_round);
+    if resolved_round not between 1 and 4 then raise exception 'Round must be between 1 and 4.'; end if;
+    if configured_test_round is not null and requested_round is distinct from configured_test_round then
+      raise exception 'Testing mode is currently set to Round %.', configured_test_round;
+    end if;
   else
     select bw.round_number into resolved_round
     from public.bid_windows bw
@@ -505,7 +620,8 @@ begin
     if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
   end if;
 
-  if not public.is_area_bid_round_open(year_row.id, target.area_id, resolved_round) then
+  if enforce_bid_windows
+     and not public.is_area_bid_round_open(year_row.id, target.area_id, resolved_round) then
     raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', resolved_round;
   end if;
 
@@ -523,9 +639,7 @@ begin
   end if;
 
   if line_row.line_type = 'CPC' and target.bid_role <> 'GL' then
-    if requested_fatigue_group is null and not manual_entry then
-      raise exception 'Choose fatigue group A, B, or C.';
-    elsif requested_fatigue_group is not null and requested_fatigue_group not in ('A', 'B', 'C') then
+    if requested_fatigue_group is not null and requested_fatigue_group not in ('A', 'B', 'C') then
       raise exception 'Choose fatigue group A, B, or C.';
     end if;
 
@@ -585,6 +699,8 @@ begin
     where id = submission_id;
   end if;
 
+  perform public.refresh_bidder_holiday_in_lieu(year_row.id, target.id);
+
   insert into public.audit_events (bid_year_id, area_id, actor_id, event_type, entity_table, entity_id, details)
   values (year_row.id, target.area_id, actor.id, 'rdo_bid_submitted', 'intake_submissions', submission_id,
     jsonb_build_object('target_bidder_id', target.id, 'line_code', line_row.line_code, 'round', resolved_round));
@@ -634,6 +750,7 @@ declare
   is_in_lieu boolean;
   result_ids jsonb := '[]'::jsonb;
   ghost_bid boolean;
+  enforce_bid_windows boolean := true;
 begin
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
@@ -642,6 +759,11 @@ begin
   if actor.id is null then raise exception 'Authenticated bidder profile required.'; end if;
 
   select * into strict year_row from public.bid_years where bid_year = requested_bid_year;
+  select coalesce(settings.enforce_bid_windows, true)
+  into enforce_bid_windows
+  from public.bid_year_settings settings
+  where settings.bid_year_id = year_row.id;
+  enforce_bid_windows := coalesce(enforce_bid_windows, true);
   if requested_items is null or jsonb_typeof(requested_items) <> 'array' or jsonb_array_length(requested_items) = 0 then
     raise exception 'At least one leave request is required.';
   end if;
@@ -724,16 +846,20 @@ begin
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       if round_no > 1 and is_rdo then raise exception 'Leave cannot include the bidder''s RDO after Round 1 (%).', leave_date; end if;
-      if not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo) then item_charged := item_charged + 1; end if;
+      if not (round_no = 1 and is_rdo)
+         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+        item_charged := item_charged + 1;
+      end if;
     end loop;
     batch_charged := batch_charged + item_charged;
   end loop;
 
-  if not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
+  if enforce_bid_windows
+     and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
     raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', batch_round;
   end if;
 
-  if not manual_entry and not exists (
+  if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at
   ) then raise exception 'Your bidding window is not open.'; end if;
@@ -798,7 +924,10 @@ begin
       ) into is_rdo;
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
-      if not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo) then item_charged := item_charged + 1; end if;
+      if not (round_no = 1 and is_rdo)
+         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+        item_charged := item_charged + 1;
+      end if;
     end loop;
 
     insert into public.leave_requests (
@@ -827,7 +956,10 @@ begin
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       insert into public.leave_request_dates (leave_request_id, leave_date, charged, is_rdo, is_holiday, is_holiday_in_lieu)
-      values (request_id, leave_date, not is_holiday and not is_in_lieu and not (round_no = 1 and is_rdo), is_rdo, is_holiday, is_in_lieu);
+      values (request_id, leave_date,
+        not (round_no = 1 and is_rdo)
+          and (round_no <= 3 or (not is_holiday and not is_in_lieu)),
+        is_rdo, is_holiday, is_in_lieu);
     end loop;
 
     insert into public.intake_submissions (
@@ -1035,7 +1167,9 @@ begin
       if not ghost_bid then
         for date_row in
           select d.leave_date from public.leave_request_dates d
-          where d.leave_request_id = leave_row.id and d.charged order by d.leave_date
+          where d.leave_request_id = leave_row.id and d.charged
+            and not d.is_holiday and not d.is_holiday_in_lieu
+          order by d.leave_date
         loop
         select * into slot_row from public.leave_slots s
         where s.bid_year_id = submission.bid_year_id and s.area_id = target.area_id
@@ -1080,7 +1214,7 @@ begin
       payload = payload || override_payload || jsonb_build_object('ghostBid', ghost_bid), updated_at = now()
   where id = submission.id;
 
-  if decision = 'approved' and submission.submission_type = 'rdo' then
+  if submission.submission_type = 'rdo' then
     perform public.refresh_bidder_holiday_in_lieu(submission.bid_year_id, target.id);
   end if;
 
@@ -1122,6 +1256,7 @@ begin
       'bidAs', b.bid_role, 'seniority', b.seniority_rank,
       'submittedAt', s.submitted_at, 'reviewedAt', s.reviewed_at,
       'reviewedBy', reviewer.initials, 'denialReason', s.denial_reason,
+      'requestId', s.leave_request_id,
       'line', rl.line_code, 'range', case
         when lr.id is null then null
         when lr.requested_end_date = lr.requested_start_date then to_char(lr.requested_start_date, 'Mon FMDD, YYYY')
@@ -1129,7 +1264,8 @@ begin
           to_char(lr.requested_start_date, 'Mon FMDD') || ' - ' || to_char(lr.requested_end_date, 'Mon FMDD, YYYY')
         else to_char(lr.requested_start_date, 'Mon FMDD, YYYY') || ' - ' || to_char(lr.requested_end_date, 'Mon FMDD, YYYY')
       end,
-      'days', lr.charged_days, 'priority', lr.priority, 'payload', s.payload
+      'days', lr.charged_days, 'priority', lr.priority,
+      'is_ghost_bid', s.is_ghost_bid, 'payload', s.payload
     ) order by s.submitted_at desc), '[]'::jsonb)
   ) into result
   from public.intake_submissions s
@@ -1156,7 +1292,13 @@ select bys.id, a.id, d::date, slots.slot_group, slots.slot_code, 'open'
 from public.bid_years bys
 cross join public.areas a
 cross join lateral generate_series(make_date(bys.bid_year, 1, 10), make_date(bys.bid_year + 1, 1, 8), interval '1 day') d
-cross join (values ('cpc', 'C1'), ('cpc', 'C2'), ('cpc', 'C3'), ('dev', 'D1')) slots(slot_group, slot_code)
+cross join lateral (
+  select 'cpc'::text as slot_group, 'C' || slot_number as slot_code
+  from generate_series(1, case when lower(a.code) = 'tmu' then 2 else 3 end) as series(slot_number)
+  union all
+  select 'dev'::text, 'D' || slot_number
+  from generate_series(1, case when lower(a.code) = 'tmu' then 2 else 4 end) as series(slot_number)
+) slots
 where bys.bid_year = 2027
 on conflict (bid_year_id, area_id, slot_date, slot_group, slot_code) do nothing;
 
