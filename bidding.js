@@ -597,6 +597,7 @@ const annualMobileCalendars = new Set();
 let calendarRenderRevision = 0;
 let pendingPageCalendarFrame = 0;
 let publicRdoPresentation = "cards";
+let publicBidTimePresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
 let editingIntakeScheduleId = "";
@@ -7569,44 +7570,51 @@ function renderPublicBidTimeTable(area) {
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
-    <div class="mobile-bid-time-cards">
-      ${seniority.map((person) => `
-        <article class="mobile-bid-time-card">
-          <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
-          <p>${escapeHtml(person.initials)}</p>
-          <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
-        </article>
-      `).join("")}
-      ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
-      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+    <div class="mobile-bid-time-view" role="group" aria-label="Bid time display">
+      <button type="button" data-bid-time-presentation="cards" aria-pressed="${publicBidTimePresentation === "cards"}">Cards</button>
+      <button type="button" data-bid-time-presentation="list" aria-pressed="${publicBidTimePresentation === "list"}">List</button>
     </div>
-    <div class="table-wrap public-table-wrap flat desktop-bid-times">
-      <table class="public-bid-time-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Name</th>
-            <th>Initials</th>
-            <th>Bid As</th>
-            <th>Round 1</th>
-            <th>Round 2</th>
-            <th>Round 3</th>
-            <th>Round 4</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${seniority.map((person) => `
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <div class="public-bid-time-results" data-public-bid-time-results data-presentation="${publicBidTimePresentation}">
+      <div class="mobile-bid-time-cards">
+        ${seniority.map((person) => `
+          <article class="mobile-bid-time-card" data-public-bid-time-card>
+            <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <p>${escapeHtml(person.initials)}</p>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+          </article>
+        `).join("")}
+        ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
+      </div>
+      <p class="mobile-table-hint bid-time-list-hint" ${publicBidTimePresentation === "list" ? "" : "hidden"}>Swipe sideways to see every bid round.</p>
+      <div class="table-wrap public-table-wrap flat desktop-bid-times" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
+        <table class="public-bid-time-table">
+          <thead>
             <tr>
-              <td>${person.rank}</td>
-              <td>${person.firstName} ${person.lastName}</td>
-              <td>${person.initials}</td>
-              <td><span class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</span></td>
-              ${person.rounds.map((round) => `<td>${publicBidTimeLabel(round)}</td>`).join("")}
+              <th>#</th>
+              <th>Name</th>
+              <th>Initials</th>
+              <th>Bid As</th>
+              <th>Round 1</th>
+              <th>Round 2</th>
+              <th>Round 3</th>
+              <th>Round 4</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${seniority.map((person) => `
+              <tr data-public-bid-time-row>
+                <td>${person.rank}</td>
+                <td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>
+                <td>${escapeHtml(person.initials)}</td>
+                <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+                ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
     </div>
   `;
 }
@@ -13607,6 +13615,18 @@ document.addEventListener("click", async (event) => {
     document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
     return;
   }
+  const bidTimePresentation = event.target.closest("[data-bid-time-presentation]");
+  if (bidTimePresentation) {
+    publicBidTimePresentation = bidTimePresentation.dataset.bidTimePresentation === "list" ? "list" : "cards";
+    const results = document.querySelector("[data-public-bid-time-results]");
+    if (results) results.dataset.presentation = publicBidTimePresentation;
+    document.querySelectorAll("[data-bid-time-presentation]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.bidTimePresentation === publicBidTimePresentation));
+    });
+    const hint = document.querySelector(".bid-time-list-hint");
+    if (hint) hint.hidden = publicBidTimePresentation !== "list";
+    return;
+  }
   const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
   if (memberPresentation) {
     memberRdoPresentation = memberPresentation.dataset.memberRdoPresentation === "table" ? "table" : "cards";
@@ -14358,12 +14378,16 @@ document.addEventListener("input", (event) => {
   if (event.target.matches("[data-mobile-bid-search]")) {
     const query = event.target.value.trim().toLowerCase();
     let matches = 0;
-    document.querySelectorAll(".mobile-bid-time-card").forEach((card) => {
+    document.querySelectorAll("[data-public-bid-time-card]").forEach((card) => {
       const name = `${card.querySelector("[data-bidder-name]").textContent} ${card.querySelector("p").textContent}`.toLowerCase();
       card.hidden = !name.includes(query);
       if (!card.hidden) matches += 1;
     });
-    document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    document.querySelectorAll("[data-public-bid-time-row]").forEach((row) => {
+      row.hidden = !row.textContent.toLowerCase().includes(query);
+    });
+    const emptyMessage = document.querySelector("[data-mobile-bid-empty]");
+    if (emptyMessage) emptyMessage.hidden = matches > 0 || !query;
     return;
   }
 
