@@ -4478,6 +4478,66 @@ function rdoWeekdaysForLine(line) {
   return new Set(line.week.map((value, index) => (value === "RDO" ? index : null)).filter((index) => index !== null));
 }
 
+function leaveDateConflictsWithRdoLine(key, line) {
+  return Boolean(line) && rdoWeekdaysForLine(line).has(dateFromKey(key).getDay());
+}
+
+function reconcileUnsubmittedLeaveForRdoLine(line) {
+  if (!line) return 0;
+
+  let removedDates = 0;
+  const nextDrafts = [];
+
+  leaveDraftQueue.forEach((item) => {
+    const dateKeys = leaveDateKeysForItem(item);
+    const conflictingDates = dateKeys.filter((key) => leaveDateConflictsWithRdoLine(key, line));
+    if (!conflictingDates.length) {
+      nextDrafts.push(item);
+      return;
+    }
+    removedDates += conflictingDates.length;
+  });
+  leaveDraftQueue = nextDrafts;
+
+  let removedSelectedDate = false;
+  [...selectedLeaveDates].forEach((key) => {
+    if (!leaveDateConflictsWithRdoLine(key, line)) return;
+    selectedLeaveDates.delete(key);
+    removedSelectedDate = true;
+    removedDates += 1;
+  });
+  if (removedSelectedDate) leaveRangePreviewActive = false;
+
+  if (leaveRangePreviewActive) {
+    const previewKeys = leaveBuilderDateKeys();
+    if (previewKeys.some((key) => leaveDateConflictsWithRdoLine(key, line))) {
+      leaveRangePreviewActive = false;
+      removedDates += previewKeys.filter((key) => leaveDateConflictsWithRdoLine(key, line)).length;
+    }
+  }
+
+  if (!removedDates) return 0;
+
+  const remainingSelection = [...selectedLeaveDates].sort();
+  if (remainingSelection.length) {
+    leaveRangeStartKey = remainingSelection[0];
+    leaveRangeEndKey = remainingSelection[remainingSelection.length - 1];
+    leaveRangeSelectionComplete = true;
+  } else if (usesIndividualLeaveDateSelection()) {
+    leaveRangeSelectionComplete = false;
+  }
+
+  syncLeaveBuilderInputs();
+  renderLeaveDatePicker();
+  renderLeaveDraftQueue();
+  renderLeaveAllowanceSummary();
+  setLeaveBuilderStatus(
+    `${removedDates} unsubmitted leave ${removedDates === 1 ? "date was" : "dates were"} removed because ${removedDates === 1 ? "it is" : "they are"} an RDO on Line ${line.line}.`,
+    "info"
+  );
+  return removedDates;
+}
+
 function rdoLineForInitials(initials = currentUser.initials) {
   const request = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
@@ -4907,6 +4967,19 @@ function renderCalendars({ includePublic = true, includeMember = true } = {}) {
     makeCalendar("leave-calendar");
     makeCalendar("full-calendar");
   }
+}
+
+function renderMemberCalendarForPage(pageName) {
+  const calendarIds = {
+    dashboard: "dashboard-calendar",
+    leave: "leave-calendar",
+    calendar: "full-calendar",
+  };
+  const calendarId = calendarIds[pageName];
+  if (!calendarId) return;
+  updateCalendarViewControls();
+  updateCalendarYearLabels();
+  makeCalendar(calendarId);
 }
 
 function refreshMemberCalendarDates(dateKeys = []) {
@@ -12517,7 +12590,7 @@ function setPage(pageName) {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
-    renderCalendars({ includePublic: false });
+    renderMemberCalendarForPage(pageName);
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
   }
 }
@@ -13756,11 +13829,14 @@ document.addEventListener("click", async (event) => {
 
   const row = event.target.closest("[data-line-id]");
   if (row && !row.classList.contains("occupied-row")) {
+    const previousLineId = selectedLineId;
     selectedLineId = row.dataset.lineId;
+    const selectedLine = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+    if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
+      reconcileUnsubmittedLeaveForRdoLine(selectedLine);
+    }
     renderRdoLines();
     updateSelectedLine();
-    renderCalendars({ includePublic: false });
-    renderLeaveSlotBoard();
     return;
   }
 
