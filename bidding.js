@@ -3074,6 +3074,14 @@ function leaveDraftTotalWeeks() {
   return roundOneDraftWeekKeySet().size;
 }
 
+function sortLeaveDraftQueueByDate() {
+  leaveDraftQueue.sort((left, right) => {
+    const leftKey = leaveDateKeysForItem(left)[0] || "";
+    const rightKey = leaveDateKeysForItem(right)[0] || "";
+    return leftKey.localeCompare(rightKey) || String(left.id || "").localeCompare(String(right.id || ""));
+  });
+}
+
 function isRoundOneLeaveItem(item) {
   return item?.round === 1 || Number(item?.weekUnits || 0) > 0;
 }
@@ -3588,6 +3596,7 @@ function addOrUpdateLeaveSubmission() {
         weekKeys,
       }];
   leaveDraftQueue.push(...newDrafts);
+  sortLeaveDraftQueueByDate();
   const leaveNotesInput = document.querySelector("[data-leave-notes-input]");
   if (leaveNotesInput) leaveNotesInput.value = "";
   leaveRangeSelectionComplete = true;
@@ -3685,6 +3694,7 @@ function previewLeaveSubmission() {
 function removeLeaveDraft(id) {
   const removedDraft = leaveDraftQueue.find((item) => item.id === id);
   leaveDraftQueue = leaveDraftQueue.filter((item) => item.id !== id);
+  sortLeaveDraftQueueByDate();
   refreshLeaveDraftUi(removedDraft ? leaveDisplayDatesForItem(removedDraft, currentUser.initials) : []);
   setLeaveBuilderStatus("Removed from the preview batch.", "info");
 }
@@ -3788,7 +3798,7 @@ async function submitLeaveDraftBatch() {
   const batchId = `leave-batch-${currentUser.initials.toLowerCase()}-${Date.now()}`;
   const submittedAt = formatDateTime(new Date());
   const startingPriority = nextLeavePriority();
-  const newRequests = leaveDraftQueue.map((draft) => ({
+  const newRequests = leaveDraftQueue.map((draft, index) => ({
     id: `leave-${currentUser.initials.toLowerCase()}-${Date.now()}-${draft.id}`,
     type: "Leave",
     ghostBid: Boolean(currentUser.ghostBidder),
@@ -3797,7 +3807,7 @@ async function submitLeaveDraftBatch() {
     initials: currentUser.initials,
     bidAs: currentUserBidAs(),
     seniority: currentUser.seniorityRank,
-    priority: startingPriority + leaveDraftQueue.indexOf(draft),
+    priority: startingPriority + index,
     status: "Pending",
     submittedAt,
     batchId,
