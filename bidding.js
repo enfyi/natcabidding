@@ -10107,7 +10107,7 @@ async function saveSupabaseRosterRows(rows) {
     originalInitials: row.originalInitials || row.initials,
   }));
 
-  const { error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
+  const { data, error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
   if (error) {
     if (/admin_save_bidder_roster_rows|function .*not found|Could not find/i.test(error.message || "")) {
       for (const row of rows) {
@@ -10133,7 +10133,10 @@ async function saveSupabaseRosterRows(rows) {
     };
   }
 
-  return { saved: true };
+  return {
+    saved: true,
+    bidWindowsReassigned: Number(data?.bid_windows_reassigned || 0),
+  };
 }
 
 async function deactivateSupabaseRosterEntry(person) {
@@ -10311,7 +10314,7 @@ async function saveRosterEntry(event) {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${values.firstName} ${values.lastName} saved to Supabase.`
+      ? `${values.firstName} ${values.lastName} saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );
@@ -10546,7 +10549,7 @@ async function applyBulkRosterChanges() {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${editedEntries.length} visible roster rows saved to Supabase.`
+      ? `${editedEntries.length} visible roster rows saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );

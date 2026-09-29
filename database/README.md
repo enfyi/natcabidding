@@ -180,6 +180,8 @@ Run `database/admin_roster_management.sql` to enable atomic roster editing from
 the Admin Console. It saves names, initials, contact information, area, bid role,
 seniority rank, leave allowance, and active status by immutable bidder ID, while
 also supporting the older initials-based payload during deployment rollout.
+When seniority changes, draft and open bid-window times stay with their rank and
+are reassigned to every bidder affected by the move in the same transaction.
 
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 
