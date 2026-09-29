@@ -7919,6 +7919,7 @@ function thirdDaySwingIndex(week) {
 
   const normalizedWeek = week.map((value) => String(value || "").trim().toUpperCase());
   if (normalizedWeek.every((value) => value === "RDO")) return -1;
+  if (normalizedWeek.some((value) => /^M\d/.test(value))) return -1;
 
   let longestRdoRun = null;
   normalizedWeek.forEach((value, index) => {
