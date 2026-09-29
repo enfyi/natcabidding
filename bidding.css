@@ -3720,13 +3720,20 @@ tr.occupied-row .rdo-tag {
 }
 
 .intake-workspace {
-  grid-template-columns: minmax(520px, 0.9fr) 360px 360px;
+  grid-template-columns: minmax(620px, 1fr) minmax(430px, 520px);
 }
 
 .intake-info-stack {
   display: grid;
+  grid-column: 1 / -1;
+  grid-row: 2;
   align-content: start;
   gap: 16px;
+}
+
+.intake-workspace > .right-stack {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .intake-queue {
@@ -9649,6 +9656,133 @@ video {
   .bidder-editor { padding: 16px; }
   .bidder-editor-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .bidder-editor-date-row { grid-template-columns: 1fr; border-top: 1px solid #dbe2e7; padding-top: 12px; }
+}
+
+/* Compact intake tools keep reference material above the working columns. */
+.intake-control-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: start;
+}
+
+.intake-control-bar[hidden] {
+  display: none;
+}
+
+.intake-control-card {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 104px;
+  margin: 0;
+  padding: 18px 48px 18px 20px;
+  overflow: hidden;
+  color: #152d3b;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-control-card::after {
+  content: "›";
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  color: #47627f;
+  font-size: 1.35rem;
+  font-weight: 900;
+  transform: translateY(-50%);
+  transition: transform 160ms ease;
+}
+
+.intake-control-card[aria-expanded="true"]::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.intake-control-card:focus-visible {
+  outline: 3px solid rgba(33, 107, 98, 0.25);
+  outline-offset: 2px;
+}
+
+.intake-control-card > span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.intake-control-card strong {
+  color: #152d3b;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.intake-control-card small {
+  color: #627080;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.intake-control-card .pill {
+  flex: 0 0 auto;
+  min-height: 34px;
+  height: auto;
+}
+
+.intake-control-content {
+  padding: 20px;
+}
+
+.intake-control-drawer {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+}
+
+.intake-control-drawer.bidder-editor .intake-control-content {
+  padding: 20px 24px 24px;
+}
+
+.intake-rule-card .current-round-rule,
+.intake-rule-card .round-rule-summary-list,
+.intake-rule-card .plain-list {
+  margin-top: 0;
+}
+
+.intake-control-cue {
+  flex: 0 0 auto;
+  color: #216b62;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+@media (max-width: 1100px) {
+  .intake-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  }
+}
+
+@media (max-width: 760px) {
+  .intake-control-bar,
+  .intake-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-workspace > .right-stack,
+  .intake-workspace > .intake-info-stack {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .intake-control-card {
+    min-height: 88px;
+    padding: 14px 44px 14px 16px;
+  }
 }
 
 /* Phone navigation, readable schedules, and calendar detail sheets. */
