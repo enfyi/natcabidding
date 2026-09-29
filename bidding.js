@@ -7291,11 +7291,12 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
       lastPattern = line.pattern;
     }
 
+    const swingIndex = thirdDaySwingIndex(line.week);
     rows.push(`
       <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
         <td>${line.line}</td>
         <td><b>${lineOccupant(line)}</b></td>
-        ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
+        ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td></td>
         <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
       </tr>
@@ -7320,17 +7321,20 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
           <span>${sectionLines.length} ${lineLabel}</span>
         </div>
         <div class="mobile-rdo-cards">
-          ${sectionLines.map((line) => `
-            <details class="mobile-rdo-card">
-              <summary>
-                <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
-                <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
-              </summary>
-              <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
-              <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
-            </details>
-          `).join("")}
+          ${sectionLines.map((line) => {
+            const swingIndex = thirdDaySwingIndex(line.week);
+            return `
+              <details class="mobile-rdo-card">
+                <summary>
+                  <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
+                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+                </summary>
+                <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
+                <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+              </details>
+            `;
+          }).join("")}
         </div>
         <div class="table-wrap rdo-page-table-wrap" tabindex="0" role="region" aria-label="${section} schedule comparison table, scroll horizontally">
           <table class="line-table public-rdo-table public-mobile-rdo-table">
@@ -7899,14 +7903,63 @@ function updateBidWindow(force = false) {
   });
 }
 
+function shiftStartMinutes(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/^[A-Z]+/, "");
+  const match = normalized.match(/^(\d{1,2})(?::?(\d{2}))$/);
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return (hours * 60) + minutes;
+}
+
+function thirdDaySwingIndex(week) {
+  if (!Array.isArray(week) || week.length === 0) return -1;
+
+  const normalizedWeek = week.map((value) => String(value || "").trim().toUpperCase());
+  if (normalizedWeek.every((value) => value === "RDO")) return -1;
+
+  let longestRdoRun = null;
+  normalizedWeek.forEach((value, index) => {
+    const previousIndex = (index - 1 + normalizedWeek.length) % normalizedWeek.length;
+    if (value !== "RDO" || normalizedWeek[previousIndex] === "RDO") return;
+
+    let length = 0;
+    while (length < normalizedWeek.length && normalizedWeek[(index + length) % normalizedWeek.length] === "RDO") {
+      length += 1;
+    }
+    if (!longestRdoRun || length > longestRdoRun.length) longestRdoRun = { index, length };
+  });
+
+  if (!longestRdoRun) return -1;
+
+  const workweekStart = (longestRdoRun.index + longestRdoRun.length) % normalizedWeek.length;
+  let workedShiftCount = 0;
+  for (let offset = 0; offset < normalizedWeek.length; offset += 1) {
+    const index = (workweekStart + offset) % normalizedWeek.length;
+    const value = normalizedWeek[index];
+    if (!value || value === "RDO") continue;
+
+    workedShiftCount += 1;
+    if (workedShiftCount === 3) {
+      const startMinutes = shiftStartMinutes(value);
+      return startMinutes !== null && startMinutes >= (10 * 60) ? index : -1;
+    }
+  }
+
+  return -1;
+}
+
 function renderWeek(targetId, week = selectedWeek) {
   const target = document.getElementById(targetId);
   if (!target) return;
 
   const values = Array.isArray(week[0]) ? week : dayNames.map((day, index) => [day, week[index]]);
+  const swingIndex = thirdDaySwingIndex(values.map(([, value]) => value));
   target.innerHTML = values
-    .map(([day, value]) => `
-      <div class="day-cell ${value === "RDO" ? "rdo" : ""}">
+    .map(([day, value], index) => `
+      <div class="day-cell ${value === "RDO" ? "rdo" : ""} ${index === swingIndex ? "third-day-swing" : ""}">
         <small>${day}</small>
         <b>${value}</b>
       </div>
@@ -7935,11 +7988,11 @@ function nextFatigueGroupAfter(group) {
   return FATIGUE_GROUP_ROTATION[(index + 1) % FATIGUE_GROUP_ROTATION.length];
 }
 
-function shiftCell(value) {
+function shiftCell(value, isThirdDaySwing = false) {
   const isRdo = value === "RDO";
   const special = /^[MSN]/.test(value);
-  const className = isRdo ? "rdo-tag" : special ? "shift special" : "shift";
-  return `<span class="${className}">${value}</span>`;
+  const className = `${isRdo ? "rdo-tag" : special ? "shift special" : "shift"}${isThirdDaySwing ? " third-day-swing" : ""}`;
+  return `<span class="${className}"${isThirdDaySwing ? ' title="Third-day swing"' : ""}>${value}</span>`;
 }
 
 function lineOccupant(line) {
@@ -8140,12 +8193,13 @@ function renderRdoLines() {
       ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>`
       : "";
     const midValue = lineMidReferenceValue(line);
+    const swingIndex = thirdDaySwingIndex(line.week);
 
     rows.push(`
       <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
-        ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
+        ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
         <td>${userChoiceCell(midValue)}</td>
       </tr>
@@ -8169,6 +8223,7 @@ function renderRdoLines() {
           .filter(Boolean)
           .join(", ") || line.pattern;
         const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const swingIndex = thirdDaySwingIndex(line.week);
         const selectButton = !isOccupied && isViewingHomeArea() && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
           : "";
@@ -8179,7 +8234,7 @@ function renderRdoLines() {
               <span class="mobile-line-status">${status}</span>
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
-            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
             <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
           </details>
         `;
