@@ -26,7 +26,8 @@ Run `database/admin_profile_adm.sql` to mark the standalone Area A admin login
 for `zla.bidding@gmail.com` as `ADM` and clear any bid windows attached to it.
 
 For bid-year-specific ghost bidding, run `database/ghost_bidding.sql` after the
-base schema, then run or re-run `database/transactional_bidding.sql` and
+base schema, then run `database/fatigue_group_balancing.sql` before running or
+re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
 `database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
