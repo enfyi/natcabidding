@@ -5836,7 +5836,7 @@ function syncAccountFields() {
     hasSession
       ? supabaseState.pendingAuthEmail
         ? `Email change pending confirmation for ${supabaseState.pendingAuthEmail}.`
-        : "You can set a password for future email/password sign-in or request a login email change."
+        : "You can set a first password, change an existing password, or request a login email change."
       : "Login email and password changes are available after signing in with Supabase."
   );
 
@@ -5844,7 +5844,7 @@ function syncAccountFields() {
     input.disabled = !hasSession;
     input.placeholder = hasSession ? "new.email@example.com" : "";
   });
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.disabled = !hasSession;
   });
   document.querySelectorAll("[data-update-account-email], [data-update-account-password]").forEach((button) => {
@@ -5884,9 +5884,26 @@ function accountEmailInputValue() {
 }
 
 function clearAccountPasswordInputs() {
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.value = "";
   });
+}
+
+function friendlyAccountPasswordFailure(error) {
+  const code = error?.code || "";
+  if (code === "current_password_required") {
+    return "Enter your current password above, then choose a different new password. If you do not know it, use Set or reset password on the login screen.";
+  }
+  if (code === "current_password_mismatch") {
+    return "The current password is incorrect. Try again or use Set or reset password on the login screen.";
+  }
+  if (code === "same_password") {
+    return "That is already your password. Choose a different new password.";
+  }
+  if (code === "reauthentication_needed") {
+    return "For security, request a fresh Set or reset password email from the login screen before changing this password.";
+  }
+  return error?.message || "Password could not be updated.";
 }
 
 async function requireSupabaseAccountSession() {
@@ -6079,7 +6096,7 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
-  setAuthStatus("Login link sent. Check that email inbox.", "success");
+  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
@@ -6249,6 +6266,7 @@ async function updateSupabaseAccountPassword() {
   const session = await requireSupabaseAccountSession();
   if (!session) return;
 
+  const currentPassword = document.querySelector("[data-account-current-password]")?.value || "";
   const password = document.querySelector("[data-account-password]")?.value || "";
   const confirmPassword = document.querySelector("[data-account-password-confirm]")?.value || "";
 
@@ -6262,9 +6280,12 @@ async function updateSupabaseAccountPassword() {
   }
 
   setAccountFormStatus("Updating password...");
-  const { error } = await supabaseClient().auth.updateUser({ password });
+  const passwordUpdate = currentPassword
+    ? { password, current_password: currentPassword }
+    : { password };
+  const { error } = await supabaseClient().auth.updateUser(passwordUpdate);
   if (error) {
-    setAccountFormStatus(error.message || "Password could not be updated.", "error");
+    setAccountFormStatus(friendlyAccountPasswordFailure(error), "error");
     return;
   }
 
