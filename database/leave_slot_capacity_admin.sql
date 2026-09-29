@@ -6,12 +6,48 @@ create table if not exists public.leave_slot_capacities (
   area_id uuid not null references public.areas(id) on delete cascade,
   slot_date date not null,
   cpc_capacity integer not null default 3 check (cpc_capacity between 0 and 99),
-  dev_capacity integer not null default 2 check (dev_capacity between 0 and 99),
+  dev_capacity integer not null default 4 check (dev_capacity between 0 and 99),
   updated_by uuid references public.bidders(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (bid_year_id, area_id, slot_date)
 );
+
+alter table public.leave_slot_capacities
+  alter column dev_capacity set default 4;
+
+-- Area A-F now default to four DEV slots. Preserve explicit daily capacity
+-- overrides and leave TMU at its existing two-slot default.
+insert into public.leave_slots (
+  bid_year_id,
+  area_id,
+  slot_date,
+  slot_group,
+  slot_code,
+  status
+)
+select
+  seeded_date.bid_year_id,
+  seeded_date.area_id,
+  seeded_date.slot_date,
+  'dev',
+  'D' || slot_number,
+  'open'
+from (
+  select distinct s.bid_year_id, s.area_id, s.slot_date
+  from public.leave_slots s
+) seeded_date
+join public.areas a on a.id = seeded_date.area_id
+left join public.leave_slot_capacities capacity
+  on capacity.bid_year_id = seeded_date.bid_year_id
+ and capacity.area_id = seeded_date.area_id
+ and capacity.slot_date = seeded_date.slot_date
+cross join lateral pg_catalog.generate_series(
+  2,
+  coalesce(capacity.dev_capacity, 4)
+) as series(slot_number)
+where pg_catalog.lower(a.code) in ('area-a', 'area-b', 'area-c', 'area-d', 'area-e', 'area-f')
+on conflict (bid_year_id, area_id, slot_date, slot_group, slot_code) do nothing;
 
 create index if not exists leave_slot_capacities_date_idx
   on public.leave_slot_capacities(bid_year_id, area_id, slot_date);
@@ -58,6 +94,7 @@ declare
   target_area_id uuid;
   target_area_code text;
   standard_cpc_capacity integer;
+  standard_dev_capacity integer;
   cpc_used integer;
   dev_used integer;
 begin
@@ -92,6 +129,7 @@ begin
   end if;
 
   standard_cpc_capacity := case when lower(target_area_code) = 'tmu' then 2 else 3 end;
+  standard_dev_capacity := case when lower(target_area_code) = 'tmu' then 2 else 4 end;
 
   select
     count(*) filter (where s.slot_group = 'cpc'),
@@ -222,7 +260,7 @@ begin
     );
   end if;
 
-  if requested_dev_capacity < 2 then
+  if requested_dev_capacity < standard_dev_capacity then
     insert into public.leave_slots (
       bid_year_id,
       area_id,
