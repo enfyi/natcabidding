@@ -13268,6 +13268,18 @@ document.addEventListener('click', (event) => {
   if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
   if (event.target.closest('[data-editor-submit]')) void processBidderEditor(false);
   if (event.target.closest('[data-editor-save-ghost]')) void saveBidderGhostStatus();
+
+  const intakeControl = event.target.closest('[data-intake-control]');
+  if (intakeControl) {
+    const controlName = intakeControl.dataset.intakeControl;
+    const shouldOpen = intakeControl.getAttribute('aria-expanded') !== 'true';
+    document.querySelectorAll('[data-intake-control]').forEach((button) => {
+      button.setAttribute('aria-expanded', String(shouldOpen && button.dataset.intakeControl === controlName));
+    });
+    document.querySelectorAll('[data-intake-control-panel]').forEach((panel) => {
+      panel.hidden = !shouldOpen || panel.dataset.intakeControlPanel !== controlName;
+    });
+  }
 });
 
 function renderApp() {

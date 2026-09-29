@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -848,16 +848,57 @@
         </section>
 
         <section class="page" id="intake-page" data-page-panel="intake">
-          <section class="panel bidder-editor" data-bidder-editor data-admin-only hidden aria-labelledby="bidder-editor-title">
-            <div class="panel-header"><div><span class="eyebrow">ADMIN / INTAKE</span><h2 id="bidder-editor-title">Edit bidder information</h2>
-              <p>Find a bidder, review every round, then validate and submit your changes.</p></div><span class="pill">Bid year <b data-editor-year></b></span></div>
-            <label class="bidder-editor-search">Search by name or initials
-              <input type="search" data-bidder-editor-search placeholder="Enter a name or initials…" autocomplete="off" />
-            </label>
-            <div class="bidder-editor-results" data-bidder-editor-results></div>
-            <p data-bidder-editor-status role="status" aria-live="polite">Enter a name or initials to find a bidder.</p>
-            <div data-bidder-editor-form></div>
-          </section>
+          <div class="intake-control-bar" data-admin-only hidden>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-bidder-info" data-intake-control="bidder">
+              <span>
+                <span class="eyebrow">ADMIN / INTAKE</span>
+                <strong>Edit Bidder Info</strong>
+                <small>Search and update any controller.</small>
+              </span>
+              <span class="pill">Bid year <b data-editor-year></b></span>
+            </button>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-round-rules" data-intake-control="round-rules">
+              <span>
+                <span class="eyebrow">REFERENCE</span>
+                <strong>Round Rules</strong>
+                <small data-round-rule-heading>Round 1 Rules</small>
+              </span>
+              <span class="pill" data-round-rule-limit>1 or 2 weeks</span>
+            </button>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-approval-rules" data-intake-control="approval-rules">
+              <span>
+                <span class="eyebrow">REFERENCE</span>
+                <strong>Approval Rules</strong>
+                <small>Current intake guidance set by Admin.</small>
+              </span>
+              <span class="intake-control-cue" aria-hidden="true">View</span>
+            </button>
+            <section class="panel intake-control-drawer bidder-editor" id="intake-bidder-info" data-intake-control-panel="bidder" data-bidder-editor hidden aria-labelledby="bidder-editor-title">
+              <div class="intake-control-content">
+                <h2 class="visually-hidden" id="bidder-editor-title">Edit Bidder Info</h2>
+                <label class="bidder-editor-search">Search by name or initials
+                  <input type="search" data-bidder-editor-search placeholder="Enter a name or initials…" autocomplete="off" />
+                </label>
+                <div class="bidder-editor-results" data-bidder-editor-results></div>
+                <p data-bidder-editor-status role="status" aria-live="polite">Enter a name or initials to find a bidder.</p>
+                <div data-bidder-editor-form></div>
+              </div>
+            </section>
+            <section class="panel intake-control-drawer intake-rule-card" id="intake-round-rules" data-intake-control-panel="round-rules" hidden aria-label="Round Rules">
+              <div class="intake-control-content">
+                <div class="current-round-rule">
+                  <strong data-round-rule-limit>1 or 2 weeks</strong>
+                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
+                </div>
+                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
+              </div>
+            </section>
+            <section class="panel intake-control-drawer intake-rule-card" id="intake-approval-rules" data-intake-control-panel="approval-rules" hidden aria-label="Approval Rules">
+              <div class="intake-control-content">
+                <ul class="plain-list success-list" data-approval-rule-summary></ul>
+              </div>
+            </section>
+          </div>
           <div class="workspace-grid intake-workspace">
             <section class="panel">
               <div class="panel-header">
@@ -900,23 +941,6 @@
               <div class="intake-queue" id="intake-queue"></div>
             </section>
             <aside class="intake-info-stack">
-              <section class="panel editable-rule-card">
-                <h3 data-round-rule-heading>Round 1 Rules</h3>
-                <div class="current-round-rule">
-                  <strong data-round-rule-limit>1 or 2 weeks</strong>
-                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
-                </div>
-                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
-              </section>
-              <section class="panel">
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Approval Rules</h3>
-                    <p>Current intake guidance set by Admin.</p>
-                  </div>
-                </div>
-                <ul class="plain-list success-list" data-approval-rule-summary></ul>
-              </section>
               <section class="panel help-summary-card">
                 <div class="panel-header compact">
                   <div>
@@ -1892,7 +1916,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
