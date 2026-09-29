@@ -7440,6 +7440,25 @@ body {
   background: #e5e7eb;
 }
 
+.public-main .shift.third-day-swing,
+.public-main tr.occupied-row .shift.third-day-swing,
+.app-main .shift.third-day-swing,
+.app-main tr.occupied-row .shift.third-day-swing {
+  border: 1px solid var(--fatigue-b-line);
+  color: #6f4b08;
+  background: var(--fatigue-b-soft);
+}
+
+.app-main .selected-line-card .day-cell.third-day-swing {
+  border-color: var(--fatigue-b-line);
+  background: var(--fatigue-b-soft);
+}
+
+.app-main .selected-line-card .day-cell.third-day-swing b {
+  color: #6f4b08;
+  background: transparent;
+}
+
 .app-main tr.selected-row td:nth-child(1),
 .app-main tr.selected-row td:nth-child(2) {
   background: #e6f6f7;
