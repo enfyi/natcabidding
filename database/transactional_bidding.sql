@@ -569,6 +569,8 @@ declare
   enforce_bid_windows boolean := true;
   configured_test_round integer;
 begin
+  requested_fatigue_group := nullif(trim(requested_fatigue_group), '');
+
   select * into actor from public.bidders
   where auth_user_id = auth.uid()
     and lower(email) = lower(auth.jwt() ->> 'email')
@@ -637,7 +639,6 @@ begin
   end if;
 
   if line_row.line_type = 'CPC' and target.bid_role <> 'GL' then
-    requested_fatigue_group := nullif(trim(requested_fatigue_group), '');
     if requested_fatigue_group is not null and requested_fatigue_group not in ('A', 'B', 'C') then
       raise exception 'Choose fatigue group A, B, or C.';
     end if;
@@ -1005,6 +1006,11 @@ declare
   target public.bidders%rowtype;
   line_id uuid;
 begin
+  requested_fatigue_group := nullif(trim(requested_fatigue_group), '');
+  if requested_fatigue_group is not null and requested_fatigue_group not in ('A', 'B', 'C') then
+    raise exception 'Fatigue group must be A, B, C, or unassigned.';
+  end if;
+
   select * into actor from public.bidders
   where auth_user_id = auth.uid() and lower(email) = lower(auth.jwt() ->> 'email') and active;
   if actor.id is null or actor.role not in ('admin', 'intake') then raise exception 'Bidding reviewer access is required.'; end if;
