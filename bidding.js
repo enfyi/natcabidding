@@ -7586,8 +7586,7 @@ function renderPublicBidTimeTable(area) {
         `).join("")}
         ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
       </div>
-      <p class="mobile-table-hint bid-time-list-hint" ${publicBidTimePresentation === "list" ? "" : "hidden"}>Swipe sideways to see every bid round.</p>
-      <div class="table-wrap public-table-wrap flat desktop-bid-times" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
+      <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
         <table class="public-bid-time-table">
           <thead>
             <tr>
@@ -13623,8 +13622,6 @@ document.addEventListener("click", async (event) => {
     document.querySelectorAll("[data-bid-time-presentation]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.bidTimePresentation === publicBidTimePresentation));
     });
-    const hint = document.querySelector(".bid-time-list-hint");
-    if (hint) hint.hidden = publicBidTimePresentation !== "list";
     return;
   }
   const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
