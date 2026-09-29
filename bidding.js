@@ -759,45 +759,93 @@ const AREA_CODE_BY_NAME = Object.entries(AREA_NAME_BY_CODE).reduce((lookup, [cod
   return lookup;
 }, {});
 
-const areaCpcCount = 36;
-const areaFatigueMax = Math.floor(areaCpcCount / 3);
+const FATIGUE_GROUPS = ["A", "B", "C"];
 
-const crewSizeByPattern = {
-  "S/S": 6,
-  "S/M": 6,
-  "M/T": 6,
-  "T/W": 6,
-  "W/T": 6,
-  "T/F": 6,
-  "F/S": 6,
-};
+function fatiguePoolForBidRole(bidAs, area) {
+  const role = normalizeBidRoleForArea(bidAs, area);
+  if (["CPC", "TMC"].includes(role)) return "CPC";
+  if (["R-DEV", "D-DEV", "DEV"].includes(role)) return "DEV";
+  return null;
+}
+
+function fatiguePoolForLine(line) {
+  return isCpcLine(line) ? "CPC" : "DEV";
+}
+
+function fatigueRdoSetForLine(line) {
+  if (isCpcLine(line)) return String(line.pattern || "").trim().toUpperCase();
+
+  const rdoDays = (line.week || [])
+    .map((value, index) => String(value || "").trim().toUpperCase() === "RDO" ? index : null)
+    .filter((index) => index !== null);
+  return rdoDays.length ? rdoDays.join("/") : String(line.pattern || "").trim().toUpperCase();
+}
+
+function fatiguePoolLines(area, pool) {
+  return rdoLinesForArea(area).filter((item) => fatiguePoolForLine(item) === pool);
+}
+
+function fatiguePoolRosterCount(area, pool, poolLines) {
+  const rosterCount = senioritySource.filter((entry) =>
+    seniorityEntryActive(entry) &&
+    seniorityEntryArea(entry) === area &&
+    fatiguePoolForBidRole(entry[2], area) === pool
+  ).length;
+  return rosterCount || poolLines.length;
+}
+
+function fatigueGroupLimit(usedByGroup, total, group) {
+  const base = Math.floor(total / FATIGUE_GROUPS.length);
+  const remainder = total % FATIGUE_GROUPS.length;
+  if (!remainder) return base;
+  if ((usedByGroup[group] || 0) > base) return base + 1;
+  const claimedExtras = FATIGUE_GROUPS.filter((name) => (usedByGroup[name] || 0) > base).length;
+  return base + (claimedExtras < remainder ? 1 : 0);
+}
+
+function fatigueGroupCanAccept(usedByGroup, total, group) {
+  if (Object.values(usedByGroup).reduce((sum, value) => sum + value, 0) >= total) return false;
+  const next = { ...usedByGroup, [group]: (usedByGroup[group] || 0) + 1 };
+  const base = Math.floor(total / FATIGUE_GROUPS.length);
+  const remainder = total % FATIGUE_GROUPS.length;
+  const ceiling = base + (remainder ? 1 : 0);
+  return next[group] <= ceiling && FATIGUE_GROUPS.filter((name) => (next[name] || 0) > base).length <= remainder;
+}
 
 function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidateGroup = selectedFatigueGroup) {
   const area = line.area || currentUser.area || "Area A";
-  const areaLines = rdoLinesForArea(area);
-  const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
-  const crewMax = Math.max(1, Math.floor(crewSize / 3));
+  const pool = fatiguePoolForLine(line);
+  const areaLines = fatiguePoolLines(area, pool);
+  const rdoSet = fatigueRdoSetForLine(line);
+  const crewLines = areaLines.filter((item) => fatigueRdoSetForLine(item) === rdoSet);
+  const areaTotal = fatiguePoolRosterCount(area, pool, areaLines);
+  const crewTotal = crewLines.length;
+  const baseAreaUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, areaLines.filter((item) =>
+    item.line !== candidateLineId && item.status === "Taken" && item.group === group
+  ).length]));
+  const baseCrewUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, crewLines.filter((item) =>
+    item.line !== candidateLineId && item.status === "Taken" && item.group === group
+  ).length]));
+  const displayedAreaUsed = { ...baseAreaUsed };
+  const displayedCrewUsed = { ...baseCrewUsed };
+  if (FATIGUE_GROUPS.includes(candidateGroup)) {
+    displayedAreaUsed[candidateGroup] += 1;
+    displayedCrewUsed[candidateGroup] += 1;
+  }
 
-  return ["A", "B", "C"].map((group) => {
-    const areaUsed = areaLines.filter((item) => {
-      if (!isCpcLine(item)) return false;
-      if (item.line === candidateLineId) return candidateGroup === group;
-      return item.status === "Taken" && item.group === group;
-    }).length;
-
-    const crewUsed = areaLines.filter((item) => {
-      if (!isCpcLine(item)) return false;
-      if (item.pattern !== line.pattern) return false;
-      if (item.line === candidateLineId) return candidateGroup === group;
-      return item.status === "Taken" && item.group === group;
-    }).length;
+  return FATIGUE_GROUPS.map((group) => {
+    const areaUsed = displayedAreaUsed[group];
+    const crewUsed = displayedCrewUsed[group];
 
     return {
       group,
       areaUsed,
-      areaMax: areaFatigueMax,
+      areaMax: fatigueGroupLimit(displayedAreaUsed, areaTotal, group),
       crewUsed,
-      crewMax,
+      crewMax: fatigueGroupLimit(displayedCrewUsed, crewTotal, group),
+      available:
+        fatigueGroupCanAccept(baseAreaUsed, areaTotal, group) &&
+        fatigueGroupCanAccept(baseCrewUsed, crewTotal, group),
     };
   });
 }
@@ -807,11 +855,17 @@ function isCpcLine(line) {
 }
 
 function isGroupAvailable(item) {
-  return item.areaUsed < item.areaMax && item.crewUsed < item.crewMax;
+  return item.available;
 }
 
 function canChooseGroup(item, isSelected) {
-  return item.areaUsed < item.areaMax && (isSelected ? item.crewUsed <= item.crewMax : item.crewUsed < item.crewMax);
+  return item.available || isSelected;
+}
+
+function fatigueGroupIsAvailableForLine(line, group, candidateLineId = line?.line) {
+  if (!line || !FATIGUE_GROUPS.includes(group)) return false;
+  const capacity = fatigueCapacityForLine(line, candidateLineId, "").find((item) => item.group === group);
+  return Boolean(capacity && isGroupAvailable(capacity));
 }
 
 function isForcedMid(line) {
@@ -2114,6 +2168,14 @@ async function addOrUpdateRdoSubmission() {
     alert("Choose a fatigue group or No preference before submitting this RDO bid.");
     return;
   }
+  if (
+    selectedFatigueGroup !== NO_FATIGUE_PREFERENCE &&
+    !fatigueGroupIsAvailableForLine(line, selectedFatigueGroup)
+  ) {
+    alert(`Fatigue Group ${selectedFatigueGroup} is now full for this area or RDO set. Choose another group.`);
+    updateSelectedLine();
+    return;
+  }
   if (!isForcedMid(line) && !selectedMidPreference) {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
@@ -2294,7 +2356,7 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
     const isAvailable = isGroupAvailable(item);
     const isSelectable = isAvailable || allowOverride;
     const label = `Group ${item.group}`;
-    const capacity = `Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}`;
+    const capacity = `Area ${item.areaUsed}/${item.areaMax}, RDO set ${item.crewUsed}/${item.crewMax}`;
     const suffix = isAvailable ? "" : allowOverride ? " - Full, override" : " - Full";
     return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isSelectable ? "" : " disabled"}>${label}${suffix} (${capacity})</option>`;
   }).join("");
@@ -4312,6 +4374,16 @@ async function approveIntakeItem(id) {
     renderApp();
     setPage("intake");
     return;
+  }
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
+    const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
+    if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
+      item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+      return;
+    }
   }
   let persisted = false;
   try {
@@ -8297,9 +8369,9 @@ function updateSelectedLine() {
             const isSelected = displayedFatiguePreference === item.group;
             const available = canChooseGroup(item, isSelected);
             return `
-              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, RDO set ${item.crewUsed}/${item.crewMax}">
                 <strong>${item.group}</strong>
-                <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
+                <small>Area ${item.areaUsed}/${item.areaMax} · RDO ${item.crewUsed}/${item.crewMax}</small>
               </button>
             `;
           }).join("")}
@@ -8409,7 +8481,7 @@ function renderFatigueCapacity() {
         <button class="${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
           <strong>${item.group}</strong>
           <span>Area ${item.areaUsed}/${item.areaMax}</span>
-          <span>Crew ${item.crewUsed}/${item.crewMax}</span>
+          <span>RDO ${item.crewUsed}/${item.crewMax}</span>
         </button>
       `;
     }).join("");

@@ -1,5 +1,6 @@
 -- Bidder editor: complete-record validation and atomic, audited saves.
 -- Requires the existing bidding routines and leave_submission_preflight.sql.
+-- Also requires fatigue_group_balancing.sql.
 -- The private date helper follows admin_leave_request_edit.sql, preserving pending status.
 create schema if not exists private;
 revoke all on schema private from public, anon;
@@ -585,7 +586,7 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   actor_id uuid; target public.bidders%rowtype; year_id uuid; before_state jsonb;
   line_row public.rdo_lines%rowtype; line_change jsonb; entry jsonb; prior jsonb;
-  rdo_id uuid; rdo_status text; group_name text; area_max integer; crew_max integer;
+  rdo_id uuid; rdo_status text; group_name text;
   start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer; manual_credit_days integer;
   bucket text; d date; r record;
   ghost_bid boolean;
@@ -629,17 +630,9 @@ begin
     if jsonb_typeof(line_change->'flex') is distinct from 'boolean' or jsonb_typeof(line_change->'aws') is distinct from 'boolean'
       or coalesce(line_change->>'mid','') not in ('Yes','No','BID') then raise exception 'Choose valid Flex, AWS, and Mid values.'; end if;
     if line_row.mid='BID' and line_change->>'mid' <> 'BID' then raise exception 'A designated Mid line must retain BID.'; end if;
-    if line_row.line_type='CPC' and target.bid_role <> 'GL' then
-      select greatest(1,floor(count(*)::numeric/3)::integer) into area_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC';
-      select greatest(1,floor(count(*)::numeric/3)::integer) into crew_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC' and pattern=line_row.pattern;
-      if (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= area_max
-        or (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and pattern=line_row.pattern and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= crew_max then
-        raise exception 'Fatigue group % is full for this area or crew.',group_name;
-      end if;
+    if line_row.line_type in ('CPC','DEV') and target.bid_role <> 'GL'
+      and not private.fatigue_group_is_available(year_id,target.area_id,line_row.id,group_name,target.id) then
+      raise exception 'Fatigue group % is full for this area or RDO set.',group_name;
     end if;
     rdo_id := (before_state->'rdo'->>'id')::uuid;
     rdo_status := coalesce(before_state->'rdo'->>'status','approved');
