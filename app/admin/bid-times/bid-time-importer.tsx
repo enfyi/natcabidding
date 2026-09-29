@@ -93,7 +93,6 @@ export function BidTimeImporter() {
       const nextYears = (yearsResult.data || []) as BidYearOption[]
       setAreas(nextAreas)
       setBidYears(nextYears)
-      setAreaCode(nextAreas[0]?.code || '')
       setBidYear(String(nextYears[0]?.bid_year || ''))
       setAccess('admin')
     }
@@ -247,7 +246,8 @@ export function BidTimeImporter() {
           </label>
           <label>
             Area
-            <select value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+            <select required value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+              <option value="" disabled>Select an area</option>
               {areas.map((area) => <option key={area.code} value={area.code}>{area.name}</option>)}
             </select>
           </label>
@@ -260,7 +260,7 @@ export function BidTimeImporter() {
 
         <p className="import-safety-note"><strong>Safe add/update:</strong> Only populated round cells are added or updated. Omitted bidders and blank round cells remain unchanged.</p>
 
-        <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>
+        <button className="button primary" type="button" disabled={busy || !file || !areaCode} onClick={() => void previewFile()}>
           {busy && !preview ? 'Validating…' : 'Preview import'}
         </button>
       </section>

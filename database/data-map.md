@@ -12,7 +12,7 @@ This maps the current front-end test data to the database tables.
 | `selectedWeek` | `rdo_line_days` for the current bidder's selected line |
 | `roundDateBlocks`, `bidStartTimes`, `userBidWindow` | `bid_rounds`, `bid_windows` |
 | Holiday rules from `holidays.pdf` | `holidays`, `holiday_in_lieu_days` |
-| `leaveSlotCapacity`, `leaveSlotWeeks`, `extraLeaveSlotData` | `leave_slots` |
+| `leaveSlotCapacity`, `leaveSlotWeeks`, `extraLeaveSlotData` | `leave_slots`, `leave_slot_capacities` via `read_public_leave_slots` |
 | `leaveBids` | `leave_requests`, `leave_request_dates`, `leave_request_week_buckets` |
 | `leaveDraftQueue` | `leave_requests` with `draft` or `preview` status |
 | `intakeSchedules` | `intake_schedules` |
@@ -30,7 +30,7 @@ Start with read-only data:
 2. Load the logged-in `bidders` row.
 3. Load that bidder's RDO line.
 4. Load `holidays` and `holiday_in_lieu_days`.
-5. Load `leave_slots` for the calendar.
+5. Load the complete Supabase leave calendar through `read_public_leave_slots`.
 
 After the calendar looks right with live data, wire up writes:
 
