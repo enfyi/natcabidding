@@ -18,7 +18,7 @@
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
     "test:rdo-change-expiration": "node scripts/test-rdo-change-leave-expiration.mjs",
     "test:rdo-preview-leave": "node scripts/test-rdo-preview-leave-reconciliation.mjs",
-    "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs",
+    "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs && node scripts/test-leave-draft-order.mjs",
     "test:bid-change-modal": "node scripts/test-bid-change-modal.mjs",
     "test:bid-window-boundaries": "node scripts/test-bid-window-boundaries.mjs",
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
