@@ -10076,7 +10076,8 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 
 @media (max-width: 720px) {
-  .member-rdo-table {
+  .member-rdo-table,
+  .line-table.public-mobile-rdo-table {
     width: 610px;
     min-width: 610px;
     table-layout: fixed;
@@ -10084,44 +10085,59 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   }
 
   .member-rdo-table th,
-  .member-rdo-table td {
+  .member-rdo-table td,
+  .line-table.public-mobile-rdo-table th,
+  .line-table.public-mobile-rdo-table td {
     padding: 7px 3px;
   }
 
-  .member-rdo-table th {
+  .member-rdo-table th,
+  .line-table.public-mobile-rdo-table th {
     font-size: 0.62rem;
   }
 
   .member-rdo-table th:nth-child(1),
-  .member-rdo-table td:nth-child(1) {
+  .member-rdo-table td:nth-child(1),
+  .line-table.public-mobile-rdo-table th:nth-child(1),
+  .line-table.public-mobile-rdo-table td:nth-child(1) {
     width: 46px;
     min-width: 46px;
   }
 
   .member-rdo-table th:nth-child(2),
-  .member-rdo-table td:nth-child(2) {
+  .member-rdo-table td:nth-child(2),
+  .line-table.public-mobile-rdo-table th:nth-child(2),
+  .line-table.public-mobile-rdo-table td:nth-child(2) {
     left: 46px;
     width: 42px;
     min-width: 42px;
   }
 
   .member-rdo-table th:nth-child(n + 3):nth-child(-n + 9),
-  .member-rdo-table td:nth-child(n + 3):nth-child(-n + 9) {
+  .member-rdo-table td:nth-child(n + 3):nth-child(-n + 9),
+  .line-table.public-mobile-rdo-table th:nth-child(n + 3):nth-child(-n + 9),
+  .line-table.public-mobile-rdo-table td:nth-child(n + 3):nth-child(-n + 9) {
     width: 58px;
   }
 
   .member-rdo-table th:nth-child(10),
-  .member-rdo-table td:nth-child(10) {
+  .member-rdo-table td:nth-child(10),
+  .line-table.public-mobile-rdo-table th:nth-child(10),
+  .line-table.public-mobile-rdo-table td:nth-child(10) {
     width: 52px;
   }
 
   .member-rdo-table th:nth-child(11),
-  .member-rdo-table td:nth-child(11) {
+  .member-rdo-table td:nth-child(11),
+  .line-table.public-mobile-rdo-table th:nth-child(11),
+  .line-table.public-mobile-rdo-table td:nth-child(11) {
     width: 64px;
   }
 
   .member-rdo-table .shift,
-  .member-rdo-table .rdo-tag {
+  .member-rdo-table .rdo-tag,
+  .line-table.public-mobile-rdo-table .shift,
+  .line-table.public-mobile-rdo-table .rdo-tag {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
