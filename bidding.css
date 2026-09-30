@@ -716,6 +716,8 @@ button.seniority-pill {
   min-width: 0;
 }
 
+.public-main .public-rdo-table th:nth-last-child(3),
+.public-main .public-rdo-table td:nth-last-child(3),
 .public-main .public-rdo-table th:nth-last-child(2),
 .public-main .public-rdo-table td:nth-last-child(2) {
   width: 6%;
@@ -10731,15 +10733,15 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 @media (max-width: 720px) {
   .member-rdo-table,
   .line-table.public-mobile-rdo-table {
-    width: 610px;
-    min-width: 610px;
+    width: 662px;
+    min-width: 662px;
     table-layout: fixed;
     font-size: 0.7rem;
   }
 
   .line-table.public-mobile-rdo-table {
-    width: 614px;
-    min-width: 614px;
+    width: 666px;
+    min-width: 666px;
   }
 
   .member-rdo-table th,
@@ -10811,6 +10813,13 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   .member-rdo-table td:nth-child(11),
   .line-table.public-mobile-rdo-table th:nth-child(11),
   .line-table.public-mobile-rdo-table td:nth-child(11) {
+    width: 52px;
+  }
+
+  .member-rdo-table th:nth-child(12),
+  .member-rdo-table td:nth-child(12),
+  .line-table.public-mobile-rdo-table th:nth-child(12),
+  .line-table.public-mobile-rdo-table td:nth-child(12) {
     width: 64px;
   }
 
