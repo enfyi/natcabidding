@@ -62,9 +62,12 @@ const overlayContext = {
   currentUser: { initials: 'GH', area: 'Area A', ghostBidder: true },
   leaveBids: [{ initials: 'GH', area: 'Area A', bidAs: 'CPC', status: 'Approved', range: 'Jan 11, 2027', ghostBid: true }],
   leaveDraftQueue: [{ initials: 'GH', area: 'Area A', bidAs: 'CPC', status: 'Pending', range: 'Jan 11, 2027', ghostBid: true }],
-  intakeQueue: [{ initials: 'GH', area: 'Area A', bidAs: 'CPC', type: 'Leave', status: 'Pending', range: 'Jan 11, 2027', ghostBid: true }],
+  intakeQueue: [
+    { initials: 'GH', area: 'Area A', bidAs: 'CPC', type: 'Leave', status: 'Pending', range: 'Jan 11, 2027', ghostBid: true },
+    { initials: 'GL', area: 'Area A', bidAs: 'GL', type: 'Leave', status: 'Approved', range: 'Jan 11, 2027' },
+  ],
   leaveSlotMap: () => ({}),
-  leaveSlotsForDateFromMap: () => ({ area: 'Area A', cpc: [], dev: [], cpcCapacity: 2, devCapacity: 1 }),
+  leaveSlotsForDateFromMap: () => ({ area: 'Area A', cpc: ['AA', 'BB'], dev: [], glBids: [], cpcCapacity: 3, devCapacity: 1 }),
   leaveSlotCapacityForDetails: (details, bucket) => details[`${bucket}Capacity`],
   activeLeavePreviewItem: () => ({ initials: 'GH', bidAs: 'CPC', range: 'Jan 11, 2027' }),
   leaveSlotDateKeys: () => ['2027-01-11'],
@@ -72,12 +75,18 @@ const overlayContext = {
   leaveSlotDatesForInitials: () => ['2027-01-11'],
   leaveSlotBucketForBidAs: () => 'cpc',
   currentUserBidAs: () => 'CPC',
-  isGhostLeaveItem: () => true,
+  isGhostLeaveItem: (item) => item?.ghostBid === true,
+  isGlLeaveItem: (item) => item?.bidAs === 'GL',
 };
 vm.createContext(overlayContext);
 vm.runInContext(source.slice(overlayStart, overlayEnd), overlayContext);
 const visible = overlayContext.visibleLeaveSlotDetailsFromMap('2027-01-11', 'Area A');
-assert.deepEqual([...visible.cpc], [], 'Ghost leave is not painted into CPC calendar capacity');
+assert.deepEqual([...visible.cpc], ['AA', 'BB'], 'Ghost and GL leave do not change the CPC calendar capacity');
+assert.deepEqual(
+  JSON.parse(JSON.stringify(visible.glBids)),
+  [{ initials: 'GL', status: 'Approved', label: 'GL Bid' }],
+  'GL leave remains visible as an annotated calendar overlay',
+);
 
 assert.match(source, /round >= 1 && round <= 6/);
 console.log('PASS ghost and GL bidders stay outside area totals while GL uses its personal balance through Round 6');
