@@ -1258,7 +1258,7 @@ begin
       ) then raise exception 'Leave after Round 1 cannot include the bidder''s RDO.'; end if;
 
       bucket := case when target.bid_role in ('R-DEV', 'D-DEV', 'DEV') then 'dev' else 'cpc' end;
-      if not ghost_bid then
+      if not ghost_bid and target.bid_role <> 'GL' then
         for date_row in
           select d.leave_date from public.leave_request_dates d
           where d.leave_request_id = leave_row.id and d.charged

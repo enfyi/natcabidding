@@ -25,8 +25,8 @@ begin
   where b.auth_user_id = auth.uid() and lower(b.email) = lower(auth.jwt() ->> 'email')
     and b.role = 'admin' and b.active;
   if actor_id is null then raise exception 'System administrator access is required.'; end if;
-  if requested_round is null or requested_round not between 1 and 4 then
-    raise exception 'Choose a bidding round from 1 through 4.';
+  if requested_round is null or requested_round not between 1 and 6 then
+    raise exception 'Choose a bidding round from 1 through 6.';
   end if;
   select s.bid_year_id into target_year from public.bid_year_settings s
   join public.bid_years y on y.id = s.bid_year_id

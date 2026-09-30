@@ -91,6 +91,7 @@ declare
   weekday_number integer;
   inserted_count integer := 0;
   updated_count integer := 0;
+  next_display_order integer;
 begin
   if not (select public.is_current_admin()) then
     raise exception 'Admin access is required.' using errcode = '42501';
@@ -123,6 +124,12 @@ begin
   if jsonb_array_length(requested_lines) < 1 or jsonb_array_length(requested_lines) > 500 then
     raise exception 'Import between 1 and 500 bid lines at a time.';
   end if;
+
+  select coalesce(max(rl.display_order), 0)
+  into next_display_order
+  from public.rdo_lines rl
+  where rl.bid_year_id = target_bid_year_id
+    and rl.area_id = target_area_id;
 
   for line_item in select value from jsonb_array_elements(requested_lines)
   loop
@@ -191,6 +198,7 @@ begin
         bid_year_id,
         area_id,
         line_code,
+        display_order,
         line_type,
         pattern,
         fatigue_group,
@@ -203,6 +211,7 @@ begin
         target_bid_year_id,
         target_area_id,
         line_code_value,
+        next_display_order + 10,
         line_type_value,
         pattern_value,
         coalesce(fatigue_group_value, 'C'),
@@ -213,6 +222,7 @@ begin
         'open'
       )
       returning id into line_id;
+      next_display_order := next_display_order + 10;
       inserted_count := inserted_count + 1;
     else
       update public.rdo_lines rl

@@ -22,7 +22,7 @@ assert.match(toolsPage, /data-pilot-admin-card/)
 assert.match(toolsPage, /data-round-rule-editor/)
 assert.match(toolsPage, /data-approval-rule-list/)
 assert.doesNotMatch(toolsPage, /data-admin-schedule-rep|Schedule Intake Rep|admin-schedule-section/)
-assert.match(toolsPage, /data-manual-bid-panel/)
+assert.doesNotMatch(toolsPage, /data-manual-bid-panel|admin-entry-section|admin-requested-leave-section/)
 assert.match(toolsPage, /data-email-log/)
 assert.match(html, /data-page-panel="intake-schedule"[\s\S]*data-schedule-rep/)
 

@@ -15,13 +15,9 @@ context.currentRoundNumber = () => context.round;
 vm.createContext(context);
 vm.runInContext(source.slice(start, end), context);
 
-for (const round of [1, 2, 3, 4]) {
+for (const round of [1, 2, 3, 4, 5, 6]) {
   context.round = round;
   assert.equal(context.usesIndividualLeaveDateSelection(), true, `Round ${round} uses exact-date selection`);
-}
-for (const round of [5, 6]) {
-  context.round = round;
-  assert.equal(context.usesIndividualLeaveDateSelection(), false, `Round ${round} retains range selection`);
 }
 context.round = 3;
 context.leaveReplacementRequestId = 'existing-request';
@@ -32,4 +28,4 @@ assert.match(source, /const selectedDays = chargeableLeaveDateKeys\(\[\.\.\.next
 assert.match(source, /Round \$\{round\} can include up to \$\{roundLimit\} charged days/);
 assert.match(source, /Dates do not need to be continuous/);
 
-console.log('PASS rounds 1-4 use exact-date selection and rounds 2-4 enforce their charged-day limits');
+console.log('PASS rounds 1-6 use exact-date selection and rounds 2-6 enforce their charged-day limits');

@@ -243,10 +243,24 @@ begin
     limit 1;
 
     if open_bid_window_id is null then
-      error_messages := array_append(
-        error_messages,
-        format('Leave can only be submitted during your allotted Round %s bid window.', batch_round)
-      );
+      if exists (
+        select 1
+        from public.bid_windows bw
+        where bw.bid_year_id = year_row.id
+          and bw.bidder_id = target.id
+          and bw.round_number = batch_round
+          and now() >= bw.closes_at
+      ) then
+        error_messages := array_append(
+          error_messages,
+          'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.'
+        );
+      else
+        error_messages := array_append(
+          error_messages,
+          format('Leave can only be submitted during your allotted Round %s bid window.', batch_round)
+        );
+      end if;
     end if;
   end if;
 
