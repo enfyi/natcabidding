@@ -69,6 +69,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
   try {
@@ -592,6 +593,7 @@ let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "";
 let calendarMode = "combined";
+const calendarWorkforceOverrides = new Map();
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
@@ -4376,6 +4378,48 @@ function leaveSlotBucketForBidAs(bidAs) {
   return null;
 }
 
+function defaultCalendarWorkforce(scope) {
+  if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
+  return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
+}
+
+function calendarWorkforceStorageKey(scope) {
+  if (scope === "public") return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:public`;
+  const identity = currentUser?.supabaseProfileId || currentUser?.initials || "anonymous";
+  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:${scope}:${identity}`;
+}
+
+function calendarWorkforceForScope(scope) {
+  if (scope !== "public" && scope !== "dashboard" && scope !== "leave") return null;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  const currentOverride = calendarWorkforceOverrides.get(storageKey);
+  if (currentOverride === "cpc" || currentOverride === "dev") return currentOverride;
+
+  try {
+    const stored = window.sessionStorage?.getItem(storageKey);
+    if (stored === "cpc" || stored === "dev") {
+      calendarWorkforceOverrides.set(storageKey, stored);
+      return stored;
+    }
+  } catch (_error) {
+    // The automatic default still works when browser storage is unavailable.
+  }
+
+  return defaultCalendarWorkforce(scope);
+}
+
+function setCalendarWorkforceForScope(scope, workforce) {
+  if ((scope !== "public" && scope !== "dashboard" && scope !== "leave") || (workforce !== "cpc" && workforce !== "dev")) return;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  calendarWorkforceOverrides.set(storageKey, workforce);
+
+  try {
+    window.sessionStorage?.setItem(storageKey, workforce);
+  } catch (_error) {
+    // Keep the current render usable even when browser storage is unavailable.
+  }
+}
+
 function removeInitialsFromLeaveRange(range, initials) {
   datesInLeaveRange(range).forEach((key) => {
     const area = bueByInitials(initials)?.area || currentUser.area;
@@ -4418,7 +4462,7 @@ function leaveApprovalConflicts(item) {
   return leaveApprovalDates(item).filter((key) => {
     const details = leaveSlotsForDate(key, item.area || currentUser.area);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
+    return (bucket === "cpc" && fullLeaveDates.has(key)) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
 }
 
@@ -4912,10 +4956,11 @@ function cachedLeaveRead(key, read) {
   return leaveReadCache.get(key);
 }
 
-function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false, slotBucket = null }) {
   return {
     area,
     mode: calendarMode,
+    slotBucket,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
@@ -5074,6 +5119,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const slotBucket = calendarWorkforceForScope(calendarScope);
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
   const renderKey = [
     displayedCalendarYear,
@@ -5083,6 +5129,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     expandedSlots,
+    slotBucket,
   ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
 
@@ -5113,6 +5160,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
+    slotBucket,
   });
 
   target.innerHTML = monthIndexes
@@ -5243,16 +5291,17 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
+  const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
   const isClosed = canShowLeaveState && (
     baseSlotDetails
-      ? leaveSlotOpenCountForDetails(baseSlotDetails, "cpc") === 0 || (detailArea === "Area A" && fullLeaveDates.has(key))
-      : isLeaveSlotsFull(key, options.area)
+      ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
+      : isLeaveSlotsFull(key, options.area, availabilityBucket)
   );
   const expandedSlots = Boolean(options.expandedSlots);
   const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots, context?.slotBucket || options.slotBucket || null)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5273,7 +5322,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const fatigueStatus = nextFatigueGroup
     ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
     : `Group ${fatigueGroup} fatigue week`;
-  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
+  const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
+  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`);
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5321,11 +5371,19 @@ function updateCalendarViewControls() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-selected", String(isActive));
   });
+  document.querySelectorAll("[data-calendar-workforce]").forEach((button) => {
+    const scope = button.dataset.calendarScope;
+    const isActive = calendarWorkforceForScope(scope) === button.dataset.calendarWorkforce;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
   document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
     const scope = description.dataset.calendarLayoutDescription;
+    const workforce = calendarWorkforceForScope(scope);
+    const workforceLabel = workforce === "dev" ? "developmental" : "CPC";
     description.textContent = calendarLayouts[scope] === "full"
-      ? "Every CPC and developmental slot is shown directly on each date."
-      : "Select a date to view its slots.";
+      ? workforce ? `Every ${workforceLabel} slot is shown directly on each date.` : "Every CPC and developmental slot is shown directly on each date."
+      : workforce ? `Select a date to view its ${workforceLabel} slots.` : "Select a date to view its slots.";
   });
 }
 
@@ -5416,6 +5474,7 @@ function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = 
       showRdo: showPersonalState,
       showPersonalLeave: showPersonalState,
       deferSlotTooltip: false,
+      slotBucket: calendarWorkforceForScope(scope),
     });
 
     uniqueKeys.forEach((key) => {
@@ -5547,9 +5606,9 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
   return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
-function isLeaveSlotsFull(key, area = currentUser.area) {
+function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, "cpc") === 0 || (area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key));
 }
 
 function slotRows(type, initials, capacity) {
@@ -5564,7 +5623,7 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false, slotBucket = null) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
@@ -5586,11 +5645,15 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
       ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
       ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
-        <span class="tooltip-slot-heading">CPC</span>
-        ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
-        <span class="tooltip-slot-rule"></span>
-        <span class="tooltip-slot-heading">Dev</span>
-        ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ${slotBucket !== "dev" ? `
+          <span class="tooltip-slot-heading">CPC</span>
+          ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
+        ` : ""}
+        ${!slotBucket ? '<span class="tooltip-slot-rule"></span>' : ""}
+        ${slotBucket !== "cpc" ? `
+          <span class="tooltip-slot-heading">DEV</span>
+          ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ` : ""}
       </span>
     </span>
   `;
@@ -14992,6 +15055,16 @@ document.addEventListener("click", async (event) => {
       calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
       renderVisibleCalendars();
     }
+    return;
+  }
+
+  const calendarWorkforceButton = event.target.closest("[data-calendar-workforce]");
+  if (calendarWorkforceButton) {
+    setCalendarWorkforceForScope(
+      calendarWorkforceButton.dataset.calendarScope,
+      calendarWorkforceButton.dataset.calendarWorkforce
+    );
+    renderVisibleCalendars();
     return;
   }
 
