@@ -1512,7 +1512,7 @@
           <header class="admin-tools-page-header">
             <div>
               <h2>Bidding Setup</h2>
-              <p>Manage bidding policy, pilot rounds, rules, intake scheduling, manual entry, and administrative data.</p>
+              <p>Manage bidding policy, pilot rounds, rules, intake scheduling, and administrative data.</p>
             </div>
             <span class="pill open">System Admin</span>
           </header>
@@ -1521,7 +1521,6 @@
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
             <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
-            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
           </nav>
           <div class="admin-tools-page-grid">
@@ -1640,159 +1639,6 @@
                   </label>
                   <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
                   <p class="form-status" data-admin-schedule-status></p>
-                </div>
-              </section>
-              <section class="panel manual-bid-card admin-section-target" id="admin-entry-section" tabindex="-1" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Manual Bid Entry</h3>
-                    <p>Enter an RDO or leave bid on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
-                  <label class="manual-controller-search">
-                    Find Controller
-                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
-                    <small data-manual-controller-search-status aria-live="polite"></small>
-                  </label>
-                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
-                  <label>
-                    Controller
-                    <select data-manual-bid-controller></select>
-                  </label>
-                  <label>
-                    Bid Type
-                    <select data-manual-bid-type>
-                      <option value="RDO Line">RDO Line</option>
-                      <option value="Leave">Leave</option>
-                    </select>
-                  </label>
-                  <label>
-                    Bid Area
-                    <select data-manual-bid-area></select>
-                  </label>
-                  <div class="manual-bid-fields" data-manual-rdo-fields>
-                    <label>
-                      RDO Line
-                      <select data-manual-rdo-line></select>
-                    </label>
-                    <label>
-                      Fatigue Group
-                      <select data-manual-fatigue-group>
-                        <option value="A">Group A</option>
-                        <option value="B">Group B</option>
-                        <option value="C">Group C</option>
-                        <option value="">No preference — assign later</option>
-                      </select>
-                    </label>
-                    <label class="manual-override-check wide">
-                      <input type="checkbox" data-manual-fatigue-override />
-                      Override full fatigue group
-                    </label>
-                    <label>
-                      Flex
-                      <select data-manual-flex>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </select>
-                    </label>
-                    <label>
-                      AWS
-                      <select data-manual-aws>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </select>
-                    </label>
-                    <label>
-                      Mid
-                      <select data-manual-mid></select>
-                    </label>
-                  </div>
-                  <div class="manual-bid-fields" data-manual-leave-fields hidden>
-                    <label class="wide">
-                      Leave Range
-                      <input type="text" placeholder="Jan 10 - Jan 16, 2027" data-manual-leave-range />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
-                  <p class="form-status" data-manual-bid-status></p>
-                </div>
-              </section>
-              <section class="panel manual-leave-request-card admin-section-target" id="admin-requested-leave-section" tabindex="-1" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Requested Leave Dates</h3>
-                    <p>Submit requested leave dates on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
-                  <label class="manual-controller-search">
-                    Find Controller
-                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
-                    <small data-manual-controller-search-status aria-live="polite"></small>
-                  </label>
-                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
-                  <label>
-                    Controller
-                    <select data-manual-bid-controller></select>
-                  </label>
-                  <select data-manual-bid-type hidden aria-hidden="true">
-                    <option value="Leave" selected>Leave</option>
-                  </select>
-                  <label>
-                    Bid Area
-                    <select data-manual-bid-area></select>
-                  </label>
-                  <div class="manual-bid-fields" data-manual-leave-fields>
-                    <label>
-                      Start Date
-                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
-                    </label>
-                    <label>
-                      End Date
-                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
-                  <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
               <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
