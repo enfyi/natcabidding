@@ -872,6 +872,30 @@ function isCpcLine(line) {
   return line.lineType !== "DEV" && !/DEV/i.test(line.pattern);
 }
 
+function rdoLineMatchesBidRole(line, bidAs, area) {
+  if (!line) return false;
+  const role = normalizeBidRoleForArea(bidAs, area);
+  const cpcLine = isCpcLine(line);
+  const pattern = String(line.pattern || "").trim().toUpperCase();
+
+  // GL is the only role that may cross between CPC/TMC and developmental
+  // lines. Intake verifies the selected side before approving the bid.
+  if (role === "GL") return true;
+  if (area === "TMU") {
+    if (role === "TMC") return cpcLine;
+    if (role === "DEV") return !cpcLine;
+    return false;
+  }
+  if (role === "CPC") return cpcLine;
+  if (role === "R-DEV") return !cpcLine && pattern === "R-DEV";
+  if (role === "D-DEV") return !cpcLine && pattern === "D-DEV";
+  return false;
+}
+
+function rdoLinesForBidder(bidAs, area) {
+  return rdoLinesForArea(area).filter((line) => rdoLineMatchesBidRole(line, bidAs, area));
+}
+
 function isGroupAvailable(item) {
   return item.available;
 }
@@ -2297,6 +2321,12 @@ async function addOrUpdateRdoSubmission() {
 
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
   if (!line || line.status === "Taken") return;
+  if (!rdoLineMatchesBidRole(line, currentUserBidAs(), currentUser.area)) {
+    alert(`Line ${line.line} is not eligible for your ${currentUserBidAs()} bid role.`);
+    renderRdoLines();
+    updateSelectedLine();
+    return;
+  }
   if (!selectedFatigueGroup) {
     alert("Choose a fatigue group or No preference before submitting this RDO bid.");
     return;
@@ -2576,7 +2606,8 @@ function renderManualBidPanel(panel) {
   if (leaveFields) leaveFields.hidden = !isLeave;
 
   const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const areaLines = rdoLinesForArea(areaSelect?.value || lockedArea);
+  const area = areaSelect?.value || lockedArea;
+  const areaLines = rdoLinesForBidder(selectedPerson.bidAs, area);
   if (lineSelect) {
     const openLines = areaLines.filter((line) => line.status !== "Taken");
     lineSelect.innerHTML = areaLines.map((line) => {
@@ -2671,6 +2702,11 @@ async function submitManualRdoBid(panel, person, area) {
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
     setManualBidStatus(panel, "Choose an RDO line before adding this bid.", "error");
+    return;
+  }
+  if (!rdoLineMatchesBidRole(line, person.bidAs, area)) {
+    setManualBidStatus(panel, `Line ${line.line} is not eligible for ${person.initials}'s ${person.bidAs} bid role.`, "error");
+    renderManualBidPanel(panel);
     return;
   }
   if (line.status === "Taken") {
@@ -4583,6 +4619,7 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
         flex: item.flex === true || item.flex === "Yes",
         aws: item.aws === true || item.aws === "Yes",
         mid: item.mid,
+        glLineTypeVerified: item.bidAs !== "GL" || Boolean(item.glLineTypeVerified),
       }
     : { leaveCapacityOverride: Boolean(item.leaveCapacityOverride) };
   const { error } = await supabaseClient().rpc("review_bidding_submission", {
@@ -4608,6 +4645,22 @@ async function approveIntakeItem(id) {
     return;
   }
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (item.type === "RDO Line" && item.bidAs === "GL") {
+    const verification = activeOverrideId === id
+      ? document.querySelector("[data-gl-line-type-verification]")
+      : null;
+    if (!verification?.checked) {
+      const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
+      const category = line && isCpcLine(line) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
+      item.reviewNote = `Verify that this GL is bidding as ${category}, then approve from the review panel.`;
+      activeOverrideId = id;
+      activeDenialId = null;
+      renderApp();
+      setPage("intake");
+      return;
+    }
+    item.glLineTypeVerified = true;
+  }
   if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
     item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
     activeOverrideId = id;
@@ -4892,7 +4945,8 @@ async function saveIntakeOverride(id) {
 
 function selectedRdoWeekdays() {
   const submittedLine = submittedRdoLineForInitials(currentUser.initials);
-  const line = submittedLine || rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0] || rdoLines[0];
+  const eligibleLines = rdoLinesForBidder(currentUserBidAs(), currentUser.area);
+  const line = submittedLine || eligibleLines.find((item) => item.line === selectedLineId) || eligibleLines[0] || null;
   return rdoWeekdaysForLine(line);
 }
 
@@ -8804,7 +8858,12 @@ function renderRdoLines() {
   let lastPattern = "";
   const rows = [];
   const viewArea = currentViewArea();
-  const areaLines = rdoLinesForArea(viewArea);
+  const areaLines = isViewingHomeArea()
+    ? rdoLinesForBidder(currentUserBidAs(), viewArea)
+    : rdoLinesForArea(viewArea);
+  if (isViewingHomeArea() && !areaLines.some((line) => line.line === selectedLineId)) {
+    selectedLineId = areaLines[0]?.line || "";
+  }
   setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
   const countTarget = document.querySelector("[data-rdo-filter-count]");
@@ -8884,8 +8943,13 @@ function renderRdoLines() {
 }
 
 function updateSelectedLine() {
-  const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const viewArea = currentViewArea();
+  const areaLines = isViewingHomeArea()
+    ? rdoLinesForBidder(currentUserBidAs(), viewArea)
+    : rdoLinesForArea(viewArea);
+  const line = areaLines.find((item) => item.line === selectedLineId)
+    || areaLines[0]
+    || (isViewingHomeArea() ? null : rdoLines[0]);
   const dashboardAssignment = currentUserRdoAssignment();
   if (!line) {
     renderDashboardSelectedLineCard(dashboardAssignment);
@@ -13151,12 +13215,19 @@ function renderOverrideEditor(item) {
     : "";
 
   if (item.type === "RDO Line") {
+    const eligibleLines = rdoLinesForBidder(item.bidAs, item.area);
+    const selectedLine = eligibleLines.find((line) => line.line === item.line);
+    const glCategory = selectedLine && isCpcLine(selectedLine) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
     return `
       <label>Line
         <select data-override-line>
-          ${rdoLinesForArea(item.area).map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
+          ${eligibleLines.map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
         </select>
       </label>
+      ${item.bidAs === "GL" ? `<label class="override-check gl-line-type-verification">
+        <input type="checkbox" data-gl-line-type-verification />
+        I verified this GL is bidding as <span data-gl-line-type-label>${glCategory}</span>. All GL rules still apply.
+      </label>` : ""}
       <label>Fatigue Group
         <select data-override-group>
           ${[["", "No preference — assign later"], ["A", "A"], ["B", "B"], ["C", "C"]].map(([value, label]) => `<option value="${value}" ${value === item.fatigueGroup ? "selected" : ""}>${label}</option>`).join("")}
@@ -15172,7 +15243,7 @@ document.addEventListener("click", async (event) => {
 
   const selectLineButton = event.target.closest("[data-select-line]");
   if (selectLineButton && !selectLineButton.hidden) {
-    const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+    const line = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
       void addOrUpdateRdoSubmission();
     }
@@ -15184,7 +15255,7 @@ document.addEventListener("click", async (event) => {
     const previousLineId = selectedLineId;
     const previousRdoWeekdays = selectedRdoWeekdays();
     selectedLineId = row.dataset.lineId;
-    const selectedLine = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+    const selectedLine = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === selectedLineId);
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
       reconcileUnsubmittedLeaveForRdoLine(selectedLine);
     }
@@ -15444,6 +15515,20 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  const overrideLine = event.target.closest("[data-override-line]");
+  if (overrideLine) {
+    const item = intakeReviewItemById(activeOverrideId);
+    const line = item
+      ? rdoLines.find((entry) => entry.line === overrideLine.value && lineForArea(entry, item.area))
+      : null;
+    const category = line && isCpcLine(line) ? (item?.area === "TMU" ? "TMC" : "CPC") : "DEV";
+    const editor = overrideLine.closest("[data-override-editor]");
+    const label = editor?.querySelector("[data-gl-line-type-label]");
+    const verification = editor?.querySelector("[data-gl-line-type-verification]");
+    if (label) label.textContent = category;
+    if (verification) verification.checked = false;
+    return;
+  }
   if (event.target.matches("[data-pilot-round-toggle]")) {
     await setPilotRound(Number(event.target.dataset.pilotRoundToggle), event.target.checked);
     return;

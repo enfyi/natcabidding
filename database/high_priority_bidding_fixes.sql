@@ -17,11 +17,13 @@ security invoker
 set search_path = ''
 as $$
   select case
-    when area_name = 'TMU' then
-      bidder_role in ('TMC', 'TMCIT', 'GL') and requested_line_type = 'CPC'
-    when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
-    when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
-    when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
+    when bidder_role in ('ADM', 'NB') then false
+    when bidder_role = 'GL' then requested_line_type in ('CPC', 'DEV')
+    when area_name = 'TMU' and bidder_role = 'TMC' then requested_line_type = 'CPC'
+    when area_name = 'TMU' and bidder_role = 'DEV' then requested_line_type = 'DEV'
+    when area_name <> 'TMU' and bidder_role = 'CPC' then requested_line_type = 'CPC'
+    when area_name <> 'TMU' and bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
+    when area_name <> 'TMU' and bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
     else false
   end
 $$;
@@ -484,6 +486,11 @@ begin
     order by rl.id
     for update;
     select * into strict line_row from public.rdo_lines where id = line_row.id;
+
+    if decision = 'approved' and target.bid_role = 'GL'
+       and not coalesce((override_payload->>'glLineTypeVerified')::boolean, false) then
+      raise exception 'Intake must verify whether this GL is bidding as CPC/TMC or DEV.';
+    end if;
 
     if decision = 'approved' and not public.rdo_line_matches_bid_role(
       target.bid_role, target_area_name, line_row.line_type, line_row.pattern
