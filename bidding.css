@@ -10386,11 +10386,8 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
   .mobile-bid-time-view button { flex: 1; min-height: 44px; border: 1px solid #b8cbce; border-radius: 8px; padding: 8px; color: #19464b; background: #fff; font: inherit; font-size: .875rem; }
   .mobile-bid-time-view button[aria-pressed="true"] { background: #28656c; color: #fff; }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table {
-    min-width: 428px;
-    table-layout: fixed;
-  }
-  .public-bid-time-results[data-presentation="list"] .public-bid-time-table:has(.bid-time-name-column) {
-    min-width: 532px;
+    min-width: 0;
+    table-layout: auto;
   }
   .public-bid-time-results[data-presentation="list"] .bid-time-rank-column { width: 28px; }
   .public-bid-time-results[data-presentation="list"] .bid-time-name-column { width: 104px; }
@@ -10405,6 +10402,7 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
     overflow-wrap: anywhere;
   }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-round {
+    white-space: nowrap;
     overflow-wrap: normal;
   }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-as {
