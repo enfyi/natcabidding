@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises'
 
 const sql = await readFile(new URL('../database/bid_line_import.sql', import.meta.url), 'utf8')
 const parser = await readFile(new URL('../lib/bid-line-import.ts', import.meta.url), 'utf8')
+const editorMigration = await readFile(new URL('../supabase/migrations/20260930180000_bid_line_editor.sql', import.meta.url), 'utf8')
+const editor = await readFile(new URL('../app/admin/bid-lines/bid-line-importer.tsx', import.meta.url), 'utf8')
+const bidding = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 
 assert.match(
   sql,
@@ -48,6 +51,46 @@ assert.match(
   parser,
   /const requiredHeaders = \['line_code', 'four_ten'/,
   'four_ten must be a required import column',
+)
+
+assert.match(editorMigration, /add column if not exists display_order integer/, 'bid lines must persist a display order')
+assert.match(
+  editorMigration,
+  /create or replace function private\.admin_save_bid_line_impl[\s\S]*?if not \(select public\.is_current_admin\(\)\)/,
+  'line edits must run through an admin-checked security-definer function',
+)
+assert.match(
+  editorMigration,
+  /create or replace function private\.admin_reorder_bid_lines_impl[\s\S]*?if not \(select public\.is_current_admin\(\)\)/,
+  'line reordering must run through an admin-checked security-definer function',
+)
+assert.match(editor, /admin_save_bid_line/, 'the admin editor must save individual lines through the secure RPC')
+assert.match(editor, /admin_reorder_bid_lines/, 'the admin editor must persist reordered lines through the secure RPC')
+assert.match(editor, /Mid Bid line/, 'the admin editor must expose the Mid Bid designation')
+assert.match(editor, /R-DEV[\s\S]*D-DEV/, 'the admin editor must expose both development-line designations')
+assert.match(editor, /type BidLineSortKey = [\s\S]*?`day-\$\{number\}`/, 'every bid-line schedule column must be sortable')
+assert.match(editor, /function sortableHeader[\s\S]*?aria-sort=/, 'sortable headers must expose their direction accessibly')
+assert.match(editor, /manualOrderActive[\s\S]*?disabled=\{!manualOrderActive/, 'manual reorder controls must be disabled during a temporary column sort')
+assert.match(bidding, /displayOrder: row\.display_order/, 'the bidder view must load the persisted line order')
+assert.match(
+  bidding,
+  /isMissingRdoLineDisplayOrder[\s\S]*?Keep existing schedules visible[\s\S]*?\.select\("id,area_id,line_code,line_type,pattern/,
+  'the bidder view must keep existing lines visible before the display-order migration is applied',
+)
+assert.match(
+  editor,
+  /isMissingDisplayOrder[\s\S]*?migrationPending = true[\s\S]*?\.select\('id,line_code,line_type,pattern/,
+  'the admin editor must keep existing lines visible before the display-order migration is applied',
+)
+assert.match(
+  bidding,
+  /function rdoLineMidReferenceCell\(line\) \{\s*return lineMidReferenceValue\(line\) === "BID" \? userChoiceCell\("BID"\) : "";/,
+  'the RDO reference tables must only populate Mid for designated Mid Bid lines',
+)
+assert.doesNotMatch(
+  bidding,
+  /<td>\$\{publicPreferenceCell\(line\.aws\)\}<\/td>/,
+  'the RDO reference tables must not populate AWS answers',
 )
 assert.match(
   parser,

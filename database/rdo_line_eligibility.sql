@@ -12,13 +12,13 @@ immutable
 set search_path = ''
 as $function$
   select case
-    when area_name = 'TMU' then
-      (bidder_role in ('TMC', 'GL') and requested_line_type = 'CPC')
-      or (bidder_role = 'DEV' and requested_line_type = 'DEV')
     when bidder_role in ('ADM', 'NB') then false
-    when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
-    when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
-    when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
+    when bidder_role = 'GL' then requested_line_type in ('CPC', 'DEV')
+    when area_name = 'TMU' and bidder_role = 'TMC' then requested_line_type = 'CPC'
+    when area_name = 'TMU' and bidder_role = 'DEV' then requested_line_type = 'DEV'
+    when area_name <> 'TMU' and bidder_role = 'CPC' then requested_line_type = 'CPC'
+    when area_name <> 'TMU' and bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
+    when area_name <> 'TMU' and bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
     else false
   end
 $function$;

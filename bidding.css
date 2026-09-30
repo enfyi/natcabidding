@@ -716,6 +716,8 @@ button.seniority-pill {
   min-width: 0;
 }
 
+.public-main .public-rdo-table th:nth-last-child(3),
+.public-main .public-rdo-table td:nth-last-child(3),
 .public-main .public-rdo-table th:nth-last-child(2),
 .public-main .public-rdo-table td:nth-last-child(2) {
   width: 6%;
@@ -873,20 +875,29 @@ button.seniority-pill {
 
 .public-bid-time-table th,
 .public-bid-time-table td {
-  padding: 9px 8px;
+  padding: 12px 14px;
+  vertical-align: middle;
   white-space: normal;
 }
 
-.public-bid-time-table th:nth-child(1),
-.public-bid-time-table td:nth-child(1) {
-  width: 42px;
+.public-bid-time-table .bid-time-rank-column {
+  width: 64px;
 }
 
-.public-bid-time-table th:nth-child(3),
-.public-bid-time-table td:nth-child(3),
-.public-bid-time-table th:nth-child(4),
-.public-bid-time-table td:nth-child(4) {
-  width: 70px;
+.public-bid-time-table .bid-time-name-column {
+  width: 224px;
+}
+
+.public-bid-time-table .bid-time-initials-column {
+  width: 112px;
+}
+
+.public-bid-time-table .bid-time-role-column {
+  width: 104px;
+}
+
+.public-bid-time-table .bid-time-round {
+  white-space: nowrap;
 }
 
 .public-calendar-panel {
@@ -2762,6 +2773,18 @@ input {
   background: var(--coral);
 }
 
+.legend .gl-bid {
+  display: inline-grid;
+  place-items: center;
+  color: #8a5700;
+  background: #fff1bd;
+  border: 1px solid #e0a92f;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .legend .previous-leave-year {
   background:
     repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
@@ -3148,8 +3171,19 @@ input {
 
 .mid-option.locked,
 .line-mode-option.locked {
-  grid-column: 1 / -1;
   opacity: 1;
+}
+
+.mid-option.locked {
+  grid-column: 1 / -1;
+}
+
+.line-mode-option.schedule-unavailable,
+.app-main .aws-picker .line-mode-option.schedule-unavailable {
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.08);
+  border-color: var(--line);
+  opacity: 0.45;
 }
 
 .attribute-grid b {
@@ -3904,6 +3938,53 @@ tr.occupied-row .rdo-tag {
   background: #f2ebfb;
   border-color: #cfb9ea !important;
   font-weight: 800;
+}
+
+.gl-bid-badge,
+.gl-bid-marker {
+  border: 1px solid #e0a92f;
+  color: #5f3b00;
+  background: #fff1bd;
+  font-weight: 900;
+}
+
+.gl-bid-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+}
+
+.month-grid .gl-bid-marker,
+.week-calendar-grid .gl-bid-marker {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  min-height: 16px;
+  border-radius: 999px;
+  padding: 1px 4px;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-heading,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-heading {
+  color: #7a4d00 !important;
+}
+
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-name,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-name,
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-value,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-value {
+  border-color: #e7c66c !important;
+  color: #5f3b00 !important;
+  background: #fff6d8 !important;
 }
 
 .intake-actions {
@@ -5414,6 +5495,13 @@ tr.occupied-row .rdo-tag {
 }
 
 /* Minimal/full calendar detail tabs and permanently expanded annual slot view. */
+.calendar-view-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .calendar-layout-tabs {
   display: inline-flex;
   gap: 4px;
@@ -5422,6 +5510,14 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
   padding: 4px;
   background: #f1f5f9;
+}
+
+.calendar-workforce-tabs {
+  flex: 0 0 auto;
+}
+
+.calendar-workforce-tabs button {
+  min-width: 92px;
 }
 
 .calendar-layout-tabs button {
@@ -5554,7 +5650,19 @@ tr.occupied-row .rdo-tag {
 }
 
 @media (max-width: 720px) {
+  .calendar-view-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
   .calendar-layout-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .calendar-workforce-tabs,
+  .public-main .calendar-workforce-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
@@ -5617,8 +5725,10 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-calendar.month-view {
-  grid-template-columns: minmax(0, 520px);
-  max-width: 520px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: none;
 }
 
 .schedule-calendar.week-view {
@@ -5874,6 +5984,11 @@ tr.occupied-row .rdo-tag {
   .schedule-calendar.year-view {
     grid-template-columns: 1fr;
     max-width: 440px;
+  }
+
+  .schedule-calendar.month-view {
+    grid-template-columns: 1fr;
+    max-width: 520px;
   }
 }
 
@@ -6214,7 +6329,31 @@ tr.occupied-row .rdo-tag {
 }
 
 .admin-workspace {
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-tools-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-tools-page-header h2,
+.admin-tools-page-header p {
+  margin: 0;
+}
+
+.admin-tools-page-header p {
+  margin-top: 4px;
+  color: #627080;
+}
+
+.admin-tools-page-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .admin-user-list {
@@ -6549,14 +6688,24 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: end;
+  align-items: start;
   border: 1px solid #d7e3ef;
   border-radius: 8px;
   padding: 14px;
   background: #f8fafc;
 }
 
-.intake-team-add label {
+.intake-team-add > .primary-action {
+  margin-top: 22px;
+}
+
+.intake-team-candidate-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.intake-team-candidate-picker label {
   display: grid;
   gap: 6px;
   color: #64748b;
@@ -6564,7 +6713,7 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font-weight: 900;
 }
 
-.intake-team-add select {
+.intake-team-candidate-picker input {
   width: 100%;
   border: 1px solid #cbd8e6;
   border-radius: 8px;
@@ -6574,6 +6723,67 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font: inherit;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.intake-team-candidate-picker small {
+  min-height: 16px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.intake-team-candidate-results {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.intake-team-candidate-results[hidden] {
+  display: none;
+}
+
+.intake-team-candidate-results button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  color: #172033;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-team-candidate-results button:last-child {
+  border-bottom: 0;
+}
+
+.intake-team-candidate-results button:hover,
+.intake-team-candidate-results button:focus-visible {
+  background: #eef7f8;
+  outline: none;
+}
+
+.intake-team-candidate-results span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .intake-team-add {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-team-add > .primary-action {
+    width: 100%;
+    margin-top: 0;
+  }
 }
 
 .intake-team-list {
@@ -7480,6 +7690,18 @@ body {
 }
 
 @media (max-width: 900px) {
+  .admin-tools-page-header {
+    flex-direction: column;
+  }
+
+  .admin-tools-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tools-page-grid > * {
+    grid-column: auto;
+  }
+
   .slot-capacity-form,
   .bid-window-builder-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9257,6 +9479,11 @@ video {
     width: 100%;
   }
 
+  .public-main .calendar-workforce-tabs,
+  .calendar-workforce-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .public-main .segmented button,
   .segmented button[data-calendar-mode] {
     min-width: 0;
@@ -9364,48 +9591,44 @@ video {
 }
 
 @media (max-width: 720px) {
-  /* The public and dashboard Full views keep the standard seven-day week on
-     phones. Only the dedicated leave/member slot boards use the compact list. */
-  #leave-calendar.expanded-slots-calendar .month-card > .month-grid,
+  /* Public, dashboard, and leave Full views share seven-day weeks on phones.
+     The member slot board keeps its compact list; leave dates remain bid buttons. */
   #full-calendar.expanded-slots-calendar .month-card > .month-grid,
-  #leave-calendar.expanded-slots-calendar .leave-year-continuation-days,
   #full-calendar.expanded-slots-calendar .leave-year-continuation-days {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     min-width: 0 !important;
   }
 
-  #leave-calendar.expanded-slots-calendar .month-grid > .dow,
-  #leave-calendar.expanded-slots-calendar .month-grid > span:not(.dow),
   #full-calendar.expanded-slots-calendar .month-grid > .dow,
   #full-calendar.expanded-slots-calendar .month-grid > span:not(.dow) {
     display: none;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading > .date-number {
     font-size: 0;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading > .date-number::after {
     content: attr(data-day-number);
     font-size: 0.68rem;
   }
 
   #public-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day,
-  #dashboard-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .month-grid > button.slot-expanded-day {
     min-height: 92px !important;
     padding: 4px;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading {
     place-items: center;
     margin-bottom: 3px;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary {
     border: 0 !important;
     padding: 0 !important;
     background: transparent !important;
@@ -9415,28 +9638,28 @@ video {
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
     display: none !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
     align-content: start;
     gap: 3px !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled {
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 0 !important;
     min-height: 0 !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value {
     width: 100% !important;
     min-height: 18px !important;
     padding: 2px !important;
@@ -10119,6 +10342,31 @@ video {
 .public-date-sheet button { min-height: 44px; padding: 8px 16px; border: 1px solid #b8cbce; border-radius: 8px; background: #eaf5f5; color: #183e42; font: inherit; font-weight: 700; }
 body:has(.public-date-sheet[open]) { overflow: hidden; }
 
+.late-bid-dialog {
+  width: min(520px, calc(100% - 24px));
+  border: 1px solid #cbd5e1;
+  border-radius: 18px;
+  padding: 28px;
+  color: #152d3b;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(10, 18, 30, .28);
+}
+.late-bid-dialog::backdrop { background: rgba(10, 18, 30, .62); }
+.late-bid-dialog h2 { margin: 6px 44px 8px 0; color: #152d3b; }
+.late-bid-dialog p { margin: 0 0 20px; color: #526273; line-height: 1.6; }
+.late-bid-dialog-eyebrow { color: #9b4d16; font-size: .78rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.late-bid-dialog-close { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border: 1px solid #cbd5e1; border-radius: 50%; color: #405363; background: #f7fafb; font: inherit; font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.late-bid-phone { display: block; margin-bottom: 20px; color: #155e75; font-size: clamp(1.6rem, 6vw, 2.25rem); font-weight: 800; letter-spacing: .02em; text-decoration: none; }
+.late-bid-phone:hover { text-decoration: underline; }
+.late-bid-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.late-bid-dialog-actions a { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; text-align: center; text-decoration: none; }
+body:has(.late-bid-dialog[open]) { overflow: hidden; }
+
+@media (max-width: 520px) {
+  .late-bid-dialog { padding: 24px 20px; }
+  .late-bid-dialog-actions { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 900px) {
   /* Cards replace the compressed round columns at tablet and phone sizes. */
   .public-bid-time-results[data-presentation="cards"] .desktop-bid-times { display: none; }
@@ -10606,15 +10854,15 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 @media (max-width: 720px) {
   .member-rdo-table,
   .line-table.public-mobile-rdo-table {
-    width: 610px;
-    min-width: 610px;
+    width: 662px;
+    min-width: 662px;
     table-layout: fixed;
     font-size: 0.7rem;
   }
 
   .line-table.public-mobile-rdo-table {
-    width: 614px;
-    min-width: 614px;
+    width: 666px;
+    min-width: 666px;
   }
 
   .member-rdo-table th,
@@ -10686,6 +10934,13 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   .member-rdo-table td:nth-child(11),
   .line-table.public-mobile-rdo-table th:nth-child(11),
   .line-table.public-mobile-rdo-table td:nth-child(11) {
+    width: 52px;
+  }
+
+  .member-rdo-table th:nth-child(12),
+  .member-rdo-table td:nth-child(12),
+  .line-table.public-mobile-rdo-table th:nth-child(12),
+  .line-table.public-mobile-rdo-table td:nth-child(12) {
     width: 64px;
   }
 

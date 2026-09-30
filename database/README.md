@@ -63,6 +63,11 @@ the admin-only database operation that safely resizes each day's slot inventory.
 Install `database/public_leave_slots_read.sql` afterward so those adjustments are
 the authoritative calendar values for both signed-out and signed-in views.
 
+Run `database/public_bid_windows_read.sql` so signed-out visitors can load the
+saved bid-window schedule shown on each public area Bid Time page. The read-only
+function exposes window times and bidder IDs only; names and initials continue to
+come from the existing public roster read model.
+
 For public FAQ and MOU publishing, also run `database/faq_mous.sql`. It creates
 admin-managed FAQ rows, a public MOU document list, and the public Supabase
 storage bucket used by the `/admin/faq` editor.
@@ -165,6 +170,8 @@ Run `database/rls_area_policies.sql` after `database/schema.sql`.
 
 Run `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-line importer. The import RPC validates every row, adds or updates `rdo_lines` and `rdo_line_days` atomically without deleting omitted lines, preserves existing assignments and status, and records an audit event. Fatigue group, AWS, and Flex are optional: blank values preserve existing lines and use C, No, and Yes for new lines.
 
+The bid-line editor is deployed by `supabase/migrations/20260930180000_bid_line_editor.sql`. It adds per-area line ordering plus administrator-only create, edit, and reorder RPCs; deletion remains protected by the bid-line import administration functions.
+
 Run `database/bid_time_import.sql` after `database/bid_line_import.sql` to enable the system-admin Excel/CSV bid-time importer. It matches active bidders by area and the displayed area seniority rank (the same rank shown in the bidding UI), treats each populated round cell as a two-hour Pacific-time window, and preserves blank rounds, omitted bidders, and existing window status. Reapply this script to pilot databases after roster changes so appended tester rows and rank gaps continue to resolve to the bidder shown in the preview.
 
 Run `database/seniority_roster_import.sql` to enable the system-admin seniority-roster importer. It matches existing bidders by profile ID or initials, applies all rows atomically, imports each bidder's leave allowance in hours, preserves linked accounts and bidding records, and leaves omitted bidders unchanged. Blank email, phone, and seniority-date cells preserve existing values.
@@ -182,6 +189,12 @@ seniority rank, leave allowance, and active status by immutable bidder ID, while
 also supporting the older initials-based payload during deployment rollout.
 When seniority changes, draft and open bid-window times stay with their rank and
 are reassigned to every bidder affected by the move in the same transaction.
+
+Run `database/roster_bid_window_sync.sql` after the existing admin roster helpers.
+The roster editor then saves seniority changes and reassigns every affected
+draft/open bid-year time slot to the BUE who occupies that seniority rank in one
+transaction. Bid-window IDs and reminder history are preserved; trailing slots
+are removed only when an area's active bidding roster becomes shorter.
 
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 

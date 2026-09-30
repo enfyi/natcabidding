@@ -11,6 +11,7 @@ material while its bidding workflows are migrated into Next.js.
 The current Next.js application provides:
 
 - email/password signup and sign-in through Supabase Auth
+- self-service password recovery and password updates
 - confirmation and PKCE callback routes
 - server-validated sessions and a protected dashboard
 - a deployment-safe environment-variable setup
@@ -32,6 +33,9 @@ Requirements: Node.js 20.9 or newer and pnpm 11.19.
 Before committing, run `pnpm check`. It performs both the TypeScript check and a
 production build.
 
+For the `natcazla.com/bidding` self-hosted deployment path, see
+`SELF_HOSTING.md`.
+
 The local Supabase project URL and publishable key are stored in the gitignored
 `.env.local`. Copy `.env.example` when configuring another environment. Never put
 a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
@@ -41,7 +45,9 @@ a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
 In Supabase Authentication → URL Configuration, add these redirect URLs:
 
 - `http://localhost:3000/auth/callback`
+- `http://localhost:3000/auth/callback?next=/update-password`
 - `https://your-production-domain/auth/callback`
+- `https://your-production-domain/auth/callback?next=/update-password`
 
 Set `NEXT_PUBLIC_SITE_URL` to the matching deployed origin in production. The app
 uses Vercel's deployment URL automatically for Preview deployments and also

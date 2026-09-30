@@ -24,19 +24,19 @@ begin
     alter table public.bidders add constraint bidders_leave_slot_allowance_check check (leave_slot_allowance >= 0);
   end if;
   if not exists (select 1 from pg_constraint where conrelid = 'public.intake_submissions'::regclass and conname = 'intake_submissions_round_number_check') then
-    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 4);
+    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 6);
   end if;
 end
 $$;
 
 alter table public.bid_rounds drop constraint if exists bid_rounds_round_number_check;
-alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 4);
+alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 6);
 alter table public.bid_windows drop constraint if exists bid_windows_round_number_check;
-alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 4);
+alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 6);
 alter table public.leave_requests drop constraint if exists leave_requests_round_number_check;
-alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 4);
+alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 6);
 alter table public.leave_credit_events drop constraint if exists leave_credit_events_round_number_check;
-alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 4);
+alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 6);
 
 do $$
 begin
@@ -143,11 +143,13 @@ security invoker
 set search_path = ''
 as $$
   select case
-    when area_name = 'TMU' then
-      bidder_role in ('TMC', 'TMCIT', 'GL') and requested_line_type = 'CPC'
-    when bidder_role in ('CPC', 'GL') then requested_line_type = 'CPC'
-    when bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
-    when bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
+    when bidder_role in ('ADM', 'NB') then false
+    when bidder_role = 'GL' then requested_line_type in ('CPC', 'DEV')
+    when area_name = 'TMU' and bidder_role = 'TMC' then requested_line_type = 'CPC'
+    when area_name = 'TMU' and bidder_role = 'DEV' then requested_line_type = 'DEV'
+    when area_name <> 'TMU' and bidder_role = 'CPC' then requested_line_type = 'CPC'
+    when area_name <> 'TMU' and bidder_role = 'R-DEV' then requested_line_type = 'DEV' and requested_pattern = 'R-DEV'
+    when area_name <> 'TMU' and bidder_role = 'D-DEV' then requested_line_type = 'DEV' and requested_pattern = 'D-DEV'
     else false
   end
 $$;
@@ -254,6 +256,9 @@ declare
 begin
   if new.assigned_bidder_id is null then return new; end if;
   select * into strict target from public.bidders where id = new.assigned_bidder_id;
+  if target.bid_role = 'GL' then
+    raise exception 'GL bids do not populate RDO line assignments.';
+  end if;
   select a.name into strict target_area_name from public.areas a where a.id = target.area_id;
   if new.area_id is distinct from target.area_id
      or not public.rdo_line_matches_bid_role(
@@ -614,7 +619,17 @@ begin
       and now() >= bw.opens_at and now() < bw.closes_at
     order by bw.round_number
     limit 1;
-    if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
+    if resolved_round is null and exists (
+      select 1
+      from public.bid_windows bw
+      where bw.bid_year_id = year_row.id
+        and bw.bidder_id = target.id
+        and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    elsif resolved_round is null then
+      raise exception 'Your bidding window is not open.';
+    end if;
   end if;
 
   if enforce_bid_windows
@@ -844,7 +859,15 @@ begin
   if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at
-  ) then raise exception 'Your bidding window is not open.'; end if;
+  ) then
+    if exists (
+      select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
+        and bw.round_number = batch_round and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    end if;
+    raise exception 'Your bidding window is not open.';
+  end if;
 
   if batch_round = 1 then
     select coalesce(array_agg(distinct wb.bucket_start_date order by wb.bucket_start_date), array[]::date[])
@@ -1085,6 +1108,11 @@ begin
     order by rl.id
     for update;
     select * into strict line_row from public.rdo_lines where id = line_row.id;
+
+    if decision = 'approved' and target.bid_role = 'GL'
+       and not coalesce((override_payload->>'glLineTypeVerified')::boolean, false) then
+      raise exception 'Intake must verify whether this GL is bidding as CPC/TMC or DEV.';
+    end if;
 
     if decision = 'approved' and not public.rdo_line_matches_bid_role(
       target.bid_role, target_area_name, line_row.line_type, line_row.pattern

@@ -255,12 +255,74 @@ h1 {
 .import-issues ul { margin: 12px 0 0; padding-left: 20px; }
 .import-preview { margin-top: 20px; }
 .import-line-manager { margin-top: 20px; }
-.import-delete-note { margin: 20px 0 0; border-radius: 12px; padding: 12px 14px; color: #762a23; background: #fff1ef; line-height: 1.5; }
+.import-line-manager-heading-actions { display: flex; align-items: center; gap: 10px; }
+.import-editor-note { margin: 20px 0 0; }
 .import-inline-status { margin: 14px 0 0; color: var(--muted); line-height: 1.5; }
 .import-empty-state { margin: 24px 0 0; color: var(--muted); }
 .import-line-manager-table { max-height: 420px; }
-.import-line-manager-table table { min-width: 680px; }
-.import-line-action-cell { text-align: right; }
+.import-line-manager-table table { min-width: 1420px; }
+.import-line-action-cell { display: flex; justify-content: flex-end; gap: 6px; text-align: right; }
+.bid-line-editor {
+  margin: 24px 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: clamp(18px, 3vw, 28px);
+  background: #f8faf7;
+}
+.bid-line-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.bid-line-editor-heading h3 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: 1.5rem; font-weight: 500; }
+.bid-line-editor-grid { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 12px; margin-top: 22px; }
+.bid-line-editor label,
+.bid-line-schedule label { display: grid; gap: 7px; color: var(--ink); font-size: 0.78rem; font-weight: 800; }
+.bid-line-editor input:not([type="checkbox"]),
+.bid-line-editor select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: #fff;
+}
+.bid-line-editor input:disabled { color: var(--muted); background: #edf1ee; }
+.bid-line-options,
+.bid-line-schedule { margin: 22px 0 0; border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.bid-line-options legend,
+.bid-line-schedule legend { padding: 0 7px; font-size: 0.8rem; font-weight: 800; }
+.bid-line-options { display: flex; flex-wrap: wrap; gap: 18px; }
+.bid-line-options label { display: flex; align-items: center; gap: 7px; }
+.bid-line-options input { width: 18px; height: 18px; accent-color: var(--green); }
+.bid-line-schedule > p { margin: 0 0 14px; color: var(--muted); font-size: 0.85rem; }
+.bid-line-schedule > div { display: grid; grid-template-columns: repeat(7, minmax(76px, 1fr)); gap: 10px; }
+.bid-line-order-buttons { display: flex; gap: 4px; }
+.bid-line-order-buttons button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--green-dark);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 800;
+}
+.bid-line-order-buttons button:disabled { cursor: not-allowed; opacity: 0.4; }
+.bid-line-sort-button {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+.bid-line-sort-button:hover,
+.bid-line-sort-button:focus-visible { color: #d8f4e4; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -525,6 +587,8 @@ h1 {
   .import-hero { align-items: flex-start; flex-direction: column; padding-top: 34px; }
   .import-field-grid { grid-template-columns: 1fr; }
   .import-section-heading { align-items: flex-start; }
+  .bid-line-editor-grid { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .bid-line-schedule > div { grid-template-columns: repeat(4, minmax(76px, 1fr)); }
   .faq-admin-grid,
   .faq-admin-stats { grid-template-columns: 1fr; }
 }
@@ -533,4 +597,7 @@ h1 {
   .import-nav { align-items: flex-start; flex-direction: column; justify-content: center; gap: 8px; }
   .import-actions { align-items: stretch; flex-direction: column; }
   .import-result dl { grid-template-columns: 1fr; }
+  .import-line-manager-heading-actions { align-items: stretch; flex-direction: column; }
+  .bid-line-editor-grid,
+  .bid-line-schedule > div { grid-template-columns: 1fr; }
 }
