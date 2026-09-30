@@ -15,7 +15,7 @@ assert.match(
 )
 assert.match(
   clientSource,
-  /function bidWindowLockIsBypassed\(\) \{\s*if \(pilotState\.database\) return isAuthorizedPilotBidder\(\);/,
+  /function bidWindowLockIsBypassed\(\) \{\s*if \(pilotState\.database\) return isAuthorizedPilotBidder\(\) && Boolean\(activeTestBidRound\(\)\);/,
   'Authorized pilot bidders must bypass the browser bid-window lock',
 )
 

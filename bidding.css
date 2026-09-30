@@ -691,26 +691,46 @@ button.seniority-pill {
 
 .public-main .public-rdo-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 0;
+  table-layout: fixed;
 }
 
 .public-main .public-rdo-table th,
 .public-main .public-rdo-table td {
-  padding: 9px 8px;
+  padding: 9px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .public-main .public-rdo-table th:nth-child(1),
 .public-main .public-rdo-table td:nth-child(1) {
-  width: auto;
-  min-width: 70px;
+  width: 6%;
+  min-width: 0;
 }
 
 .public-main .public-rdo-table th:nth-child(2),
 .public-main .public-rdo-table td:nth-child(2) {
-  left: 70px;
-  width: auto;
-  min-width: 78px;
+  left: 6%;
+  width: 10%;
+  min-width: 0;
+}
+
+.public-main .public-rdo-table th:nth-last-child(2),
+.public-main .public-rdo-table td:nth-last-child(2) {
+  width: 6%;
+}
+
+.public-main .public-rdo-table th:last-child,
+.public-main .public-rdo-table td:last-child {
+  width: 9%;
+}
+
+.public-main .public-rdo-table .shift,
+.public-main .public-rdo-table .rdo-tag {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 3px;
 }
 
 .public-main .public-rdo-panel {
@@ -4657,7 +4677,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .leave-builder-status[data-status="error"] {
-  color: #991b1b;
+  color: var(--red);
 }
 
 .leave-builder label {
@@ -5337,6 +5357,17 @@ tr.occupied-row .rdo-tag {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 900;
+}
+
+.account-form label small {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.account-password-current {
+  grid-column: 1 / -1;
 }
 
 .account-form input {
@@ -7973,6 +8004,25 @@ body {
   background: #e5e7eb;
 }
 
+.public-main .shift.third-day-swing,
+.public-main tr.occupied-row .shift.third-day-swing,
+.app-main .shift.third-day-swing,
+.app-main tr.occupied-row .shift.third-day-swing {
+  border: 1px solid var(--fatigue-b-line);
+  color: #6f4b08;
+  background: var(--fatigue-b-soft);
+}
+
+.app-main .selected-line-card .day-cell.third-day-swing {
+  border-color: var(--fatigue-b-line);
+  background: var(--fatigue-b-soft);
+}
+
+.app-main .selected-line-card .day-cell.third-day-swing b {
+  color: #6f4b08;
+  background: transparent;
+}
+
 .app-main tr.selected-row td:nth-child(1),
 .app-main tr.selected-row td:nth-child(2) {
   background: #e6f6f7;
@@ -9995,7 +10045,7 @@ video {
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 .mobile-area-control, .mobile-login-slot, .mobile-public-menu,
-.mobile-bid-time-cards, .mobile-rdo-cards, .mobile-rdo-view,
+.mobile-bid-time-cards, .mobile-bid-time-view, .mobile-rdo-cards, .mobile-rdo-view,
 .mobile-table-hint, .mobile-calendar-controls { display: none; }
 .mobile-app-menu,
 .mobile-roster-hint,
@@ -10016,8 +10066,26 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
 
 @media (max-width: 900px) {
   /* Cards replace the compressed round columns at tablet and phone sizes. */
-  .desktop-bid-times { display: none; }
-  .mobile-bid-time-cards { display: grid; gap: 12px; }
+  .public-bid-time-results[data-presentation="cards"] .desktop-bid-times { display: none; }
+  .public-bid-time-results[data-presentation="cards"] .mobile-bid-time-cards { display: grid; gap: 12px; }
+  .public-bid-time-results[data-presentation="list"] .mobile-bid-time-cards { display: none; }
+  .public-bid-time-results[data-presentation="list"] .desktop-bid-times { display: block; }
+  .public-bid-time-results { min-width: 0; }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-list-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mobile-bid-time-view { display: flex; gap: 8px; margin: 12px 0; }
+  .mobile-bid-time-view button { flex: 1; min-height: 44px; border: 1px solid #b8cbce; border-radius: 8px; padding: 8px; color: #19464b; background: #fff; font: inherit; font-size: .875rem; }
+  .mobile-bid-time-view button[aria-pressed="true"] { background: #28656c; color: #fff; }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table {
+    min-width: 980px;
+    table-layout: fixed;
+  }
   .mobile-bid-time-card { min-width: 0; padding: 16px; border: 1px solid #d3dfe7; border-radius: 12px; background: white; }
   .mobile-bid-time-card h3 { color: #152d3b; display: flex; align-items: start; justify-content: space-between; gap: 10px; margin: 0; font-size: 1rem; line-height: 1.5; }
   .mobile-bid-time-card h3 > span:first-child { min-width: 0; overflow-wrap: anywhere; }
@@ -10105,6 +10173,7 @@ body:has(.public-date-sheet[open]) { overflow: hidden; }
   .mobile-line-week dt { font-size: .875rem; color: #526273; }
   .mobile-line-week dd { margin: 0; font-size: 1rem; }
   .mobile-rdo-card > p { padding: 0 14px 14px; font-size: .875rem; }
+  .public-main .public-rdo-table { min-width: 980px; table-layout: auto; }
   .public-rdo-table th:first-child, .public-rdo-table td:first-child { position: sticky; left: 0; z-index: 1; background: #f0f6f7; }
   .public-rdo-table th[colspan] { position: static; }
   .public-rdo-panel .filter-bar input[type="search"], .public-rdo-panel .filter-bar select { min-height: 44px; font-size: 16px; }
@@ -10488,6 +10557,11 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
     font-size: 0.7rem;
   }
 
+  .line-table.public-mobile-rdo-table {
+    width: 614px;
+    min-width: 614px;
+  }
+
   .member-rdo-table th,
   .member-rdo-table td,
   .line-table.public-mobile-rdo-table th,
@@ -10515,6 +10589,28 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
     left: 46px;
     width: 42px;
     min-width: 42px;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(2),
+  .line-table.public-mobile-rdo-table td:nth-child(2) {
+    width: 46px;
+    min-width: 46px;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(1),
+  .line-table.public-mobile-rdo-table th:nth-child(2) {
+    z-index: 4;
+    overflow: hidden;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(2) {
+    text-transform: none;
+  }
+
+  .line-table.public-mobile-rdo-table td:nth-child(1),
+  .line-table.public-mobile-rdo-table td:nth-child(2) {
+    z-index: 3;
+    overflow: hidden;
   }
 
   .member-rdo-table th:nth-child(n + 3):nth-child(-n + 9),
@@ -11140,4 +11236,56 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   .bid-change-footer .primary-action {
     grid-row: 1;
   }
+}
+
+/* Keep schedule badges visible on occupied and personal RDO lines. */
+.public-main .public-rdo-panel tr.occupied-row,
+.public-main .public-rdo-panel tr.occupied-row td,
+.app-main tr.occupied-row,
+.app-main tr.occupied-row td:nth-child(1),
+.app-main tr.occupied-row td:nth-child(2) {
+  background: #eef0f3;
+}
+
+.public-main tr.occupied-row .shift,
+.app-main tr.occupied-row .shift {
+  color: #172033;
+  background: #edf3f8;
+}
+
+.public-main tr.occupied-row .rdo-tag,
+.app-main tr.occupied-row .rdo-tag {
+  color: #14335f;
+  background: #dbe7ff;
+}
+
+.public-main tr.occupied-row .shift.special,
+.app-main tr.occupied-row .shift.special {
+  color: #073d41;
+  background: #cfeff1;
+}
+
+.public-main tr.occupied-row .shift.third-day-swing,
+.app-main tr.occupied-row .shift.third-day-swing {
+  color: #6f4b08;
+  background: var(--fatigue-b-soft);
+  border-color: var(--fatigue-b-line);
+}
+
+.app-main tr.own-rdo-row,
+.app-main tr.own-rdo-row td,
+.app-main tr.own-rdo-row td:nth-child(1),
+.app-main tr.own-rdo-row td:nth-child(2) {
+  color: #172033;
+  background: #e8e3fa;
+}
+
+.app-main tr.own-rdo-row {
+  outline: 2px solid #8b75c5;
+}
+
+.app-main .member-rdo-card.own-rdo-card {
+  background: #e8e3fa;
+  border-color: #8b75c5;
+  box-shadow: 0 0 0 2px rgba(139, 117, 197, 0.2);
 }

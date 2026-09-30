@@ -43,7 +43,8 @@ Run `database/admin_profile_adm.sql` to mark the standalone Area A admin login
 for `zla.bidding@gmail.com` as `ADM` and clear any bid windows attached to it.
 
 For bid-year-specific ghost bidding, run `database/ghost_bidding.sql` after the
-base schema, then run or re-run `database/transactional_bidding.sql` and
+base schema, then run `database/fatigue_group_balancing.sql` before running or
+re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
 `database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
@@ -179,6 +180,8 @@ Run `database/admin_roster_management.sql` to enable atomic roster editing from
 the Admin Console. It saves names, initials, contact information, area, bid role,
 seniority rank, leave allowance, and active status by immutable bidder ID, while
 also supporting the older initials-based payload during deployment rollout.
+When seniority changes, draft and open bid-window times stay with their rank and
+are reassigned to every bidder affected by the move in the same transaction.
 
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 

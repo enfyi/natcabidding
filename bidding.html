@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -34,6 +34,9 @@
     </section>
     <div class="pilot-environment-banner" data-pilot-environment-banner hidden>
       TEST SITE · Practice bids only · Data may be reset by an administrator
+      <label data-pilot-round-picker-row hidden>Practice bidding round
+        <select data-pilot-round-picker aria-label="Practice bidding round"><option value="">All rounds off</option></select>
+      </label>
     </div>
     <section class="login-screen public-shell" aria-label="Public bidding website">
       <aside class="public-rail" aria-label="Public bidding navigation">
@@ -556,7 +559,7 @@
             <section class="panel rdo-table-panel">
               <div class="panel-header">
                 <div>
-                  <h2>RDO Bid Lines - Area A</h2>
+                  <h2 data-rdo-lines-heading>RDO Bid Lines</h2>
                   <p>Select an open negotiated line. Flex, AWS, and most Mid preferences are chosen by the employee. Fatigue group may be selected or left to intake with No preference.</p>
                 </div>
                 <span class="pill open" data-rdo-filter-count>All lines</span>
@@ -576,11 +579,11 @@
                 </select>
               </div>
               <div class="mobile-rdo-view member-rdo-view" role="group" aria-label="RDO display">
-                <button type="button" aria-pressed="true" data-member-rdo-presentation="cards">Line cards</button>
-                <button type="button" aria-pressed="false" data-member-rdo-presentation="table">Compare table</button>
+                <button type="button" aria-pressed="false" data-member-rdo-presentation="cards">Line cards</button>
+                <button type="button" aria-pressed="true" data-member-rdo-presentation="table">Compare table</button>
               </div>
-              <p class="mobile-table-hint member-rdo-table-hint" hidden>Swipe horizontally to compare the full weekly schedule.</p>
-              <div class="member-rdo-results" data-member-rdo-results data-presentation="cards">
+              <p class="mobile-table-hint member-rdo-table-hint">Swipe horizontally to compare the full weekly schedule.</p>
+              <div class="member-rdo-results" data-member-rdo-results data-presentation="table">
                 <div class="mobile-rdo-cards member-rdo-cards" data-member-rdo-cards></div>
                 <div class="table-wrap tall rdo-page-table-wrap" tabindex="0" role="region" aria-label="RDO schedule comparison table, scroll horizontally">
                 <table class="line-table member-rdo-table">
@@ -1509,7 +1512,7 @@
               <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Pilot Access</h3>
+                    <h3>Pilot Access and Rounds</h3>
                     <p data-pilot-status-copy>This database is not configured for an isolated pilot.</p>
                   </div>
                   <span class="pill" data-pilot-status>Pilot unavailable</span>
@@ -1523,6 +1526,11 @@
                   <input type="text" data-pilot-member-initials placeholder="AB, CD, EF" autocomplete="off" />
                   <small>Separate initials with commas. Admin and intake access remains available.</small>
                 </label>
+                <p>Turn each round on or off. Authorized pilot BUEs can choose any enabled round and submit without scheduled hours. Pilot access must also be on.</p>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="1" disabled /><span>Round 1 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="2" disabled /><span>Round 2 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="3" disabled /><span>Round 3 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="4" disabled /><span>Round 4 bidding on</span></label>
                 <div class="button-row">
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
@@ -1815,9 +1823,10 @@
                   <button class="secondary-action" type="submit" data-update-account-email>Change Login Email</button>
                 </form>
                 <form class="account-form" data-account-password-form>
+                  <label class="account-password-current">Current Password <input type="password" autocomplete="current-password" data-account-current-password /><small>Only required if this account already has a password. Leave blank if you only use login links.</small></label>
                   <label>New Password <input type="password" autocomplete="new-password" minlength="8" data-account-password /></label>
                   <label>Confirm Password <input type="password" autocomplete="new-password" minlength="8" data-account-password-confirm /></label>
-                  <button class="primary-action" type="submit" data-update-account-password>Set Password</button>
+                  <button class="primary-action" type="submit" data-update-account-password>Set or Change Password</button>
                 </form>
                 <p class="profile-form-status" data-account-form-status role="status" aria-live="polite"></p>
               </section>
@@ -1930,7 +1939,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

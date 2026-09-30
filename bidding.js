@@ -1,3 +1,5 @@
+let leaveReadCache = null;
+
 const monthNames = [
   "January",
   "February",
@@ -103,6 +105,9 @@ let roundRulesDatabaseComplete = false;
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 let enforceBidWindows = true;
 let bidWindowTestRound = null;
+let pilotOpenRounds = [];
+let selectedPilotRound = null;
+let pilotRoundRefreshPending = false;
 let bidWindowSettingsFallbackMessage = "";
 let pilotState = {
   available: false,
@@ -594,7 +599,10 @@ const calendarLayouts = {
 let displayedCalendarYear = BID_YEAR;
 let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
 const annualMobileCalendars = new Set();
-let publicRdoPresentation = "cards";
+let calendarRenderRevision = 0;
+let pendingPageCalendarFrame = 0;
+let publicRdoPresentation = "table";
+let publicBidTimePresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
 let editingIntakeScheduleId = "";
@@ -759,45 +767,93 @@ const AREA_CODE_BY_NAME = Object.entries(AREA_NAME_BY_CODE).reduce((lookup, [cod
   return lookup;
 }, {});
 
-const areaCpcCount = 36;
-const areaFatigueMax = Math.floor(areaCpcCount / 3);
+const FATIGUE_GROUPS = ["A", "B", "C"];
 
-const crewSizeByPattern = {
-  "S/S": 6,
-  "S/M": 6,
-  "M/T": 6,
-  "T/W": 6,
-  "W/T": 6,
-  "T/F": 6,
-  "F/S": 6,
-};
+function fatiguePoolForBidRole(bidAs, area) {
+  const role = normalizeBidRoleForArea(bidAs, area);
+  if (["CPC", "TMC"].includes(role)) return "CPC";
+  if (["R-DEV", "D-DEV", "DEV"].includes(role)) return "DEV";
+  return null;
+}
+
+function fatiguePoolForLine(line) {
+  return isCpcLine(line) ? "CPC" : "DEV";
+}
+
+function fatigueRdoSetForLine(line) {
+  if (isCpcLine(line)) return String(line.pattern || "").trim().toUpperCase();
+
+  const rdoDays = (line.week || [])
+    .map((value, index) => String(value || "").trim().toUpperCase() === "RDO" ? index : null)
+    .filter((index) => index !== null);
+  return rdoDays.length ? rdoDays.join("/") : String(line.pattern || "").trim().toUpperCase();
+}
+
+function fatiguePoolLines(area, pool) {
+  return rdoLinesForArea(area).filter((item) => fatiguePoolForLine(item) === pool);
+}
+
+function fatiguePoolRosterCount(area, pool, poolLines) {
+  const rosterCount = senioritySource.filter((entry) =>
+    seniorityEntryActive(entry) &&
+    seniorityEntryArea(entry) === area &&
+    fatiguePoolForBidRole(entry[2], area) === pool
+  ).length;
+  return rosterCount || poolLines.length;
+}
+
+function fatigueGroupLimit(usedByGroup, total, group) {
+  const base = Math.floor(total / FATIGUE_GROUPS.length);
+  const remainder = total % FATIGUE_GROUPS.length;
+  if (!remainder) return base;
+  if ((usedByGroup[group] || 0) > base) return base + 1;
+  const claimedExtras = FATIGUE_GROUPS.filter((name) => (usedByGroup[name] || 0) > base).length;
+  return base + (claimedExtras < remainder ? 1 : 0);
+}
+
+function fatigueGroupCanAccept(usedByGroup, total, group) {
+  if (Object.values(usedByGroup).reduce((sum, value) => sum + value, 0) >= total) return false;
+  const next = { ...usedByGroup, [group]: (usedByGroup[group] || 0) + 1 };
+  const base = Math.floor(total / FATIGUE_GROUPS.length);
+  const remainder = total % FATIGUE_GROUPS.length;
+  const ceiling = base + (remainder ? 1 : 0);
+  return next[group] <= ceiling && FATIGUE_GROUPS.filter((name) => (next[name] || 0) > base).length <= remainder;
+}
 
 function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidateGroup = selectedFatigueGroup) {
   const area = line.area || currentUser.area || "Area A";
-  const areaLines = rdoLinesForArea(area);
-  const crewSize = crewSizeByPattern[line.pattern] || areaLines.filter((item) => item.pattern === line.pattern).length;
-  const crewMax = Math.max(1, Math.floor(crewSize / 3));
+  const pool = fatiguePoolForLine(line);
+  const areaLines = fatiguePoolLines(area, pool);
+  const rdoSet = fatigueRdoSetForLine(line);
+  const crewLines = areaLines.filter((item) => fatigueRdoSetForLine(item) === rdoSet);
+  const areaTotal = fatiguePoolRosterCount(area, pool, areaLines);
+  const crewTotal = crewLines.length;
+  const baseAreaUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, areaLines.filter((item) =>
+    item.line !== candidateLineId && item.status === "Taken" && item.group === group
+  ).length]));
+  const baseCrewUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, crewLines.filter((item) =>
+    item.line !== candidateLineId && item.status === "Taken" && item.group === group
+  ).length]));
+  const displayedAreaUsed = { ...baseAreaUsed };
+  const displayedCrewUsed = { ...baseCrewUsed };
+  if (FATIGUE_GROUPS.includes(candidateGroup)) {
+    displayedAreaUsed[candidateGroup] += 1;
+    displayedCrewUsed[candidateGroup] += 1;
+  }
 
-  return ["A", "B", "C"].map((group) => {
-    const areaUsed = areaLines.filter((item) => {
-      if (!isCpcLine(item)) return false;
-      if (item.line === candidateLineId) return candidateGroup === group;
-      return item.status === "Taken" && item.group === group;
-    }).length;
-
-    const crewUsed = areaLines.filter((item) => {
-      if (!isCpcLine(item)) return false;
-      if (item.pattern !== line.pattern) return false;
-      if (item.line === candidateLineId) return candidateGroup === group;
-      return item.status === "Taken" && item.group === group;
-    }).length;
+  return FATIGUE_GROUPS.map((group) => {
+    const areaUsed = displayedAreaUsed[group];
+    const crewUsed = displayedCrewUsed[group];
 
     return {
       group,
       areaUsed,
-      areaMax: areaFatigueMax,
+      areaMax: fatigueGroupLimit(displayedAreaUsed, areaTotal, group),
       crewUsed,
-      crewMax,
+      crewMax: fatigueGroupLimit(displayedCrewUsed, crewTotal, group),
+      available:
+        fatigueGroupCanAccept(baseAreaUsed, areaTotal, group) &&
+        fatigueGroupCanAccept(baseCrewUsed, crewTotal, group),
     };
   });
 }
@@ -807,11 +863,17 @@ function isCpcLine(line) {
 }
 
 function isGroupAvailable(item) {
-  return item.areaUsed < item.areaMax && item.crewUsed < item.crewMax;
+  return item.available;
 }
 
 function canChooseGroup(item, isSelected) {
-  return item.areaUsed < item.areaMax && (isSelected ? item.crewUsed <= item.crewMax : item.crewUsed < item.crewMax);
+  return item.available || isSelected;
+}
+
+function fatigueGroupIsAvailableForLine(line, group, candidateLineId = line?.line) {
+  if (!line || !FATIGUE_GROUPS.includes(group)) return false;
+  const capacity = fatigueCapacityForLine(line, candidateLineId, "").find((item) => item.group === group);
+  return Boolean(capacity && isGroupAvailable(capacity));
 }
 
 function isForcedMid(line) {
@@ -1222,6 +1284,10 @@ let bidWindowBuilderPreview = null;
 let bidWindowBuilderSaving = false;
 
 function roundDateBlocksForArea(area = currentViewArea()) {
+  return cachedLeaveRead(JSON.stringify(["roundDateBlocksForArea", area]), () => roundDateBlocksForAreaUncached(area));
+}
+
+function roundDateBlocksForAreaUncached(area = currentViewArea()) {
   const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
   return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
 }
@@ -1400,6 +1466,10 @@ function currentUserBidWindow(date = new Date(), area = currentUser.area) {
 }
 
 function roundWindows(roundNumber, area = currentViewArea()) {
+  return cachedLeaveRead(JSON.stringify(["roundWindows", roundNumber, area]), () => roundWindowsUncached(roundNumber, area));
+}
+
+function roundWindowsUncached(roundNumber, area = currentViewArea()) {
   return activeRosterEntries(area)
     .map((_, index) => bidWindowForRankRound(index + 1, roundNumber, area))
     .filter(Boolean);
@@ -1584,6 +1654,10 @@ function personMatchesCurrentUser(person) {
 }
 
 function activeRosterEntries(area = null) {
+  return cachedLeaveRead(JSON.stringify(["activeRosterEntries", area]), () => activeRosterEntriesUncached(area));
+}
+
+function activeRosterEntriesUncached(area = null) {
   return senioritySource.filter((entry) =>
     seniorityEntryActive(entry) &&
     seniorityEntryParticipatesInBidding(entry) &&
@@ -1701,7 +1775,7 @@ let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
 let intakeEditorReturnFocus = null;
-let memberRdoPresentation = "cards";
+let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
 const intakeBidderSelection = {
   initials: "",
@@ -1860,16 +1934,18 @@ function normalizeBidWindowTestRound(value) {
 }
 
 function activeTestBidRound() {
-  return bidWindowLockIsBypassed() ? bidWindowTestRound : null;
+  return pilotState.database && isAuthorizedPilotBidder()
+    ? (pilotOpenRounds.includes(selectedPilotRound) ? selectedPilotRound : pilotOpenRounds[0] || null)
+    : null;
 }
 
 function bidWindowLockIsBypassed() {
-  if (pilotState.database) return isAuthorizedPilotBidder();
+  if (pilotState.database) return isAuthorizedPilotBidder() && Boolean(activeTestBidRound());
   return false;
 }
 
 function currentUserBidWindowStatus(date = new Date()) {
-  const window = currentUserBidWindow(date);
+  const window = pilotState.database ? (activeTestBidRound() ? { round: activeTestBidRound() } : null) : currentUserBidWindow(date);
   const inHomeArea = isViewingHomeArea();
   return {
     window,
@@ -1880,6 +1956,7 @@ function currentUserBidWindowStatus(date = new Date()) {
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
+  if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
@@ -1919,11 +1996,24 @@ function syncLeaveBidWindowControls(date = new Date()) {
   }
 }
 
+function rdoChangeWindowErrorMessage(date = new Date()) {
+  const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
+    || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
+  if (!hasApprovedRdo) return "";
+  const window = bidWindowForRankRound(currentUserSeniorityRank(currentUser.area), 1, currentUser.area);
+  const closesAt = window ? Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000) : 0;
+  if (!isViewingHomeArea() || (pilotState.database && activeTestBidRound() !== 1)
+      || !window || date < window.start || date.getTime() >= closesAt) {
+    return "RDO changes are only allowed during your own two-hour Round 1 bid window. Changes are closed outside that window and in Rounds 2–4.";
+  }
+  return "";
+}
+
 function rdoBidWindowErrorMessage(date = new Date()) {
   if (pendingCurrentUserRdoRequest()) {
     return "Your RDO bid is awaiting an intake decision. You can submit another change after it is approved or denied.";
   }
-  return bidWindowErrorMessage("RDO bids", date);
+  return rdoChangeWindowErrorMessage(date) || bidWindowErrorMessage("RDO bids", date);
 }
 
 async function setBidWindowEnforcement(enabled) {
@@ -1965,10 +2055,10 @@ function syncBidWindowTestingControls() {
     select.disabled = true;
   });
 
-  setText("[data-bid-window-enforcement-state]", "Strict Windows Required");
+  setText("[data-bid-window-enforcement-state]", pilotState.database ? "Pilot Round Controls" : "Strict Windows Required");
   setText(
     "[data-bid-window-enforcement-copy]",
-    bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
+    pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
 }
 
@@ -2001,6 +2091,47 @@ function pilotInitialsForMemberIds() {
     .join(", ");
 }
 
+async function refreshPilotRounds() {
+  if (!pilotState.database || !supabaseState.authUserId || pilotRoundRefreshPending) return;
+  pilotRoundRefreshPending = true;
+  const previousState = JSON.stringify([pilotOpenRounds, pilotState]);
+  try {
+    const [rounds, access] = await Promise.all([
+      supabaseClient().rpc("read_pilot_rounds", { requested_bid_year: BID_YEAR }),
+      supabaseClient().rpc("read_pilot_settings", { requested_bid_year: BID_YEAR }),
+    ]);
+    const { data, error } = rounds;
+    if (!access.error && access.data) applyPilotSettings(Array.isArray(access.data) ? access.data[0] : access.data);
+    else pilotState.enabled = false;
+    pilotOpenRounds = !error && Array.isArray(data) ? data.map(Number).filter((round) => normalizeBidWindowTestRound(round)) : [];
+    if (JSON.stringify([pilotOpenRounds, pilotState]) !== previousState) {
+      syncPilotControls();
+      renderApp();
+    }
+  } catch {
+    pilotOpenRounds = [];
+    syncPilotControls();
+    updateBidWindow(true);
+  } finally {
+    pilotRoundRefreshPending = false;
+  }
+}
+
+async function setPilotRound(round, enabled) {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  const { data, error } = await supabaseClient().rpc("set_pilot_round", {
+    requested_bid_year: BID_YEAR, requested_round: round, should_enable: enabled,
+  });
+  if (error) {
+    window.alert(error.message || "Pilot round could not be changed.");
+    syncPilotControls();
+    return;
+  }
+  pilotOpenRounds = data || [];
+  syncPilotControls();
+  renderApp();
+}
+
 function syncPilotControls() {
   const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
   const banner = document.querySelector("[data-pilot-environment-banner]");
@@ -2008,6 +2139,18 @@ function syncPilotControls() {
 
   document.querySelectorAll("[data-pilot-admin-card]").forEach((card) => {
     card.hidden = !hasSystemAdminAccess();
+  });
+  document.querySelectorAll("[data-pilot-round-toggle]").forEach((toggle) => {
+    toggle.checked = pilotOpenRounds.includes(Number(toggle.dataset.pilotRoundToggle));
+    toggle.disabled = !pilotState.database;
+  });
+  document.querySelectorAll("[data-pilot-round-picker]").forEach((select) => {
+    select.closest("[data-pilot-round-picker-row]").hidden = !pilotState.database || !isConfirmedHelpUser();
+    select.innerHTML = pilotOpenRounds.length
+      ? pilotOpenRounds.map((round) => `<option value="${round}">Round ${round}</option>`).join("")
+      : '<option value="">All rounds off</option>';
+    select.value = String(activeTestBidRound() || "");
+    select.disabled = !isAuthorizedPilotBidder() || !pilotOpenRounds.length;
   });
   const toggle = document.querySelector("[data-pilot-enabled-toggle]");
   const initials = document.querySelector("[data-pilot-member-initials]");
@@ -2121,6 +2264,14 @@ async function addOrUpdateRdoSubmission() {
   if (!line || line.status === "Taken") return;
   if (!selectedFatigueGroup) {
     alert("Choose a fatigue group or No preference before submitting this RDO bid.");
+    return;
+  }
+  if (
+    selectedFatigueGroup !== NO_FATIGUE_PREFERENCE &&
+    !fatigueGroupIsAvailableForLine(line, selectedFatigueGroup)
+  ) {
+    alert(`Fatigue Group ${selectedFatigueGroup} is now full for this area or RDO set. Choose another group.`);
+    updateSelectedLine();
     return;
   }
   if (!isForcedMid(line) && !selectedMidPreference) {
@@ -2303,7 +2454,7 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
     const isAvailable = isGroupAvailable(item);
     const isSelectable = isAvailable || allowOverride;
     const label = `Group ${item.group}`;
-    const capacity = `Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}`;
+    const capacity = `Area ${item.areaUsed}/${item.areaMax}, RDO set ${item.crewUsed}/${item.crewMax}`;
     const suffix = isAvailable ? "" : allowOverride ? " - Full, override" : " - Full";
     return `<option class="${isAvailable ? "" : "manual-fatigue-group-full"}" value="${item.group}"${isSelected ? " selected" : ""}${isSelectable ? "" : " disabled"}>${label}${suffix} (${capacity})</option>`;
   }).join("");
@@ -2864,7 +3015,21 @@ function isLeavePreviewRangeDate(key) {
   return leaveRangePreviewActive && isLeaveBuilderRangeDate(key);
 }
 
+function previouslyBidLeaveDateKeys() {
+  const dates = new Set();
+  activeLeaveItemsForInitials(currentUser.initials).forEach((item) => {
+    if (leaveReplacementRequestId && submittedLeaveItemKey(item) === leaveReplacementRequestId) return;
+    leaveDateKeysForItem(item).forEach((key) => dates.add(key));
+  });
+  return dates;
+}
+
 function selectLeaveBuilderDate(key) {
+  if (previouslyBidLeaveDateKeys().has(key)) {
+    setLeaveBuilderStatus(`${formatCalendarDate(key)} is already in your submitted leave bids and cannot be selected again.`, "error");
+    return false;
+  }
+
   if (isRdoDateForInitials(key, currentUser.initials)) {
     setLeaveBuilderStatus(`${formatCalendarDate(key)} is an RDO on your submitted line and cannot be selected for leave.`, "error");
     return false;
@@ -2971,6 +3136,7 @@ function renderLeaveDatePicker() {
   const firstDay = new Date(leavePickerYear, leavePickerMonthIndex, 1).getDay();
   const daysInMonth = new Date(leavePickerYear, leavePickerMonthIndex + 1, 0).getDate();
   const selectedKeys = new Set(leaveBuilderDateKeys());
+  const previouslyBidDates = previouslyBidLeaveDateKeys();
   const cells = [];
 
   dayNames.forEach((day) => cells.push(`<span class="picker-dow">${day[0]}</span>`));
@@ -2982,8 +3148,11 @@ function renderLeaveDatePicker() {
     const isEdge = isLeaveBuilderRangeEdge(key);
     const isOutsideLeaveYear = !isBidLeaveYearDate(key);
     const isRdo = isRdoDateForInitials(key, currentUser.initials);
-    const isUnavailable = isOutsideLeaveYear || isRdo;
-    const unavailableLabel = isRdo
+    const isAlreadyBid = previouslyBidDates.has(key);
+    const isUnavailable = isOutsideLeaveYear || isRdo || isAlreadyBid;
+    const unavailableLabel = isAlreadyBid
+      ? ": already submitted for leave; cannot be selected again"
+      : isRdo
       ? ": RDO on your submitted line; leave bidding unavailable"
       : isOutsideLeaveYear
         ? ": leave bidding unavailable"
@@ -3142,9 +3311,8 @@ function chargeableLeaveDatesForInitials(range, initials = currentUser.initials,
 }
 
 function leaveSlotDateKeys(keys, initials = currentUser.initials) {
-  return keys.filter((key) =>
-    !isRdoDateForInitials(key, initials) && !isHolidayDate(key, initials)
-  );
+  // Slot occupancy is separate from charged leave hours.
+  return keys.filter((key) => !isRdoDateForInitials(key, initials));
 }
 
 function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
@@ -3323,6 +3491,10 @@ function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
 }
 
 function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
+  return withLeaveReadCache(() => leaveAreaCapacityMessageWithCache(area, bidAs, extraItems));
+}
+
+function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
   const bucket = leaveSlotBucketForBidAs(bidAs);
   if (!bucket) return "";
   const total = areaLeaveSlotBudget(area, bucket);
@@ -3723,8 +3895,7 @@ function previewLeaveSubmission() {
   selectedLeaveDateKey = dateKeys[0];
   displayedCalendarYear = previewYear;
   if (calendarYearChanged) {
-    updateCalendarYearLabels();
-    makeCalendar("leave-calendar");
+    renderCalendars({ includePublic: false });
   } else {
     syncMemberCalendarSelection([...previousPreviewKeys, ...dateKeys]);
   }
@@ -3745,12 +3916,20 @@ function removeLeaveDraft(id) {
 }
 
 function refreshLeaveDraftUi(affectedDateKeys = []) {
+  return withLeaveReadCache(() => refreshLeaveDraftUiWithCache(affectedDateKeys));
+}
+
+function refreshLeaveDraftUiWithCache(affectedDateKeys = []) {
   syncMemberCalendarSelection(affectedDateKeys);
   renderLeaveDraftQueue();
   renderLeaveAllowanceSummary();
 }
 
 function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
+  return withLeaveReadCache(() => leaveDraftPreSubmissionMessageWithCache(drafts));
+}
+
+function leaveDraftPreSubmissionMessageWithCache(drafts = leaveDraftQueue) {
   const requestedDates = new Map();
   const overlappingDates = new Set();
 
@@ -4312,8 +4491,16 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
 }
 
 async function approveIntakeItem(id) {
-  const item = intakeQueue.find((entry) => entry.id === id);
+  const item = intakeReviewItemById(id);
   if (!item || item.status !== "Pending") return;
+  if (item.members) {
+    try { await reviewIntakeLeaveGroup(item, "approved"); }
+    catch (error) {
+      intakeGroupReviewState.set(id, { reviewNote: error.message || "This week or batch could not be approved." });
+      renderIntakeQueue();
+    }
+    return;
+  }
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
   if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
     item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
@@ -4321,6 +4508,16 @@ async function approveIntakeItem(id) {
     renderApp();
     setPage("intake");
     return;
+  }
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
+    const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
+    if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
+      item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+      return;
+    }
   }
   let persisted = false;
   try {
@@ -4356,12 +4553,13 @@ async function approveIntakeItem(id) {
 }
 
 async function denyIntakeItem(id) {
-  const item = intakeQueue.find((entry) => entry.id === id);
+  const item = intakeReviewItemById(id);
   if (!item || item.status !== "Pending") return;
 
   const reason = document.querySelector("[data-denial-reason]")?.value.trim() || "";
   if (!reason) {
     item.denialDraftError = "Enter a denial reason before sending this back to the BUE.";
+    if (item.members) intakeGroupReviewState.set(id, { denialDraftError: item.denialDraftError });
     activeDenialId = id;
     activeOverrideId = null;
     renderApp();
@@ -4369,6 +4567,14 @@ async function denyIntakeItem(id) {
     return;
   }
 
+  if (item.members) {
+    try { await reviewIntakeLeaveGroup(item, "denied", reason); }
+    catch (error) {
+      intakeGroupReviewState.set(id, { denialDraftError: error.message || "This week or batch could not be denied." });
+      renderIntakeQueue();
+    }
+    return;
+  }
   let persisted = false;
   try {
     persisted = await persistIntakeDecision(item, "denied", reason);
@@ -4688,6 +4894,22 @@ function calendarActiveDate() {
   return new Date(displayedCalendarYear, activeDate.getMonth(), day);
 }
 
+// Share derived read data only during one synchronous operation. Always discard
+// it before returning so edits, RDO changes, and database refreshes remain fresh.
+
+function withLeaveReadCache(read) {
+  if (leaveReadCache) return read();
+  leaveReadCache = new Map();
+  try { return read(); }
+  finally { leaveReadCache = null; }
+}
+
+function cachedLeaveRead(key, read) {
+  if (!leaveReadCache) return read();
+  if (!leaveReadCache.has(key)) leaveReadCache.set(key, read());
+  return leaveReadCache.get(key);
+}
+
 function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
   return {
     area,
@@ -4824,12 +5046,19 @@ function openPublicDateSheet(button) {
   sheet.showModal();
 }
 
-function makeCalendar(targetId) {
+function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   const target = document.getElementById(targetId);
   if (!target) return;
   const isPublicCalendar = targetId === "public-calendar";
   const ownerPage = target.closest(".page");
   if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
+  if (
+    reuseCurrent &&
+    target.childElementCount > 0 &&
+    Number(target.dataset.calendarRevision) === calendarRenderRevision
+  ) {
+    return;
+  }
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
@@ -4844,7 +5073,38 @@ function makeCalendar(targetId) {
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
+  const renderKey = [
+    displayedCalendarYear,
+    calendarMode,
+    area,
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip,
+    expandedSlots,
+  ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
+
+  syncMobileCalendarControls(target);
+  target.classList.remove("month-view", "week-view");
+  target.classList.toggle("expanded-slots-calendar", expandedSlots);
+
+  if (reuseCurrent) {
+    const reusableCalendar = [...document.querySelectorAll(".app-shell .year-calendar[id]")].find(
+      (calendar) =>
+        calendar !== target &&
+        calendar.childElementCount > 0 &&
+        Number(calendar.dataset.calendarRevision) === calendarRenderRevision &&
+        calendar.dataset.calendarRenderKey === renderKey
+    );
+    if (reusableCalendar) {
+      target.replaceChildren(...[...reusableCalendar.childNodes].map((node) => node.cloneNode(true)));
+      syncMobileCalendarMonths(target);
+      target.dataset.calendarRevision = String(calendarRenderRevision);
+      target.dataset.calendarRenderKey = renderKey;
+      return;
+    }
+  }
+
   const context = makeCalendarRenderContext({
     area,
     showRdo,
@@ -4852,10 +5112,6 @@ function makeCalendar(targetId) {
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
   });
-
-  syncMobileCalendarControls(target);
-  target.classList.remove("month-view", "week-view");
-  target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
   target.innerHTML = monthIndexes
     .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, {
@@ -4875,6 +5131,8 @@ function makeCalendar(targetId) {
       context,
     });
   syncMobileCalendarMonths(target);
+  target.dataset.calendarRevision = String(calendarRenderRevision);
+  target.dataset.calendarRenderKey = renderKey;
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -5069,37 +5327,78 @@ function updateCalendarViewControls() {
   });
 }
 
-function renderCalendars({ includePublic = true, includeMember = true } = {}) {
+function renderCalendars({ includePublic = true, includeMember = true, reuseCurrent = false } = {}) {
+  return withLeaveReadCache(() => renderCalendarsWithCache({ includePublic, includeMember, reuseCurrent }));
+}
+
+function renderCalendarsWithCache({ includePublic = true, includeMember = true, reuseCurrent = false } = {}) {
+  if (!reuseCurrent) calendarRenderRevision += 1;
   updateCalendarViewControls();
   updateCalendarYearLabels();
-  if (includePublic) makeCalendar("public-calendar");
+  if (includePublic) makeCalendar("public-calendar", { reuseCurrent });
   if (includeMember) {
-    makeCalendar("dashboard-calendar");
-    makeCalendar("leave-calendar");
-    makeCalendar("full-calendar");
+    makeCalendar("dashboard-calendar", { reuseCurrent });
+    makeCalendar("leave-calendar", { reuseCurrent });
+    makeCalendar("full-calendar", { reuseCurrent });
   }
 }
 
-function renderMemberCalendarForPage(pageName) {
+function memberCalendarForPage(pageName) {
   const calendarIds = {
     dashboard: "dashboard-calendar",
     leave: "leave-calendar",
     calendar: "full-calendar",
   };
   const calendarId = calendarIds[pageName];
-  if (!calendarId) return;
-  updateCalendarViewControls();
-  updateCalendarYearLabels();
-  makeCalendar(calendarId);
+  return calendarId ? document.getElementById(calendarId) : null;
 }
 
-function refreshMemberCalendarDates(dateKeys = []) {
+function memberPageCalendarNeedsRender(pageName) {
+  const calendar = memberCalendarForPage(pageName);
+  return Boolean(
+    calendar && (
+      calendar.childElementCount === 0 ||
+      Number(calendar.dataset.calendarRevision) !== calendarRenderRevision
+    )
+  );
+}
+
+function renderMemberCalendarForPage(pageName, { defer = false } = {}) {
+  if (pendingPageCalendarFrame) {
+    window.cancelAnimationFrame(pendingPageCalendarFrame);
+    pendingPageCalendarFrame = 0;
+  }
+
+  const render = () => {
+    pendingPageCalendarFrame = 0;
+    if (document.querySelector(".page.active")?.dataset.pagePanel !== pageName) return;
+    renderCalendars({ includePublic: false, reuseCurrent: true });
+    memberCalendarForPage(pageName)?.removeAttribute("aria-busy");
+  };
+
+  if (defer) {
+    memberCalendarForPage(pageName)?.setAttribute("aria-busy", "true");
+    pendingPageCalendarFrame = window.requestAnimationFrame(() => {
+      pendingPageCalendarFrame = window.requestAnimationFrame(render);
+    });
+    return;
+  }
+
+  render();
+}
+
+function refreshMemberCalendarDates(dateKeys = [], { includeInactive = false } = {}) {
+  return withLeaveReadCache(() => refreshMemberCalendarDatesWithCache(dateKeys, { includeInactive }));
+}
+
+function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = false } = {}) {
   const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
   if (!uniqueKeys.length) return;
 
   document.querySelectorAll(".app-shell .year-calendar[id]").forEach((calendar) => {
+    if (!calendar.childElementCount) return;
     const ownerPage = calendar.closest(".page");
-    if (ownerPage && !ownerPage.classList.contains("active")) return;
+    if (!includeInactive && ownerPage && !ownerPage.classList.contains("active")) return;
 
     const area = currentViewArea();
     const showPersonalState = area === currentUser.area;
@@ -5118,7 +5417,7 @@ function refreshMemberCalendarDates(dateKeys = []) {
     });
 
     uniqueKeys.forEach((key) => {
-      const button = calendar.querySelector(`[data-leave-date="${key}"]`);
+      const button = calendar.querySelector(`[data-calendar-date="${key}"]`);
       if (!button) return;
       const date = dateFromKey(key);
       button.outerHTML = renderCalendarDay(date.getMonth(), date.getDate(), false, date.getFullYear(), {
@@ -5131,6 +5430,23 @@ function refreshMemberCalendarDates(dateKeys = []) {
       });
     });
   });
+}
+
+function refreshMemberCalendarRdoPattern(previousWeekdays = new Set()) {
+  const nextWeekdays = selectedRdoWeekdays();
+  const changedWeekdays = new Set(
+    [...previousWeekdays, ...nextWeekdays].filter(
+      (weekday) => previousWeekdays.has(weekday) !== nextWeekdays.has(weekday)
+    )
+  );
+  if (!changedWeekdays.size) return;
+
+  const affectedDateKeys = new Set();
+  document.querySelectorAll(".app-shell .year-calendar [data-calendar-date]").forEach((button) => {
+    const key = button.dataset.calendarDate;
+    if (key && changedWeekdays.has(dateFromKey(key).getDay())) affectedDateKeys.add(key);
+  });
+  refreshMemberCalendarDates([...affectedDateKeys], { includeInactive: true });
 }
 
 function syncMemberCalendarSelection(previousPreviewKeys = []) {
@@ -5279,6 +5595,10 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
 }
 
 function renderLeaveSlotBoard() {
+  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache());
+}
+
+function renderLeaveSlotBoardWithCache() {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
@@ -5364,6 +5684,10 @@ function lastWeekdayOfMonth(year, monthIndex, weekday) {
 }
 
 function legalHolidayDatesForYear(year) {
+  return cachedLeaveRead(JSON.stringify(["legalHolidayDatesForYear", year]), () => legalHolidayDatesForYearUncached(year));
+}
+
+function legalHolidayDatesForYearUncached(year) {
   return new Set([
     dateKey(year, 1, 1),
     dateKey(year, 1, nthWeekdayOfMonth(year, 0, 1, 3)),
@@ -5421,6 +5745,10 @@ function inLieuHolidayKey(actualKey, initials = currentUser.initials, blocked = 
 }
 
 function federalHolidayDatesForYear(year, initials = currentUser.initials) {
+  return cachedLeaveRead(JSON.stringify(["federalHolidayDatesForYear", year, initials]), () => federalHolidayDatesForYearUncached(year, initials));
+}
+
+function federalHolidayDatesForYearUncached(year, initials = currentUser.initials) {
   const holidays = new Set();
   const inLieuDates = holidayInLieuDatesForYear(year, initials);
   inLieuDates.forEach((key) => holidays.add(key));
@@ -5433,6 +5761,10 @@ function federalHolidayDatesForYear(year, initials = currentUser.initials) {
 }
 
 function holidayInLieuDatesForYear(year, initials = currentUser.initials) {
+  return cachedLeaveRead(JSON.stringify(["holidayInLieuDatesForYear", year, initials]), () => holidayInLieuDatesForYearUncached(year, initials));
+}
+
+function holidayInLieuDatesForYearUncached(year, initials = currentUser.initials) {
   const inLieuDates = new Set();
 
   legalHolidayDatesForYear(year).forEach((key) => {
@@ -5685,7 +6017,7 @@ function syncAccountFields() {
     hasSession
       ? supabaseState.pendingAuthEmail
         ? `Email change pending confirmation for ${supabaseState.pendingAuthEmail}.`
-        : "You can set a password for future email/password sign-in or request a login email change."
+        : "You can set a first password, change an existing password, or request a login email change."
       : "Login email and password changes are available after signing in with Supabase."
   );
 
@@ -5693,7 +6025,7 @@ function syncAccountFields() {
     input.disabled = !hasSession;
     input.placeholder = hasSession ? "new.email@example.com" : "";
   });
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.disabled = !hasSession;
   });
   document.querySelectorAll("[data-update-account-email], [data-update-account-password]").forEach((button) => {
@@ -5733,9 +6065,26 @@ function accountEmailInputValue() {
 }
 
 function clearAccountPasswordInputs() {
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.value = "";
   });
+}
+
+function friendlyAccountPasswordFailure(error) {
+  const code = error?.code || "";
+  if (code === "current_password_required") {
+    return "Enter your current password above, then choose a different new password. If you do not know it, use Set or reset password on the login screen.";
+  }
+  if (code === "current_password_mismatch") {
+    return "The current password is incorrect. Try again or use Set or reset password on the login screen.";
+  }
+  if (code === "same_password") {
+    return "That is already your password. Choose a different new password.";
+  }
+  if (code === "reauthentication_needed") {
+    return "For security, request a fresh Set or reset password email from the login screen before changing this password.";
+  }
+  return error?.message || "Password could not be updated.";
 }
 
 async function requireSupabaseAccountSession() {
@@ -5928,7 +6277,7 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
-  setAuthStatus("Login link sent. Check that email inbox.", "success");
+  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
@@ -6098,6 +6447,7 @@ async function updateSupabaseAccountPassword() {
   const session = await requireSupabaseAccountSession();
   if (!session) return;
 
+  const currentPassword = document.querySelector("[data-account-current-password]")?.value || "";
   const password = document.querySelector("[data-account-password]")?.value || "";
   const confirmPassword = document.querySelector("[data-account-password-confirm]")?.value || "";
 
@@ -6111,9 +6461,12 @@ async function updateSupabaseAccountPassword() {
   }
 
   setAccountFormStatus("Updating password...");
-  const { error } = await supabaseClient().auth.updateUser({ password });
+  const passwordUpdate = currentPassword
+    ? { password, current_password: currentPassword }
+    : { password };
+  const { error } = await supabaseClient().auth.updateUser(passwordUpdate);
   if (error) {
-    setAccountFormStatus(error.message || "Password could not be updated.", "error");
+    setAccountFormStatus(friendlyAccountPasswordFailure(error), "error");
     return;
   }
 
@@ -6344,6 +6697,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   return {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
+    submissionBatchKey: row.submitted_at || row.created_at || row.id,
     supabaseSubmissionId: row.submission_id || "",
     bidderId: row.bidder_id || bidder.id || "",
     type: "Leave",
@@ -6872,7 +7226,10 @@ async function loadSupabaseReferenceData() {
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
-    if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+    if (!pilotSettingsResult.error && pilotSettingsResult.data) {
+      applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+      await refreshPilotRounds();
+    }
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
@@ -6996,6 +7353,7 @@ function formatBidWindowStart(start) {
 }
 
 function latestAreaRound(date = new Date(), roundState = areaBidRoundState(date)) {
+  if (activeTestBidRound()) return activeTestBidRound();
   if (roundState) return roundState.round;
 
   const activePerson = seniority.find((person) => person.openRound);
@@ -7210,7 +7568,10 @@ function rdoStickyHeaderElement() {
 }
 
 function rdoStickyHeaderTop() {
-  const publicHeader = document.querySelector(".public-shell:not([hidden]) .public-topbar");
+  const publicShell = document.querySelector(".public-shell:not([hidden])");
+  const publicHeader = publicShell
+    ? publicShell.querySelector(window.matchMedia("(max-width: 720px)").matches ? ".public-rail" : ".public-topbar")
+    : null;
   const memberHeader = document.querySelector(".app-shell:not([hidden]) .topbar");
   const header = publicHeader || memberHeader;
   if (!header || !["fixed", "sticky"].includes(getComputedStyle(header).position)) return 0;
@@ -7294,6 +7655,17 @@ function publicRdoLineSection(line) {
   return /D[-\s]?DEV/i.test(line.pattern) ? "D-Dev" : "R-Dev";
 }
 
+function rdoLineDisplayFatigueGroup(line, { previewGroup = "", pendingGroup = "" } = {}) {
+  const group = line.status === "Taken" ? line.group : pendingGroup || previewGroup;
+  return ["A", "B", "C"].includes(group) ? group : "";
+}
+
+function rdoFatigueGroupBadge(group) {
+  return ["A", "B", "C"].includes(group)
+    ? `<span class="group ${groupClass(group)}">${group}</span>`
+    : "";
+}
+
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
   if (!lines.length) return `<tr><td colspan="11">No RDO lines match those filters for ${area}.</td></tr>`;
 
@@ -7306,12 +7678,13 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
       lastPattern = line.pattern;
     }
 
+    const swingIndex = thirdDaySwingIndex(line.week);
     rows.push(`
       <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
         <td>${line.line}</td>
         <td><b>${lineOccupant(line)}</b></td>
-        ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
-        <td></td>
+        ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
+        <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
         <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
       </tr>
     `);
@@ -7335,17 +7708,21 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
           <span>${sectionLines.length} ${lineLabel}</span>
         </div>
         <div class="mobile-rdo-cards">
-          ${sectionLines.map((line) => `
-            <details class="mobile-rdo-card">
-              <summary>
-                <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
-                <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
-              </summary>
-              <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
-              <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
-            </details>
-          `).join("")}
+          ${sectionLines.map((line) => {
+            const swingIndex = thirdDaySwingIndex(line.week);
+            return `
+              <details class="mobile-rdo-card">
+                <summary>
+                  <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
+                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
+                </summary>
+                <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
+                <p>Fatigue group: ${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line)) || "Not assigned"}</p>
+                <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+              </details>
+            `;
+          }).join("")}
         </div>
         <div class="table-wrap rdo-page-table-wrap" tabindex="0" role="region" aria-label="${section} schedule comparison table, scroll horizontally">
           <table class="line-table public-rdo-table public-mobile-rdo-table">
@@ -7421,44 +7798,50 @@ function renderPublicBidTimeTable(area) {
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
-    <div class="mobile-bid-time-cards">
-      ${seniority.map((person) => `
-        <article class="mobile-bid-time-card">
-          <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
-          <p>${escapeHtml(person.initials)}</p>
-          <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
-        </article>
-      `).join("")}
-      ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
-      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+    <div class="mobile-bid-time-view" role="group" aria-label="Bid time display">
+      <button type="button" data-bid-time-presentation="cards" aria-pressed="${publicBidTimePresentation === "cards"}">Cards</button>
+      <button type="button" data-bid-time-presentation="list" aria-pressed="${publicBidTimePresentation === "list"}">List</button>
     </div>
-    <div class="table-wrap public-table-wrap flat desktop-bid-times">
-      <table class="public-bid-time-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Name</th>
-            <th>Initials</th>
-            <th>Bid As</th>
-            <th>Round 1</th>
-            <th>Round 2</th>
-            <th>Round 3</th>
-            <th>Round 4</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${seniority.map((person) => `
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <div class="public-bid-time-results" data-public-bid-time-results data-presentation="${publicBidTimePresentation}">
+      <div class="mobile-bid-time-cards">
+        ${seniority.map((person) => `
+          <article class="mobile-bid-time-card" data-public-bid-time-card>
+            <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <p>${escapeHtml(person.initials)}</p>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+          </article>
+        `).join("")}
+        ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
+      </div>
+      <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
+        <table class="public-bid-time-table">
+          <thead>
             <tr>
-              <td>${person.rank}</td>
-              <td>${person.firstName} ${person.lastName}</td>
-              <td>${person.initials}</td>
-              <td><span class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</span></td>
-              ${person.rounds.map((round) => `<td>${publicBidTimeLabel(round)}</td>`).join("")}
+              <th>#</th>
+              <th>Name</th>
+              <th>Initials</th>
+              <th>Bid As</th>
+              <th>Round 1</th>
+              <th>Round 2</th>
+              <th>Round 3</th>
+              <th>Round 4</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${seniority.map((person) => `
+              <tr data-public-bid-time-row>
+                <td>${person.rank}</td>
+                <td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>
+                <td>${escapeHtml(person.initials)}</td>
+                <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+                ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
     </div>
   `;
 }
@@ -7757,24 +8140,28 @@ function hasSubmittedRdoBid() {
 }
 
 function updateBidWindow(force = false) {
+  return withLeaveReadCache(() => updateBidWindowWithCache(force));
+}
+
+function updateBidWindowWithCache(force = false) {
   const now = new Date();
   const roundState = areaBidRoundState(now);
-  const isValidationPeriod = roundState?.phase === "validation";
+  const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
   const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
   const viewingHomeArea = isViewingHomeArea();
-  const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
-  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
+  const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
+  const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
-  const statusText = areaRoundOpen ? "Open" : "Closed";
-  const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
-  const countdownText = isOpen
+  const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
+  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen;
+  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
@@ -7783,7 +8170,7 @@ function updateBidWindow(force = false) {
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
-  const countdownLabel = isOpen
+  const countdownLabel = pilotState.database ? "Pilot Bidding" : isOpen
       ? "Window Closes In"
       : isBefore
       ? "Next Window In"
@@ -7795,6 +8182,7 @@ function updateBidWindow(force = false) {
   const currentRoundRule = roundRuleForRound(currentRound);
   const pendingRequest = pendingCurrentUserRdoRequest();
   const hasRdoBid = currentUserHasRdoRequestForLeave();
+  const rdoChangeError = rdoChangeWindowErrorMessage(now);
 
   // The countdown changes every second; the rest of the controls only need work
   // when a bid window, round, active bidder, or rendered page state changes.
@@ -7832,6 +8220,7 @@ function updateBidWindow(force = false) {
     currentRoundRule.detail,
     pendingRequest?.id || null,
     hasRdoBid,
+    rdoChangeError,
   ]);
 
   if (!force && stateKey === bidWindowUiStateKey) return;
@@ -7896,6 +8285,13 @@ function updateBidWindow(force = false) {
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
       return;
     }
+    if (rdoChangeError) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "RDO Changes Closed";
+      button.title = rdoChangeError;
+      return;
+    }
     button.title = "";
     if (isValidationPeriod && !isTestingBypass) {
       button.textContent = "Round Closed";
@@ -7914,14 +8310,64 @@ function updateBidWindow(force = false) {
   });
 }
 
+function shiftStartMinutes(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/^[A-Z]+/, "");
+  const match = normalized.match(/^(\d{1,2})(?::?(\d{2}))$/);
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return (hours * 60) + minutes;
+}
+
+function thirdDaySwingIndex(week) {
+  if (!Array.isArray(week) || week.length === 0) return -1;
+
+  const normalizedWeek = week.map((value) => String(value || "").trim().toUpperCase());
+  if (normalizedWeek.every((value) => value === "RDO")) return -1;
+  if (normalizedWeek.some((value) => /^M\d/.test(value))) return -1;
+
+  let longestRdoRun = null;
+  normalizedWeek.forEach((value, index) => {
+    const previousIndex = (index - 1 + normalizedWeek.length) % normalizedWeek.length;
+    if (value !== "RDO" || normalizedWeek[previousIndex] === "RDO") return;
+
+    let length = 0;
+    while (length < normalizedWeek.length && normalizedWeek[(index + length) % normalizedWeek.length] === "RDO") {
+      length += 1;
+    }
+    if (!longestRdoRun || length > longestRdoRun.length) longestRdoRun = { index, length };
+  });
+
+  if (!longestRdoRun) return -1;
+
+  const workweekStart = (longestRdoRun.index + longestRdoRun.length) % normalizedWeek.length;
+  let workedShiftCount = 0;
+  for (let offset = 0; offset < normalizedWeek.length; offset += 1) {
+    const index = (workweekStart + offset) % normalizedWeek.length;
+    const value = normalizedWeek[index];
+    if (!value || value === "RDO") continue;
+
+    workedShiftCount += 1;
+    if (workedShiftCount === 3) {
+      const startMinutes = shiftStartMinutes(value);
+      return startMinutes !== null && startMinutes >= (10 * 60) ? index : -1;
+    }
+  }
+
+  return -1;
+}
+
 function renderWeek(targetId, week = selectedWeek) {
   const target = document.getElementById(targetId);
   if (!target) return;
 
   const values = Array.isArray(week[0]) ? week : dayNames.map((day, index) => [day, week[index]]);
+  const swingIndex = thirdDaySwingIndex(values.map(([, value]) => value));
   target.innerHTML = values
-    .map(([day, value]) => `
-      <div class="day-cell ${value === "RDO" ? "rdo" : ""}">
+    .map(([day, value], index) => `
+      <div class="day-cell ${value === "RDO" ? "rdo" : ""} ${index === swingIndex ? "third-day-swing" : ""}">
         <small>${day}</small>
         <b>${value}</b>
       </div>
@@ -7950,11 +8396,11 @@ function nextFatigueGroupAfter(group) {
   return FATIGUE_GROUP_ROTATION[(index + 1) % FATIGUE_GROUP_ROTATION.length];
 }
 
-function shiftCell(value) {
+function shiftCell(value, isThirdDaySwing = false) {
   const isRdo = value === "RDO";
   const special = /^[MSN]/.test(value);
-  const className = isRdo ? "rdo-tag" : special ? "shift special" : "shift";
-  return `<span class="${className}">${value}</span>`;
+  const className = `${isRdo ? "rdo-tag" : special ? "shift special" : "shift"}${isThirdDaySwing ? " third-day-swing" : ""}`;
+  return `<span class="${className}"${isThirdDaySwing ? ' title="Third-day swing"' : ""}>${value}</span>`;
 }
 
 function lineOccupant(line) {
@@ -8122,6 +8568,13 @@ function isRdoFilterActive() {
   );
 }
 
+function isCurrentUserRdoLine(line) {
+  return isViewingHomeArea() && (
+    (line.status === "Taken" && line.cpc === currentUser.initials) ||
+    currentUserRdoRequest()?.line === line.line
+  );
+}
+
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
@@ -8130,6 +8583,7 @@ function renderRdoLines() {
   const rows = [];
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
+  setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
   const countTarget = document.querySelector("[data-rdo-filter-count]");
   const pendingRequest = pendingCurrentUserRdoRequest();
@@ -8151,16 +8605,18 @@ function renderRdoLines() {
     const isSelected = line.line === selectedLineId;
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
-    const groupValue = isSelected && selectedFatigueGroup !== NO_FATIGUE_PREFERENCE
-      ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>`
-      : "";
+    const groupValue = rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line, {
+      previewGroup: isSelected && isViewingHomeArea() ? selectedFatigueGroup : "",
+      pendingGroup: isViewingHomeArea() && pendingRequest?.line === line.line ? pendingRequest.fatigueGroup : "",
+    }));
     const midValue = lineMidReferenceValue(line);
+    const swingIndex = thirdDaySwingIndex(line.week);
 
     rows.push(`
-      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
-        ${line.week.map((value) => `<td>${shiftCell(value)}</td>`).join("")}
+        ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
         <td>${userChoiceCell(midValue)}</td>
       </tr>
@@ -8184,17 +8640,18 @@ function renderRdoLines() {
           .filter(Boolean)
           .join(", ") || line.pattern;
         const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const swingIndex = thirdDaySwingIndex(line.week);
         const selectButton = !isOccupied && isViewingHomeArea() && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
           : "";
         return `
-          <details class="mobile-rdo-card member-rdo-card ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
+          <details class="mobile-rdo-card member-rdo-card ${isCurrentUserRdoLine(line) ? "own-rdo-card" : ""} ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
             <summary>
               <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${escapeHtml(rdoDays)}</span></span>
               <span class="mobile-line-status">${status}</span>
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
-            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value)}</dd></div>`).join("")}</dl>
+            <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
             <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
           </details>
         `;
@@ -8256,9 +8713,9 @@ function updateSelectedLine() {
             const isSelected = displayedFatiguePreference === item.group;
             const available = canChooseGroup(item, isSelected);
             return `
-              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, crew ${item.crewUsed}/${item.crewMax}">
+              <button class="fatigue-option ${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available && !bidderSelectionLocked ? "" : "disabled"} title="Area ${item.areaUsed}/${item.areaMax}, RDO set ${item.crewUsed}/${item.crewMax}">
                 <strong>${item.group}</strong>
-                <small>Area ${item.areaUsed}/${item.areaMax} · Crew ${item.crewUsed}/${item.crewMax}</small>
+                <small>Area ${item.areaUsed}/${item.areaMax} · RDO ${item.crewUsed}/${item.crewMax}</small>
               </button>
             `;
           }).join("")}
@@ -8368,7 +8825,7 @@ function renderFatigueCapacity() {
         <button class="${groupClass(item.group)} ${isSelected ? "active" : ""}" type="button" data-fatigue-group="${item.group}" ${available ? "" : "disabled"}>
           <strong>${item.group}</strong>
           <span>Area ${item.areaUsed}/${item.areaMax}</span>
-          <span>Crew ${item.crewUsed}/${item.crewMax}</span>
+          <span>RDO ${item.crewUsed}/${item.crewMax}</span>
         </button>
       `;
     }).join("");
@@ -9101,7 +9558,9 @@ function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundStat
   const testRound = activeTestBidRound();
   const round = testRound || latestAreaRound(date, roundState);
   const rule = roundRuleForRound(round);
-  const phaseDetail = testRound
+  const phaseDetail = pilotState.database && !testRound
+    ? "Pilot bidding is turned off. An administrator must enable pilot access and a round."
+    : testRound
     ? "Authorized pilot mode is using this round for practice submissions."
     : roundState?.phase === "validation"
     ? "Validation period is active. No bids may be entered."
@@ -9525,6 +9984,10 @@ function setAdminScheduleStatus(message, status = "info") {
 }
 
 function bueRoster() {
+  return cachedLeaveRead("roster", () => bueRosterUncached());
+}
+
+function bueRosterUncached() {
   const currentEntry = {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
@@ -9562,6 +10025,10 @@ function bueRoster() {
 }
 
 function bueByInitials(initials) {
+  return cachedLeaveRead(JSON.stringify(["bueByInitials", initials]), () => bueByInitialsUncached(initials));
+}
+
+function bueByInitialsUncached(initials) {
   const normalized = String(initials || "").trim().toUpperCase();
   return bueRoster().find((person) => person.initials === normalized) || null;
 }
@@ -9994,7 +10461,7 @@ async function saveSupabaseRosterRows(rows) {
     originalInitials: row.originalInitials || row.initials,
   }));
 
-  const { error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
+  const { data, error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
   if (error) {
     if (/admin_save_bidder_roster_rows|function .*not found|Could not find/i.test(error.message || "")) {
       for (const row of rows) {
@@ -10020,7 +10487,10 @@ async function saveSupabaseRosterRows(rows) {
     };
   }
 
-  return { saved: true };
+  return {
+    saved: true,
+    bidWindowsReassigned: Number(data?.bid_windows_reassigned || 0),
+  };
 }
 
 async function deactivateSupabaseRosterEntry(person) {
@@ -10198,7 +10668,7 @@ async function saveRosterEntry(event) {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${values.firstName} ${values.lastName} saved to Supabase.`
+      ? `${values.firstName} ${values.lastName} saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );
@@ -10433,7 +10903,7 @@ async function applyBulkRosterChanges() {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${editedEntries.length} visible roster rows saved to Supabase.`
+      ? `${editedEntries.length} visible roster rows saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );
@@ -12830,15 +13300,112 @@ function ensureIntakeBidderSelection() {
   if (!intakeBidderSelection.record && !intakeBidderSelection.loading) void loadSelectedIntakeBidder();
 }
 
+// Keep each date's saved request so intake can still edit or decide individual
+// dates. Present those requests as one week (Round 1) or submission batch.
+const intakeGroupReviewState = new Map();
+
+function groupedLeaveIntakeItems(items = intakeQueue) {
+  const weekStartsByBidder = new Map();
+  items.forEach((item) => {
+    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved"].includes(item.status)) return;
+    const owner = `${item.area}|${item.initials}`;
+    const dates = weekStartsByBidder.get(owner) || [];
+    dates.push(...leaveDateKeysForItem(item));
+    weekStartsByBidder.set(owner, dates);
+  });
+  weekStartsByBidder.forEach((dates, owner) => weekStartsByBidder.set(owner, roundOneWeekKeysForDateKeys(dates)));
+  const groups = new Map();
+  const result = [];
+  items.forEach((item) => {
+    if (item.type !== "Leave" || !item.submissionBatchKey) { result.push(item); return; }
+    const round = intakeItemRound(item);
+    const dates = leaveDateKeysForItem(item).sort();
+    if (!dates.length) { result.push(item); return; }
+    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}`) || roundOneWeekKeysForDateKeys(dates);
+    const weekStart = round === 1 ? starts.find((start) => dates[0] >= start && dates[0] <= dateKeyFromDate(new Date(dateFromKey(start).getTime() + 6 * 86400000))) : "";
+    // Legacy continuous requests spanning two weeks already have one approval;
+    // keep their edit/review controls instead of approving half a saved range.
+    if (round === 1 && (!weekStart || dates.some((key) => Math.round((dateFromKey(key) - dateFromKey(weekStart)) / 86400000) > 6))) {
+      result.push(item); return;
+    }
+    const key = JSON.stringify([item.area, item.initials, round, item.submissionBatchKey, weekStart, item.status, Boolean(item.ghostBid)]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { ...item, id: `leave-group-${item.id}`, members: [], weekStart, round, days: 0, dateKeys: [], weekUnits: round === 1 ? 1 : 0 };
+      groups.set(key, group);
+      result.push(group);
+    }
+    group.members.push(item);
+    group.dateKeys.push(...dates);
+    group.days += Number(item.days || 0);
+  });
+  groups.forEach((group) => {
+    group.members.sort((a,b) => leaveDateKeysForItem(a)[0].localeCompare(leaveDateKeysForItem(b)[0]));
+    group.dateKeys = [...new Set(group.dateKeys)].sort();
+    group.range = formatIndividualLeaveDates(group.dateKeys);
+    group.groupLabel = group.round === 1 ? `Round 1 · Week starting ${formatCalendarDate(group.weekStart)}` : `Round ${group.round} · Leave batch`;
+    group.summary = `${group.groupLabel} · ${group.range} · ${group.days} charged ${group.days === 1 ? "day" : "days"}`;
+    Object.assign(group, intakeGroupReviewState.get(group.id) || {});
+  });
+  return result;
+}
+
+function intakeReviewItemById(id) {
+  return intakeQueue.find((item) => item.id === id) || groupedLeaveIntakeItems().find((item) => item.id === id);
+}
+
+function intakeReviewConflicts(item, check) {
+  return [...new Set((item.members || [item]).flatMap(check))].sort();
+}
+
+function renderIntakeGroupDates(item, canReview) {
+  if (!item.members) return "";
+  return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
+    <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
+    ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
+    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">Edit / Override date</button>` : ""}
+    </div>`).join("")}</details>`;
+}
+
+async function reviewIntakeLeaveGroup(item, decision, reason = "") {
+  if (!supabaseState.connected) throw new Error("This intake decision could not reach the database. Check the connection and try again.");
+  let submissions = [];
+  if (item.members.some((member) => !member.supabaseSubmissionId)) {
+    const { data, error } = await supabaseClient().rpc("read_bidding_state", { requested_bid_year: BID_YEAR });
+    if (error) throw error;
+    submissions = data?.submissions || [];
+  }
+  const ids = item.members.map((member) => member.supabaseSubmissionId || intakeSubmissionIdFromBiddingState(member, submissions));
+  if (ids.some((id) => !id)) throw new Error("A saved request could not be found. Reload the queue before reviewing this group.");
+  const { error } = await supabaseClient().rpc("review_leave_submission_group", {
+    submission_ids: ids, decision, denial_reason_text: reason || null,
+  });
+  if (error) throw error;
+  if (decision === "approved") queueBidVerifiedEmail(item);
+  else { item.denialReason = reason; queueBidDeniedEmail(item); }
+  intakeGroupReviewState.delete(item.id);
+  activeOverrideId = null;
+  activeDenialId = null;
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
+  renderApp();
+  setPage("intake");
+}
+
 function renderIntakeQueue() {
+  return withLeaveReadCache(() => renderIntakeQueueWithCache());
+}
+
+function renderIntakeQueueWithCache() {
   const target = document.getElementById("intake-queue");
   if (!target) return;
 
   syncIntakeSearchControls();
   const canReview = hasIntakeAccess();
+  const groupedItems = groupedLeaveIntakeItems();
   const visibleItems = canReview
-    ? intakeQueue
-    : intakeQueue.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
+    ? groupedItems
+    : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
@@ -12849,10 +13416,11 @@ function renderIntakeQueue() {
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <h3>${item.name} · ${item.initials}</h3>
-          <p>${item.summary}</p>
+          <p>${escapeHtml(item.summary)}</p>
+          ${renderIntakeGroupDates(item, canReview)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
-          ${item.type === "Leave" && item.status === "Pending" && leaveRdoConflicts(item).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(leaveRdoConflicts(item))} ${leaveRdoConflicts(item).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
-          ${item.type === "Leave" && item.status === "Pending" && leaveApprovalConflicts(item).length ? `<p class="intake-warning">Requires override before approval: ${formatLeaveConflictDates(leaveApprovalConflicts(item))} is full.</p>` : ""}
+          ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveRdoConflicts).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveRdoConflicts))} ${intakeReviewConflicts(item, leaveRdoConflicts).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
+          ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveApprovalConflicts).length ? `<p class="intake-warning">Requires override before approval: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveApprovalConflicts))} is full.</p>` : ""}
           <div class="intake-meta">
             <span>${item.area}</span>
             <span>Seniority #${item.seniority}</span>
@@ -12865,10 +13433,10 @@ function renderIntakeQueue() {
         <div class="intake-actions">
           <span class="status ${item.status.toLowerCase()}">${item.status}</span>
           ${item.status === "Pending" && canReview ? `
-            <button class="primary-action small" type="button" data-intake-approve="${item.id}">Approve</button>
-            <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">Deny</button>
+            <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
+            <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
@@ -12887,7 +13455,7 @@ function renderIntakeQueue() {
 
   const denialPanel = document.getElementById("denial-panel");
   const denialEditor = document.querySelector("[data-denial-editor]");
-  const denialItem = intakeQueue.find((item) => item.id === activeDenialId);
+  const denialItem = intakeReviewItemById(activeDenialId);
   if (denialPanel && denialEditor) {
     denialPanel.hidden = !denialItem;
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
@@ -12972,12 +13540,16 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
+  if (isMemberAppVisible() && activePageName !== pageName) renderMemberPageContent(pageName);
   if (activePageName !== pageName) {
     window.scrollTo({ top: 0, behavior: "instant" });
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
-    renderMemberCalendarForPage(pageName);
+    const needsFullRender = memberPageCalendarNeedsRender(pageName);
+    renderMemberCalendarForPage(pageName, {
+      defer: activePageName !== pageName && needsFullRender,
+    });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
   }
 }
@@ -13568,7 +14140,33 @@ document.addEventListener('click', (event) => {
   }
 });
 
+function renderMemberPageContent(pageName) {
+  return withLeaveReadCache(() => {
+    if (pageName === "rdos") {
+      syncRdoFilterControls();
+      renderRdoLines();
+    }
+    if (pageName === "leave") renderSubmittedLeaveManager();
+    if (pageName === "seniority") renderSeniority();
+    if (pageName === "intake-schedule") renderIntakeSchedule();
+    if (pageName === "history") renderHistory();
+    if (pageName === "intake") {
+      renderIntakeQueue();
+      renderManualBidEntry();
+      ensureIntakeBidderSelection();
+    }
+    if (pageName === "admin") {
+      renderRuleEditors();
+      renderAdminConsole();
+    }
+  });
+}
+
 function renderApp() {
+  return withLeaveReadCache(() => renderAppWithCache());
+}
+
+function renderAppWithCache() {
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
@@ -13580,28 +14178,18 @@ function renderApp() {
   renderCurrentUser();
   renderCalendars({ includePublic: false });
   syncLeaveBuilderInputs();
-  syncRdoFilterControls();
-  renderRdoLines();
   updateSelectedLine();
   renderLeaveRows("dashboard-leave-rows");
   renderLeaveRows("leave-page-rows");
   renderLeaveDraftQueue();
-  renderSubmittedLeaveManager();
   renderLeaveAllowanceSummary();
-  renderRuleEditors();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
   renderLeaveSlotBoard();
-  renderSeniority();
-  renderIntakeSchedule();
-  renderHistory();
-  renderIntakeQueue();
-  renderManualBidEntry();
-  ensureIntakeBidderSelection();
-  renderAdminConsole();
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
+  renderMemberPageContent(document.querySelector(".page.active")?.dataset.pagePanel);
   updateBidWindow(true);
 }
 
@@ -13685,6 +14273,16 @@ document.addEventListener("click", async (event) => {
     document.querySelector("[data-public-rdo-sections]").dataset.presentation = publicRdoPresentation;
     document.querySelectorAll("[data-rdo-presentation]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.rdoPresentation === publicRdoPresentation)));
     document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
+    return;
+  }
+  const bidTimePresentation = event.target.closest("[data-bid-time-presentation]");
+  if (bidTimePresentation) {
+    publicBidTimePresentation = bidTimePresentation.dataset.bidTimePresentation === "list" ? "list" : "cards";
+    const results = document.querySelector("[data-public-bid-time-results]");
+    if (results) results.dataset.presentation = publicBidTimePresentation;
+    document.querySelectorAll("[data-bid-time-presentation]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.bidTimePresentation === publicBidTimePresentation));
+    });
     return;
   }
   const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
@@ -14262,6 +14860,7 @@ document.addEventListener("click", async (event) => {
   const row = event.target.closest("[data-line-id]");
   if (row && !row.classList.contains("occupied-row")) {
     const previousLineId = selectedLineId;
+    const previousRdoWeekdays = selectedRdoWeekdays();
     selectedLineId = row.dataset.lineId;
     const selectedLine = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
@@ -14269,6 +14868,7 @@ document.addEventListener("click", async (event) => {
     }
     renderRdoLines();
     updateSelectedLine();
+    refreshMemberCalendarRdoPattern(previousRdoWeekdays);
     return;
   }
 
@@ -14440,12 +15040,16 @@ document.addEventListener("input", (event) => {
   if (event.target.matches("[data-mobile-bid-search]")) {
     const query = event.target.value.trim().toLowerCase();
     let matches = 0;
-    document.querySelectorAll(".mobile-bid-time-card").forEach((card) => {
+    document.querySelectorAll("[data-public-bid-time-card]").forEach((card) => {
       const name = `${card.querySelector("[data-bidder-name]").textContent} ${card.querySelector("p").textContent}`.toLowerCase();
       card.hidden = !name.includes(query);
       if (!card.hidden) matches += 1;
     });
-    document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    document.querySelectorAll("[data-public-bid-time-row]").forEach((row) => {
+      row.hidden = !row.textContent.toLowerCase().includes(query);
+    });
+    const emptyMessage = document.querySelector("[data-mobile-bid-empty]");
+    if (emptyMessage) emptyMessage.hidden = matches > 0 || !query;
     return;
   }
 
@@ -14490,6 +15094,15 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-pilot-round-toggle]")) {
+    await setPilotRound(Number(event.target.dataset.pilotRoundToggle), event.target.checked);
+    return;
+  }
+  if (event.target.matches("[data-pilot-round-picker]")) {
+    selectedPilotRound = normalizeBidWindowTestRound(event.target.value);
+    renderApp();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;
@@ -14647,3 +15260,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") updateBidWindow(true);
 });
 window.NATCA_BIDDING_READY = true;
+
+setInterval(() => {
+  if (document.visibilityState === "visible") void refreshPilotRounds();
+}, 10000);

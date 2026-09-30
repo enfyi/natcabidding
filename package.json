@@ -25,7 +25,8 @@
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
     "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm typecheck && pnpm build"
+    "check": "pnpm typecheck && pnpm build",
+    "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
