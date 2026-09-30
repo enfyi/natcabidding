@@ -6288,11 +6288,6 @@ tr.occupied-row .rdo-tag {
   gap: 16px;
 }
 
-.admin-tools-page-grid > .manual-bid-card,
-.admin-tools-page-grid > .manual-leave-request-card {
-  grid-column: 1 / -1;
-}
-
 .admin-user-list {
   display: grid;
   gap: 12px;
