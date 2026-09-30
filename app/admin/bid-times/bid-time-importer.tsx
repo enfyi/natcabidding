@@ -4,13 +4,14 @@ import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
 import type { BidTimeImportPreview, BidTimeImportRow } from '@/lib/bid-time-import-types'
-import { getSupabaseEnv } from '@/lib/env'
+import { getBasePath, getSupabaseEnv } from '@/lib/env'
 import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
 
 type AreaOption = { code: string; name: string }
 type BidYearOption = { bid_year: number; status: string }
 type ImportResult = { bidders_processed: number; windows_inserted: number; windows_updated: number; windows_processed: number }
 type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
+const basePath = getBasePath()
 
 declare global {
   interface Window {
@@ -128,7 +129,7 @@ export function BidTimeImporter() {
 
       const formData = new FormData()
       formData.set('file', file)
-      const response = await fetch('/api/admin/bid-times/preview', {
+      const response = await fetch(`${basePath}/api/admin/bid-times/preview`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
@@ -221,7 +222,7 @@ export function BidTimeImporter() {
           <h1>Import bid times.</h1>
           <p className="import-lede">Upload one area at a time, preview each bidder’s six rounds, then save the selected windows to Supabase.</p>
         </div>
-        <a className="button secondary" href="/templates/zla-bid-time-import-template.xlsx" download>
+        <a className="button secondary" href={`${basePath}/templates/zla-bid-time-import-template.xlsx`} download>
           Download Excel template
         </a>
       </header>

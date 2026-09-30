@@ -55,6 +55,8 @@ const DEFAULT_ROUND_RULES = {
   },
 };
 const MANUAL_AFTER_WINDOW_RULE = "After a BUE's personal window closes, intake or an administrator may enter the bid manually only while that same round remains open.";
+const LATE_BID_MESSAGE = "Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.";
+const BID_OFFICE_PHONE_DISPLAY = "661-434-1004";
 const CLOSED_ROUND_RULE = "Once the round is closed, no BUE, intake user, or administrator may enter a bid for that round.";
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
@@ -69,6 +71,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
   try {
@@ -148,6 +151,8 @@ let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
+let intakeTeamCandidateQuery = "";
+let selectedIntakeTeamCandidateInitials = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
@@ -590,6 +595,7 @@ let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "";
 let calendarMode = "combined";
+const calendarWorkforceOverrides = new Map();
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
@@ -892,6 +898,10 @@ function lineFourTenValue(line) {
 
 function lineScheduleLabel(line) {
   return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
+}
+
+function awsPreferenceForLine(line, preference = selectedAwsPreference) {
+  return lineFourTenValue(line) === "Yes" ? "Yes" : preference;
 }
 
 function confirmFlexNo() {
@@ -1777,6 +1787,15 @@ let activeIntakeDetailId = null;
 let intakeEditorReturnFocus = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
+const intakeBidderSelection = {
+  initials: "",
+  profileId: "",
+  record: null,
+  detail: "",
+  loading: false,
+  error: "",
+  generation: 0,
+};
 const intakeFilters = {
   status: "all",
   type: "all",
@@ -1951,9 +1970,30 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+
+  if (!pilotState.database) {
+    const rank = currentUserSeniorityRank(currentUser.area);
+    const activeRound = areaBidRoundState(date, currentUser.area)?.round;
+    const activeRoundWindow = Number.isFinite(rank) && activeRound
+      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      : null;
+    if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
+
+    if (!window) {
+      const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
+      const hasClosedWindow = Number.isFinite(rank) && Array.from(
+        { length: roundCount },
+        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+      ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
+      return hasClosedWindow
+        ? LATE_BID_MESSAGE
+        : `${actionLabel} can only be submitted during your allotted bid window.`;
+    }
+  }
+
   if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
   if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window is no longer open.`;
+  return LATE_BID_MESSAGE;
 }
 
 function leaveBidWindowErrorMessage(date = new Date()) {
@@ -2269,7 +2309,8 @@ async function addOrUpdateRdoSubmission() {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
   }
-  if (!selectedAwsPreference) {
+  const awsPreference = awsPreferenceForLine(line);
+  if (!awsPreference) {
     alert("Choose Yes or No for AWS before submitting this RDO bid.");
     return;
   }
@@ -2300,9 +2341,9 @@ async function addOrUpdateRdoSubmission() {
     line: line.line,
     fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
-    aws: selectedAwsPreference,
+    aws: awsPreference,
     mid: selectedMidValue(line),
-    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
   const isChange = Boolean(existing)
@@ -3197,14 +3238,6 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  if (round >= 2 && round <= 6) {
-    const line = submittedRdoLineForInitials();
-    if (line) {
-      const limit = leaveDayLimitForRound(round);
-      const creditDetail = round >= 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
-      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.${creditDetail}` };
-    }
-  }
   return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
@@ -4394,6 +4427,48 @@ function leaveSlotBucketForBidAs(bidAs) {
   return null;
 }
 
+function defaultCalendarWorkforce(scope) {
+  if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
+  return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
+}
+
+function calendarWorkforceStorageKey(scope) {
+  if (scope === "public") return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:public`;
+  const identity = currentUser?.supabaseProfileId || currentUser?.initials || "anonymous";
+  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:${scope}:${identity}`;
+}
+
+function calendarWorkforceForScope(scope) {
+  if (scope !== "public" && scope !== "dashboard" && scope !== "leave") return null;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  const currentOverride = calendarWorkforceOverrides.get(storageKey);
+  if (currentOverride === "cpc" || currentOverride === "dev") return currentOverride;
+
+  try {
+    const stored = window.sessionStorage?.getItem(storageKey);
+    if (stored === "cpc" || stored === "dev") {
+      calendarWorkforceOverrides.set(storageKey, stored);
+      return stored;
+    }
+  } catch (_error) {
+    // The automatic default still works when browser storage is unavailable.
+  }
+
+  return defaultCalendarWorkforce(scope);
+}
+
+function setCalendarWorkforceForScope(scope, workforce) {
+  if ((scope !== "public" && scope !== "dashboard" && scope !== "leave") || (workforce !== "cpc" && workforce !== "dev")) return;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  calendarWorkforceOverrides.set(storageKey, workforce);
+
+  try {
+    window.sessionStorage?.setItem(storageKey, workforce);
+  } catch (_error) {
+    // Keep the current render usable even when browser storage is unavailable.
+  }
+}
+
 function removeInitialsFromLeaveRange(range, initials) {
   datesInLeaveRange(range).forEach((key) => {
     const area = bueByInitials(initials)?.area || currentUser.area;
@@ -4436,7 +4511,7 @@ function leaveApprovalConflicts(item) {
   return leaveApprovalDates(item).filter((key) => {
     const details = leaveSlotsForDate(key, item.area || currentUser.area);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
+    return (bucket === "cpc" && fullLeaveDates.has(key)) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
 }
 
@@ -4930,10 +5005,11 @@ function cachedLeaveRead(key, read) {
   return leaveReadCache.get(key);
 }
 
-function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false, slotBucket = null }) {
   return {
     area,
     mode: calendarMode,
+    slotBucket,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
@@ -5093,6 +5169,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const slotBucket = calendarWorkforceForScope(calendarScope);
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
   const renderKey = [
     displayedCalendarYear,
@@ -5102,6 +5179,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     expandedSlots,
+    slotBucket,
   ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
 
@@ -5132,6 +5210,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
+    slotBucket,
   });
 
   target.innerHTML = monthIndexes
@@ -5262,10 +5341,11 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
+  const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
   const isClosed = canShowLeaveState && (
     baseSlotDetails
-      ? leaveSlotOpenCountForDetails(baseSlotDetails, "cpc") === 0 || (detailArea === "Area A" && fullLeaveDates.has(key))
-      : isLeaveSlotsFull(key, options.area)
+      ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
+      : isLeaveSlotsFull(key, options.area, availabilityBucket)
   );
   const expandedSlots = Boolean(options.expandedSlots);
   const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
@@ -5276,7 +5356,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const hasGlBid = glBids.length > 0;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots, context?.slotBucket || options.slotBucket || null)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5298,8 +5378,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const fatigueStatus = nextFatigueGroup
     ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
     : `Group ${fatigueGroup} fatigue week`;
+  const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
   const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
-  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots")}${glBidStatus}`;
+  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5312,7 +5393,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
   const leaveDateAttribute = canShowLeaveState
     ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
-    : 'aria-disabled="true"';
+    : hasDetail ? "" : 'aria-disabled="true"';
 
   return `
     <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
@@ -5348,11 +5429,19 @@ function updateCalendarViewControls() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-selected", String(isActive));
   });
+  document.querySelectorAll("[data-calendar-workforce]").forEach((button) => {
+    const scope = button.dataset.calendarScope;
+    const isActive = calendarWorkforceForScope(scope) === button.dataset.calendarWorkforce;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
   document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
     const scope = description.dataset.calendarLayoutDescription;
+    const workforce = calendarWorkforceForScope(scope);
+    const workforceLabel = workforce === "dev" ? "developmental" : "CPC";
     description.textContent = calendarLayouts[scope] === "full"
-      ? "Every CPC and developmental slot is shown directly on each date."
-      : "Select a date to view its slots.";
+      ? workforce ? `Every ${workforceLabel} slot is shown directly on each date.` : "Every CPC and developmental slot is shown directly on each date."
+      : workforce ? `Select a date to view its ${workforceLabel} slots.` : "Select a date to view its slots.";
   });
 }
 
@@ -5443,6 +5532,7 @@ function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = 
       showRdo: showPersonalState,
       showPersonalLeave: showPersonalState,
       deferSlotTooltip: false,
+      slotBucket: calendarWorkforceForScope(scope),
     });
 
     uniqueKeys.forEach((key) => {
@@ -5575,9 +5665,9 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
   return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
-function isLeaveSlotsFull(key, area = currentUser.area) {
+function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, "cpc") === 0 || (area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key));
 }
 
 function slotRows(type, initials, capacity) {
@@ -5592,7 +5682,7 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false, slotBucket = null) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
@@ -5615,11 +5705,15 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
       ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
       ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
-        <span class="tooltip-slot-heading">CPC</span>
-        ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
-        <span class="tooltip-slot-rule"></span>
-        <span class="tooltip-slot-heading">Dev</span>
-        ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ${slotBucket !== "dev" ? `
+          <span class="tooltip-slot-heading">CPC</span>
+          ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
+        ` : ""}
+        ${!slotBucket ? '<span class="tooltip-slot-rule"></span>' : ""}
+        ${slotBucket !== "cpc" ? `
+          <span class="tooltip-slot-heading">DEV</span>
+          ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ` : ""}
         ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
           <span class="tooltip-slot-row gl-bid-row filled">
             <span class="tooltip-slot-name">GL Bid</span>
@@ -5630,15 +5724,17 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   `;
 }
 
-function renderLeaveSlotBoard() {
-  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache());
+function renderLeaveSlotBoard(options = {}) {
+  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache(options));
 }
 
-function renderLeaveSlotBoardWithCache() {
+function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = currentViewArea(), inspectOnly = false } = {}) {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
-  const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
+  const details = inspectOnly
+    ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
+    : leaveSlotsForDate(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -5684,8 +5780,8 @@ function renderLeaveSlotBoardWithCache() {
 
 let leaveSlotReturnFocus = null;
 
-function openLeaveSlotModal() {
-  renderLeaveSlotBoard();
+function openLeaveSlotModal(options = {}) {
+  renderLeaveSlotBoard(options);
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
   leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -5992,7 +6088,7 @@ function friendlyAuthFailure(error) {
 
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -6003,7 +6099,9 @@ function defaultLandingPageForRole() {
 
 function intendedLandingPage(requestedPage = requestedLandingPage()) {
   const defaultPage = defaultLandingPageForRole();
-  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "admin" || requestedPage === "admin-tools") {
+    return hasSystemAdminAccess() ? requestedPage : defaultPage;
+  }
   if (requestedPage === "intake" || requestedPage === "intake-schedule") {
     return canUseIntakeView() ? requestedPage : defaultPage;
   }
@@ -6608,6 +6706,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   return {
     id: `supabase-rdo-${row.id}`,
     supabaseSubmissionId: row.id,
+    bidderId: bidder.id || row.bidder_id || "",
     type: "RDO Line",
     ghostBid,
     area,
@@ -6742,6 +6841,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     supabaseRequestId: row.id,
     submissionBatchKey: row.submitted_at || row.created_at || row.id,
     supabaseSubmissionId: row.submission_id || "",
+    bidderId: row.bidder_id || bidder.id || "",
     type: "Leave",
     ghostBid,
     area,
@@ -6859,6 +6959,10 @@ function resetSupabaseBackedData() {
   holidayOverrides.clear();
   fullLeaveDates.clear();
   ghostBidderIds.clear();
+  intakeBidderSelection.record = null;
+  intakeBidderSelection.error = "";
+  intakeBidderSelection.loading = false;
+  intakeBidderSelection.generation += 1;
   if (currentUser) currentUser.ghostBidder = false;
   selectedLineId = "";
   supabaseState.placeholdersCleared = true;
@@ -7832,6 +7936,8 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  const showBidderNames = Boolean(supabaseState.authUserId);
+
   return `
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
@@ -7840,12 +7946,12 @@ function renderPublicBidTimeTable(area) {
       <button type="button" data-bid-time-presentation="cards" aria-pressed="${publicBidTimePresentation === "cards"}">Cards</button>
       <button type="button" data-bid-time-presentation="list" aria-pressed="${publicBidTimePresentation === "list"}">List</button>
     </div>
-    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="${showBidderNames ? "Name or initials" : "Initials"}" aria-label="Find your bid times" data-mobile-bid-search /></label>
     <div class="public-bid-time-results" data-public-bid-time-results data-presentation="${publicBidTimePresentation}">
       <div class="mobile-bid-time-cards">
         ${seniority.map((person) => `
           <article class="mobile-bid-time-card" data-public-bid-time-card>
-            <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
             <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
           </article>
@@ -7854,32 +7960,39 @@ function renderPublicBidTimeTable(area) {
       </div>
       <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
         <table class="public-bid-time-table">
+          <colgroup>
+            <col class="bid-time-rank-column" />
+            ${showBidderNames ? '<col class="bid-time-name-column" />' : ""}
+            <col class="bid-time-initials-column" />
+            <col class="bid-time-role-column" />
+            ${Array.from({ length: 4 }, () => '<col class="bid-time-round-column" />').join("")}
+          </colgroup>
           <thead>
             <tr>
               <th>#</th>
-              <th>Name</th>
+              ${showBidderNames ? "<th>Name</th>" : ""}
               <th>Initials</th>
               <th>Bid As</th>
-              <th>Round 1</th>
-              <th>Round 2</th>
-              <th>Round 3</th>
-              <th>Round 4</th>
+              <th class="bid-time-round">Round 1</th>
+              <th class="bid-time-round">Round 2</th>
+              <th class="bid-time-round">Round 3</th>
+              <th class="bid-time-round">Round 4</th>
             </tr>
           </thead>
           <tbody>
             ${seniority.map((person) => `
               <tr data-public-bid-time-row>
                 <td>${person.rank}</td>
-                <td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>
+                ${showBidderNames ? `<td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td>${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
         </table>
       </div>
-      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+      <p data-mobile-bid-empty hidden role="status">No bidders match ${showBidderNames ? "that name or those initials" : "those initials"}.</p>
     </div>
   `;
 }
@@ -8022,7 +8135,7 @@ function pageForViewMode(mode) {
 }
 
 function viewModeForPage(pageName) {
-  if (pageName === "admin") return "admin";
+  if (pageName === "admin" || pageName === "admin-tools") return "admin";
   if (pageName === "intake" || pageName === "intake-schedule") return "intake";
   return "bue";
 }
@@ -8177,6 +8290,22 @@ function hasSubmittedRdoBid() {
   return currentUserHasRdoRequestForLeave();
 }
 
+function shouldShowLateBidContact(date = new Date()) {
+  return !pilotState.database
+    && bidWindowErrorMessage("RDO bids", date) === LATE_BID_MESSAGE
+    && !hasSubmittedRdoBid();
+}
+
+function openLateBidDialog() {
+  const dialog = document.querySelector("[data-late-bid-dialog]");
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+}
+
+function closeLateBidDialog() {
+  document.querySelector("[data-late-bid-dialog]")?.close();
+}
+
 function updateBidWindow(force = false) {
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
@@ -8193,6 +8322,7 @@ function updateBidWindowWithCache(force = false) {
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
@@ -8259,6 +8389,7 @@ function updateBidWindowWithCache(force = false) {
     pendingRequest?.id || null,
     hasRdoBid,
     rdoChangeError,
+    showLateBidContact,
   ]);
 
   if (!force && stateKey === bidWindowUiStateKey) return;
@@ -8308,8 +8439,10 @@ function updateBidWindowWithCache(force = false) {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = !canUseBidActions;
+    const isLateBidContactAction = button.matches("[data-bid-entry-action]") && showLateBidContact;
+    const disabled = !canUseBidActions && !isLateBidContactAction;
     button.disabled = disabled;
+    button.dataset.lateBidContact = String(isLateBidContactAction);
     button.classList.toggle("disabled", disabled);
   });
 
@@ -8321,6 +8454,20 @@ function updateBidWindowWithCache(force = false) {
       button.classList.add("disabled");
       button.textContent = "Awaiting Intake Decision";
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
+      return;
+    }
+    if (!isOpen && !isTestingBypass && hasRdoBid) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "Bid Submitted";
+      button.title = "";
+      return;
+    }
+    if (showLateBidContact) {
+      button.disabled = false;
+      button.classList.remove("disabled");
+      button.textContent = `Call or Text ${BID_OFFICE_PHONE_DISPLAY}`;
+      button.title = "Contact the Bidding Office to complete your bid.";
       return;
     }
     if (rdoChangeError) {
@@ -8544,7 +8691,10 @@ function selectedLineReadinessItems(line) {
   const requestMatchesLine = existingRequest?.line === line.line;
   const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
-  const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
+  const awsPreference = awsPreferenceForLine(
+    line,
+    selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "")
+  );
   const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
   const lineStatus = selectedLineStatus(line);
   const selectedLineOpen = lineStatus !== "Taken";
@@ -8708,8 +8858,8 @@ function updateSelectedLine() {
   }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
-  const canEditLineSchedule = hasSystemAdminAccess();
   const lineSchedule = lineScheduleLabel(line);
+  const isFourTenLine = lineSchedule === "4-10";
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
   const lineRequest = selectedLineRequest(line);
@@ -8775,19 +8925,20 @@ function updateSelectedLine() {
       </span>
       <span class="aws-picker">
         <em>AWS</em>
-        <small>Line schedule</small>
+        <small>${isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
         <span class="line-mode-options">
-          ${canEditLineSchedule
-            ? ["4-10", "5-8"].map((value) => `
-                <button class="line-mode-option ${lineSchedule === value ? "active" : ""}" type="button" data-four-ten-choice="${value === "4-10" ? "Yes" : "No"}">
-                  ${value}
-                </button>
-              `).join("")
-            : `<button class="line-mode-option active locked" type="button" disabled>${lineSchedule}</button>`}
+          ${["4-10", "5-8"].map((value) => {
+            const isCurrentSchedule = lineSchedule === value;
+            return `
+              <button class="line-mode-option locked ${isCurrentSchedule ? "active" : "schedule-unavailable"}" type="button" disabled aria-pressed="${isCurrentSchedule}">
+                ${value}
+              </button>
+            `;
+          }).join("")}
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
+            <button class="choice-option ${!isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
               ${value}
             </button>
           `).join("")}
@@ -9717,32 +9868,20 @@ async function saveSupabaseRoundRule(round, label, detail) {
     throw new Error("Round Rules could not reach the database. Check the connection and try again.");
   }
 
-  const nextRules = {
-    ...roundRules,
-    [round]: { label, detail },
-  };
-  const rulesToSave = roundRulesDatabaseComplete
-    ? [[round, nextRules[round]]]
-    : Object.entries(nextRules);
-  let savedRules = null;
-
-  for (const [ruleNumber, rule] of rulesToSave) {
-    const { data, error } = await client.rpc("set_round_rule", {
-      requested_bid_year: BID_YEAR,
-      requested_round: Number(ruleNumber),
-      rule_label: rule.label,
-      rule_detail: rule.detail,
-    });
-    if (error) {
-      if (isMissingSupabaseRoutine(error)) {
-        throw new Error("Round Rules database support is not installed yet.");
-      }
-      throw error;
+  const { data, error } = await client.rpc("set_round_rule", {
+    requested_bid_year: BID_YEAR,
+    requested_round: round,
+    rule_label: label,
+    rule_detail: detail,
+  });
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) {
+      throw new Error("Round Rules database support is not installed yet.");
     }
-    savedRules = data;
+    throw error;
   }
 
-  applyRoundRules(savedRules);
+  applyRoundRules(data);
 }
 
 function roundRuleNumbers() {
@@ -10086,6 +10225,81 @@ function intakeTeamMembers() {
   return bueRoster().filter((person) => intakeTeamInitials.has(person.initials));
 }
 
+function availableIntakeTeamCandidates() {
+  return bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+}
+
+function intakeTeamCandidateMatches(person, query) {
+  if (!query) return true;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const searchable = [
+    rank,
+    Number.isFinite(rank) ? `#${rank}` : "",
+    Number.isFinite(rank) ? `seniority ${rank}` : "",
+    person.firstName,
+    person.lastName,
+    person.initials,
+    person.area,
+    person.bidAs,
+    person.email,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function renderIntakeTeamCandidateSearch() {
+  const input = document.querySelector("[data-intake-team-candidate-search]");
+  const results = document.querySelector("[data-intake-team-candidate-results]");
+  const status = document.querySelector("[data-intake-team-candidate-status]");
+  const addButton = document.querySelector("[data-add-intake-team-member]");
+  if (!input || !results || !status || !addButton) return;
+
+  const availablePeople = availableIntakeTeamCandidates();
+  const selectedPerson = availablePeople.find((person) => person.initials === selectedIntakeTeamCandidateInitials);
+  if (selectedIntakeTeamCandidateInitials && !selectedPerson) selectedIntakeTeamCandidateInitials = "";
+
+  if (selectedPerson) {
+    input.value = personScheduleLabel(selectedPerson);
+    input.setAttribute("aria-expanded", "false");
+    results.innerHTML = "";
+    results.hidden = true;
+    status.textContent = `Selected ${personDisplayName(selectedPerson)} (${selectedPerson.initials}).`;
+    addButton.disabled = false;
+    return;
+  }
+
+  input.value = intakeTeamCandidateQuery;
+  addButton.disabled = true;
+  const query = intakeTeamCandidateQuery.trim();
+  const matches = query
+    ? availablePeople.filter((person) => intakeTeamCandidateMatches(person, query))
+    : [];
+  const visibleMatches = matches.slice(0, 40);
+
+  results.innerHTML = visibleMatches.map((person) => {
+    const rank = Number.isFinite(person.rank) ? `Seniority #${person.rank}` : "Unranked";
+    return `
+      <button id="intake-team-candidate-${escapeHtml(person.initials)}" type="button" role="option" data-intake-team-candidate-result="${escapeHtml(person.initials)}">
+        <strong>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</strong>
+        <span>${escapeHtml(person.area)} · ${escapeHtml(rank)} · ${escapeHtml(person.bidAs || "CPC")}</span>
+      </button>
+    `;
+  }).join("");
+  results.hidden = !query || visibleMatches.length === 0;
+  input.setAttribute("aria-expanded", String(!results.hidden));
+
+  if (!availablePeople.length) {
+    status.textContent = "All rostered BUEs are already on the intake team.";
+  } else if (!query) {
+    status.textContent = `Search ${availablePeople.length} available employees.`;
+  } else if (!matches.length) {
+    status.textContent = "No available employees match that search.";
+  } else if (matches.length > visibleMatches.length) {
+    status.textContent = `${matches.length} matches; showing the first ${visibleMatches.length}. Keep typing to narrow the list.`;
+  } else {
+    status.textContent = `${matches.length} ${matches.length === 1 ? "match" : "matches"}. Select an employee below.`;
+  }
+}
+
 function renderRosterSelect(selector, people, selectedInitials = "") {
   document.querySelectorAll(selector).forEach((select) => {
     const currentValue = selectedInitials || select.value;
@@ -10097,9 +10311,8 @@ function renderRosterSelect(selector, people, selectedInitials = "") {
 }
 
 function syncIntakeTeamControls() {
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
-  renderRosterSelect("[data-intake-team-candidate]", availablePeople);
+  renderIntakeTeamCandidateSearch();
   renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
   renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
 }
@@ -10120,8 +10333,7 @@ async function saveIntakeTeamMember(initials, enabled) {
 
 async function addSelectedBueToIntakeTeam() {
   if (!hasSystemAdminAccess()) return;
-  const select = document.querySelector("[data-intake-team-candidate]");
-  const initials = select?.value || "";
+  const initials = selectedIntakeTeamCandidateInitials;
   const person = bueByInitials(initials);
   if (!person) {
     setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
@@ -10132,6 +10344,8 @@ async function addSelectedBueToIntakeTeam() {
   try {
     await saveIntakeTeamMember(person.initials, true);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
+    intakeTeamCandidateQuery = "";
+    selectedIntakeTeamCandidateInitials = "";
     renderApp();
     setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
   } catch (error) {
@@ -11470,32 +11684,29 @@ async function saveBidWindowBuilderSchedule() {
 }
 
 function renderAdminConsole() {
-  syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
   syncSlotCapacityForm();
   renderSlotCapacitySummary();
   syncBidWindowBuilder();
   renderRosterManager();
-  renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
 
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
 
   target.innerHTML = `
     <section class="intake-team-builder">
       <div class="intake-team-add">
-        <label>
-          Add BUE to Intake Team
-          <select data-intake-team-candidate>
-            ${availablePeople.length
-              ? availablePeople.map((person) => `<option value="${escapeHtml(person.initials)}">${escapeHtml(personScheduleLabel(person))}</option>`).join("")
-              : '<option value="">All rostered BUEs are already on the intake team</option>'}
-          </select>
-        </label>
-        <button class="primary-action small" type="button" data-add-intake-team-member ${availablePeople.length ? "" : "disabled"}>Add to Team</button>
+        <div class="intake-team-candidate-picker">
+          <label>
+            Add BUE to Intake Team
+            <input type="search" placeholder="Name, initials, area, rank, role, or email" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="intake-team-candidate-results" data-intake-team-candidate-search />
+          </label>
+          <small data-intake-team-candidate-status role="status" aria-live="polite"></small>
+          <div class="intake-team-candidate-results" id="intake-team-candidate-results" role="listbox" aria-label="Matching employees" data-intake-team-candidate-results hidden></div>
+        </div>
+        <button class="primary-action small" type="button" data-add-intake-team-member disabled>Add to Team</button>
       </div>
       <div class="intake-team-list" data-intake-team-list>
         ${teamPeople.map((person) => {
@@ -11519,6 +11730,16 @@ function renderAdminConsole() {
     </section>
   `;
   syncIntakeTeamControls();
+}
+
+function renderAdminToolsPage() {
+  if (!hasSystemAdminAccess()) return;
+  syncAdminScheduleFormDefaults();
+  renderRuleEditors();
+  renderManualBidEntry();
+  renderEmailLog();
+  syncBidWindowTestingControls();
+  syncPilotControls();
 }
 
 function setSlotCapacityStatus(message, status = "info") {
@@ -12056,7 +12277,8 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
+    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
   });
 }
 
@@ -12090,10 +12312,16 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), {
+      const visibleMonths = [0, 1].map((offset) => new Date(
+        scheduleActiveDate.getFullYear(),
+        scheduleActiveDate.getMonth() + offset,
+        1
+      ));
+      calendar.innerHTML = visibleMonths.map((month) => renderScheduleMonthCard(month.getMonth(), month.getFullYear(), {
         showAssignments: true,
         showYear: true,
-      });
+      }))
+        .join("");
     }
   }
 
@@ -13067,6 +13295,277 @@ function renderIntakeDetailPanel(item, visibleItems) {
   `;
 }
 
+function selectedIntakeBidderPerson() {
+  const rosterPerson = bueByInitials(intakeBidderSelection.initials);
+  const savedPerson = intakeBidderSelection.record?.person;
+  if (!savedPerson) return rosterPerson;
+  return {
+    ...rosterPerson,
+    profileId: savedPerson.id || rosterPerson?.profileId || intakeBidderSelection.profileId,
+    firstName: savedPerson.first_name || rosterPerson?.firstName || "",
+    lastName: savedPerson.last_name || rosterPerson?.lastName || "",
+    initials: savedPerson.initials || rosterPerson?.initials || intakeBidderSelection.initials,
+    area: savedPerson.area || rosterPerson?.area || "",
+    bidAs: savedPerson.bid_role || rosterPerson?.bidAs || "",
+    seniorityRank: savedPerson.seniority_rank ?? rosterPerson?.seniorityRank ?? rosterPerson?.rank,
+    email: savedPerson.email || rosterPerson?.email || "",
+    phone: savedPerson.phone || rosterPerson?.phone || "",
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(
+      savedPerson.leave_slot_allowance ?? rosterPerson?.leaveSlotAllowance
+    ),
+  };
+}
+
+function intakeBidderLocalLeaveRows(initials) {
+  return activeLeaveItemsForInitials(initials).map((item) => ({
+    id: item.supabaseRequestId || item.id,
+    round_number: leaveRoundForItem(item),
+    priority: Number(item.priority || 0),
+    status: String(item.status || "Pending").toLowerCase(),
+    charged_days: leaveItemChargedDays(item),
+    requested_start_date: leaveDateKeysForItem(item)[0] || "",
+    requested_end_date: leaveDateKeysForItem(item).at(-1) || "",
+    dates: leaveDateKeysForItem(item)
+      .filter((key) => !isRdoDateForInitials(key, initials))
+      .map((key) => ({
+        leave_date: key,
+        charged: true,
+        is_rdo: false,
+        is_holiday: isHolidayDate(key, initials) && !isHolidayInLieuDate(key, initials),
+        is_holiday_in_lieu: isHolidayInLieuDate(key, initials),
+      })),
+  }));
+}
+
+function selectedIntakeBidderLeaveRows() {
+  const savedRows = intakeBidderSelection.record?.snapshot?.leave;
+  return Array.isArray(savedRows) ? savedRows : intakeBidderLocalLeaveRows(intakeBidderSelection.initials);
+}
+
+function intakeBidderActiveLeaveRows(rows) {
+  return rows.filter((row) => ["pending", "approved"].includes(String(row.status || "").toLowerCase()));
+}
+
+function intakeBidderLeaveDates(row) {
+  if (Array.isArray(row.dates) && row.dates.length) {
+    return row.dates
+      .filter((date) => !date.is_rdo)
+      .sort((left, right) => String(left.leave_date).localeCompare(String(right.leave_date)));
+  }
+  const start = row.requested_start_date;
+  const end = row.requested_end_date || start;
+  return start && end
+    ? datesBetweenKeys(start, end)
+      .filter((key) => !isRdoDateForInitials(key, intakeBidderSelection.initials))
+      .map((key) => ({ leave_date: key, charged: true }))
+    : [];
+}
+
+function intakeBidderLine() {
+  const initials = intakeBidderSelection.initials;
+  const localLine = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
+  if (localLine) return localLine;
+  const assignment = intakeBidderSelection.record?.snapshot?.assignment;
+  if (!assignment) return null;
+  const savedLine = intakeBidderSelection.record?.lines?.find((line) => line.id === assignment.id);
+  return savedLine ? {
+    line: savedLine.line_code,
+    pattern: savedLine.pattern,
+    week: Array.isArray(assignment.week) ? assignment.week : [],
+  } : null;
+}
+
+function intakeBidderExactDateLabel(key) {
+  if (!key) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(dateFromKey(key));
+}
+
+function intakeBidderRoundDetail(rows) {
+  const rounds = Array.from({ length: 6 }, (_, index) => index + 1);
+  return rounds.map((round) => {
+    const roundRows = rows
+      .filter((row) => Number(row.round_number) === round)
+      .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+    const entries = roundRows.length ? roundRows.map((row) => {
+      const dates = intakeBidderLeaveDates(row);
+      const dateList = dates.length
+        ? dates.map((date) => {
+          const holiday = date.is_holiday_in_lieu ? " · Holiday in-lieu" : date.is_holiday ? " · Holiday" : "";
+          return '<time datetime="' + escapeHtml(date.leave_date) + '">' +
+            escapeHtml(intakeBidderExactDateLabel(date.leave_date)) + holiday + "</time>";
+        }).join(", ")
+        : "No exact dates are stored for this bid.";
+      const status = uiStatusFromDatabase(row.status || "pending");
+      const priority = Number(row.priority || 0);
+      const chargedDays = Number(row.charged_days || 0);
+      return '<div class="intake-bid-round-entry"><strong>' +
+        (priority ? "Priority " + priority + " · " : "") + escapeHtml(status) +
+        "</strong><span>" + dateList + "</span><small>" +
+        formatLeaveDaysLabel(chargedDays) + " charged</small></div>";
+    }).join("") : "<span>No leave bids in this round.</span>";
+    return '<section class="intake-bid-round"><strong>Round ' + round +
+      '</strong><div class="intake-bid-round-list">' + entries + "</div></section>";
+  }).join("");
+}
+
+function renderIntakeBidderDetail(person, rows) {
+  const target = document.querySelector("[data-intake-bidder-detail]");
+  if (!target) return;
+  const mode = intakeBidderSelection.detail;
+  target.hidden = !mode;
+  if (!mode) {
+    target.replaceChildren();
+    return;
+  }
+
+  const closeButton = '<button class="secondary-action small" type="button" data-intake-bidder-detail-close>Close</button>';
+  if (mode === "contact") {
+    const phone = person.phone || "Not provided";
+    const email = person.email || "Not provided";
+    const phoneValue = person.phone
+      ? '<a href="tel:' + escapeHtml(person.phone) + '">' + escapeHtml(phone) + "</a>"
+      : "<strong>" + escapeHtml(phone) + "</strong>";
+    const emailValue = person.email
+      ? '<a href="mailto:' + escapeHtml(person.email) + '">' + escapeHtml(email) + "</a>"
+      : "<strong>" + escapeHtml(email) + "</strong>";
+    target.innerHTML =
+      '<div class="intake-bidder-detail-header"><div><h3>' +
+      escapeHtml(personDisplayName(person)) +
+      "</h3><p>Contact information</p></div>" + closeButton + "</div>" +
+      '<div class="intake-bidder-contact-grid"><div><span>Phone</span>' + phoneValue +
+      "</div><div><span>Email</span>" + emailValue + "</div></div>";
+    return;
+  }
+
+  target.innerHTML =
+    '<div class="intake-bidder-detail-header"><div><h3>Leave bids by round</h3><p>' +
+    escapeHtml(personDisplayName(person)) + " · Bid Year " + BID_YEAR +
+    "</p></div>" + closeButton + '</div><div class="intake-bid-rounds">' +
+    intakeBidderRoundDetail(rows) + "</div>";
+}
+
+function renderIntakeBidderSummary() {
+  const target = document.querySelector("[data-intake-bidder-summary]");
+  const area = document.querySelector("[data-intake-bidder-area]");
+  if (!target || !area) return;
+  const person = selectedIntakeBidderPerson();
+  if (!person) {
+    area.textContent = "Select a controller";
+    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>';
+    renderIntakeBidderDetail({}, []);
+    return;
+  }
+
+  const line = intakeBidderLine();
+  const rdoDays = line
+    ? [...rdoWeekdaysForLine(line)].sort((left, right) => left - right).map((weekday) => dayNames[weekday])
+    : [];
+  const hoursPerDay = rdoDays.length === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  const allowanceHours = normalizeLeaveSlotAllowance(person.leaveSlotAllowance);
+  const allowanceDays = estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay);
+  const rows = selectedIntakeBidderLeaveRows();
+  const activeRows = intakeBidderActiveLeaveRows(rows);
+  const daysBid = activeRows.reduce((total, row) => total + Number(row.charged_days || 0), 0);
+  const holidaysBid = new Set(activeRows.flatMap((row) => intakeBidderLeaveDates(row)
+    .filter((date) => date.is_holiday || date.is_holiday_in_lieu)
+    .map((date) => date.leave_date))).size;
+  const scheduleLabel = rdoDays.length === 3 ? "10-hour schedule" : "8-hour schedule";
+  const loadingNote = intakeBidderSelection.loading ? "Refreshing saved details…" : intakeBidderSelection.error;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+
+  area.textContent = person.area || "Area";
+  target.classList.toggle("intake-bidder-loading", intakeBidderSelection.loading);
+  target.innerHTML =
+    '<div class="intake-bidder-metric"><span>Name</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="contact">' +
+      escapeHtml(personDisplayName(person)) + "</button><small>" +
+      escapeHtml(person.bidAs || "BUE") + (loadingNote ? " · " + escapeHtml(loadingNote) : "") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Initials</span><strong>' +
+      escapeHtml(person.initials || "—") + "</strong><small>Seniority #" +
+      (Number.isFinite(rank) ? rank : "—") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Line &amp; RDOs</span><strong>' +
+      (line?.line ? "Line " + escapeHtml(line.line) : "Not selected") + "</strong><small>" +
+      (rdoDays.length ? escapeHtml(rdoDays.join(" / ")) : "RDOs unavailable") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>' + BID_YEAR + " Accrual</span><strong>" +
+      formatEstimatedLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
+      " hours · " + scheduleLabel + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Days Bid</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="bids">' +
+      formatEstimatedLeaveDays(daysBid) + " days</button><small>Pending and approved</small></div>" +
+    '<div class="intake-bidder-metric"><span>Holidays Bid</span><strong>' +
+      holidaysBid + "</strong><small>Holiday and in-lieu dates</small></div>";
+  renderIntakeBidderDetail(person, rows);
+}
+
+async function loadSelectedIntakeBidder() {
+  const client = supabaseClient();
+  const profileId = intakeBidderSelection.profileId;
+  if (!client || !supabaseState.connected || !profileId || !hasIntakeAccess()) return;
+  const generation = ++intakeBidderSelection.generation;
+  intakeBidderSelection.loading = true;
+  intakeBidderSelection.error = "";
+  renderIntakeBidderSummary();
+  try {
+    const { data, error } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR,
+      target_bidder_id: profileId,
+    });
+    if (generation !== intakeBidderSelection.generation) return;
+    if (error) throw error;
+    intakeBidderSelection.record = data;
+  } catch (_error) {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.error = "Saved details unavailable";
+    }
+  } finally {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.loading = false;
+      renderIntakeBidderSummary();
+    }
+  }
+}
+
+function selectIntakeBidder(initials, profileId = "") {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const person = bueByInitials(normalized);
+  if (!normalized || !person) return;
+  const nextProfileId = profileId || person.profileId || "";
+  const changed = normalized !== intakeBidderSelection.initials || nextProfileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = normalized;
+  intakeBidderSelection.profileId = nextProfileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.detail = "";
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+  }
+  renderIntakeBidderSummary();
+  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+}
+
+function ensureIntakeBidderSelection() {
+  if (!hasIntakeAccess()) return;
+  const selected = bueByInitials(intakeBidderSelection.initials)
+    || bueByInitials(currentUser.initials)
+    || manualBidControllerRoster()[0];
+  if (!selected) return;
+  const profileId = selected.profileId || "";
+  const changed = selected.initials !== intakeBidderSelection.initials || profileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = selected.initials;
+  intakeBidderSelection.profileId = profileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.error = "";
+  }
+  renderIntakeBidderSummary();
+  if (!intakeBidderSelection.record && !intakeBidderSelection.loading) void loadSelectedIntakeBidder();
+}
+
 // Keep each date's saved request so intake can still edit or decide individual
 // dates. Present those requests as one week (Round 1) or submission batch.
 const intakeGroupReviewState = new Map();
@@ -13278,7 +13777,7 @@ function setPage(pageName) {
   if (pageName === "intake-schedule" && !canUseIntakeView()) {
     pageName = "dashboard";
   }
-  if (pageName === "admin" && !hasSystemAdminAccess()) {
+  if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
 
@@ -13303,6 +13802,7 @@ function setPage(pageName) {
     intake: "Intake Queue",
     "intake-schedule": "Intake Schedule",
     admin: "Admin Console",
+    "admin-tools": "Bidding Setup",
     history: "Bid History",
     profile: "My Profile",
   };
@@ -13921,11 +14421,12 @@ function renderMemberPageContent(pageName) {
     if (pageName === "intake") {
       renderIntakeQueue();
       renderManualBidEntry();
+      ensureIntakeBidderSelection();
     }
     if (pageName === "admin") {
-      renderRuleEditors();
       renderAdminConsole();
     }
+    if (pageName === "admin-tools") renderAdminToolsPage();
   });
 }
 
@@ -13973,6 +14474,19 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
+  if (intakeBidderDetailOpen) {
+    intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
+    renderIntakeBidderSummary();
+    document.querySelector("[data-intake-bidder-detail]")?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  if (event.target.closest("[data-intake-bidder-detail-close]")) {
+    intakeBidderSelection.detail = "";
+    renderIntakeBidderSummary();
+    return;
+  }
+
   const manualControllerResult = event.target.closest("[data-manual-controller-result]");
   if (manualControllerResult) {
     const panel = manualControllerResult.closest("[data-manual-bid-panel]");
@@ -13984,8 +14498,18 @@ document.addEventListener("click", async (event) => {
       renderManualBidPanel(panel);
       const person = manualBidSelectedPerson(controllerSelect.value);
       setManualBidStatus(panel, `Selected ${controllerName(person)} (${person.initials}).`);
+      selectIntakeBidder(person.initials, person.profileId);
       controllerSelect.focus();
     }
+    return;
+  }
+
+  const intakeTeamCandidateResult = event.target.closest("[data-intake-team-candidate-result]");
+  if (intakeTeamCandidateResult) {
+    selectedIntakeTeamCandidateInitials = intakeTeamCandidateResult.dataset.intakeTeamCandidateResult || "";
+    intakeTeamCandidateQuery = "";
+    renderIntakeTeamCandidateSearch();
+    document.querySelector("[data-add-intake-team-member]")?.focus();
     return;
   }
 
@@ -13999,6 +14523,10 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-public-date-close]")) {
     document.querySelector("[data-public-date-sheet]").close();
+    return;
+  }
+  if (event.target.closest("[data-late-bid-close]") || event.target.matches("[data-late-bid-dialog]")) {
+    closeLateBidDialog();
     return;
   }
   const mobileCalendar = event.target.closest("[data-mobile-calendar]");
@@ -14552,6 +15080,8 @@ document.addEventListener("click", async (event) => {
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
     return;
@@ -14599,6 +15129,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const bidEntryButton = event.target.closest("[data-bid-entry-action]");
+  if (bidEntryButton?.dataset.lateBidContact === "true") {
+    openLateBidDialog();
+    return;
+  }
+
   const selectLineButton = event.target.closest("[data-select-line]");
   if (selectLineButton && !selectLineButton.hidden) {
     const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
@@ -14620,6 +15156,16 @@ document.addEventListener("click", async (event) => {
     renderRdoLines();
     updateSelectedLine();
     refreshMemberCalendarRdoPattern(previousRdoWeekdays);
+    return;
+  }
+
+  // Inspect dashboard dates without updating the leave builder or rerendering calendars.
+  const dashboardDateButton = event.target.closest("#dashboard-calendar [data-calendar-date]");
+  if (dashboardDateButton) {
+    const key = dashboardDateButton.dataset.calendarDate;
+    if (key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY) {
+      openLeaveSlotModal({ key, area: currentViewArea(), inspectOnly: true });
+    }
     return;
   }
 
@@ -14656,6 +15202,16 @@ document.addEventListener("click", async (event) => {
       calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
       renderVisibleCalendars();
     }
+    return;
+  }
+
+  const calendarWorkforceButton = event.target.closest("[data-calendar-workforce]");
+  if (calendarWorkforceButton) {
+    setCalendarWorkforceForScope(
+      calendarWorkforceButton.dataset.calendarScope,
+      calendarWorkforceButton.dataset.calendarWorkforce
+    );
+    renderVisibleCalendars();
     return;
   }
 
@@ -14708,6 +15264,8 @@ document.addEventListener("keydown", async (event) => {
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
   }
@@ -14812,6 +15370,14 @@ document.addEventListener("input", (event) => {
   if (manualControllerSearch) {
     const panel = manualControllerSearch.closest("[data-manual-bid-panel]");
     if (panel) renderManualBidPanel(panel);
+    return;
+  }
+
+  const intakeTeamCandidateSearch = event.target.closest("[data-intake-team-candidate-search]");
+  if (intakeTeamCandidateSearch) {
+    intakeTeamCandidateQuery = intakeTeamCandidateSearch.value;
+    selectedIntakeTeamCandidateInitials = "";
+    renderIntakeTeamCandidateSearch();
     return;
   }
 
@@ -14965,6 +15531,10 @@ document.addEventListener("change", async (event) => {
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);
+    if (manualReactiveField.matches("[data-manual-bid-controller]")) {
+      const person = manualBidSelectedPerson(manualReactiveField.value);
+      selectIntakeBidder(person.initials, person.profileId);
+    }
     return;
   }
 
