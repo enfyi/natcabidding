@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
 import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
-import { getSupabaseEnv } from '@/lib/env'
+import { getBasePath, getSupabaseEnv } from '@/lib/env'
 import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
 
 type AreaOption = { id: string; code: string; name: string }
@@ -21,6 +21,7 @@ type ExistingBidLine = {
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const basePath = getBasePath()
 
 declare global {
   interface Window {
@@ -175,7 +176,7 @@ export function BidLineImporter() {
 
       const formData = new FormData()
       formData.set('file', file)
-      const response = await fetch('/api/admin/bid-lines/preview', {
+      const response = await fetch(`${basePath}/api/admin/bid-lines/preview`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
@@ -293,7 +294,7 @@ export function BidLineImporter() {
           <h1>Import bid lines.</h1>
           <p className="import-lede">Upload one area at a time. The workbook keeps CPC, R-Dev, and D-Dev lines on separate tabs.</p>
         </div>
-        <a className="button secondary" href="/templates/zla-bid-line-import-template.xlsx" download>
+        <a className="button secondary" href={`${basePath}/templates/zla-bid-line-import-template.xlsx`} download>
           Download Excel template
         </a>
       </header>

@@ -63,6 +63,11 @@ the admin-only database operation that safely resizes each day's slot inventory.
 Install `database/public_leave_slots_read.sql` afterward so those adjustments are
 the authoritative calendar values for both signed-out and signed-in views.
 
+Run `database/public_bid_windows_read.sql` so signed-out visitors can load the
+saved bid-window schedule shown on each public area Bid Time page. The read-only
+function exposes window times and bidder IDs only; names and initials continue to
+come from the existing public roster read model.
+
 For public FAQ and MOU publishing, also run `database/faq_mous.sql`. It creates
 admin-managed FAQ rows, a public MOU document list, and the public Supabase
 storage bucket used by the `/admin/faq` editor.
@@ -182,6 +187,12 @@ seniority rank, leave allowance, and active status by immutable bidder ID, while
 also supporting the older initials-based payload during deployment rollout.
 When seniority changes, draft and open bid-window times stay with their rank and
 are reassigned to every bidder affected by the move in the same transaction.
+
+Run `database/roster_bid_window_sync.sql` after the existing admin roster helpers.
+The roster editor then saves seniority changes and reassigns every affected
+draft/open bid-year time slot to the BUE who occupies that seniority rank in one
+transaction. Bid-window IDs and reminder history are preserved; trailing slots
+are removed only when an area's active bidding roster becomes shorter.
 
 Regular logged-in users default to their own area, but can view public/reference bidding data for other areas: area names, RDO lines, RDO line days, holidays, and daily leave-slot availability.
 

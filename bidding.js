@@ -55,6 +55,8 @@ const DEFAULT_ROUND_RULES = {
   },
 };
 const MANUAL_AFTER_WINDOW_RULE = "After a BUE's personal window closes, intake or an administrator may enter the bid manually only while that same round remains open.";
+const LATE_BID_MESSAGE = "Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.";
+const BID_OFFICE_PHONE_DISPLAY = "661-434-1004";
 const CLOSED_ROUND_RULE = "Once the round is closed, no BUE, intake user, or administrator may enter a bid for that round.";
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
@@ -896,6 +898,10 @@ function lineFourTenValue(line) {
 
 function lineScheduleLabel(line) {
   return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
+}
+
+function awsPreferenceForLine(line, preference = selectedAwsPreference) {
+  return lineFourTenValue(line) === "Yes" ? "Yes" : preference;
 }
 
 function confirmFlexNo() {
@@ -1964,9 +1970,30 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+
+  if (!pilotState.database) {
+    const rank = currentUserSeniorityRank(currentUser.area);
+    const activeRound = areaBidRoundState(date, currentUser.area)?.round;
+    const activeRoundWindow = Number.isFinite(rank) && activeRound
+      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      : null;
+    if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
+
+    if (!window) {
+      const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
+      const hasClosedWindow = Number.isFinite(rank) && Array.from(
+        { length: roundCount },
+        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+      ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
+      return hasClosedWindow
+        ? LATE_BID_MESSAGE
+        : `${actionLabel} can only be submitted during your allotted bid window.`;
+    }
+  }
+
   if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
   if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window is no longer open.`;
+  return LATE_BID_MESSAGE;
 }
 
 function leaveBidWindowErrorMessage(date = new Date()) {
@@ -2282,7 +2309,8 @@ async function addOrUpdateRdoSubmission() {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
   }
-  if (!selectedAwsPreference) {
+  const awsPreference = awsPreferenceForLine(line);
+  if (!awsPreference) {
     alert("Choose Yes or No for AWS before submitting this RDO bid.");
     return;
   }
@@ -2313,9 +2341,9 @@ async function addOrUpdateRdoSubmission() {
     line: line.line,
     fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
-    aws: selectedAwsPreference,
+    aws: awsPreference,
     mid: selectedMidValue(line),
-    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
   const isChange = Boolean(existing)
@@ -7893,16 +7921,23 @@ function renderPublicBidTimeTable(area) {
       </div>
       <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
         <table class="public-bid-time-table">
+          <colgroup>
+            <col class="bid-time-rank-column" />
+            ${showBidderNames ? '<col class="bid-time-name-column" />' : ""}
+            <col class="bid-time-initials-column" />
+            <col class="bid-time-role-column" />
+            ${Array.from({ length: 4 }, () => '<col class="bid-time-round-column" />').join("")}
+          </colgroup>
           <thead>
             <tr>
               <th>#</th>
               ${showBidderNames ? "<th>Name</th>" : ""}
               <th>Initials</th>
               <th>Bid As</th>
-              <th>Round 1</th>
-              <th>Round 2</th>
-              <th>Round 3</th>
-              <th>Round 4</th>
+              <th class="bid-time-round">Round 1</th>
+              <th class="bid-time-round">Round 2</th>
+              <th class="bid-time-round">Round 3</th>
+              <th class="bid-time-round">Round 4</th>
             </tr>
           </thead>
           <tbody>
@@ -7912,7 +7947,7 @@ function renderPublicBidTimeTable(area) {
                 ${showBidderNames ? `<td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td>${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
@@ -8216,6 +8251,22 @@ function hasSubmittedRdoBid() {
   return currentUserHasRdoRequestForLeave();
 }
 
+function shouldShowLateBidContact(date = new Date()) {
+  return !pilotState.database
+    && bidWindowErrorMessage("RDO bids", date) === LATE_BID_MESSAGE
+    && !hasSubmittedRdoBid();
+}
+
+function openLateBidDialog() {
+  const dialog = document.querySelector("[data-late-bid-dialog]");
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+}
+
+function closeLateBidDialog() {
+  document.querySelector("[data-late-bid-dialog]")?.close();
+}
+
 function updateBidWindow(force = false) {
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
@@ -8232,6 +8283,7 @@ function updateBidWindowWithCache(force = false) {
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
@@ -8298,6 +8350,7 @@ function updateBidWindowWithCache(force = false) {
     pendingRequest?.id || null,
     hasRdoBid,
     rdoChangeError,
+    showLateBidContact,
   ]);
 
   if (!force && stateKey === bidWindowUiStateKey) return;
@@ -8347,8 +8400,10 @@ function updateBidWindowWithCache(force = false) {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = !canUseBidActions;
+    const isLateBidContactAction = button.matches("[data-bid-entry-action]") && showLateBidContact;
+    const disabled = !canUseBidActions && !isLateBidContactAction;
     button.disabled = disabled;
+    button.dataset.lateBidContact = String(isLateBidContactAction);
     button.classList.toggle("disabled", disabled);
   });
 
@@ -8360,6 +8415,20 @@ function updateBidWindowWithCache(force = false) {
       button.classList.add("disabled");
       button.textContent = "Awaiting Intake Decision";
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
+      return;
+    }
+    if (!isOpen && !isTestingBypass && hasRdoBid) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "Bid Submitted";
+      button.title = "";
+      return;
+    }
+    if (showLateBidContact) {
+      button.disabled = false;
+      button.classList.remove("disabled");
+      button.textContent = `Call or Text ${BID_OFFICE_PHONE_DISPLAY}`;
+      button.title = "Contact the Bidding Office to complete your bid.";
       return;
     }
     if (rdoChangeError) {
@@ -8583,7 +8652,10 @@ function selectedLineReadinessItems(line) {
   const requestMatchesLine = existingRequest?.line === line.line;
   const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
-  const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
+  const awsPreference = awsPreferenceForLine(
+    line,
+    selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "")
+  );
   const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
   const lineStatus = selectedLineStatus(line);
   const selectedLineOpen = lineStatus !== "Taken";
@@ -8747,8 +8819,8 @@ function updateSelectedLine() {
   }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
-  const canEditLineSchedule = hasSystemAdminAccess();
   const lineSchedule = lineScheduleLabel(line);
+  const isFourTenLine = lineSchedule === "4-10";
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
   const lineRequest = selectedLineRequest(line);
@@ -8814,19 +8886,20 @@ function updateSelectedLine() {
       </span>
       <span class="aws-picker">
         <em>AWS</em>
-        <small>Line schedule</small>
+        <small>${isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
         <span class="line-mode-options">
-          ${canEditLineSchedule
-            ? ["4-10", "5-8"].map((value) => `
-                <button class="line-mode-option ${lineSchedule === value ? "active" : ""}" type="button" data-four-ten-choice="${value === "4-10" ? "Yes" : "No"}">
-                  ${value}
-                </button>
-              `).join("")
-            : `<button class="line-mode-option active locked" type="button" disabled>${lineSchedule}</button>`}
+          ${["4-10", "5-8"].map((value) => {
+            const isCurrentSchedule = lineSchedule === value;
+            return `
+              <button class="line-mode-option locked ${isCurrentSchedule ? "active" : "schedule-unavailable"}" type="button" disabled aria-pressed="${isCurrentSchedule}">
+                ${value}
+              </button>
+            `;
+          }).join("")}
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
+            <button class="choice-option ${!isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
               ${value}
             </button>
           `).join("")}
@@ -14417,6 +14490,10 @@ document.addEventListener("click", async (event) => {
     document.querySelector("[data-public-date-sheet]").close();
     return;
   }
+  if (event.target.closest("[data-late-bid-close]") || event.target.matches("[data-late-bid-dialog]")) {
+    closeLateBidDialog();
+    return;
+  }
   const mobileCalendar = event.target.closest("[data-mobile-calendar]");
   const monthStep = event.target.closest("[data-mobile-month-step]");
   if (monthStep) {
@@ -15014,6 +15091,12 @@ document.addEventListener("click", async (event) => {
     selectedFlexPreference = flexButton.dataset.flexChoice;
     renderRdoLines();
     updateSelectedLine();
+    return;
+  }
+
+  const bidEntryButton = event.target.closest("[data-bid-entry-action]");
+  if (bidEntryButton?.dataset.lateBidContact === "true") {
+    openLateBidDialog();
     return;
   }
 
