@@ -97,8 +97,8 @@ begin
     raise exception 'Bid year % was not found.', requested_bid_year;
   end if;
 
-  if test_round is not null and test_round not between 1 and 4 then
-    raise exception 'Test round must be 1, 2, 3, or 4.';
+  if coalesce(should_enforce, false) is not true or test_round is not null then
+    raise exception 'Assigned bid windows are required and cannot be bypassed.';
   end if;
 
   insert into public.bid_year_settings (
@@ -109,8 +109,8 @@ begin
     updated_at
   ) values (
     target_bid_year_id,
-    coalesce(should_enforce, true),
-    test_round,
+    true,
+    null,
     actor_id,
     now()
   )

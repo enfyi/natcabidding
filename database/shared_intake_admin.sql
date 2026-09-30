@@ -1,0 +1,393 @@
+-- Durable intake-team membership and scheduling for shared admin views.
+
+alter table public.intake_schedules
+  add column if not exists bid_year_id uuid references public.bid_years(id) on delete cascade;
+
+update public.intake_schedules schedules
+set bid_year_id = byear.id
+from public.bid_years byear
+where schedules.bid_year_id is null
+  and byear.bid_year = 2027;
+
+create index if not exists intake_schedules_bid_year_start_idx
+  on public.intake_schedules(bid_year_id, starts_at);
+
+drop policy if exists "users can read intake schedules in own area" on public.intake_schedules;
+create policy "users can read intake schedules in own area"
+on public.intake_schedules for select
+to authenticated
+using (
+  public.is_current_intake_or_admin()
+  or area_id = public.current_bidder_area_id()
+  or public.is_bidder_in_current_area(intake_user_id)
+);
+
+create or replace function public.read_intake_schedules(
+  requested_bid_year integer
+)
+returns table (
+  id uuid,
+  bid_year_id uuid,
+  area_id uuid,
+  intake_user_id uuid,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  scope text,
+  first_name text,
+  last_name text,
+  initials text,
+  area_name text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null or not public.is_current_intake_or_admin() then
+    raise exception 'Intake or admin access is required to read intake schedules.';
+  end if;
+
+  return query
+  select
+    schedules.id,
+    schedules.bid_year_id,
+    schedules.area_id,
+    schedules.intake_user_id,
+    schedules.starts_at,
+    schedules.ends_at,
+    schedules.scope,
+    bidders.first_name,
+    bidders.last_name,
+    bidders.initials,
+    areas.name as area_name
+  from public.intake_schedules schedules
+  join public.bid_years bid_years on bid_years.id = schedules.bid_year_id
+  join public.bidders bidders on bidders.id = schedules.intake_user_id
+  left join public.areas areas on areas.id = schedules.area_id
+  where bid_years.bid_year = requested_bid_year
+  order by schedules.starts_at;
+end;
+$$;
+
+revoke all on function public.read_intake_schedules(integer) from public, anon, authenticated;
+grant execute on function public.read_intake_schedules(integer) to authenticated;
+revoke select on table public.intake_schedules from authenticated;
+
+create or replace function public.set_intake_team_member(
+  requested_initials text,
+  should_enable boolean
+)
+returns table (
+  bidder_id uuid,
+  initials text,
+  role text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := public.current_bidder_id();
+  target public.bidders%rowtype;
+begin
+  if not public.is_current_admin() then
+    raise exception 'Only system admins can change the intake team.';
+  end if;
+
+  select * into target
+  from public.bidders b
+  where upper(b.initials) = upper(trim(requested_initials))
+    and b.active
+  limit 1;
+
+  if target.id is null then
+    raise exception 'The selected BUE was not found.';
+  end if;
+
+  if target.role = 'admin' and not should_enable then
+    raise exception 'Admin accounts cannot be removed from intake access.';
+  end if;
+
+  update public.bidders b
+  set role = case
+        when should_enable and b.role = 'controller' then 'intake'
+        when not should_enable and b.role = 'intake' then 'controller'
+        else b.role
+      end,
+      updated_at = now()
+  where b.id = target.id
+  returning b.id, b.initials, b.role
+  into bidder_id, initials, role;
+
+  insert into public.audit_events (
+    actor_id,
+    event_type,
+    entity_table,
+    entity_id,
+    details
+  ) values (
+    actor_id,
+    case when should_enable then 'intake_team_member_added' else 'intake_team_member_removed' end,
+    'bidders',
+    target.id,
+    jsonb_build_object('initials', target.initials, 'enabled', should_enable)
+  );
+
+  return next;
+end;
+$$;
+
+revoke all on function public.set_intake_team_member(text, boolean) from public, anon, authenticated;
+grant execute on function public.set_intake_team_member(text, boolean) to authenticated;
+
+create or replace function public.create_intake_schedule(
+  requested_bid_year integer,
+  requested_initials text,
+  requested_starts_at timestamptz,
+  requested_ends_at timestamptz,
+  requested_scope text default 'All Areas'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := public.current_bidder_id();
+  target_bid_year_id uuid;
+  target_bidder_id uuid;
+  new_schedule_id uuid;
+begin
+  if not public.is_current_intake_or_admin() then
+    raise exception 'Intake or admin access is required to create a schedule.';
+  end if;
+
+  if requested_starts_at is null or requested_ends_at is null or requested_ends_at <= requested_starts_at then
+    raise exception 'Choose a valid start and end time.';
+  end if;
+
+  select byear.id into target_bid_year_id
+  from public.bid_years byear
+  where byear.bid_year = requested_bid_year;
+
+  if target_bid_year_id is null then
+    raise exception 'Bid year % was not found.', requested_bid_year;
+  end if;
+
+  select b.id into target_bidder_id
+  from public.bidders b
+  where upper(b.initials) = upper(trim(requested_initials))
+    and b.active
+    and b.role in ('intake', 'admin')
+  limit 1;
+
+  if target_bidder_id is null then
+    raise exception 'Choose an active intake-team member.';
+  end if;
+
+  insert into public.intake_schedules (
+    bid_year_id,
+    area_id,
+    intake_user_id,
+    starts_at,
+    ends_at,
+    scope
+  ) values (
+    target_bid_year_id,
+    null,
+    target_bidder_id,
+    requested_starts_at,
+    requested_ends_at,
+    coalesce(nullif(trim(requested_scope), ''), 'All Areas')
+  )
+  returning id into new_schedule_id;
+
+  insert into public.audit_events (
+    bid_year_id,
+    actor_id,
+    event_type,
+    entity_table,
+    entity_id,
+    details
+  ) values (
+    target_bid_year_id,
+    actor_id,
+    'intake_shift_scheduled',
+    'intake_schedules',
+    new_schedule_id,
+    jsonb_build_object(
+      'intake_user_id', target_bidder_id,
+      'starts_at', requested_starts_at,
+      'ends_at', requested_ends_at,
+      'scope', coalesce(nullif(trim(requested_scope), ''), 'All Areas')
+    )
+  );
+
+  return new_schedule_id;
+end;
+$$;
+
+revoke all on function public.create_intake_schedule(integer, text, timestamptz, timestamptz, text) from public, anon, authenticated;
+grant execute on function public.create_intake_schedule(integer, text, timestamptz, timestamptz, text) to authenticated;
+
+create or replace function public.update_intake_schedule(
+  requested_bid_year integer,
+  requested_schedule_id uuid,
+  requested_initials text,
+  requested_starts_at timestamptz,
+  requested_ends_at timestamptz,
+  requested_scope text default 'All Areas'
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := public.current_bidder_id();
+  target_bid_year_id uuid;
+  target_bidder_id uuid;
+  existing_schedule public.intake_schedules%rowtype;
+begin
+  if auth.uid() is null or not public.is_current_intake_or_admin() then
+    raise exception 'Intake or admin access is required to update a schedule.';
+  end if;
+
+  if requested_starts_at is null or requested_ends_at is null or requested_ends_at <= requested_starts_at then
+    raise exception 'Choose a valid start and end time.';
+  end if;
+
+  select byear.id into target_bid_year_id
+  from public.bid_years byear
+  where byear.bid_year = requested_bid_year;
+
+  if target_bid_year_id is null then
+    raise exception 'Bid year % was not found.', requested_bid_year;
+  end if;
+
+  select schedules.* into existing_schedule
+  from public.intake_schedules schedules
+  where schedules.id = requested_schedule_id
+    and schedules.bid_year_id = target_bid_year_id
+  for update;
+
+  if existing_schedule.id is null then
+    raise exception 'The selected intake shift was not found.';
+  end if;
+
+  select bidders.id into target_bidder_id
+  from public.bidders bidders
+  where upper(bidders.initials) = upper(trim(requested_initials))
+    and bidders.active
+    and bidders.role in ('intake', 'admin')
+  limit 1;
+
+  if target_bidder_id is null then
+    raise exception 'Choose an active intake-team member.';
+  end if;
+
+  update public.intake_schedules schedules
+  set intake_user_id = target_bidder_id,
+      starts_at = requested_starts_at,
+      ends_at = requested_ends_at,
+      scope = coalesce(nullif(trim(requested_scope), ''), 'All Areas')
+  where schedules.id = existing_schedule.id;
+
+  insert into public.audit_events (
+    bid_year_id,
+    actor_id,
+    event_type,
+    entity_table,
+    entity_id,
+    details
+  ) values (
+    target_bid_year_id,
+    actor_id,
+    'intake_shift_updated',
+    'intake_schedules',
+    existing_schedule.id,
+    jsonb_build_object(
+      'previous_intake_user_id', existing_schedule.intake_user_id,
+      'previous_starts_at', existing_schedule.starts_at,
+      'previous_ends_at', existing_schedule.ends_at,
+      'previous_scope', existing_schedule.scope,
+      'intake_user_id', target_bidder_id,
+      'starts_at', requested_starts_at,
+      'ends_at', requested_ends_at,
+      'scope', coalesce(nullif(trim(requested_scope), ''), 'All Areas')
+    )
+  );
+
+  return existing_schedule.id;
+end;
+$$;
+
+revoke all on function public.update_intake_schedule(integer, uuid, text, timestamptz, timestamptz, text) from public, anon, authenticated;
+grant execute on function public.update_intake_schedule(integer, uuid, text, timestamptz, timestamptz, text) to authenticated;
+
+create or replace function public.delete_intake_schedule(
+  requested_bid_year integer,
+  requested_schedule_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  actor_id uuid := public.current_bidder_id();
+  target_bid_year_id uuid;
+  existing_schedule public.intake_schedules%rowtype;
+begin
+  if auth.uid() is null or not public.is_current_intake_or_admin() then
+    raise exception 'Intake or admin access is required to delete a schedule.';
+  end if;
+
+  select byear.id into target_bid_year_id
+  from public.bid_years byear
+  where byear.bid_year = requested_bid_year;
+
+  if target_bid_year_id is null then
+    raise exception 'Bid year % was not found.', requested_bid_year;
+  end if;
+
+  select schedules.* into existing_schedule
+  from public.intake_schedules schedules
+  where schedules.id = requested_schedule_id
+    and schedules.bid_year_id = target_bid_year_id
+  for update;
+
+  if existing_schedule.id is null then
+    raise exception 'The selected intake shift was not found.';
+  end if;
+
+  delete from public.intake_schedules schedules
+  where schedules.id = existing_schedule.id;
+
+  insert into public.audit_events (
+    bid_year_id,
+    actor_id,
+    event_type,
+    entity_table,
+    entity_id,
+    details
+  ) values (
+    target_bid_year_id,
+    actor_id,
+    'intake_shift_deleted',
+    'intake_schedules',
+    existing_schedule.id,
+    jsonb_build_object(
+      'intake_user_id', existing_schedule.intake_user_id,
+      'starts_at', existing_schedule.starts_at,
+      'ends_at', existing_schedule.ends_at,
+      'scope', existing_schedule.scope
+    )
+  );
+
+  return existing_schedule.id;
+end;
+$$;
+
+revoke all on function public.delete_intake_schedule(integer, uuid) from public, anon, authenticated;
+grant execute on function public.delete_intake_schedule(integer, uuid) to authenticated;

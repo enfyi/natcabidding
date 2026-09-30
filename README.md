@@ -55,7 +55,7 @@ and add these Additional Redirect URLs for development and Vercel previews:
 
 If the Vercel team slug changes, update the preview wildcard to match it. When a
 custom confirmation email template uses `token_hash`, send it directly to the
-selected callback so the deployment origin is preserved:
+selected redirect so the deployment origin is preserved:
 
 ```html
 <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">
@@ -63,12 +63,48 @@ selected callback so the deployment origin is preserved:
 </a>
 ```
 
+The public bidding page recognizes this token-hash URL and presents a separate
+`Confirm email and sign in` button before calling `verifyOtp`. The extra user
+gesture prevents Microsoft Safe Links and similar email scanners from consuming
+the one-time token merely by previewing the link.
+
 ## Vercel environment variables
 
 Define `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in Production, Preview, and Development.
 Define `NEXT_PUBLIC_SITE_URL` only for Production (and locally in `.env.local`).
 The build intentionally fails if the Supabase URL or publishable key is missing.
+
+The browser configuration at `/supabase-config.js` is generated from these
+environment variables at request time. Set `NEXT_PUBLIC_APP_ENVIRONMENT=pilot`
+on an isolated pilot deployment to show the permanent practice-data banner.
+Never point a pilot deployment at the production Supabase project.
+
+## Isolated bidding pilot
+
+Use a separate Supabase project and a separate Vercel deployment for a
+participant pilot. Apply the normal database scripts, then apply
+`database/pilot_auth_profile.sql`, `database/pilot_mode.sql`,
+`database/pilot_seed.sql`, and `database/pilot_login_only.sql` only in that
+disposable database. The Admin page can then select BUEs by initials, turn
+practice bidding on or off, and reset the year's practice data. Reset keeps the
+roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
+participant list.
+
+Apply `database/pilot_round_controls.sql` after `pilot_mode.sql`, then apply
+`database/pilot_submission_window_fix.sql` to upgrade legacy RDO and leave
+submission functions. `scripts/test-pilot-submission-windows.sql` verifies both
+public submission RPCs in a transaction that rolls back all test data. In Pilot Access
+and Rounds, administrators can turn each of rounds 1–4 on or off independently.
+Authorized pilot participants choose an enabled round in the test-site banner
+and submit without scheduled hours. Both pilot access and the chosen round must
+be on. All rounds start off. Controls refresh every ten seconds; the database
+checks the round at submission time. The selected participant list still controls
+who can submit, and normal leave limits and review rules still apply.
+
+The database refuses pilot activation and reset unless `pilot_seed.sql` marked
+it as isolated. A reset also turns the pilot off, so the administrator must
+review the clean state and turn it back on for the next run.
 
 ## Bid notification email
 

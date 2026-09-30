@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
 import type { BidTimeImportPreview, BidTimeImportRow } from '@/lib/bid-time-import-types'
 import { getSupabaseEnv } from '@/lib/env'
+import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
 
 type AreaOption = { code: string; name: string }
 type BidYearOption = { bid_year: number; status: string }
@@ -92,7 +93,6 @@ export function BidTimeImporter() {
       const nextYears = (yearsResult.data || []) as BidYearOption[]
       setAreas(nextAreas)
       setBidYears(nextYears)
-      setAreaCode(nextAreas[0]?.code || '')
       setBidYear(String(nextYears[0]?.bid_year || ''))
       setAccess('admin')
     }
@@ -119,6 +119,7 @@ export function BidTimeImporter() {
     setIssues([])
     setStatus('Reading and validating the workbook…')
     setResult(null)
+    const requestTimeout = createImportRequestTimeout()
 
     try {
       const { data: sessionData } = await supabase.auth.getSession()
@@ -131,6 +132,7 @@ export function BidTimeImporter() {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
+        signal: requestTimeout.signal,
       })
       const body = await response.json()
       if (!response.ok) {
@@ -142,8 +144,11 @@ export function BidTimeImporter() {
       setStatus(`${body.windowCount} bid windows for ${body.bidders.length} bidders are ready to import.`)
     } catch (error) {
       setPreview(null)
-      setStatus(error instanceof Error ? error.message : 'The workbook could not be previewed.')
+      setStatus(requestTimeout.didExpire()
+        ? importTimeoutMessage('preview')
+        : error instanceof Error ? error.message : 'The workbook could not be previewed.')
     } finally {
+      requestTimeout.clear()
       setBusy(false)
     }
   }
@@ -153,21 +158,29 @@ export function BidTimeImporter() {
     setBusy(true)
     setIssues([])
     setStatus('Importing bid times into Supabase…')
+    const requestTimeout = createImportRequestTimeout()
 
     try {
-      const { data, error } = await supabase.rpc('import_bid_time_schedule', {
-        requested_bid_year: Number(bidYear),
-        requested_area_code: areaCode,
-        requested_bidders: importPayload(preview.bidders),
-      })
+      const { data, error } = await supabase
+        .rpc('import_bid_time_schedule', {
+          requested_bid_year: Number(bidYear),
+          requested_area_code: areaCode,
+          requested_bidders: importPayload(preview.bidders),
+        })
+        .abortSignal(requestTimeout.signal)
+      if (requestTimeout.didExpire()) throw new Error(importTimeoutMessage('import'))
       if (error) throw error
 
       const imported = data as ImportResult
       setResult(imported)
       setStatus(`Import complete: ${imported.windows_inserted} windows added and ${imported.windows_updated} updated.`)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'The import failed. No partial changes were saved.')
+      if (requestTimeout.didExpire()) setPreview(null)
+      setStatus(requestTimeout.didExpire()
+        ? importTimeoutMessage('import')
+        : error instanceof Error ? error.message : 'The import failed. No partial changes were saved.')
     } finally {
+      requestTimeout.clear()
       setBusy(false)
     }
   }
@@ -233,7 +246,8 @@ export function BidTimeImporter() {
           </label>
           <label>
             Area
-            <select value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+            <select required value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+              <option value="" disabled>Select an area</option>
               {areas.map((area) => <option key={area.code} value={area.code}>{area.name}</option>)}
             </select>
           </label>
@@ -246,7 +260,7 @@ export function BidTimeImporter() {
 
         <p className="import-safety-note"><strong>Safe add/update:</strong> Only populated round cells are added or updated. Omitted bidders and blank round cells remain unchanged.</p>
 
-        <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>
+        <button className="button primary" type="button" disabled={busy || !file || !areaCode} onClick={() => void previewFile()}>
           {busy && !preview ? 'Validating…' : 'Preview import'}
         </button>
       </section>

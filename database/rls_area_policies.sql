@@ -49,7 +49,8 @@ as $$
   )
 $$;
 
-create or replace function public.read_leave_intake_queue(queue_bid_year integer default null)
+drop function if exists public.read_leave_intake_queue(integer);
+create function public.read_leave_intake_queue(queue_bid_year integer default null)
 returns table (
   id uuid,
   bidder_id uuid,
@@ -71,7 +72,8 @@ returns table (
   bid_role text,
   seniority_rank integer,
   area_id uuid,
-  area_name text
+  area_name text,
+  is_ghost_bid boolean
 )
 language sql
 stable
@@ -87,6 +89,7 @@ as $$
       )::integer as area_seniority_rank
     from bidders area_bidders
     where area_bidders.active
+      and area_bidders.bid_role not in ('ADM', 'NB')
   )
   select
     lr.id,
@@ -109,7 +112,8 @@ as $$
     b.bid_role,
     rb.area_seniority_rank as seniority_rank,
     b.area_id,
-    a.name as area_name
+    a.name as area_name,
+    lr.is_ghost_bid
   from leave_requests lr
   join bid_years byear on byear.id = lr.bid_year_id
   join bidders b on b.id = lr.bidder_id and b.active
@@ -264,10 +268,14 @@ to authenticated
 using (true);
 
 drop policy if exists "users can read bid windows in own area" on bid_windows;
-create policy "users can read bid windows in own area"
+drop policy if exists "users can read own-area bid windows and admins can read all" on bid_windows;
+create policy "users can read own-area bid windows and admins can read all"
 on bid_windows for select
 to authenticated
-using (public.is_bidder_in_current_area(bidder_id));
+using (
+  (select public.is_current_admin())
+  or public.is_bidder_in_current_area(bidder_id)
+);
 
 alter table bid_year_settings enable row level security;
 

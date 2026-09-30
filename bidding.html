@@ -8,6 +8,12 @@
       content="NATCA ZLA annual RDO and leave bidding prototype for Los Angeles Center controllers."
     />
     <title>NATCA ZLA Bidding</title>
+    <script>
+      const bootParams = new URLSearchParams(location.search);
+      if (bootParams.get("member") === "1" || ["dashboard", "intake", "intake-schedule", "admin"].includes(bootParams.get("page"))) {
+        document.documentElement.classList.add("member-boot-pending");
+      }
+    </script>
     <link rel="icon" href="assets/logo-5v2a.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,18 +21,48 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change" />
   </head>
   <body>
+    <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
+      <img src="assets/logo-5v2a.png" alt="" />
+      <div>
+        <p>Member access</p>
+        <h1>Loading your dashboard…</h1>
+        <span>Restoring your secure session and current bidding data.</span>
+      </div>
+    </section>
+    <div class="pilot-environment-banner" data-pilot-environment-banner hidden>
+      TEST SITE · Practice bids only · Data may be reset by an administrator
+      <label data-pilot-round-picker-row hidden>Practice bidding round
+        <select data-pilot-round-picker aria-label="Practice bidding round"><option value="">All rounds off</option></select>
+      </label>
+    </div>
     <section class="login-screen public-shell" aria-label="Public bidding website">
       <aside class="public-rail" aria-label="Public bidding navigation">
-        <a class="brand-block" href="index.html" aria-label="NATCA ZLA home">
+        <a class="brand-block" href="/" target="_top" aria-label="ZLA Bidding front page" data-public-home>
           <img src="assets/logo-5v2a.png" alt="NATCA ZLA" />
           <span>
             <strong>ZLA</strong>
             <small>Los Angeles Center</small>
           </span>
         </a>
+        <label class="mobile-area-control">
+          <span class="visually-hidden">Select area</span>
+          <select data-mobile-public-area aria-label="Select area">
+            <option value="" disabled>Select area</option><option selected>Area A</option><option>Area B</option><option>Area C</option>
+            <option>Area D</option><option>Area E</option><option>Area F</option><option>TMU</option>
+          </select>
+        </label>
+        <div class="mobile-login-slot"></div>
+        <details class="mobile-public-menu">
+          <summary aria-label="More navigation">More</summary>
+          <div>
+            <button type="button" data-public-area="FAQ">FAQ</button>
+            <button type="button" data-public-area="Previous Years">Previous Years</button>
+            <button type="button" data-help-toggle>Live Help</button>
+          </div>
+        </details>
         <nav class="public-nav">
           <button class="public-nav-item" type="button" data-public-area="FAQ">FAQ</button>
           <details class="public-area" open>
@@ -103,6 +139,9 @@
                   <button class="primary-action small" type="submit">Sign In</button>
                 </div>
                 <button class="auth-link-action" type="button" data-reset-login-password>Set or reset password</button>
+                <button class="primary-action small" type="button" hidden data-confirm-email-token>
+                  Confirm email and sign in
+                </button>
                 <p class="auth-status" data-auth-status aria-live="polite"></p>
               </form>
             </div>
@@ -119,7 +158,7 @@
           <div class="panel-header">
             <div>
               <h2 data-public-sheet-title>Bid Calendar</h2>
-              <p data-public-sheet-code>Hover or focus a date to view open slots and current bidder initials. Public calendars are read-only.</p>
+              <p data-public-sheet-code>Select a date to view open slots and bidder initials. Read-only calendar.</p>
             </div>
             <div class="segmented" aria-label="Public calendar mode" data-calendar-mode-control>
               <button type="button" data-calendar-mode="vacation">Vacation</button>
@@ -139,7 +178,7 @@
                 <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="public">DEV</button>
               </div>
             </div>
-            <p class="calendar-layout-description" data-calendar-layout-description="public">Hover or focus a date to view its slots.</p>
+            <p class="calendar-layout-description" data-calendar-layout-description="public">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
@@ -162,7 +201,7 @@
 
     <div class="app-shell" hidden>
       <aside class="side-rail" aria-label="Bidding navigation">
-        <a class="brand-block" href="index.html" aria-label="NATCA ZLA home">
+        <a class="brand-block" href="/" target="_top" aria-label="ZLA Bidding front page" data-public-home>
           <img src="assets/logo-5v2a.png" alt="NATCA ZLA" />
           <span>
             <strong>ZLA</strong>
@@ -172,28 +211,28 @@
 
         <nav class="app-nav" aria-label="Bidding pages">
           <p>Home</p>
-          <button class="nav-item" type="button" data-public-home>
+          <button class="nav-item mobile-secondary-nav" type="button" data-public-home>
             <span class="nav-icon">⌂</span>
             Front Page
           </button>
           <p>Bidding</p>
-          <button class="nav-item active" type="button" data-page="dashboard">
+          <button class="nav-item mobile-primary-nav active" type="button" data-page="dashboard">
             <span class="nav-icon">▥</span>
             Dashboard
           </button>
-          <button class="nav-item" type="button" data-page="seniority">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="seniority">
             <span class="nav-icon">#</span>
             Bid Times
           </button>
-          <button class="nav-item" type="button" data-page="rdos">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="rdos">
             <span class="nav-icon">▦</span>
             RDOs
           </button>
-          <button class="nav-item" type="button" data-page="leave">
+          <button class="nav-item mobile-primary-nav" type="button" data-page="leave">
             <span class="nav-icon">▣</span>
             Leave
           </button>
-          <button class="nav-item" type="button" data-page="history">
+          <button class="nav-item mobile-secondary-nav" type="button" data-page="history">
             <span class="nav-icon">◷</span>
             History
           </button>
@@ -212,6 +251,22 @@
             Admin
           </button>
         </nav>
+
+        <details class="mobile-app-menu">
+          <summary aria-label="Open more navigation options">
+            <span class="nav-icon" aria-hidden="true">•••</span>
+            <span>More</span>
+          </summary>
+          <div class="mobile-app-menu-panel">
+            <button class="nav-item" type="button" data-public-home><span class="nav-icon">⌂</span>Front Page</button>
+            <button class="nav-item" type="button" data-page="history"><span class="nav-icon">◷</span>History</button>
+            <button class="nav-item" type="button" data-page="intake" data-admin-only hidden><span class="nav-icon">!</span>Intake<span class="nav-badge" data-intake-count>0</span></button>
+            <button class="nav-item" type="button" data-page="intake-schedule" data-intake-rep-only hidden><span class="nav-icon">◫</span>Intake Schedule</button>
+            <button class="nav-item" type="button" data-page="admin" data-system-admin-only hidden><span class="nav-icon">⚙</span>Admin</button>
+            <button class="nav-item" type="button" data-help-toggle><span class="nav-icon">?</span>Live Help</button>
+            <button class="nav-item danger" type="button" data-log-out><span class="nav-icon">↪</span>Log Out</button>
+          </div>
+        </details>
 
         <div class="side-footer">
           <button class="ghost-link" type="button" data-help-toggle>Live Help</button>
@@ -332,7 +387,7 @@
             <article class="metric-card round-rule-card">
               <span>Round Rules</span>
               <strong data-next-bid-window-rule>1 or 2 weeks</strong>
-              <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Leave may include up to 2 bid weeks.</span></small>
+              <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.</span></small>
             </article>
             <article class="metric-card area-slots-metric">
               <span>Area Leave Slots Left</span>
@@ -376,7 +431,7 @@
                   <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="dashboard">DEV</button>
                 </div>
               </div>
-              <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Hover or focus a date to view its slots.</p>
+              <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong id="dashboard-calendar-year" data-calendar-year-label>2027</strong>
@@ -419,6 +474,7 @@
                 <div class="attribute-grid" data-selected-attributes>
                   <span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>
                 </div>
+                <p class="bid-denial-reason" data-rdo-denial-reason hidden></p>
                 <div class="button-row">
                   <button class="primary-action window-action" type="button" data-page="rdos" data-bid-entry-action>Bid</button>
                   <button class="secondary-action" type="button" data-page="rdos">View RDO Lines</button>
@@ -496,6 +552,14 @@
                   </div>
                 </div>
               </div>
+              <div class="seniority-find-tools">
+                <label>
+                  Find a bidder
+                  <input type="search" placeholder="Name, initials, rank, or role" autocomplete="off" data-seniority-search />
+                </label>
+                <button class="secondary-action" type="button" data-seniority-jump-current>Jump to me</button>
+                <p data-seniority-search-status role="status" aria-live="polite"></p>
+              </div>
               <div class="seniority-board" id="seniority-page-list"></div>
               <div class="table-wrap seniority-list-wrap" id="seniority-page-table" hidden></div>
             </section>
@@ -507,8 +571,8 @@
             <section class="panel rdo-table-panel">
               <div class="panel-header">
                 <div>
-                  <h2>RDO Bid Lines - Area A</h2>
-                  <p>Select an open negotiated line. Flex, AWS, fatigue group, and most Mid preferences are chosen by the employee.</p>
+                  <h2 data-rdo-lines-heading>RDO Bid Lines</h2>
+                  <p>Select an open negotiated line. Flex, AWS, and most Mid preferences are chosen by the employee. Fatigue group may be selected or left to intake with No preference.</p>
                 </div>
                 <span class="pill open" data-rdo-filter-count>All lines</span>
               </div>
@@ -526,8 +590,15 @@
                   <option value="No">4-10: No</option>
                 </select>
               </div>
-              <div class="table-wrap tall rdo-page-table-wrap">
-                <table class="line-table">
+              <div class="mobile-rdo-view member-rdo-view" role="group" aria-label="RDO display">
+                <button type="button" aria-pressed="false" data-member-rdo-presentation="cards">Line cards</button>
+                <button type="button" aria-pressed="true" data-member-rdo-presentation="table">Compare table</button>
+              </div>
+              <p class="mobile-table-hint member-rdo-table-hint">Swipe horizontally to compare the full weekly schedule.</p>
+              <div class="member-rdo-results" data-member-rdo-results data-presentation="table">
+                <div class="mobile-rdo-cards member-rdo-cards" data-member-rdo-cards></div>
+                <div class="table-wrap tall rdo-page-table-wrap" tabindex="0" role="region" aria-label="RDO schedule comparison table, scroll horizontally">
+                <table class="line-table member-rdo-table">
                   <thead>
                     <tr>
                       <th>Line #</th>
@@ -545,6 +616,7 @@
                   </thead>
                   <tbody id="rdo-line-rows"></tbody>
                 </table>
+                </div>
               </div>
             </section>
             <aside class="right-stack">
@@ -567,9 +639,10 @@
                 <div class="attribute-grid" data-selected-attributes>
                   <span class="empty-attribute-message">Choose a line to enter RDO details.</span>
                 </div>
+                <p class="bid-denial-reason" data-rdo-denial-reason hidden></p>
                 <ul class="bid-readiness-list" data-bid-readiness-list aria-label="Bid readiness checklist">
                   <li class="checked">Selected line open</li>
-                  <li class="checked">Fatigue group selected</li>
+                  <li class="checked">Fatigue preference selected</li>
                   <li class="checked">Preferences complete</li>
                   <li class="checked">Leave within allowance</li>
                 </ul>
@@ -612,7 +685,7 @@
                   <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
                 </div>
               </div>
-              <p class="calendar-layout-description" data-calendar-layout-description="leave">Hover or focus a date to view its slots.</p>
+              <p class="calendar-layout-description" data-calendar-layout-description="leave">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong data-calendar-year-label>2027</strong>
@@ -693,7 +766,7 @@
                   <button class="primary-action small" type="button" data-add-leave-request>Add to Batch</button>
                 </div>
                 <div class="leave-builder compact">
-                  <label class="date-range-picker">Date Range
+                  <label class="date-range-picker"><span data-leave-selection-label>Date Range</span>
                     <input type="text" value="Apr 8 - Apr 9, 2027" data-leave-range-input readonly aria-haspopup="dialog" aria-expanded="false" />
                     <div class="leave-date-picker" data-leave-date-picker hidden></div>
                   </label>
@@ -720,9 +793,12 @@
                     <div>
                       <span class="eyebrow" data-submitted-leave-round>Round 1</span>
                       <h3>Manage Submitted Bid Dates</h3>
-                      <p>Add more dates or remove a submitted range while your bid window is open.</p>
+                      <p>Add dates, change submitted dates, or remove a bid while your bid window is open.</p>
                     </div>
-                    <button class="secondary-action small" type="button" data-add-more-leave-dates>Add More Dates</button>
+                    <div class="submitted-leave-actions">
+                      <button class="secondary-action small" type="button" data-change-all-submitted-leave>Change Bid Dates</button>
+                      <button class="secondary-action small" type="button" data-add-more-leave-dates>Add More Dates</button>
+                    </div>
                   </div>
                   <div class="submitted-leave-usage" data-submitted-leave-usage></div>
                   <div class="submitted-leave-list" data-submitted-leave-list></div>
@@ -768,7 +844,7 @@
               <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="member">Minimal</button>
               <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="member">Full</button>
             </div>
-            <p class="calendar-layout-description" data-calendar-layout-description="member">Hover or focus a date to view its slots.</p>
+            <p class="calendar-layout-description" data-calendar-layout-description="member">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
@@ -793,15 +869,70 @@
         </section>
 
         <section class="page" id="intake-page" data-page-panel="intake">
-          <section class="panel bidder-editor" data-bidder-editor data-admin-only hidden aria-labelledby="bidder-editor-title">
-            <div class="panel-header"><div><span class="eyebrow">ADMIN / INTAKE</span><h2 id="bidder-editor-title">Edit bidder information</h2>
-              <p>Find a bidder, review every round, then validate and submit your changes.</p></div><span class="pill">Bid year <b data-editor-year></b></span></div>
-            <label class="bidder-editor-search">Search by name or initials
-              <input type="search" data-bidder-editor-search placeholder="Enter a name or initials…" autocomplete="off" />
-            </label>
-            <div class="bidder-editor-results" data-bidder-editor-results></div>
-            <p data-bidder-editor-status role="status" aria-live="polite">Enter a name or initials to find a bidder.</p>
-            <div data-bidder-editor-form></div>
+          <div class="intake-control-bar" data-admin-only hidden>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-bidder-info" data-intake-control="bidder">
+              <span>
+                <span class="eyebrow">ADMIN / INTAKE</span>
+                <strong>Edit Bidder Info</strong>
+                <small>Search and update any controller.</small>
+              </span>
+              <span class="pill">Bid year <b data-editor-year></b></span>
+            </button>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-round-rules" data-intake-control="round-rules">
+              <span>
+                <span class="eyebrow">REFERENCE</span>
+                <strong>Round Rules</strong>
+                <small data-round-rule-heading>Round 1 Rules</small>
+              </span>
+              <span class="pill" data-round-rule-limit>1 or 2 weeks</span>
+            </button>
+            <button class="panel intake-control-card" type="button" aria-expanded="false" aria-controls="intake-approval-rules" data-intake-control="approval-rules">
+              <span>
+                <span class="eyebrow">REFERENCE</span>
+                <strong>Approval Rules</strong>
+                <small>Current intake guidance set by Admin.</small>
+              </span>
+              <span class="intake-control-cue" aria-hidden="true">View</span>
+            </button>
+            <section class="panel intake-control-drawer bidder-editor" id="intake-bidder-info" data-intake-control-panel="bidder" data-bidder-editor hidden aria-labelledby="bidder-editor-title">
+              <div class="intake-control-content">
+                <h2 class="visually-hidden" id="bidder-editor-title">Edit Bidder Info</h2>
+                <label class="bidder-editor-search">Search by name or initials
+                  <input type="search" data-bidder-editor-search placeholder="Enter a name or initials…" autocomplete="off" />
+                </label>
+                <div class="bidder-editor-results" data-bidder-editor-results></div>
+                <p data-bidder-editor-status role="status" aria-live="polite">Enter a name or initials to find a bidder.</p>
+                <div data-bidder-editor-form></div>
+              </div>
+            </section>
+            <section class="panel intake-control-drawer intake-rule-card" id="intake-round-rules" data-intake-control-panel="round-rules" hidden aria-label="Round Rules">
+              <div class="intake-control-content">
+                <div class="current-round-rule">
+                  <strong data-round-rule-limit>1 or 2 weeks</strong>
+                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
+                </div>
+                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
+              </div>
+            </section>
+            <section class="panel intake-control-drawer intake-rule-card" id="intake-approval-rules" data-intake-control-panel="approval-rules" hidden aria-label="Approval Rules">
+              <div class="intake-control-content">
+                <ul class="plain-list success-list" data-approval-rule-summary></ul>
+              </div>
+            </section>
+          </div>
+          <section class="panel intake-bidder-overview" data-intake-bidder-overview>
+            <div class="panel-header compact">
+              <div>
+                <span class="eyebrow">SELECTED BIDDER</span>
+                <h2>Bidding Employee</h2>
+                <p>Controller details for the current intake review or manual entry.</p>
+              </div>
+              <span class="pill" data-intake-bidder-area>Select a controller</span>
+            </div>
+            <div class="intake-bidder-summary" data-intake-bidder-summary aria-live="polite">
+              <div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>
+            </div>
+            <div class="intake-bidder-detail" data-intake-bidder-detail hidden></div>
           </section>
           <div class="workspace-grid intake-workspace">
             <section class="panel">
@@ -818,6 +949,7 @@
                       <option value="Pending">Pending</option>
                       <option value="Approved">Approved</option>
                       <option value="Denied">Denied</option>
+                      <option value="Expired">Expired</option>
                     </select>
                     <select data-intake-filter="type" aria-label="Filter intake by bid type">
                       <option value="all">All Types</option>
@@ -840,27 +972,10 @@
                 </div>
                 <span class="pill open"><b data-intake-count>0</b> pending</span>
               </div>
-              <div class="intake-detail-panel" data-intake-detail-panel hidden></div>
+              <div class="intake-detail-panel" data-intake-detail-panel tabindex="-1" hidden></div>
               <div class="intake-queue" id="intake-queue"></div>
             </section>
             <aside class="intake-info-stack">
-              <section class="panel editable-rule-card">
-                <h3 data-round-rule-heading>Round 1 Rules</h3>
-                <div class="current-round-rule">
-                  <strong data-round-rule-limit>1 or 2 weeks</strong>
-                  <small data-round-rule-detail>Leave may include up to 2 bid weeks.</small>
-                </div>
-                <dl class="rule-list compact round-rule-summary-list" data-round-rules-summary></dl>
-              </section>
-              <section class="panel">
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Approval Rules</h3>
-                    <p>Current intake guidance set by Admin.</p>
-                  </div>
-                </div>
-                <ul class="plain-list success-list" data-approval-rule-summary></ul>
-              </section>
               <section class="panel help-summary-card">
                 <div class="panel-header compact">
                   <div>
@@ -873,12 +988,14 @@
               </section>
             </aside>
             <aside class="right-stack">
+              <button class="intake-editor-backdrop" type="button" aria-label="Close intake editor" data-intake-editor-backdrop hidden></button>
               <section class="panel" id="override-panel" hidden>
                 <div class="panel-header compact">
                   <div>
                     <h2>Admin Override / Edit</h2>
                     <p>Changes are logged under the signed-in intake account.</p>
                   </div>
+                  <button class="secondary-action small intake-editor-close" type="button" data-intake-editor-close>Close</button>
                 </div>
                 <div class="override-editor" data-override-editor></div>
               </section>
@@ -888,6 +1005,7 @@
                     <h2>Deny Request</h2>
                     <p>Tell the BUE what needs to change before resubmitting.</p>
                   </div>
+                  <button class="secondary-action small intake-editor-close" type="button" data-intake-editor-close>Close</button>
                 </div>
                 <div class="denial-editor" data-denial-editor></div>
               </section>
@@ -899,6 +1017,12 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
+                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -925,6 +1049,7 @@
                         <option value="A">Group A</option>
                         <option value="B">Group B</option>
                         <option value="C">Group C</option>
+                        <option value="">No preference — assign later</option>
                       </select>
                     </label>
                     <label class="manual-override-check wide">
@@ -987,6 +1112,12 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
+                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -1080,15 +1211,39 @@
                     Intake Team Member
                     <select data-schedule-rep></select>
                   </label>
+                  <fieldset class="intake-shift-presets">
+                    <legend>Base Shift</legend>
+                    <div class="intake-shift-preset-buttons">
+                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
+                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
+                    </div>
+                  </fieldset>
+                  <div class="intake-shift-fields">
+                    <label>
+                      Start Date
+                      <input type="date" data-intake-shift-date />
+                    </label>
+                    <label>
+                      Start Time
+                      <input type="time" step="900" data-intake-shift-time />
+                    </label>
+                    <label>
+                      Shift Length
+                      <span class="schedule-duration-input">
+                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
+                        <span>hours</span>
+                      </span>
+                    </label>
+                  </div>
+                  <input type="hidden" data-schedule-start />
                   <label>
-                    Starts
-                    <input type="datetime-local" data-schedule-start />
+                    Calculated End
+                    <input type="datetime-local" data-schedule-end readonly />
                   </label>
-                  <label>
-                    Ends
-                    <input type="datetime-local" data-schedule-end />
-                  </label>
-                  <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
+                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel Edit</button>
+                  </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
               </section>
@@ -1097,6 +1252,15 @@
         </section>
 
         <section class="page" id="admin-page" data-page-panel="admin">
+          <nav class="admin-section-nav" aria-label="Admin console sections">
+            <button type="button" data-admin-section-target="admin-capacity-section">Capacity</button>
+            <button type="button" data-admin-section-target="admin-bid-window-section">Bid windows</button>
+            <button type="button" data-admin-section-target="admin-roster-section">Roster</button>
+            <button type="button" data-admin-section-target="admin-access-section">Access</button>
+            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
+            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
+            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
+          </nav>
           <div class="workspace-grid admin-workspace">
             <section class="panel admin-console-panel">
               <div class="panel-header">
@@ -1105,18 +1269,19 @@
                   <p>Maintain the BUE roster, build the intake team, and schedule temporary intake coverage.</p>
                 </div>
                 <div class="admin-header-actions">
+                  <a class="secondary-action small" href="/admin/faq" target="_top">Edit FAQ & MOUs</a>
                   <a class="secondary-action small" href="/admin/bid-lines" target="_top">Import Bid Lines</a>
                   <a class="secondary-action small" href="/admin/bid-times" target="_top">Import Bid Times</a>
                   <span class="pill open">System Admin</span>
                 </div>
               </div>
-              <section class="slot-capacity-manager" aria-label="Daily leave slot capacity">
+              <section class="slot-capacity-manager admin-section-target" id="admin-capacity-section" tabindex="-1" aria-label="Daily leave slot capacity">
                 <div class="panel-header compact">
                   <div>
                     <h3>Daily Bid Slot Capacity</h3>
                     <p>Set the CPC and DEV leave slots available for a date range in each area.</p>
                   </div>
-                  <span class="status open" data-slot-capacity-summary>3 CPC · 2 DEV</span>
+                  <span class="status open" data-slot-capacity-summary>3 CPC · 4 DEV</span>
                 </div>
                 <form class="slot-capacity-form" data-slot-capacity-form>
                   <label>
@@ -1162,15 +1327,22 @@
                 </div>
                 <div class="slot-capacity-change-grid" data-slot-capacity-changes></div>
               </section>
-              <section class="roster-manager" aria-label="BUE roster manager">
+              <section class="bid-window-builder admin-section-target" id="admin-bid-window-section" tabindex="-1" aria-label="Bid window schedule builder">
                 <div class="panel-header compact">
                   <div>
-                    <h3>BUE Roster</h3>
-                    <p>Add, amend, move, deactivate, delete, or adjust leave-slot counts for BUE records.</p>
+                    <h3>Bid Window Builder</h3>
+                    <p>Build all four rounds from the active seniority roster, office hours, and blocked dates.</p>
                   </div>
-                  <label class="compact-filter">
+                  <span class="status open" data-bid-window-builder-summary>Ready to build</span>
+                </div>
+                <form class="bid-window-builder-form" data-bid-window-builder-form>
+                  <label class="toggle-row bid-window-consistency-toggle">
+                    <input type="checkbox" data-bid-window-builder-consistent checked />
+                    <span>Start all areas together</span>
+                  </label>
+                  <label>
                     Area
-                    <select data-roster-area-filter>
+                    <select data-bid-window-builder-area>
                       <option>Area A</option>
                       <option>Area B</option>
                       <option>Area C</option>
@@ -1180,14 +1352,77 @@
                       <option>TMU</option>
                     </select>
                   </label>
+                  <label>
+                    Round 1 start date
+                    <input type="date" min="2026-01-01" max="2027-12-31" value="2026-10-01" data-bid-window-builder-start />
+                  </label>
+                  <label>
+                    Office opens
+                    <input type="time" step="900" data-bid-window-builder-open />
+                  </label>
+                  <label>
+                    Office closes
+                    <input type="time" step="900" data-bid-window-builder-close />
+                  </label>
+                  <label>
+                    Window length
+                    <select data-bid-window-builder-length>
+                      <option value="30">30 minutes</option>
+                      <option value="60">1 hour</option>
+                      <option value="90">1.5 hours</option>
+                      <option value="120" selected>2 hours</option>
+                      <option value="180">3 hours</option>
+                      <option value="240">4 hours</option>
+                    </select>
+                  </label>
+                  <label>
+                    Review days between rounds
+                    <input type="number" min="0" max="14" step="1" inputmode="numeric" data-bid-window-builder-gap />
+                  </label>
+                  <div class="bid-window-blackout-control">
+                    <label>
+                      Block out a date
+                      <input type="date" data-bid-window-builder-blackout />
+                    </label>
+                    <button class="secondary-action small" type="button" data-add-bid-window-blackout>Add date</button>
+                  </div>
+                  <button class="primary-action small" type="submit">Build Preview</button>
+                  <p class="bid-window-builder-help">Blocked dates are skipped completely. Review days reserve full office days between rounds.</p>
+                  <p class="form-status" data-bid-window-builder-status aria-live="polite"></p>
+                </form>
+                <div class="bid-window-blackout-list" data-bid-window-blackout-list aria-label="Blocked bidding dates"></div>
+                <div class="bid-window-builder-preview" data-bid-window-builder-preview></div>
+              </section>
+              <section class="roster-manager admin-section-target" id="admin-roster-section" tabindex="-1" aria-label="BUE roster manager">
+                <div class="panel-header compact">
+                  <div>
+                    <h3>BUE Roster</h3>
+                    <p>Add, amend, move, deactivate, delete, or adjust leave-slot counts for BUE records.</p>
+                  </div>
+                  <div class="roster-header-actions">
+                    <a class="secondary-action small" href="/admin/roster-import">Import Seniority Roster</a>
+                    <button class="secondary-action small" type="button" data-export-seniority-roster>Export Seniority Roster</button>
+                    <label class="compact-filter">
+                      Area
+                      <select data-roster-area-filter>
+                        <option>Area A</option>
+                        <option>Area B</option>
+                        <option>Area C</option>
+                        <option>Area D</option>
+                        <option>Area E</option>
+                        <option>Area F</option>
+                        <option>TMU</option>
+                      </select>
+                    </label>
+                  </div>
                 </div>
                 <div class="roster-editor-grid">
                   <form class="roster-form" data-roster-form>
                     <input type="hidden" data-roster-edit-initials />
                     <input type="hidden" data-roster-edit-index />
-                    <label>First Name <input type="text" data-roster-first-name /></label>
-                    <label>Last Name <input type="text" data-roster-last-name /></label>
-                    <label>Initials <input type="text" maxlength="4" data-roster-initials /></label>
+                    <label>First Name <input type="text" name="first_name" autocomplete="given-name" required data-roster-first-name /></label>
+                    <label>Last Name <input type="text" name="last_name" autocomplete="family-name" required data-roster-last-name /></label>
+                    <label>Initials <input type="text" name="initials" autocomplete="off" maxlength="4" required data-roster-initials /></label>
                     <label>Email <input type="email" data-roster-email /></label>
                     <label>Phone <input type="tel" data-roster-phone /></label>
                     <label>Area
@@ -1208,13 +1443,15 @@
                         <option>GL</option>
                         <option>R-DEV</option>
                         <option>D-DEV</option>
+                        <option>NB</option>
                       </select>
                     </label>
-                    <label>Leave Slots <input type="number" min="0" step="1" data-roster-leave-slots /></label>
+                    <label>Leave Allowance (Hours) <input type="number" min="0" step="1" data-roster-leave-slots /></label>
                     <div class="roster-form-actions">
                       <button class="secondary-action small" type="button" data-roster-new>New</button>
                       <button class="primary-action small" type="submit">Save BUE</button>
                     </div>
+                    <button class="secondary-action small danger" type="button" data-roster-delete-selected disabled>Delete BUE</button>
                     <p class="form-status" data-roster-status></p>
                   </form>
                   <div class="roster-table-wrap">
@@ -1225,6 +1462,7 @@
                       </div>
                       <button class="primary-action small" type="button" data-apply-bulk-roster>Apply Bulk Changes</button>
                     </div>
+                    <p class="mobile-roster-hint">Edit rank directly to reorder. Swipe the roster horizontally for contact details and row actions.</p>
                     <div class="roster-table-scroll">
                       <table class="roster-table" data-roster-table-element>
                         <colgroup>
@@ -1251,7 +1489,7 @@
                             <th data-roster-resizable-col="phone"><span>Phone</span><i data-roster-col-resizer="phone"></i></th>
                             <th data-roster-resizable-col="area"><span>Area</span><i data-roster-col-resizer="area"></i></th>
                             <th data-roster-resizable-col="role"><span>Role</span><i data-roster-col-resizer="role"></i></th>
-                            <th data-roster-resizable-col="leaveSlots"><span>Leave Slots</span><i data-roster-col-resizer="leaveSlots"></i></th>
+                            <th data-roster-resizable-col="leaveSlots"><span>Leave Allowance (Hours)</span><i data-roster-col-resizer="leaveSlots"></i></th>
                             <th data-roster-resizable-col="actions"><span></span><i data-roster-col-resizer="actions"></i></th>
                           </tr>
                         </thead>
@@ -1261,24 +1499,26 @@
                   </div>
                 </div>
               </section>
-              <div class="admin-user-list" data-admin-user-list></div>
+              <section class="admin-section-target" id="admin-access-section" tabindex="-1" aria-label="Administrator and intake access">
+                <div class="admin-user-list" data-admin-user-list></div>
+              </section>
             </section>
             <aside class="right-stack">
               <section class="panel bid-window-testing-card" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Bid Window Testing</h3>
-                    <p data-bid-window-enforcement-copy>BUEs can submit only during their assigned bid window.</p>
+                    <h3>Bid Window Policy</h3>
+                    <p data-bid-window-enforcement-copy>BUEs can submit only during their assigned bid window. This cannot be bypassed.</p>
                   </div>
-                  <span class="pill open" data-bid-window-enforcement-state>Strict Windows On</span>
+                  <span class="pill open" data-bid-window-enforcement-state>Strict Windows Required</span>
                 </div>
                 <label class="toggle-row">
-                  <input type="checkbox" data-bid-window-enforcement-toggle checked />
-                  <span>Require assigned bid window for BUE submissions</span>
+                  <input type="checkbox" data-bid-window-enforcement-toggle checked disabled />
+                  <span>Assigned bid window required for BUE submissions</span>
                 </label>
                 <label class="testing-select-row">
-                  Test Round
-                  <select data-bid-window-test-round>
+                  Test Round (window rules still apply)
+                  <select data-bid-window-test-round disabled>
                     <option value="">Actual Schedule</option>
                     <option value="1">Round 1</option>
                     <option value="2">Round 2</option>
@@ -1287,7 +1527,34 @@
                   </select>
                 </label>
               </section>
-              <section class="panel editable-rule-card">
+              <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
+                <div class="panel-header compact">
+                  <div>
+                    <h3>Pilot Access and Rounds</h3>
+                    <p data-pilot-status-copy>This database is not configured for an isolated pilot.</p>
+                  </div>
+                  <span class="pill" data-pilot-status>Pilot unavailable</span>
+                </div>
+                <label class="toggle-row">
+                  <input type="checkbox" data-pilot-enabled-toggle />
+                  <span>Allow selected BUEs to submit practice bids</span>
+                </label>
+                <label class="testing-select-row">
+                  Pilot BUE initials
+                  <input type="text" data-pilot-member-initials placeholder="AB, CD, EF" autocomplete="off" />
+                  <small>Separate initials with commas. Admin and intake access remains available.</small>
+                </label>
+                <p>Turn each round on or off. Authorized pilot BUEs can choose any enabled round and submit without scheduled hours. Pilot access must also be on.</p>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="1" disabled /><span>Round 1 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="2" disabled /><span>Round 2 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="3" disabled /><span>Round 3 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="4" disabled /><span>Round 4 bidding on</span></label>
+                <div class="button-row">
+                  <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
+                  <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
+                </div>
+              </section>
+              <section class="panel editable-rule-card admin-section-target" id="admin-rules-section" tabindex="-1">
                 <div class="panel-header compact">
                   <div>
                     <h3>Round Rules</h3>
@@ -1295,6 +1562,7 @@
                   </div>
                 </div>
                 <div class="round-rule-editor" data-round-rule-editor></div>
+                <p class="form-status" data-round-rule-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel editable-rule-card">
                 <div class="panel-header compact">
@@ -1308,8 +1576,9 @@
                   <input type="text" data-approval-rule-input placeholder="Add approval rule">
                   <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
                 </div>
+                <p class="form-status" data-approval-rule-status role="status" aria-live="polite"></p>
               </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-schedule-section" tabindex="-1">
                 <h3>Schedule Intake Rep</h3>
                 <p>Access opens 15 minutes before the shift starts.</p>
                 <div class="schedule-form">
@@ -1317,19 +1586,40 @@
                     Intake Team Member
                     <select data-admin-schedule-rep></select>
                   </label>
+                  <fieldset class="intake-shift-presets">
+                    <legend>Base Shift</legend>
+                    <div class="intake-shift-preset-buttons">
+                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
+                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
+                    </div>
+                  </fieldset>
+                  <div class="intake-shift-fields">
+                    <label>
+                      Start Date
+                      <input type="date" data-intake-shift-date />
+                    </label>
+                    <label>
+                      Start Time
+                      <input type="time" step="900" data-intake-shift-time />
+                    </label>
+                    <label>
+                      Shift Length
+                      <span class="schedule-duration-input">
+                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
+                        <span>hours</span>
+                      </span>
+                    </label>
+                  </div>
+                  <input type="hidden" data-admin-schedule-start />
                   <label>
-                    Starts
-                    <input type="datetime-local" data-admin-schedule-start />
-                  </label>
-                  <label>
-                    Ends
-                    <input type="datetime-local" data-admin-schedule-end />
+                    Calculated End
+                    <input type="datetime-local" data-admin-schedule-end readonly />
                   </label>
                   <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
                   <p class="form-status" data-admin-schedule-status></p>
                 </div>
               </section>
-              <section class="panel manual-bid-card" data-manual-bid-panel>
+              <section class="panel manual-bid-card admin-section-target" id="admin-entry-section" tabindex="-1" data-manual-bid-panel>
                 <div class="panel-header compact">
                   <div>
                     <h3>Manual Bid Entry</h3>
@@ -1337,6 +1627,12 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
+                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -1363,6 +1659,7 @@
                         <option value="A">Group A</option>
                         <option value="B">Group B</option>
                         <option value="C">Group C</option>
+                        <option value="">No preference — assign later</option>
                       </select>
                     </label>
                     <label class="manual-override-check wide">
@@ -1425,6 +1722,12 @@
                   </div>
                 </div>
                 <div class="schedule-form manual-bid-form">
+                  <label class="manual-controller-search">
+                    Find Controller
+                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
+                    <small data-manual-controller-search-status aria-live="polite"></small>
+                  </label>
+                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
@@ -1538,9 +1841,10 @@
                   <button class="secondary-action" type="submit" data-update-account-email>Change Login Email</button>
                 </form>
                 <form class="account-form" data-account-password-form>
+                  <label class="account-password-current">Current Password <input type="password" autocomplete="current-password" data-account-current-password /><small>Only required if this account already has a password. Leave blank if you only use login links.</small></label>
                   <label>New Password <input type="password" autocomplete="new-password" minlength="8" data-account-password /></label>
                   <label>Confirm Password <input type="password" autocomplete="new-password" minlength="8" data-account-password-confirm /></label>
-                  <button class="primary-action" type="submit" data-update-account-password>Set Password</button>
+                  <button class="primary-action" type="submit" data-update-account-password>Set or Change Password</button>
                 </form>
                 <p class="profile-form-status" data-account-form-status role="status" aria-live="polite"></p>
               </section>
@@ -1551,6 +1855,7 @@
                 <dl class="rule-list">
                   <div><dt>Seniority</dt><dd data-user-seniority-long>#5 of 45</dd></div>
                   <div><dt>Bid Year</dt><dd>2027</dd></div>
+                  <div><dt>Bidding Status</dt><dd data-profile-ghost-status>Standard Bidder</dd></div>
                   <div><dt>Bid Window</dt><dd data-bid-window-text>Checking</dd></div>
                   <div><dt>Time Remaining</dt><dd data-bid-window-countdown>--:--:--</dd></div>
                 </dl>
@@ -1622,9 +1927,37 @@
       </div>
     </div>
 
+    <div class="bid-change-modal" data-bid-change-modal hidden role="dialog" aria-modal="true" aria-labelledby="bid-change-modal-title" aria-describedby="bid-change-modal-description">
+      <div class="bid-change-modal-panel">
+        <header class="bid-change-modal-header">
+          <div>
+            <span class="eyebrow" data-bid-change-round>Round 1</span>
+            <h2 id="bid-change-modal-title">Change Bid Dates</h2>
+            <p id="bid-change-modal-description" data-bid-change-description></p>
+          </div>
+          <button class="bid-change-close" type="button" data-bid-change-close aria-label="Close change bid dates">×</button>
+        </header>
+        <div class="bid-change-guidance" data-bid-change-guidance></div>
+        <div class="bid-change-table-head" aria-hidden="true">
+          <span>Current bid date</span>
+          <span>New bid date</span>
+        </div>
+        <div class="bid-change-rows" data-bid-change-rows></div>
+        <p class="bid-change-status" data-bid-change-status role="status" aria-live="polite"></p>
+        <footer class="bid-change-footer">
+          <button class="secondary-action" type="button" data-bid-change-cancel>Keep Current Dates</button>
+          <button class="primary-action" type="button" data-bid-change-save disabled>Review &amp; Save Changes</button>
+        </footer>
+      </div>
+    </div>
+
+    <dialog class="public-date-sheet" aria-labelledby="public-date-title" data-public-date-sheet>
+      <header><h2 id="public-date-title">Leave slots</h2><button type="button" data-public-date-close>Close</button></header>
+      <div data-public-date-content></div>
+    </dialog>
     <script src="supabase-config.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor"></script>
+    <script src="/vendor/supabase.js?v=2.112.3"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

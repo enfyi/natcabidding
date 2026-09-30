@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { getSupabaseEnv } from '@/lib/env'
+import { getSupabaseEnv, withBasePath } from '@/lib/env'
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -31,9 +31,35 @@ export async function updateSession(request: NextRequest) {
   )
 
   // getClaims verifies the token. Do not replace this with getSession for guards.
-  // Refresh an existing session for optional account features without gating
-  // access to the public bidding website.
-  await supabase.auth.getClaims()
+  const { data } = await supabase.auth.getClaims()
+
+  const isPilot = process.env.NEXT_PUBLIC_APP_ENVIRONMENT === 'pilot'
+  const path = request.nextUrl.pathname
+  const isPilotPublicRoute = path === '/login'
+    || path === '/forgot-password'
+    || path.startsWith('/auth/')
+
+  if (request.method === 'GET' && path === '/' && data?.claims) {
+    const dashboardUrl = new URL('/dashboard', request.url)
+    const redirectResponse = NextResponse.redirect(dashboardUrl)
+
+    response.cookies.getAll().forEach(({ name, value, ...options }) => {
+      redirectResponse.cookies.set(name, value, options)
+    })
+
+    return redirectResponse
+  }
+
+  if (isPilot && !data?.claims && !isPilotPublicRoute) {
+    const loginUrl = new URL(withBasePath('/login'), request.url)
+    const redirectResponse = NextResponse.redirect(loginUrl)
+
+    response.cookies.getAll().forEach(({ name, value, ...options }) => {
+      redirectResponse.cookies.set(name, value, options)
+    })
+
+    return redirectResponse
+  }
 
   return response
 }

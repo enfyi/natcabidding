@@ -68,7 +68,9 @@ export async function signup(formData: FormData) {
   const supabase = await createClient()
   const userCredentials = credentials(formData)
 
-  await requireRecognizedEmail(supabase, userCredentials.email)
+  if (process.env.NEXT_PUBLIC_APP_ENVIRONMENT !== 'pilot') {
+    await requireRecognizedEmail(supabase, userCredentials.email)
+  }
 
   const { data, error } = await supabase.auth.signUp({
     ...userCredentials,

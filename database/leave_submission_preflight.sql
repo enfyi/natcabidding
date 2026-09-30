@@ -22,12 +22,27 @@ alter table public.bid_year_settings
 alter table public.bid_year_settings enable row level security;
 
 do $migration$
+declare
+  public_function_source text;
 begin
-  if to_regprocedure('private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)') is null then
-    if to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)') is null then
-      raise exception 'public.submit_leave_bid_batch(integer,jsonb,text,text,boolean) must exist before applying this migration';
-    end if;
+  if to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)') is null then
+    raise exception 'public.submit_leave_bid_batch(integer,jsonb,text,text,boolean) must exist before applying this migration';
+  end if;
 
+  select procedure.prosrc
+  into public_function_source
+  from pg_catalog.pg_proc procedure
+  where procedure.oid = to_regprocedure('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)');
+
+  if to_regprocedure('private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)') is null then
+    alter function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean)
+      rename to submit_leave_bid_batch_unchecked;
+    alter function public.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean)
+      set schema private;
+  elsif position('private.submit_leave_bid_batch_unchecked' in coalesce(public_function_source, '')) = 0 then
+    -- A newer transactional migration replaced the public wrapper. Promote that
+    -- implementation so this migration can safely install a fresh preflight wrapper.
+    drop function private.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean);
     alter function public.submit_leave_bid_batch(integer, jsonb, text, text, boolean)
       rename to submit_leave_bid_batch_unchecked;
     alter function public.submit_leave_bid_batch_unchecked(integer, jsonb, text, text, boolean)
@@ -68,21 +83,20 @@ declare
   submitted_rdo_line_code text;
   rdo_request_line_code text;
   open_bid_window_id uuid;
-  enforce_bid_windows boolean := true;
-  configured_test_round integer;
   requested_charged_days integer := 0;
   existing_charged_days integer := 0;
   leave_hours_per_day integer := 8;
   available_credit_days integer := 0;
   maximum_leave_hours integer := 0;
   projected_leave_hours integer := 0;
-  requested_week_count integer := 0;
   existing_round_usage integer := 0;
   round_leave_limit integer := 0;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
   conflict_date_labels text;
   error_messages text[] := array[]::text[];
+  ghost_bid boolean;
+  enforce_bid_windows boolean := true;
 begin
   select b.*
   into actor
@@ -101,11 +115,10 @@ begin
   from public.bid_years bys
   where bys.bid_year = requested_bid_year;
 
-  select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round
-  into enforce_bid_windows, configured_test_round
+  select coalesce(settings.enforce_bid_windows, true)
+  into enforce_bid_windows
   from public.bid_year_settings settings
   where settings.bid_year_id = year_row.id;
-
   enforce_bid_windows := coalesce(enforce_bid_windows, true);
 
   if requested_items is null
@@ -137,6 +150,10 @@ begin
     raise exception 'The bidder must be assigned to an area before leave can be submitted.';
   end if;
 
+  if target.bid_role in ('ADM', 'NB') then
+    raise exception 'This profile is not eligible to submit leave bids.';
+  end if;
+
   select a.name
   into strict target_area
   from public.areas a
@@ -146,6 +163,8 @@ begin
     when target.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
     else 'cpc'
   end;
+
+  ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
 
   -- Validate bounded, parseable input before expanding ranges.
   for item in
@@ -203,13 +222,11 @@ begin
     raise exception 'Your batch could not be submitted for review because it contains overlapping date ranges.';
   end if;
 
-  if not manual_entry
-     and not enforce_bid_windows
-     and configured_test_round is not null
-     and batch_round <> configured_test_round then
+  if enforce_bid_windows
+     and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
     error_messages := array_append(
       error_messages,
-      format('Testing mode is currently set to Round %s.', configured_test_round)
+      format('Round %s is not currently open for this area. Closed rounds cannot accept bids.', batch_round)
     );
   end if;
 
@@ -221,7 +238,7 @@ begin
       and bw.bidder_id = target.id
       and bw.round_number = batch_round
       and now() >= bw.opens_at
-      and now() <= bw.closes_at
+      and now() < bw.closes_at
     order by bw.opens_at desc
     limit 1;
 
@@ -249,153 +266,10 @@ begin
     raise exception 'A leave batch must use one RDO line.';
   end if;
 
-  -- Serialize submissions that compete for the same role/area/date. The first
-  -- transaction to commit becomes visible to the next capacity check.
-  for leave_date in
-    select distinct gs::date
-    from jsonb_array_elements(requested_items) requested(item)
-    cross join lateral generate_series(
-      (requested.item ->> 'start_date')::date,
-      (requested.item ->> 'end_date')::date,
-      interval '1 day'
-    ) gs
-    where not exists (
-      select 1
-      from public.holidays h
-      where h.bid_year_id = year_row.id
-        and h.holiday_date = gs::date
-    )
-      and not exists (
-        select 1
-        from public.holiday_in_lieu_days h
-        where h.bid_year_id = year_row.id
-          and h.bidder_id = target.id
-          and h.in_lieu_date = gs::date
-      )
-    order by gs::date
-  loop
-    perform pg_advisory_xact_lock(
-      hashtextextended(
-        year_row.id::text || ':' || target.area_id::text || ':' || target_bucket || ':' || leave_date::text,
-        0
-      )
-    );
-  end loop;
-
-  -- A configured row is one daily slot. Approved/held slots are already removed
-  -- from the open count; pending requests are subtracted as reservations.
-  with requested_dates as (
-    select distinct gs::date as leave_date
-    from jsonb_array_elements(requested_items) requested(item)
-    cross join lateral generate_series(
-      (requested.item ->> 'start_date')::date,
-      (requested.item ->> 'end_date')::date,
-      interval '1 day'
-    ) gs
-    where not exists (
-      select 1
-      from public.holidays h
-      where h.bid_year_id = year_row.id
-        and h.holiday_date = gs::date
-    )
-      and not exists (
-        select 1
-        from public.holiday_in_lieu_days h
-        where h.bid_year_id = year_row.id
-          and h.bidder_id = target.id
-          and h.in_lieu_date = gs::date
-      )
-  ),
-  open_slots as (
-    select s.slot_date as leave_date, count(*)::integer as slot_count
-    from public.leave_slots s
-    join requested_dates requested on requested.leave_date = s.slot_date
-    where s.bid_year_id = year_row.id
-      and s.area_id = target.area_id
-      and s.slot_group = target_bucket
-      and s.status = 'open'
-      and s.bidder_id is null
-      and s.source_leave_request_id is null
-    group by s.slot_date
-  ),
-  pending_reservations as (
-    select d.leave_date, count(*)::integer as reservation_count
-    from public.leave_request_dates d
-    join public.leave_requests lr on lr.id = d.leave_request_id
-    join public.bidders b on b.id = lr.bidder_id
-    join requested_dates requested on requested.leave_date = d.leave_date
-    where lr.bid_year_id = year_row.id
-      and b.area_id = target.area_id
-      and lr.status = 'pending'
-      and d.charged
-      and case
-        when b.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
-        else 'cpc'
-      end = target_bucket
-    group by d.leave_date
-  )
-  select array_agg(requested.leave_date order by requested.leave_date)
-  into capacity_conflict_dates
-  from requested_dates requested
-  left join open_slots available on available.leave_date = requested.leave_date
-  left join pending_reservations pending on pending.leave_date = requested.leave_date
-  where coalesce(available.slot_count, 0) - coalesce(pending.reservation_count, 0) < 1;
-
-  if cardinality(capacity_conflict_dates) > 0 then
-    select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
-    into conflict_date_labels
-    from unnest(capacity_conflict_dates) date_value;
-
-    error_messages := array_append(
-      error_messages,
-      format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
-    );
-  end if;
-
-  -- A date already submitted in this or an earlier round cannot consume
-  -- another slot.
-  with requested_dates as (
-    select distinct gs::date as leave_date
-    from jsonb_array_elements(requested_items) requested(item)
-    cross join lateral generate_series(
-      (requested.item ->> 'start_date')::date,
-      (requested.item ->> 'end_date')::date,
-      interval '1 day'
-    ) gs
-  )
-  select array_agg(distinct d.leave_date order by d.leave_date)
-  into duplicate_conflict_dates
-  from public.leave_request_dates d
-  join public.leave_requests lr on lr.id = d.leave_request_id
-  join requested_dates requested on requested.leave_date = d.leave_date
-  where lr.bid_year_id = year_row.id
-    and lr.bidder_id = target.id
-    and lr.round_number <= batch_round
-    and lr.status in ('pending', 'approved');
-
-  if cardinality(duplicate_conflict_dates) > 0 then
-    select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
-    into conflict_date_labels
-    from unnest(duplicate_conflict_dates) date_value;
-
-    error_messages := array_append(
-      error_messages,
-      format('You already bid one or more of these dates: %s. Each date may be bid only once.', conflict_date_labels)
-    );
-  end if;
-
   -- A bidder must have requested an RDO line before leave can be submitted,
   -- but intake approval is not required yet. Approved RDO patterns are removed
   -- from charged leave by the underlying submitter and reconciliation trigger.
-  select rl.id
-  into target_rdo_line_id
-  from public.rdo_lines rl
-  where rl.bid_year_id = year_row.id
-    and rl.area_id = target.area_id
-    and rl.assigned_bidder_id = target.id
-    and rl.status = 'taken'
-  order by rl.updated_at desc, rl.id
-  limit 1;
+  target_rdo_line_id := public.effective_rdo_line_id(year_row.id, target.id);
 
   if target_rdo_line_id is null then
     select coalesce(
@@ -442,7 +316,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif exists (
+    elsif not ghost_bid and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id
@@ -465,6 +339,157 @@ begin
     );
   end if;
 
+  -- Serialize submissions that compete for the same role/area/date. The first
+  -- transaction to commit becomes visible to the next capacity check.
+  for leave_date in
+    select distinct gs::date
+    from jsonb_array_elements(requested_items) requested(item)
+    cross join lateral generate_series(
+      (requested.item ->> 'start_date')::date,
+      (requested.item ->> 'end_date')::date,
+      interval '1 day'
+    ) gs
+    where not exists (
+      select 1
+      from public.holidays h
+      where h.bid_year_id = year_row.id
+        and h.holiday_date = gs::date
+    )
+      and not exists (
+        select 1
+        from public.holiday_in_lieu_days h
+        where h.bid_year_id = year_row.id
+          and h.bidder_id = target.id
+          and h.in_lieu_date = gs::date
+      )
+      and not (batch_round = 1 and exists (
+        select 1 from public.rdo_line_days day
+        where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+          and day.weekday = extract(dow from gs::date)::smallint and day.is_rdo
+      ))
+    order by gs::date
+  loop
+    perform pg_advisory_xact_lock(
+      hashtextextended(
+        year_row.id::text || ':' || target.area_id::text || ':' || target_bucket || ':' || leave_date::text,
+        0
+      )
+    );
+  end loop;
+
+  -- Ghost leave remains visible to the bidder and intake, but never reserves
+  -- or consumes an area slot.
+  if not ghost_bid then
+    -- A configured row is one daily slot. Approved/held slots are already removed
+    -- from the open count; pending requests are subtracted as reservations.
+    with requested_dates as (
+    select distinct gs::date as leave_date
+    from jsonb_array_elements(requested_items) requested(item)
+    cross join lateral generate_series(
+      (requested.item ->> 'start_date')::date,
+      (requested.item ->> 'end_date')::date,
+      interval '1 day'
+    ) gs
+    where not exists (
+      select 1
+      from public.holidays h
+      where h.bid_year_id = year_row.id
+        and h.holiday_date = gs::date
+    )
+      and not exists (
+        select 1
+        from public.holiday_in_lieu_days h
+        where h.bid_year_id = year_row.id
+          and h.bidder_id = target.id
+          and h.in_lieu_date = gs::date
+      )
+      and not (batch_round = 1 and exists (
+        select 1 from public.rdo_line_days day
+        where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+          and day.weekday = extract(dow from gs::date)::smallint and day.is_rdo
+      ))
+  ),
+  open_slots as (
+    select s.slot_date as leave_date, count(*)::integer as slot_count
+    from public.leave_slots s
+    join requested_dates requested on requested.leave_date = s.slot_date
+    where s.bid_year_id = year_row.id
+      and s.area_id = target.area_id
+      and s.slot_group = target_bucket
+      and s.status = 'open'
+      and s.bidder_id is null
+      and s.source_leave_request_id is null
+    group by s.slot_date
+  ),
+  pending_reservations as (
+    select d.leave_date, count(*)::integer as reservation_count
+    from public.leave_request_dates d
+    join public.leave_requests lr on lr.id = d.leave_request_id
+    join public.bidders b on b.id = lr.bidder_id
+    join requested_dates requested on requested.leave_date = d.leave_date
+    where lr.bid_year_id = year_row.id
+      and b.area_id = target.area_id
+      and lr.status = 'pending'
+      and not lr.is_ghost_bid
+      and d.charged
+      and b.bid_role not in ('ADM', 'NB')
+      and case
+        when b.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
+        else 'cpc'
+      end = target_bucket
+    group by d.leave_date
+  )
+  select array_agg(requested.leave_date order by requested.leave_date)
+  into capacity_conflict_dates
+  from requested_dates requested
+  left join open_slots available on available.leave_date = requested.leave_date
+  left join pending_reservations pending on pending.leave_date = requested.leave_date
+  where coalesce(available.slot_count, 0) - coalesce(pending.reservation_count, 0) < 1;
+
+    if cardinality(capacity_conflict_dates) > 0 then
+      select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
+      into conflict_date_labels
+      from unnest(capacity_conflict_dates) date_value;
+
+      error_messages := array_append(
+        error_messages,
+        format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
+      );
+    end if;
+  end if;
+
+  -- A date already submitted in this or an earlier round cannot consume
+  -- another slot.
+  with requested_dates as (
+    select distinct gs::date as leave_date
+    from jsonb_array_elements(requested_items) requested(item)
+    cross join lateral generate_series(
+      (requested.item ->> 'start_date')::date,
+      (requested.item ->> 'end_date')::date,
+      interval '1 day'
+    ) gs
+  )
+  select array_agg(distinct d.leave_date order by d.leave_date)
+  into duplicate_conflict_dates
+  from public.leave_request_dates d
+  join public.leave_requests lr on lr.id = d.leave_request_id
+  join requested_dates requested on requested.leave_date = d.leave_date
+  where lr.bid_year_id = year_row.id
+    and lr.bidder_id = target.id
+    and lr.round_number <= batch_round
+    and lr.status in ('pending', 'approved');
+
+  if cardinality(duplicate_conflict_dates) > 0 then
+    select string_agg(to_char(date_value, 'Mon FMDD, YYYY'), ', ' order by date_value)
+    into conflict_date_labels
+    from unnest(duplicate_conflict_dates) date_value;
+
+    error_messages := array_append(
+      error_messages,
+      format('You already bid one or more of these dates: %s. Each date may be bid only once.', conflict_date_labels)
+    );
+  end if;
+
   -- Enforce the bidder's configured leave allowance on the server. The browser
   -- shows the same projection, but this is the authoritative protection against
   -- submitting additional ranges beyond the member's allotted hours.
@@ -483,7 +508,7 @@ begin
     (requested.item ->> 'end_date')::date::timestamp,
     interval '1 day'
   ) generated_date
-  where not exists (
+  where (batch_round <= 3 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = year_row.id
@@ -495,7 +520,12 @@ begin
       where in_lieu.bid_year_id = year_row.id
         and in_lieu.bidder_id = target.id
         and in_lieu.in_lieu_date = generated_date::date
-    );
+    )))
+    and not (batch_round = 1 and exists (
+      select 1 from public.rdo_line_days day
+      where day.rdo_line_id = coalesce(target_rdo_line_id, submitted_rdo_line_id)
+        and day.weekday = extract(dow from generated_date::date)::smallint and day.is_rdo
+    ));
 
   select coalesce(sum(request.charged_days), 0)::integer
   into existing_charged_days
@@ -504,32 +534,9 @@ begin
     and request.bidder_id = target.id
     and request.status in ('pending', 'approved');
 
-  if batch_round = 1 then
-    select coalesce(sum(pg_catalog.ceil(
-      ((requested.item ->> 'end_date')::date - (requested.item ->> 'start_date')::date + 1)::numeric / 7
-    )), 0)::integer
-    into requested_week_count
-    from jsonb_array_elements(requested_items) requested(item);
-
-    select count(*)::integer
-    into existing_round_usage
-    from public.leave_request_week_buckets bucket
-    join public.leave_requests request on request.id = bucket.leave_request_id
-    where request.bid_year_id = year_row.id
-      and request.bidder_id = target.id
-      and request.round_number = 1
-      and request.status in ('pending', 'approved');
-
-    if existing_round_usage + requested_week_count > 2 then
-      error_messages := array_append(
-        error_messages,
-        format(
-          'Round 1 can include no more than 2 bid weeks. This batch would bring you to %s.',
-          existing_round_usage + requested_week_count
-        )
-      );
-    end if;
-  else
+  -- The private submitter builds Round 1's actual seven-day buckets, including
+  -- dates that fit an existing bucket; a per-range estimate rejects those.
+  if batch_round <> 1 then
     round_leave_limit := case when batch_round in (2, 3) then 10 else 5 end;
 
     select coalesce(sum(request.charged_days), 0)::integer
@@ -554,12 +561,24 @@ begin
   end if;
 
   if batch_round >= 4 then
-    select coalesce(sum(credit.credit_days), 0)::integer
+    select count(distinct request_date.leave_date)::integer
+    into available_credit_days
+    from public.leave_request_dates request_date
+    join public.leave_requests request on request.id = request_date.leave_request_id
+    where request.bid_year_id = year_row.id
+      and request.bidder_id = target.id
+      and request.round_number between 1 and 3
+      and request.status in ('pending', 'approved')
+      and request_date.charged
+      and (request_date.is_holiday or request_date.is_holiday_in_lieu);
+
+    select available_credit_days + coalesce(sum(credit.credit_days), 0)::integer
     into available_credit_days
     from public.leave_credit_events credit
     where credit.bid_year_id = year_row.id
       and credit.bidder_id = target.id
-      and credit.round_number <= batch_round;
+      and credit.round_number <= batch_round
+      and credit.source = 'manual_adjustment';
   end if;
 
   maximum_leave_hours := target.leave_slot_allowance + (available_credit_days * leave_hours_per_day);
@@ -624,9 +643,7 @@ begin
           and line_day.is_rdo
           and line_day.weekday = extract(dow from lrd.leave_date)::smallint
       ),
-      charged = not lrd.is_holiday
-        and not lrd.is_holiday_in_lieu
-        and not (
+      charged = not (
           lr.round_number = 1
           and exists (
             select 1
@@ -636,6 +653,8 @@ begin
               and line_day.weekday = extract(dow from lrd.leave_date)::smallint
           )
         )
+        and (lr.round_number <= 3
+          or (not lrd.is_holiday and not lrd.is_holiday_in_lieu))
   from public.leave_requests lr
   where lrd.leave_request_id = lr.id
     and lr.bid_year_id = new.bid_year_id
