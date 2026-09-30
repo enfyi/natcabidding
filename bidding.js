@@ -1703,6 +1703,15 @@ let activeIntakeDetailId = null;
 let intakeEditorReturnFocus = null;
 let memberRdoPresentation = "cards";
 let intakeSearchQuery = "";
+const intakeBidderSelection = {
+  initials: "",
+  profileId: "",
+  record: null,
+  detail: "",
+  loading: false,
+  error: "",
+  generation: 0,
+};
 const intakeFilters = {
   status: "all",
   type: "all",
@@ -6210,6 +6219,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   return {
     id: `supabase-rdo-${row.id}`,
     supabaseSubmissionId: row.id,
+    bidderId: bidder.id || row.bidder_id || "",
     type: "RDO Line",
     ghostBid,
     area,
@@ -6335,6 +6345,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
     supabaseSubmissionId: row.submission_id || "",
+    bidderId: row.bidder_id || bidder.id || "",
     type: "Leave",
     ghostBid,
     area,
@@ -6452,6 +6463,10 @@ function resetSupabaseBackedData() {
   holidayOverrides.clear();
   fullLeaveDates.clear();
   ghostBidderIds.clear();
+  intakeBidderSelection.record = null;
+  intakeBidderSelection.error = "";
+  intakeBidderSelection.loading = false;
+  intakeBidderSelection.generation += 1;
   if (currentUser) currentUser.ghostBidder = false;
   selectedLineId = "";
   supabaseState.placeholdersCleared = true;
@@ -12544,6 +12559,277 @@ function renderIntakeDetailPanel(item, visibleItems) {
   `;
 }
 
+function selectedIntakeBidderPerson() {
+  const rosterPerson = bueByInitials(intakeBidderSelection.initials);
+  const savedPerson = intakeBidderSelection.record?.person;
+  if (!savedPerson) return rosterPerson;
+  return {
+    ...rosterPerson,
+    profileId: savedPerson.id || rosterPerson?.profileId || intakeBidderSelection.profileId,
+    firstName: savedPerson.first_name || rosterPerson?.firstName || "",
+    lastName: savedPerson.last_name || rosterPerson?.lastName || "",
+    initials: savedPerson.initials || rosterPerson?.initials || intakeBidderSelection.initials,
+    area: savedPerson.area || rosterPerson?.area || "",
+    bidAs: savedPerson.bid_role || rosterPerson?.bidAs || "",
+    seniorityRank: savedPerson.seniority_rank ?? rosterPerson?.seniorityRank ?? rosterPerson?.rank,
+    email: savedPerson.email || rosterPerson?.email || "",
+    phone: savedPerson.phone || rosterPerson?.phone || "",
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(
+      savedPerson.leave_slot_allowance ?? rosterPerson?.leaveSlotAllowance
+    ),
+  };
+}
+
+function intakeBidderLocalLeaveRows(initials) {
+  return activeLeaveItemsForInitials(initials).map((item) => ({
+    id: item.supabaseRequestId || item.id,
+    round_number: leaveRoundForItem(item),
+    priority: Number(item.priority || 0),
+    status: String(item.status || "Pending").toLowerCase(),
+    charged_days: leaveItemChargedDays(item),
+    requested_start_date: leaveDateKeysForItem(item)[0] || "",
+    requested_end_date: leaveDateKeysForItem(item).at(-1) || "",
+    dates: leaveDateKeysForItem(item)
+      .filter((key) => !isRdoDateForInitials(key, initials))
+      .map((key) => ({
+        leave_date: key,
+        charged: true,
+        is_rdo: false,
+        is_holiday: isHolidayDate(key, initials) && !isHolidayInLieuDate(key, initials),
+        is_holiday_in_lieu: isHolidayInLieuDate(key, initials),
+      })),
+  }));
+}
+
+function selectedIntakeBidderLeaveRows() {
+  const savedRows = intakeBidderSelection.record?.snapshot?.leave;
+  return Array.isArray(savedRows) ? savedRows : intakeBidderLocalLeaveRows(intakeBidderSelection.initials);
+}
+
+function intakeBidderActiveLeaveRows(rows) {
+  return rows.filter((row) => ["pending", "approved"].includes(String(row.status || "").toLowerCase()));
+}
+
+function intakeBidderLeaveDates(row) {
+  if (Array.isArray(row.dates) && row.dates.length) {
+    return row.dates
+      .filter((date) => !date.is_rdo)
+      .sort((left, right) => String(left.leave_date).localeCompare(String(right.leave_date)));
+  }
+  const start = row.requested_start_date;
+  const end = row.requested_end_date || start;
+  return start && end
+    ? datesBetweenKeys(start, end)
+      .filter((key) => !isRdoDateForInitials(key, intakeBidderSelection.initials))
+      .map((key) => ({ leave_date: key, charged: true }))
+    : [];
+}
+
+function intakeBidderLine() {
+  const initials = intakeBidderSelection.initials;
+  const localLine = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
+  if (localLine) return localLine;
+  const assignment = intakeBidderSelection.record?.snapshot?.assignment;
+  if (!assignment) return null;
+  const savedLine = intakeBidderSelection.record?.lines?.find((line) => line.id === assignment.id);
+  return savedLine ? {
+    line: savedLine.line_code,
+    pattern: savedLine.pattern,
+    week: Array.isArray(assignment.week) ? assignment.week : [],
+  } : null;
+}
+
+function intakeBidderExactDateLabel(key) {
+  if (!key) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(dateFromKey(key));
+}
+
+function intakeBidderRoundDetail(rows) {
+  const rounds = Array.from({ length: 6 }, (_, index) => index + 1);
+  return rounds.map((round) => {
+    const roundRows = rows
+      .filter((row) => Number(row.round_number) === round)
+      .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+    const entries = roundRows.length ? roundRows.map((row) => {
+      const dates = intakeBidderLeaveDates(row);
+      const dateList = dates.length
+        ? dates.map((date) => {
+          const holiday = date.is_holiday_in_lieu ? " · Holiday in-lieu" : date.is_holiday ? " · Holiday" : "";
+          return '<time datetime="' + escapeHtml(date.leave_date) + '">' +
+            escapeHtml(intakeBidderExactDateLabel(date.leave_date)) + holiday + "</time>";
+        }).join(", ")
+        : "No exact dates are stored for this bid.";
+      const status = uiStatusFromDatabase(row.status || "pending");
+      const priority = Number(row.priority || 0);
+      const chargedDays = Number(row.charged_days || 0);
+      return '<div class="intake-bid-round-entry"><strong>' +
+        (priority ? "Priority " + priority + " · " : "") + escapeHtml(status) +
+        "</strong><span>" + dateList + "</span><small>" +
+        formatLeaveDaysLabel(chargedDays) + " charged</small></div>";
+    }).join("") : "<span>No leave bids in this round.</span>";
+    return '<section class="intake-bid-round"><strong>Round ' + round +
+      '</strong><div class="intake-bid-round-list">' + entries + "</div></section>";
+  }).join("");
+}
+
+function renderIntakeBidderDetail(person, rows) {
+  const target = document.querySelector("[data-intake-bidder-detail]");
+  if (!target) return;
+  const mode = intakeBidderSelection.detail;
+  target.hidden = !mode;
+  if (!mode) {
+    target.replaceChildren();
+    return;
+  }
+
+  const closeButton = '<button class="secondary-action small" type="button" data-intake-bidder-detail-close>Close</button>';
+  if (mode === "contact") {
+    const phone = person.phone || "Not provided";
+    const email = person.email || "Not provided";
+    const phoneValue = person.phone
+      ? '<a href="tel:' + escapeHtml(person.phone) + '">' + escapeHtml(phone) + "</a>"
+      : "<strong>" + escapeHtml(phone) + "</strong>";
+    const emailValue = person.email
+      ? '<a href="mailto:' + escapeHtml(person.email) + '">' + escapeHtml(email) + "</a>"
+      : "<strong>" + escapeHtml(email) + "</strong>";
+    target.innerHTML =
+      '<div class="intake-bidder-detail-header"><div><h3>' +
+      escapeHtml(personDisplayName(person)) +
+      "</h3><p>Contact information</p></div>" + closeButton + "</div>" +
+      '<div class="intake-bidder-contact-grid"><div><span>Phone</span>' + phoneValue +
+      "</div><div><span>Email</span>" + emailValue + "</div></div>";
+    return;
+  }
+
+  target.innerHTML =
+    '<div class="intake-bidder-detail-header"><div><h3>Leave bids by round</h3><p>' +
+    escapeHtml(personDisplayName(person)) + " · Bid Year " + BID_YEAR +
+    "</p></div>" + closeButton + '</div><div class="intake-bid-rounds">' +
+    intakeBidderRoundDetail(rows) + "</div>";
+}
+
+function renderIntakeBidderSummary() {
+  const target = document.querySelector("[data-intake-bidder-summary]");
+  const area = document.querySelector("[data-intake-bidder-area]");
+  if (!target || !area) return;
+  const person = selectedIntakeBidderPerson();
+  if (!person) {
+    area.textContent = "Select a controller";
+    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>';
+    renderIntakeBidderDetail({}, []);
+    return;
+  }
+
+  const line = intakeBidderLine();
+  const rdoDays = line
+    ? [...rdoWeekdaysForLine(line)].sort((left, right) => left - right).map((weekday) => dayNames[weekday])
+    : [];
+  const hoursPerDay = rdoDays.length === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  const allowanceHours = normalizeLeaveSlotAllowance(person.leaveSlotAllowance);
+  const allowanceDays = estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay);
+  const rows = selectedIntakeBidderLeaveRows();
+  const activeRows = intakeBidderActiveLeaveRows(rows);
+  const daysBid = activeRows.reduce((total, row) => total + Number(row.charged_days || 0), 0);
+  const holidaysBid = new Set(activeRows.flatMap((row) => intakeBidderLeaveDates(row)
+    .filter((date) => date.is_holiday || date.is_holiday_in_lieu)
+    .map((date) => date.leave_date))).size;
+  const scheduleLabel = rdoDays.length === 3 ? "10-hour schedule" : "8-hour schedule";
+  const loadingNote = intakeBidderSelection.loading ? "Refreshing saved details…" : intakeBidderSelection.error;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+
+  area.textContent = person.area || "Area";
+  target.classList.toggle("intake-bidder-loading", intakeBidderSelection.loading);
+  target.innerHTML =
+    '<div class="intake-bidder-metric"><span>Name</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="contact">' +
+      escapeHtml(personDisplayName(person)) + "</button><small>" +
+      escapeHtml(person.bidAs || "BUE") + (loadingNote ? " · " + escapeHtml(loadingNote) : "") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Initials</span><strong>' +
+      escapeHtml(person.initials || "—") + "</strong><small>Seniority #" +
+      (Number.isFinite(rank) ? rank : "—") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Line &amp; RDOs</span><strong>' +
+      (line?.line ? "Line " + escapeHtml(line.line) : "Not selected") + "</strong><small>" +
+      (rdoDays.length ? escapeHtml(rdoDays.join(" / ")) : "RDOs unavailable") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>' + BID_YEAR + " Accrual</span><strong>" +
+      formatEstimatedLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
+      " hours · " + scheduleLabel + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Days Bid</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="bids">' +
+      formatEstimatedLeaveDays(daysBid) + " days</button><small>Pending and approved</small></div>" +
+    '<div class="intake-bidder-metric"><span>Holidays Bid</span><strong>' +
+      holidaysBid + "</strong><small>Holiday and in-lieu dates</small></div>";
+  renderIntakeBidderDetail(person, rows);
+}
+
+async function loadSelectedIntakeBidder() {
+  const client = supabaseClient();
+  const profileId = intakeBidderSelection.profileId;
+  if (!client || !supabaseState.connected || !profileId || !hasIntakeAccess()) return;
+  const generation = ++intakeBidderSelection.generation;
+  intakeBidderSelection.loading = true;
+  intakeBidderSelection.error = "";
+  renderIntakeBidderSummary();
+  try {
+    const { data, error } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR,
+      target_bidder_id: profileId,
+    });
+    if (generation !== intakeBidderSelection.generation) return;
+    if (error) throw error;
+    intakeBidderSelection.record = data;
+  } catch (_error) {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.error = "Saved details unavailable";
+    }
+  } finally {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.loading = false;
+      renderIntakeBidderSummary();
+    }
+  }
+}
+
+function selectIntakeBidder(initials, profileId = "") {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const person = bueByInitials(normalized);
+  if (!normalized || !person) return;
+  const nextProfileId = profileId || person.profileId || "";
+  const changed = normalized !== intakeBidderSelection.initials || nextProfileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = normalized;
+  intakeBidderSelection.profileId = nextProfileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.detail = "";
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+  }
+  renderIntakeBidderSummary();
+  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+}
+
+function ensureIntakeBidderSelection() {
+  if (!hasIntakeAccess()) return;
+  const selected = bueByInitials(intakeBidderSelection.initials)
+    || bueByInitials(currentUser.initials)
+    || manualBidControllerRoster()[0];
+  if (!selected) return;
+  const profileId = selected.profileId || "";
+  const changed = selected.initials !== intakeBidderSelection.initials || profileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = selected.initials;
+  intakeBidderSelection.profileId = profileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.error = "";
+  }
+  renderIntakeBidderSummary();
+  if (!intakeBidderSelection.record && !intakeBidderSelection.loading) void loadSelectedIntakeBidder();
+}
+
 function renderIntakeQueue() {
   const target = document.getElementById("intake-queue");
   if (!target) return;
@@ -13311,6 +13597,7 @@ function renderApp() {
   renderHistory();
   renderIntakeQueue();
   renderManualBidEntry();
+  ensureIntakeBidderSelection();
   renderAdminConsole();
   renderHelpSummary();
   renderHelpPanel();
@@ -13331,6 +13618,19 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
+  if (intakeBidderDetailOpen) {
+    intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
+    renderIntakeBidderSummary();
+    document.querySelector("[data-intake-bidder-detail]")?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  if (event.target.closest("[data-intake-bidder-detail-close]")) {
+    intakeBidderSelection.detail = "";
+    renderIntakeBidderSummary();
+    return;
+  }
+
   const manualControllerResult = event.target.closest("[data-manual-controller-result]");
   if (manualControllerResult) {
     const panel = manualControllerResult.closest("[data-manual-bid-panel]");
@@ -13342,6 +13642,7 @@ document.addEventListener("click", async (event) => {
       renderManualBidPanel(panel);
       const person = manualBidSelectedPerson(controllerSelect.value);
       setManualBidStatus(panel, `Selected ${controllerName(person)} (${person.initials}).`);
+      selectIntakeBidder(person.initials, person.profileId);
       controllerSelect.focus();
     }
     return;
@@ -13900,6 +14201,8 @@ document.addEventListener("click", async (event) => {
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
     return;
@@ -14054,6 +14357,8 @@ document.addEventListener("keydown", async (event) => {
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
   }
@@ -14298,6 +14603,10 @@ document.addEventListener("change", async (event) => {
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     renderManualBidPanel(manualPanel);
+    if (manualReactiveField.matches("[data-manual-bid-controller]")) {
+      const person = manualBidSelectedPerson(manualReactiveField.value);
+      selectIntakeBidder(person.initials, person.profileId);
+    }
     return;
   }
 
