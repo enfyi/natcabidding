@@ -12252,7 +12252,8 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
+    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
   });
 }
 
@@ -12286,10 +12287,16 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), {
+      const visibleMonths = [0, 1].map((offset) => new Date(
+        scheduleActiveDate.getFullYear(),
+        scheduleActiveDate.getMonth() + offset,
+        1
+      ));
+      calendar.innerHTML = visibleMonths.map((month) => renderScheduleMonthCard(month.getMonth(), month.getFullYear(), {
         showAssignments: true,
         showYear: true,
-      });
+      }))
+        .join("");
     }
   }
 

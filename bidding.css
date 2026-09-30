@@ -5664,8 +5664,10 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-calendar.month-view {
-  grid-template-columns: minmax(0, 520px);
-  max-width: 520px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: none;
 }
 
 .schedule-calendar.week-view {
@@ -5921,6 +5923,11 @@ tr.occupied-row .rdo-tag {
   .schedule-calendar.year-view {
     grid-template-columns: 1fr;
     max-width: 440px;
+  }
+
+  .schedule-calendar.month-view {
+    grid-template-columns: 1fr;
+    max-width: 520px;
   }
 }
 

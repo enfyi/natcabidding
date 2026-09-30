@@ -20,6 +20,7 @@
     "test:intake-team-search": "node scripts/test-intake-team-search.mjs",
     "test:admin-tools-page": "node scripts/test-admin-tools-page.mjs",
     "test:intake-schedule": "node scripts/test-intake-schedule-mutations.mjs",
+    "test:intake-schedule-calendar": "node scripts/test-intake-schedule-calendar.mjs",
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
     "test:rdo-change-expiration": "node scripts/test-rdo-change-leave-expiration.mjs",
     "test:rdo-preview-leave": "node scripts/test-rdo-preview-leave-reconciliation.mjs",
