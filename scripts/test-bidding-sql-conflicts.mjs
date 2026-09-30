@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bi
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
@@ -173,6 +173,8 @@ await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,
  values('${changeBidder}','${changeAuth}','${bidder.area_id}','Change','Tester','CT','change@example.test','CPC',16);
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
  values('${year}','${bidder.area_id}','${changeBidder}',1,'${holidayLine}','rdo','pending','{"line":"HOLIDAY-TEST"}',now());
+ insert into bid_windows(bid_year_id,bidder_id,round_number,opens_at,closes_at,status)
+ values('${year}','${changeBidder}',1,now()-interval '1 hour',now()+interval '1 hour','open');
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
  values('${year}','${bidder.area_id}','2027-07-01','cpc','CHANGE-1'),
        ('${year}','${bidder.area_id}','2027-07-15','cpc','CHANGE-2'),
@@ -205,6 +207,11 @@ try {
 } catch(error) {if(!error.message.includes('same dates')) throw error;}
 if((await db.query('select status from leave_requests where id=$1',[newRequest.id])).rows[0].status!=='pending')
   throw new Error('Unchanged replacement removed the original bid');
+await db.exec(`set test.uid='${changeAuth}'; set test.email='change@example.test';
+ insert into bid_windows(bid_year_id,bidder_id,round_number,opens_at,closes_at,status)
+ values('${year}','${changeBidder}',1,now()-interval '1 hour',now()+interval '1 hour','open')
+ on conflict (bid_year_id,bidder_id,round_number) do update
+ set opens_at=excluded.opens_at,closes_at=excluded.closes_at,status=excluded.status;`);
 await db.query('select public.cancel_own_leave_request($1)',[newRequest.id]);
 try {
   await submitChangeDate('2027-07-16');
@@ -225,6 +232,8 @@ await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,
  from generate_series(0,6) weekday;
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
  values('${year}','${bidder.area_id}','${flexibleBidder}',1,'${flexibleLine}','rdo','pending','{"line":"FLEX-WEEK"}',now());
+ insert into bid_windows(bid_year_id,bidder_id,round_number,opens_at,closes_at,status)
+ values('${year}','${flexibleBidder}',1,now()-interval '1 hour',now()+interval '1 hour','open');
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
  select '${year}','${bidder.area_id}',selected_date,'cpc','FLEX-' || selected_date::text
  from unnest(array['2027-06-07','2027-06-08','2027-06-10','2027-06-13','2027-06-20','2027-07-01']::date[]) selected_date
@@ -392,3 +401,56 @@ const ghostState=(await db.query('select public.read_bidding_state(2027) as stat
 if(ghostState.length!==2 || ghostState.some(item=>!item.is_ghost_bid))
   throw new Error('Ghost annotations were not exposed in bidding state');
 console.log('PASS Ghost Line stays open and Ghost Leave consumes no area capacity');
+
+const glArea='00000000-0000-0000-0000-000000000310';
+const glAreaCpc='00000000-0000-0000-0000-000000000311';
+const glBidder='00000000-0000-0000-0000-000000000312';
+const glAuth='00000000-0000-0000-0000-000000000313';
+const glLine='00000000-0000-0000-0000-000000000314';
+await db.exec(`insert into areas(id,code,name,display_order)
+ values('${glArea}','gl-test','GL Test Area',99);
+ insert into bidders(id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
+ values('${glAreaCpc}','${glArea}','Area','Controller','AC','area-controller@example.test','CPC',1,16);
+ insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
+ values('${glBidder}','${glAuth}','${glArea}','Gate','Leader','GL','gl@example.test','GL',2,40);
+ insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
+ values('${glLine}','${year}','${glArea}','GL-LINE','CPC','S/S','open');
+ insert into rdo_line_days(rdo_line_id,weekday,shift_code)
+ select '${glLine}',weekday,'0700' from generate_series(0,6) weekday;
+ insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+ values('${year}','${glArea}','${glBidder}',1,'${glLine}','rdo','pending','{"line":"GL-LINE"}',now());
+ insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date,charged_days,submitted_at)
+ values('${year}','${glAreaCpc}',1,1,'approved','2027-01-10','2027-01-10',1,now());
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ values('${year}','${glArea}','2027-11-01','cpc','GL-1'),
+       ('${year}','${glArea}','2027-11-02','cpc','GL-2'),
+       ('${year}','${glArea}','2027-11-03','cpc','GL-3'),
+       ('${year}','${glArea}','2027-11-04','cpc','GL-4');
+ set test.uid='${glAuth}'; set test.email='gl@example.test';`);
+const glBalanceBefore=(await db.query(`select total_days::text,used_days,remaining_days::text
+ from private.area_leave_balance_days($1,$2,'cpc')`,[year,glArea])).rows[0];
+if(Number(glBalanceBefore.total_days)!==2 || glBalanceBefore.used_days!==1 || Number(glBalanceBefore.remaining_days)!==1)
+  throw new Error(`GL or area balance fixture was not calculated correctly: ${JSON.stringify(glBalanceBefore)}`);
+for(const [round,date] of [[4,'2027-11-01'],[5,'2027-11-02'],[6,'2027-11-03']]) {
+  await db.exec(`update bid_year_settings set enforce_bid_windows=false,test_bid_round=${round} where bid_year_id='${year}'`);
+  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:date,end_date:date,round,rdo_line_code:'GL-LINE'}])]);
+}
+const glBalanceAfter=(await db.query(`select total_days::text,used_days,remaining_days::text
+ from private.area_leave_balance_days($1,$2,'cpc')`,[year,glArea])).rows[0];
+if(Number(glBalanceAfter.total_days)!==2 || glBalanceAfter.used_days!==1 || Number(glBalanceAfter.remaining_days)!==1)
+  throw new Error('GL leave changed the area leave balance');
+const glPersonalUsage=(await db.query(`select coalesce(sum(charged_days),0)::integer as used
+ from leave_requests where bidder_id=$1 and status in ('pending','approved')`,[glBidder])).rows[0].used;
+if(glPersonalUsage!==3) throw new Error('GL personal leave balance did not track Rounds 4-6');
+await db.exec(`insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date,charged_days,submitted_at)
+ values('${year}','${glAreaCpc}',1,2,'approved','2027-01-11','2027-01-11',1,now());
+ update bid_year_settings set test_bid_round=6 where bid_year_id='${year}';`);
+try {
+  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:'2027-11-04',end_date:'2027-11-04',round:6,rdo_line_code:'GL-LINE'}])]);
+  throw new Error('GL leave unexpectedly passed after the area balance was exhausted');
+} catch(error) {
+  if(!error.message.includes('leave balance is exhausted')) throw error;
+}
+console.log('PASS GL allowance and usage stay outside area totals; GL bids Rounds 4-6 until area leave is exhausted');

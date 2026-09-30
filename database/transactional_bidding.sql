@@ -24,19 +24,19 @@ begin
     alter table public.bidders add constraint bidders_leave_slot_allowance_check check (leave_slot_allowance >= 0);
   end if;
   if not exists (select 1 from pg_constraint where conrelid = 'public.intake_submissions'::regclass and conname = 'intake_submissions_round_number_check') then
-    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 4);
+    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 6);
   end if;
 end
 $$;
 
 alter table public.bid_rounds drop constraint if exists bid_rounds_round_number_check;
-alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 4);
+alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 6);
 alter table public.bid_windows drop constraint if exists bid_windows_round_number_check;
-alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 4);
+alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 6);
 alter table public.leave_requests drop constraint if exists leave_requests_round_number_check;
-alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 4);
+alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 6);
 alter table public.leave_credit_events drop constraint if exists leave_credit_events_round_number_check;
-alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 4);
+alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 6);
 
 do $$
 begin
