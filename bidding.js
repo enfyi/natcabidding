@@ -8359,6 +8359,7 @@ function renderRdoLines() {
   const rows = [];
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
+  setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
   const countTarget = document.querySelector("[data-rdo-filter-count]");
   const pendingRequest = pendingCurrentUserRdoRequest();
