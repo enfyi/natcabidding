@@ -7794,6 +7794,8 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  const showBidderNames = Boolean(supabaseState.authUserId);
+
   return `
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
@@ -7802,12 +7804,12 @@ function renderPublicBidTimeTable(area) {
       <button type="button" data-bid-time-presentation="cards" aria-pressed="${publicBidTimePresentation === "cards"}">Cards</button>
       <button type="button" data-bid-time-presentation="list" aria-pressed="${publicBidTimePresentation === "list"}">List</button>
     </div>
-    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="${showBidderNames ? "Name or initials" : "Initials"}" aria-label="Find your bid times" data-mobile-bid-search /></label>
     <div class="public-bid-time-results" data-public-bid-time-results data-presentation="${publicBidTimePresentation}">
       <div class="mobile-bid-time-cards">
         ${seniority.map((person) => `
           <article class="mobile-bid-time-card" data-public-bid-time-card>
-            <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
             <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
           </article>
@@ -7819,7 +7821,7 @@ function renderPublicBidTimeTable(area) {
           <thead>
             <tr>
               <th>#</th>
-              <th>Name</th>
+              ${showBidderNames ? "<th>Name</th>" : ""}
               <th>Initials</th>
               <th>Bid As</th>
               <th>Round 1</th>
@@ -7832,7 +7834,7 @@ function renderPublicBidTimeTable(area) {
             ${seniority.map((person) => `
               <tr data-public-bid-time-row>
                 <td>${person.rank}</td>
-                <td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>
+                ${showBidderNames ? `<td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td>${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
                 ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
@@ -7841,7 +7843,7 @@ function renderPublicBidTimeTable(area) {
           </tbody>
         </table>
       </div>
-      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+      <p data-mobile-bid-empty hidden role="status">No bidders match ${showBidderNames ? "that name or those initials" : "those initials"}.</p>
     </div>
   `;
 }
