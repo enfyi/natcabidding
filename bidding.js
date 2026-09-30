@@ -896,6 +896,10 @@ function lineScheduleLabel(line) {
   return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
 }
 
+function awsPreferenceForLine(line, preference = selectedAwsPreference) {
+  return lineFourTenValue(line) === "Yes" ? "Yes" : preference;
+}
+
 function confirmFlexNo() {
   return window.confirm("Are you sure you do not want to the ability to flex your shifts?");
 }
@@ -2301,7 +2305,8 @@ async function addOrUpdateRdoSubmission() {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
   }
-  if (!selectedAwsPreference) {
+  const awsPreference = awsPreferenceForLine(line);
+  if (!awsPreference) {
     alert("Choose Yes or No for AWS before submitting this RDO bid.");
     return;
   }
@@ -2332,9 +2337,9 @@ async function addOrUpdateRdoSubmission() {
     line: line.line,
     fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
-    aws: selectedAwsPreference,
+    aws: awsPreference,
     mid: selectedMidValue(line),
-    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${selectedMidValue(line)}`,
   };
 
   const isChange = Boolean(existing)
@@ -8572,7 +8577,10 @@ function selectedLineReadinessItems(line) {
   const requestMatchesLine = existingRequest?.line === line.line;
   const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
-  const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
+  const awsPreference = awsPreferenceForLine(
+    line,
+    selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "")
+  );
   const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
   const lineStatus = selectedLineStatus(line);
   const selectedLineOpen = lineStatus !== "Taken";
@@ -8736,8 +8744,8 @@ function updateSelectedLine() {
   }
   const midIsBidLine = isMidLineByDesign(line);
   const fatigueCapacity = fatigueCapacityForLine(line);
-  const canEditLineSchedule = hasSystemAdminAccess();
   const lineSchedule = lineScheduleLabel(line);
+  const isFourTenLine = lineSchedule === "4-10";
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
   const lineRequest = selectedLineRequest(line);
@@ -8803,19 +8811,20 @@ function updateSelectedLine() {
       </span>
       <span class="aws-picker">
         <em>AWS</em>
-        <small>Line schedule</small>
+        <small>${isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
         <span class="line-mode-options">
-          ${canEditLineSchedule
-            ? ["4-10", "5-8"].map((value) => `
-                <button class="line-mode-option ${lineSchedule === value ? "active" : ""}" type="button" data-four-ten-choice="${value === "4-10" ? "Yes" : "No"}">
-                  ${value}
-                </button>
-              `).join("")
-            : `<button class="line-mode-option active locked" type="button" disabled>${lineSchedule}</button>`}
+          ${["4-10", "5-8"].map((value) => {
+            const isCurrentSchedule = lineSchedule === value;
+            return `
+              <button class="line-mode-option locked ${isCurrentSchedule ? "active" : "schedule-unavailable"}" type="button" disabled aria-pressed="${isCurrentSchedule}">
+                ${value}
+              </button>
+            `;
+          }).join("")}
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
+            <button class="choice-option ${!isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
               ${value}
             </button>
           `).join("")}

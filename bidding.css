@@ -3157,8 +3157,19 @@ input {
 
 .mid-option.locked,
 .line-mode-option.locked {
-  grid-column: 1 / -1;
   opacity: 1;
+}
+
+.mid-option.locked {
+  grid-column: 1 / -1;
+}
+
+.line-mode-option.schedule-unavailable,
+.app-main .line-mode-option.schedule-unavailable {
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.08);
+  border-color: var(--line);
+  opacity: 0.45;
 }
 
 .attribute-grid b {
