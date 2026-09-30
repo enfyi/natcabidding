@@ -679,6 +679,10 @@ function isMissingSupabaseColumn(error) {
   return /column .* does not exist|relation .* does not exist|Could not find .* column|Could not find the table|schema cache|PGRST204|PGRST205/i.test(error?.message || "");
 }
 
+function isMissingRdoLineDisplayOrder(error) {
+  return /display_order/i.test(error?.message || "") && isMissingSupabaseColumn(error);
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 }
@@ -7254,6 +7258,21 @@ async function loadPublishedLeaveSlots(client) {
   return client.rpc("read_public_leave_slots", { requested_bid_year: BID_YEAR });
 }
 
+async function loadRdoLines(client, bidYearId) {
+  const orderedResult = await client
+    .from("rdo_lines")
+    .select("id,area_id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)")
+    .eq("bid_year_id", bidYearId);
+
+  if (!isMissingRdoLineDisplayOrder(orderedResult.error)) return orderedResult;
+
+  // Keep existing schedules visible while the bid-line editor migration is pending.
+  return client
+    .from("rdo_lines")
+    .select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)")
+    .eq("bid_year_id", bidYearId);
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -7307,7 +7326,7 @@ async function loadSupabaseReferenceData() {
       _helpThreadsLoaded,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
+      loadRdoLines(client, bidYear.id),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),

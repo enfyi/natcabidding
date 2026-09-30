@@ -27,6 +27,8 @@ type ExistingBidLine = {
   rdo_line_days: { weekday: number; shift_code: string }[]
 }
 
+type SupabaseReadError = { message?: string } | null
+
 type BidLineSection = 'CPC' | 'R-DEV' | 'D-DEV'
 type BidLineDraft = {
   area_code: string
@@ -67,6 +69,12 @@ function importPayload(lines: BidLineImportRow[]) {
 function bidLineSection(line: BidLineImportRow) {
   if (line.line_type === 'CPC') return 'CPC'
   return line.pattern === 'D-DEV' ? 'D-Dev' : 'R-Dev'
+}
+
+function isMissingDisplayOrder(error: SupabaseReadError) {
+  const message = error?.message || ''
+  return /display_order/i.test(message)
+    && /does not exist|Could not find|schema cache|PGRST204|PGRST205/i.test(message)
 }
 
 function sectionForLine(line: ExistingBidLine): BidLineSection {
@@ -188,26 +196,53 @@ export function BidLineImporter() {
     }
 
     let active = true
+    const client = supabase
     setLinesLoading(true)
     setLineManagementStatus('')
 
-    void supabase
-      .from('rdo_lines')
-      .select('id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,rdo_line_days(weekday,shift_code)')
-      .eq('bid_year_id', bidYearId)
-      .eq('area_id', areaId)
-      .order('display_order')
-      .order('line_code')
-      .then(({ data, error }) => {
-        if (!active) return
-        if (error) {
-          setExistingLines([])
-          setLineManagementStatus(error.message)
-        } else {
-          setExistingLines((data || []) as ExistingBidLine[])
+    async function loadExistingLines() {
+      const orderedResult = await client
+        .from('rdo_lines')
+        .select('id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,rdo_line_days(weekday,shift_code)')
+        .eq('bid_year_id', bidYearId)
+        .eq('area_id', areaId)
+        .order('display_order')
+        .order('line_code')
+      let data: unknown[] | null = orderedResult.data
+      let error: SupabaseReadError = orderedResult.error
+      let migrationPending = false
+
+      if (isMissingDisplayOrder(error)) {
+        migrationPending = true
+        const legacyResult = await client
+          .from('rdo_lines')
+          .select('id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,rdo_line_days(weekday,shift_code)')
+          .eq('bid_year_id', bidYearId)
+          .eq('area_id', areaId)
+          .order('line_code')
+        data = legacyResult.data
+        error = legacyResult.error
+      }
+
+      if (!active) return
+      if (error) {
+        setExistingLines([])
+        setLineManagementStatus(error.message || 'Bid lines could not be loaded.')
+      } else {
+        setExistingLines((data || []).map((line, index) => ({
+          ...(line as object),
+          display_order: typeof line === 'object' && line && 'display_order' in line
+            ? Number(line.display_order)
+            : (index + 1) * 10,
+        })) as ExistingBidLine[])
+        if (migrationPending) {
+          setLineManagementStatus('Existing lines are loaded. Apply the bid-line editor database migration to enable adding, editing, and reordering.')
         }
-        setLinesLoading(false)
-      })
+      }
+      setLinesLoading(false)
+    }
+
+    void loadExistingLines()
 
     return () => { active = false }
   }, [access, areaCode, areas, bidYear, bidYears, linesReloadToken, supabase])
