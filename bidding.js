@@ -8064,8 +8064,8 @@ function renderPublicBidTimeTable(area) {
           <thead>
             <tr>
               <th>#</th>
-              ${showBidderNames ? "<th>Name</th>" : ""}
-              <th>Initials</th>
+              ${showBidderNames ? '<th class="bid-time-name">Name</th>' : ""}
+              <th class="bid-time-initials">Initials</th>
               <th>Bid As</th>
               <th class="bid-time-round">Round 1</th>
               <th class="bid-time-round">Round 2</th>
@@ -8077,8 +8077,8 @@ function renderPublicBidTimeTable(area) {
             ${seniority.map((person) => `
               <tr data-public-bid-time-row>
                 <td>${person.rank}</td>
-                ${showBidderNames ? `<td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
-                <td>${escapeHtml(person.initials)}</td>
+                ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
+                <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
                 ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
               </tr>
