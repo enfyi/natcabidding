@@ -7849,8 +7849,8 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
         <td><b>${lineOccupant(line)}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
-        <td>${publicPreferenceCell(line.aws)}</td>
-        <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
+        <td></td>
+        <td>${rdoLineMidReferenceCell(line)}</td>
       </tr>
     `);
   });
@@ -7884,8 +7884,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
                 <p>Fatigue group: ${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line)) || "Not assigned"}</p>
-                <p>AWS: ${publicPreferenceCell(line.aws) || "Not answered"}</p>
-                <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+                ${rdoLineMidReferenceCell(line) ? `<p>Mid: ${rdoLineMidReferenceCell(line)}</p>` : ""}
               </details>
             `;
           }).join("")}
@@ -8630,15 +8629,13 @@ function userChoiceCell(value) {
   return value;
 }
 
-function publicPreferenceCell(value) {
-  const normalized = String(value || "").trim();
-  if (!normalized || normalized === "—" || normalized.toUpperCase() === "UNSELECTED") return "";
-  return userChoiceCell(normalized);
-}
-
 function lineMidReferenceValue(line) {
   if (line.mid === "BID" || line.mid === "Yes" || line.mid === "No") return line.mid;
   return "UNSELECTED";
+}
+
+function rdoLineMidReferenceCell(line) {
+  return lineMidReferenceValue(line) === "BID" ? userChoiceCell("BID") : "";
 }
 
 function selectedLineStatus(line) {
@@ -8831,8 +8828,8 @@ function renderRdoLines() {
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
-        <td>${publicPreferenceCell(line.aws)}</td>
-        <td>${userChoiceCell(midValue)}</td>
+        <td></td>
+        <td>${midValue === "BID" ? userChoiceCell(midValue) : ""}</td>
       </tr>
     `);
   });
@@ -8866,7 +8863,7 @@ function renderRdoLines() {
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
             <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
-            <div class="member-rdo-card-footer"><span>AWS: ${publicPreferenceCell(line.aws) || "Not answered"} · Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
+            <div class="member-rdo-card-footer">${rdoLineMidReferenceCell(line) ? `<span>Mid: ${rdoLineMidReferenceCell(line)}</span>` : ""}${selectButton}</div>
           </details>
         `;
       }).join("")
