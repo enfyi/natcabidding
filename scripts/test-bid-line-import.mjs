@@ -80,6 +80,16 @@ assert.match(
   'the admin editor must keep existing lines visible before the display-order migration is applied',
 )
 assert.match(
+  bidding,
+  /function rdoLineMidReferenceCell\(line\) \{\s*return lineMidReferenceValue\(line\) === "BID" \? userChoiceCell\("BID"\) : "";/,
+  'the RDO reference tables must only populate Mid for designated Mid Bid lines',
+)
+assert.doesNotMatch(
+  bidding,
+  /<td>\$\{publicPreferenceCell\(line\.aws\)\}<\/td>/,
+  'the RDO reference tables must not populate AWS answers',
+)
+assert.match(
   parser,
   /if \(!normalized\) \{\s*issues\.push\(`\$\{rowReference\(row\)\}: \$\{label\} must be Yes or No\.`\)/,
   'blank required boolean cells must produce a validation issue',
