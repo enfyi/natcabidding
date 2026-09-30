@@ -148,6 +148,8 @@ let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
+let intakeTeamCandidateQuery = "";
+let selectedIntakeTeamCandidateInitials = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
@@ -10050,6 +10052,81 @@ function intakeTeamMembers() {
   return bueRoster().filter((person) => intakeTeamInitials.has(person.initials));
 }
 
+function availableIntakeTeamCandidates() {
+  return bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+}
+
+function intakeTeamCandidateMatches(person, query) {
+  if (!query) return true;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const searchable = [
+    rank,
+    Number.isFinite(rank) ? `#${rank}` : "",
+    Number.isFinite(rank) ? `seniority ${rank}` : "",
+    person.firstName,
+    person.lastName,
+    person.initials,
+    person.area,
+    person.bidAs,
+    person.email,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function renderIntakeTeamCandidateSearch() {
+  const input = document.querySelector("[data-intake-team-candidate-search]");
+  const results = document.querySelector("[data-intake-team-candidate-results]");
+  const status = document.querySelector("[data-intake-team-candidate-status]");
+  const addButton = document.querySelector("[data-add-intake-team-member]");
+  if (!input || !results || !status || !addButton) return;
+
+  const availablePeople = availableIntakeTeamCandidates();
+  const selectedPerson = availablePeople.find((person) => person.initials === selectedIntakeTeamCandidateInitials);
+  if (selectedIntakeTeamCandidateInitials && !selectedPerson) selectedIntakeTeamCandidateInitials = "";
+
+  if (selectedPerson) {
+    input.value = personScheduleLabel(selectedPerson);
+    input.setAttribute("aria-expanded", "false");
+    results.innerHTML = "";
+    results.hidden = true;
+    status.textContent = `Selected ${personDisplayName(selectedPerson)} (${selectedPerson.initials}).`;
+    addButton.disabled = false;
+    return;
+  }
+
+  input.value = intakeTeamCandidateQuery;
+  addButton.disabled = true;
+  const query = intakeTeamCandidateQuery.trim();
+  const matches = query
+    ? availablePeople.filter((person) => intakeTeamCandidateMatches(person, query))
+    : [];
+  const visibleMatches = matches.slice(0, 40);
+
+  results.innerHTML = visibleMatches.map((person) => {
+    const rank = Number.isFinite(person.rank) ? `Seniority #${person.rank}` : "Unranked";
+    return `
+      <button id="intake-team-candidate-${escapeHtml(person.initials)}" type="button" role="option" data-intake-team-candidate-result="${escapeHtml(person.initials)}">
+        <strong>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</strong>
+        <span>${escapeHtml(person.area)} · ${escapeHtml(rank)} · ${escapeHtml(person.bidAs || "CPC")}</span>
+      </button>
+    `;
+  }).join("");
+  results.hidden = !query || visibleMatches.length === 0;
+  input.setAttribute("aria-expanded", String(!results.hidden));
+
+  if (!availablePeople.length) {
+    status.textContent = "All rostered BUEs are already on the intake team.";
+  } else if (!query) {
+    status.textContent = `Search ${availablePeople.length} available employees.`;
+  } else if (!matches.length) {
+    status.textContent = "No available employees match that search.";
+  } else if (matches.length > visibleMatches.length) {
+    status.textContent = `${matches.length} matches; showing the first ${visibleMatches.length}. Keep typing to narrow the list.`;
+  } else {
+    status.textContent = `${matches.length} ${matches.length === 1 ? "match" : "matches"}. Select an employee below.`;
+  }
+}
+
 function renderRosterSelect(selector, people, selectedInitials = "") {
   document.querySelectorAll(selector).forEach((select) => {
     const currentValue = selectedInitials || select.value;
@@ -10061,9 +10138,8 @@ function renderRosterSelect(selector, people, selectedInitials = "") {
 }
 
 function syncIntakeTeamControls() {
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
-  renderRosterSelect("[data-intake-team-candidate]", availablePeople);
+  renderIntakeTeamCandidateSearch();
   renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
   renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
 }
@@ -10084,8 +10160,7 @@ async function saveIntakeTeamMember(initials, enabled) {
 
 async function addSelectedBueToIntakeTeam() {
   if (!hasSystemAdminAccess()) return;
-  const select = document.querySelector("[data-intake-team-candidate]");
-  const initials = select?.value || "";
+  const initials = selectedIntakeTeamCandidateInitials;
   const person = bueByInitials(initials);
   if (!person) {
     setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
@@ -10096,6 +10171,8 @@ async function addSelectedBueToIntakeTeam() {
   try {
     await saveIntakeTeamMember(person.initials, true);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
+    intakeTeamCandidateQuery = "";
+    selectedIntakeTeamCandidateInitials = "";
     renderApp();
     setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
   } catch (error) {
@@ -11445,21 +11522,20 @@ function renderAdminConsole() {
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
 
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
 
   target.innerHTML = `
     <section class="intake-team-builder">
       <div class="intake-team-add">
-        <label>
-          Add BUE to Intake Team
-          <select data-intake-team-candidate>
-            ${availablePeople.length
-              ? availablePeople.map((person) => `<option value="${escapeHtml(person.initials)}">${escapeHtml(personScheduleLabel(person))}</option>`).join("")
-              : '<option value="">All rostered BUEs are already on the intake team</option>'}
-          </select>
-        </label>
-        <button class="primary-action small" type="button" data-add-intake-team-member ${availablePeople.length ? "" : "disabled"}>Add to Team</button>
+        <div class="intake-team-candidate-picker">
+          <label>
+            Add BUE to Intake Team
+            <input type="search" placeholder="Name, initials, area, rank, role, or email" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="intake-team-candidate-results" data-intake-team-candidate-search />
+          </label>
+          <small data-intake-team-candidate-status role="status" aria-live="polite"></small>
+          <div class="intake-team-candidate-results" id="intake-team-candidate-results" role="listbox" aria-label="Matching employees" data-intake-team-candidate-results hidden></div>
+        </div>
+        <button class="primary-action small" type="button" data-add-intake-team-member disabled>Add to Team</button>
       </div>
       <div class="intake-team-list" data-intake-team-list>
         ${teamPeople.map((person) => {
@@ -14238,6 +14314,15 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const intakeTeamCandidateResult = event.target.closest("[data-intake-team-candidate-result]");
+  if (intakeTeamCandidateResult) {
+    selectedIntakeTeamCandidateInitials = intakeTeamCandidateResult.dataset.intakeTeamCandidateResult || "";
+    intakeTeamCandidateQuery = "";
+    renderIntakeTeamCandidateSearch();
+    document.querySelector("[data-add-intake-team-member]")?.focus();
+    return;
+  }
+
   const mobileAppMenu = event.target.closest(".mobile-app-menu");
   if (mobileAppMenu && event.target.closest("button")) mobileAppMenu.removeAttribute("open");
 
@@ -15065,6 +15150,14 @@ document.addEventListener("input", (event) => {
   if (manualControllerSearch) {
     const panel = manualControllerSearch.closest("[data-manual-bid-panel]");
     if (panel) renderManualBidPanel(panel);
+    return;
+  }
+
+  const intakeTeamCandidateSearch = event.target.closest("[data-intake-team-candidate-search]");
+  if (intakeTeamCandidateSearch) {
+    intakeTeamCandidateQuery = intakeTeamCandidateSearch.value;
+    selectedIntakeTeamCandidateInitials = "";
+    renderIntakeTeamCandidateSearch();
     return;
   }
 
