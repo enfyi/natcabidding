@@ -14,6 +14,7 @@
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
+    "test:intake-bidder-summary": "node scripts/test-intake-bidder-summary.mjs",
     "test:intake-schedule": "node scripts/test-intake-schedule-mutations.mjs",
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",
     "test:rdo-change-expiration": "node scripts/test-rdo-change-leave-expiration.mjs",

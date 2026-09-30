@@ -9792,7 +9792,195 @@ video {
   font-weight: 900;
 }
 
+.intake-bidder-overview {
+  margin: 0 0 16px;
+  padding: 20px;
+}
+
+.intake-bidder-overview .panel-header {
+  margin-bottom: 16px;
+}
+
+.intake-bidder-summary {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) repeat(5, minmax(110px, 1fr));
+  border: 1px solid #d5e0e7;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.intake-bidder-empty {
+  grid-column: 1 / -1;
+  padding: 22px;
+  color: #627080;
+  text-align: center;
+}
+
+.intake-bidder-metric {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 82px;
+  padding: 14px 16px;
+  border-left: 1px solid #e1e8ed;
+  background: #fff;
+}
+
+.intake-bidder-metric:first-child {
+  border-left: 0;
+}
+
+.intake-bidder-metric span {
+  color: #627080;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.intake-bidder-metric strong,
+.intake-bidder-link {
+  color: #152d3b;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.intake-bidder-metric small {
+  color: #627080;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.intake-bidder-link {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: #176c72;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-bidder-link:hover,
+.intake-bidder-link:focus-visible {
+  color: #0c5055;
+}
+
+.intake-bidder-loading {
+  opacity: 0.65;
+}
+
+.intake-bidder-detail {
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 1px solid #d5e0e7;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.intake-bidder-detail[hidden] {
+  display: none;
+}
+
+.intake-bidder-detail-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.intake-bidder-detail-header h3,
+.intake-bidder-detail-header p {
+  margin: 0;
+}
+
+.intake-bidder-detail-header p {
+  margin-top: 4px;
+  color: #627080;
+}
+
+.intake-bidder-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.intake-bidder-contact-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #e1e8ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.intake-bidder-contact-grid span {
+  color: #627080;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.intake-bidder-contact-grid a,
+.intake-bidder-contact-grid strong {
+  color: #176c72;
+  overflow-wrap: anywhere;
+}
+
+.intake-bid-rounds {
+  display: grid;
+  gap: 10px;
+}
+
+.intake-bid-round {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid #d5e0e7;
+}
+
+.intake-bid-round:first-child {
+  border-top: 0;
+}
+
+.intake-bid-round > strong {
+  color: #152d3b;
+}
+
+.intake-bid-round-list {
+  display: grid;
+  gap: 10px;
+}
+
+.intake-bid-round-entry {
+  display: grid;
+  gap: 4px;
+}
+
+.intake-bid-round-entry small {
+  color: #627080;
+}
+
 @media (max-width: 1100px) {
+  .intake-bidder-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .intake-bidder-metric:nth-child(4) {
+    border-left: 0;
+  }
+
+  .intake-bidder-metric:nth-child(n + 4) {
+    border-top: 1px solid #e1e8ed;
+  }
+
   .intake-workspace {
     grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
   }
@@ -9813,6 +10001,41 @@ video {
   .intake-control-card {
     min-height: 88px;
     padding: 14px 44px 14px 16px;
+  }
+
+  .intake-bidder-overview {
+    padding: 16px;
+  }
+
+  .intake-bidder-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .intake-bidder-metric,
+  .intake-bidder-metric:nth-child(4) {
+    border-left: 1px solid #e1e8ed;
+    border-top: 1px solid #e1e8ed;
+  }
+
+  .intake-bidder-metric:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .intake-bidder-metric:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .intake-bidder-detail {
+    padding: 16px;
+  }
+
+  .intake-bidder-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-bid-round {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 }
 
