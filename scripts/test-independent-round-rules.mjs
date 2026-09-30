@@ -5,7 +5,9 @@ import vm from 'node:vm'
 const source = readFileSync(new URL('../bidding.js', import.meta.url), 'utf8')
 
 function extract(name) {
-  const start = source.indexOf(`function ${name}(`)
+  const functionStart = source.indexOf(`function ${name}(`)
+  const asyncStart = source.indexOf(`async function ${name}(`)
+  const start = asyncStart >= 0 ? asyncStart : functionStart
   assert.ok(start >= 0, `${name} must exist`)
   let index = source.indexOf('{', start)
   let depth = 1
@@ -56,7 +58,7 @@ vm.runInContext(
 await context.saveSupabaseRoundRule(1, 'Updated Round 1 limit', 'Updated Round 1 rule')
 
 assert.equal(calls.length, 1, 'saving one round must make exactly one database write')
-assert.deepEqual(calls[0], {
+assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
   name: 'set_round_rule',
   payload: {
     requested_bid_year: 2027,
