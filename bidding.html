@@ -34,6 +34,9 @@
     </section>
     <div class="pilot-environment-banner" data-pilot-environment-banner hidden>
       TEST SITE · Practice bids only · Data may be reset by an administrator
+      <label data-pilot-round-picker-row hidden>Practice bidding round
+        <select data-pilot-round-picker aria-label="Practice bidding round"><option value="">All rounds off</option></select>
+      </label>
     </div>
     <section class="login-screen public-shell" aria-label="Public bidding website">
       <aside class="public-rail" aria-label="Public bidding navigation">
@@ -1495,7 +1498,7 @@
               <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
                 <div class="panel-header compact">
                   <div>
-                    <h3>Pilot Access</h3>
+                    <h3>Pilot Access and Rounds</h3>
                     <p data-pilot-status-copy>This database is not configured for an isolated pilot.</p>
                   </div>
                   <span class="pill" data-pilot-status>Pilot unavailable</span>
@@ -1509,6 +1512,11 @@
                   <input type="text" data-pilot-member-initials placeholder="AB, CD, EF" autocomplete="off" />
                   <small>Separate initials with commas. Admin and intake access remains available.</small>
                 </label>
+                <p>Turn each round on or off. Authorized pilot BUEs can choose any enabled round and submit without scheduled hours. Pilot access must also be on.</p>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="1" disabled /><span>Round 1 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="2" disabled /><span>Round 2 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="3" disabled /><span>Round 3 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="4" disabled /><span>Round 4 bidding on</span></label>
                 <div class="button-row">
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>

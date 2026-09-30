@@ -103,6 +103,9 @@ let roundRulesDatabaseComplete = false;
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 let enforceBidWindows = true;
 let bidWindowTestRound = null;
+let pilotOpenRounds = [];
+let selectedPilotRound = null;
+let pilotRoundRefreshPending = false;
 let bidWindowSettingsFallbackMessage = "";
 let pilotState = {
   available: false,
@@ -1908,16 +1911,18 @@ function normalizeBidWindowTestRound(value) {
 }
 
 function activeTestBidRound() {
-  return bidWindowLockIsBypassed() ? bidWindowTestRound : null;
+  return pilotState.database && isAuthorizedPilotBidder()
+    ? (pilotOpenRounds.includes(selectedPilotRound) ? selectedPilotRound : pilotOpenRounds[0] || null)
+    : null;
 }
 
 function bidWindowLockIsBypassed() {
-  if (pilotState.database) return isAuthorizedPilotBidder();
+  if (pilotState.database) return isAuthorizedPilotBidder() && Boolean(activeTestBidRound());
   return false;
 }
 
 function currentUserBidWindowStatus(date = new Date()) {
-  const window = currentUserBidWindow(date);
+  const window = pilotState.database ? (activeTestBidRound() ? { round: activeTestBidRound() } : null) : currentUserBidWindow(date);
   const inHomeArea = isViewingHomeArea();
   return {
     window,
@@ -1928,6 +1933,7 @@ function currentUserBidWindowStatus(date = new Date()) {
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
+  if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
@@ -2013,10 +2019,10 @@ function syncBidWindowTestingControls() {
     select.disabled = true;
   });
 
-  setText("[data-bid-window-enforcement-state]", "Strict Windows Required");
+  setText("[data-bid-window-enforcement-state]", pilotState.database ? "Pilot Round Controls" : "Strict Windows Required");
   setText(
     "[data-bid-window-enforcement-copy]",
-    bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
+    pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
 }
 
@@ -2049,6 +2055,47 @@ function pilotInitialsForMemberIds() {
     .join(", ");
 }
 
+async function refreshPilotRounds() {
+  if (!pilotState.database || !supabaseState.authUserId || pilotRoundRefreshPending) return;
+  pilotRoundRefreshPending = true;
+  const previousState = JSON.stringify([pilotOpenRounds, pilotState]);
+  try {
+    const [rounds, access] = await Promise.all([
+      supabaseClient().rpc("read_pilot_rounds", { requested_bid_year: BID_YEAR }),
+      supabaseClient().rpc("read_pilot_settings", { requested_bid_year: BID_YEAR }),
+    ]);
+    const { data, error } = rounds;
+    if (!access.error && access.data) applyPilotSettings(Array.isArray(access.data) ? access.data[0] : access.data);
+    else pilotState.enabled = false;
+    pilotOpenRounds = !error && Array.isArray(data) ? data.map(Number).filter((round) => normalizeBidWindowTestRound(round)) : [];
+    if (JSON.stringify([pilotOpenRounds, pilotState]) !== previousState) {
+      syncPilotControls();
+      renderApp();
+    }
+  } catch {
+    pilotOpenRounds = [];
+    syncPilotControls();
+    updateBidWindow(true);
+  } finally {
+    pilotRoundRefreshPending = false;
+  }
+}
+
+async function setPilotRound(round, enabled) {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  const { data, error } = await supabaseClient().rpc("set_pilot_round", {
+    requested_bid_year: BID_YEAR, requested_round: round, should_enable: enabled,
+  });
+  if (error) {
+    window.alert(error.message || "Pilot round could not be changed.");
+    syncPilotControls();
+    return;
+  }
+  pilotOpenRounds = data || [];
+  syncPilotControls();
+  renderApp();
+}
+
 function syncPilotControls() {
   const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
   const banner = document.querySelector("[data-pilot-environment-banner]");
@@ -2056,6 +2103,18 @@ function syncPilotControls() {
 
   document.querySelectorAll("[data-pilot-admin-card]").forEach((card) => {
     card.hidden = !hasSystemAdminAccess();
+  });
+  document.querySelectorAll("[data-pilot-round-toggle]").forEach((toggle) => {
+    toggle.checked = pilotOpenRounds.includes(Number(toggle.dataset.pilotRoundToggle));
+    toggle.disabled = !pilotState.database;
+  });
+  document.querySelectorAll("[data-pilot-round-picker]").forEach((select) => {
+    select.closest("[data-pilot-round-picker-row]").hidden = !pilotState.database || !isConfirmedHelpUser();
+    select.innerHTML = pilotOpenRounds.length
+      ? pilotOpenRounds.map((round) => `<option value="${round}">Round ${round}</option>`).join("")
+      : '<option value="">All rounds off</option>';
+    select.value = String(activeTestBidRound() || "");
+    select.disabled = !isAuthorizedPilotBidder() || !pilotOpenRounds.length;
   });
   const toggle = document.querySelector("[data-pilot-enabled-toggle]");
   const initials = document.querySelector("[data-pilot-member-initials]");
@@ -7038,7 +7097,10 @@ async function loadSupabaseReferenceData() {
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
-    if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+    if (!pilotSettingsResult.error && pilotSettingsResult.data) {
+      applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+      await refreshPilotRounds();
+    }
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
@@ -7162,6 +7224,7 @@ function formatBidWindowStart(start) {
 }
 
 function latestAreaRound(date = new Date(), roundState = areaBidRoundState(date)) {
+  if (activeTestBidRound()) return activeTestBidRound();
   if (roundState) return roundState.round;
 
   const activePerson = seniority.find((person) => person.openRound);
@@ -7938,22 +8001,22 @@ function hasSubmittedRdoBid() {
 function updateBidWindow(force = false) {
   const now = new Date();
   const roundState = areaBidRoundState(now);
-  const isValidationPeriod = roundState?.phase === "validation";
+  const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
   const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
   const viewingHomeArea = isViewingHomeArea();
-  const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
-  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
+  const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
+  const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
-  const statusText = areaRoundOpen ? "Open" : "Closed";
-  const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
-  const countdownText = isOpen
+  const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
+  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen;
+  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
@@ -7962,7 +8025,7 @@ function updateBidWindow(force = false) {
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
-  const countdownLabel = isOpen
+  const countdownLabel = pilotState.database ? "Pilot Bidding" : isOpen
       ? "Window Closes In"
       : isBefore
       ? "Next Window In"
@@ -9333,7 +9396,9 @@ function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundStat
   const testRound = activeTestBidRound();
   const round = testRound || latestAreaRound(date, roundState);
   const rule = roundRuleForRound(round);
-  const phaseDetail = testRound
+  const phaseDetail = pilotState.database && !testRound
+    ? "Pilot bidding is turned off. An administrator must enable pilot access and a round."
+    : testRound
     ? "Authorized pilot mode is using this round for practice submissions."
     : roundState?.phase === "validation"
     ? "Validation period is active. No bids may be entered."
@@ -14454,6 +14519,15 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-pilot-round-toggle]")) {
+    await setPilotRound(Number(event.target.dataset.pilotRoundToggle), event.target.checked);
+    return;
+  }
+  if (event.target.matches("[data-pilot-round-picker]")) {
+    selectedPilotRound = normalizeBidWindowTestRound(event.target.value);
+    renderApp();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;
@@ -14607,3 +14681,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") updateBidWindow(true);
 });
 window.NATCA_BIDDING_READY = true;
+
+setInterval(() => {
+  if (document.visibilityState === "visible") void refreshPilotRounds();
+}, 10000);
