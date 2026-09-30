@@ -3238,14 +3238,6 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  if (round >= 2 && round <= 6) {
-    const line = submittedRdoLineForInitials();
-    if (line) {
-      const limit = leaveDayLimitForRound(round);
-      const creditDetail = round >= 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
-      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.${creditDetail}` };
-    }
-  }
   return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
@@ -9831,32 +9823,20 @@ async function saveSupabaseRoundRule(round, label, detail) {
     throw new Error("Round Rules could not reach the database. Check the connection and try again.");
   }
 
-  const nextRules = {
-    ...roundRules,
-    [round]: { label, detail },
-  };
-  const rulesToSave = roundRulesDatabaseComplete
-    ? [[round, nextRules[round]]]
-    : Object.entries(nextRules);
-  let savedRules = null;
-
-  for (const [ruleNumber, rule] of rulesToSave) {
-    const { data, error } = await client.rpc("set_round_rule", {
-      requested_bid_year: BID_YEAR,
-      requested_round: Number(ruleNumber),
-      rule_label: rule.label,
-      rule_detail: rule.detail,
-    });
-    if (error) {
-      if (isMissingSupabaseRoutine(error)) {
-        throw new Error("Round Rules database support is not installed yet.");
-      }
-      throw error;
+  const { data, error } = await client.rpc("set_round_rule", {
+    requested_bid_year: BID_YEAR,
+    requested_round: round,
+    rule_label: label,
+    rule_detail: detail,
+  });
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) {
+      throw new Error("Round Rules database support is not installed yet.");
     }
-    savedRules = data;
+    throw error;
   }
 
-  applyRoundRules(savedRules);
+  applyRoundRules(data);
 }
 
 function roundRuleNumbers() {
