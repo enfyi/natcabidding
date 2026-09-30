@@ -5372,7 +5372,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
   const leaveDateAttribute = canShowLeaveState
     ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
-    : 'aria-disabled="true"';
+    : hasDetail ? "" : 'aria-disabled="true"';
 
   return `
     <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
@@ -5695,15 +5695,17 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   `;
 }
 
-function renderLeaveSlotBoard() {
-  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache());
+function renderLeaveSlotBoard(options = {}) {
+  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache(options));
 }
 
-function renderLeaveSlotBoardWithCache() {
+function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = currentViewArea(), inspectOnly = false } = {}) {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
-  const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
+  const details = inspectOnly
+    ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
+    : leaveSlotsForDate(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -5749,8 +5751,8 @@ function renderLeaveSlotBoardWithCache() {
 
 let leaveSlotReturnFocus = null;
 
-function openLeaveSlotModal() {
-  renderLeaveSlotBoard();
+function openLeaveSlotModal(options = {}) {
+  renderLeaveSlotBoard(options);
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
   leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -15121,6 +15123,16 @@ document.addEventListener("click", async (event) => {
     renderRdoLines();
     updateSelectedLine();
     refreshMemberCalendarRdoPattern(previousRdoWeekdays);
+    return;
+  }
+
+  // Inspect dashboard dates without updating the leave builder or rerendering calendars.
+  const dashboardDateButton = event.target.closest("#dashboard-calendar [data-calendar-date]");
+  if (dashboardDateButton) {
+    const key = dashboardDateButton.dataset.calendarDate;
+    if (key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY) {
+      openLeaveSlotModal({ key, area: currentViewArea(), inspectOnly: true });
+    }
     return;
   }
 
