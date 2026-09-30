@@ -5356,7 +5356,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const hasGlBid = glBids.length > 0;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots, context?.slotBucket || options.slotBucket || null)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5380,7 +5380,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     : `Group ${fatigueGroup} fatigue week`;
   const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
   const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
-  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`)}${glBidStatus}`;
+  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5438,10 +5438,9 @@ function updateCalendarViewControls() {
   document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
     const scope = description.dataset.calendarLayoutDescription;
     const workforce = calendarWorkforceForScope(scope);
-    const workforceLabel = workforce === "dev" ? "developmental" : "CPC";
     description.textContent = calendarLayouts[scope] === "full"
-      ? workforce ? `Every ${workforceLabel} slot is shown directly on each date.` : "Every CPC and developmental slot is shown directly on each date."
-      : workforce ? `Select a date to view its ${workforceLabel} slots.` : "Select a date to view its slots.";
+      ? "Every CPC and developmental slot is shown directly on each date."
+      : workforce ? "Select a date to view its CPC and developmental slots." : "Select a date to view its slots.";
   });
 }
 
@@ -5682,7 +5681,7 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false, slotBucket = null) {
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
@@ -5705,15 +5704,11 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
       ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
       ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
-        ${slotBucket !== "dev" ? `
-          <span class="tooltip-slot-heading">CPC</span>
-          ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
-        ` : ""}
-        ${!slotBucket ? '<span class="tooltip-slot-rule"></span>' : ""}
-        ${slotBucket !== "cpc" ? `
-          <span class="tooltip-slot-heading">DEV</span>
-          ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
-        ` : ""}
+        <span class="tooltip-slot-heading">CPC</span>
+        ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
+        <span class="tooltip-slot-rule"></span>
+        <span class="tooltip-slot-heading">DEV</span>
+        ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
         ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
           <span class="tooltip-slot-row gl-bid-row filled">
             <span class="tooltip-slot-name">GL Bid</span>
