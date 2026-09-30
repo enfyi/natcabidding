@@ -3616,18 +3616,18 @@ function leaveSlotBucketForBidAs(bidAs) {
 }
 
 function defaultCalendarWorkforce(scope) {
-  if (scope !== "dashboard" || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
+  if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
   return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
 }
 
 function calendarWorkforceStorageKey(scope) {
   if (scope === "public") return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:public`;
   const identity = currentUser?.supabaseProfileId || currentUser?.initials || "anonymous";
-  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:dashboard:${identity}`;
+  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:${scope}:${identity}`;
 }
 
 function calendarWorkforceForScope(scope) {
-  if (scope !== "public" && scope !== "dashboard") return null;
+  if (scope !== "public" && scope !== "dashboard" && scope !== "leave") return null;
   const storageKey = calendarWorkforceStorageKey(scope);
   const currentOverride = calendarWorkforceOverrides.get(storageKey);
   if (currentOverride === "cpc" || currentOverride === "dev") return currentOverride;
@@ -3646,7 +3646,7 @@ function calendarWorkforceForScope(scope) {
 }
 
 function setCalendarWorkforceForScope(scope, workforce) {
-  if ((scope !== "public" && scope !== "dashboard") || (workforce !== "cpc" && workforce !== "dev")) return;
+  if ((scope !== "public" && scope !== "dashboard" && scope !== "leave") || (workforce !== "cpc" && workforce !== "dev")) return;
   const storageKey = calendarWorkforceStorageKey(scope);
   calendarWorkforceOverrides.set(storageKey, workforce);
 

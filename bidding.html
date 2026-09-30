@@ -602,9 +602,15 @@
                   <button class="active" type="button" data-calendar-mode="combined">Combined</button>
                 </div>
               </div>
-              <div class="calendar-layout-tabs" role="tablist" aria-label="Leave calendar detail">
-                <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="leave">Minimal</button>
-                <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
+              <div class="calendar-view-row">
+                <div class="calendar-layout-tabs" role="tablist" aria-label="Leave calendar detail">
+                  <button class="active" type="button" role="tab" aria-selected="true" data-calendar-layout="minimal" data-calendar-scope="leave">Minimal</button>
+                  <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
+                </div>
+                <div class="segmented calendar-workforce-tabs" aria-label="Leave calendar workforce">
+                  <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="leave">CPC</button>
+                  <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
+                </div>
               </div>
               <p class="calendar-layout-description" data-calendar-layout-description="leave">Hover or focus a date to view its slots.</p>
               <div class="calendar-toolbar">
