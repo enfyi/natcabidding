@@ -614,7 +614,17 @@ begin
       and now() >= bw.opens_at and now() < bw.closes_at
     order by bw.round_number
     limit 1;
-    if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
+    if resolved_round is null and exists (
+      select 1
+      from public.bid_windows bw
+      where bw.bid_year_id = year_row.id
+        and bw.bidder_id = target.id
+        and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    elsif resolved_round is null then
+      raise exception 'Your bidding window is not open.';
+    end if;
   end if;
 
   if enforce_bid_windows
@@ -844,7 +854,15 @@ begin
   if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at
-  ) then raise exception 'Your bidding window is not open.'; end if;
+  ) then
+    if exists (
+      select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
+        and bw.round_number = batch_round and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    end if;
+    raise exception 'Your bidding window is not open.';
+  end if;
 
   if batch_round = 1 then
     select coalesce(array_agg(distinct wb.bucket_start_date order by wb.bucket_start_date), array[]::date[])

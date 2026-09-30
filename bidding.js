@@ -55,6 +55,8 @@ const DEFAULT_ROUND_RULES = {
   },
 };
 const MANUAL_AFTER_WINDOW_RULE = "After a BUE's personal window closes, intake or an administrator may enter the bid manually only while that same round remains open.";
+const LATE_BID_MESSAGE = "Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.";
+const BID_OFFICE_PHONE_DISPLAY = "661-434-1004";
 const CLOSED_ROUND_RULE = "Once the round is closed, no BUE, intake user, or administrator may enter a bid for that round.";
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
@@ -1960,9 +1962,30 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+
+  if (!pilotState.database) {
+    const rank = currentUserSeniorityRank(currentUser.area);
+    const activeRound = areaBidRoundState(date, currentUser.area)?.round;
+    const activeRoundWindow = Number.isFinite(rank) && activeRound
+      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      : null;
+    if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
+
+    if (!window) {
+      const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
+      const hasClosedWindow = Number.isFinite(rank) && Array.from(
+        { length: roundCount },
+        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+      ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
+      return hasClosedWindow
+        ? LATE_BID_MESSAGE
+        : `${actionLabel} can only be submitted during your allotted bid window.`;
+    }
+  }
+
   if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
   if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window is no longer open.`;
+  return LATE_BID_MESSAGE;
 }
 
 function leaveBidWindowErrorMessage(date = new Date()) {
@@ -8148,6 +8171,22 @@ function hasSubmittedRdoBid() {
   return currentUserHasRdoRequestForLeave();
 }
 
+function shouldShowLateBidContact(date = new Date()) {
+  return !pilotState.database
+    && bidWindowErrorMessage("RDO bids", date) === LATE_BID_MESSAGE
+    && !hasSubmittedRdoBid();
+}
+
+function openLateBidDialog() {
+  const dialog = document.querySelector("[data-late-bid-dialog]");
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+}
+
+function closeLateBidDialog() {
+  document.querySelector("[data-late-bid-dialog]")?.close();
+}
+
 function updateBidWindow(force = false) {
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
@@ -8164,6 +8203,7 @@ function updateBidWindowWithCache(force = false) {
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
@@ -8230,6 +8270,7 @@ function updateBidWindowWithCache(force = false) {
     pendingRequest?.id || null,
     hasRdoBid,
     rdoChangeError,
+    showLateBidContact,
   ]);
 
   if (!force && stateKey === bidWindowUiStateKey) return;
@@ -8279,8 +8320,10 @@ function updateBidWindowWithCache(force = false) {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = !canUseBidActions;
+    const isLateBidContactAction = button.matches("[data-bid-entry-action]") && showLateBidContact;
+    const disabled = !canUseBidActions && !isLateBidContactAction;
     button.disabled = disabled;
+    button.dataset.lateBidContact = String(isLateBidContactAction);
     button.classList.toggle("disabled", disabled);
   });
 
@@ -8292,6 +8335,20 @@ function updateBidWindowWithCache(force = false) {
       button.classList.add("disabled");
       button.textContent = "Awaiting Intake Decision";
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
+      return;
+    }
+    if (!isOpen && !isTestingBypass && hasRdoBid) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "Bid Submitted";
+      button.title = "";
+      return;
+    }
+    if (showLateBidContact) {
+      button.disabled = false;
+      button.classList.remove("disabled");
+      button.textContent = `Call or Text ${BID_OFFICE_PHONE_DISPLAY}`;
+      button.title = "Contact the Bidding Office to complete your bid.";
       return;
     }
     if (rdoChangeError) {
@@ -14257,6 +14314,10 @@ document.addEventListener("click", async (event) => {
     document.querySelector("[data-public-date-sheet]").close();
     return;
   }
+  if (event.target.closest("[data-late-bid-close]") || event.target.matches("[data-late-bid-dialog]")) {
+    closeLateBidDialog();
+    return;
+  }
   const mobileCalendar = event.target.closest("[data-mobile-calendar]");
   const monthStep = event.target.closest("[data-mobile-month-step]");
   if (monthStep) {
@@ -14854,6 +14915,12 @@ document.addEventListener("click", async (event) => {
     selectedFlexPreference = flexButton.dataset.flexChoice;
     renderRdoLines();
     updateSelectedLine();
+    return;
+  }
+
+  const bidEntryButton = event.target.closest("[data-bid-entry-action]");
+  if (bidEntryButton?.dataset.lateBidContact === "true") {
+    openLateBidDialog();
     return;
   }
 

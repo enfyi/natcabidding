@@ -6,6 +6,8 @@
     "dev": "next dev",
     "dev:pilot": "node scripts/run-with-pilot-env.mjs dev",
     "build": "next build",
+    "build:self-host": "NEXT_PUBLIC_BASE_PATH=/bidding NEXT_PUBLIC_SITE_URL=https://natcazla.com next build",
+    "package:self-host": "pnpm build:self-host && node scripts/package-self-host.mjs",
     "build:pilot": "node scripts/run-with-pilot-env.mjs build",
     "start": "next start",
     "test:bid-line-import": "node scripts/test-bid-line-import.mjs",
