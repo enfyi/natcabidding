@@ -3165,7 +3165,7 @@ input {
 }
 
 .line-mode-option.schedule-unavailable,
-.app-main .line-mode-option.schedule-unavailable {
+.app-main .aws-picker .line-mode-option.schedule-unavailable {
   color: var(--muted);
   background: rgba(148, 163, 184, 0.08);
   border-color: var(--line);
