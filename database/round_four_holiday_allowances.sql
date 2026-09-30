@@ -793,8 +793,9 @@ begin
     where lr.bid_year_id = year_row.id
       and b.area_id = target.area_id
       and lr.status = 'pending'
+      and not lr.is_ghost_bid
       and d.charged
-      and b.bid_role not in ('ADM', 'NB')
+      and b.bid_role not in ('GL', 'ADM', 'NB')
       and case
         when b.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
@@ -1361,12 +1362,13 @@ begin
       on pending_bidder.id = pending_request.bidder_id
     where pending_request.bid_year_id = request_row.bid_year_id
       and pending_request.status = 'pending'
+      and not pending_request.is_ghost_bid
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
       and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
-      and pending_bidder.bid_role not in ('ADM', 'NB')
+      and pending_bidder.bid_role not in ('GL', 'ADM', 'NB')
       and case
         when pending_bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
@@ -1890,12 +1892,13 @@ begin
       on pending_bidder.id = pending_request.bidder_id
     where pending_request.bid_year_id = request_row.bid_year_id
       and pending_request.status = 'pending'
+      and not pending_request.is_ghost_bid
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
       and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
-      and pending_bidder.bid_role not in ('ADM', 'NB')
+      and pending_bidder.bid_role not in ('GL', 'ADM', 'NB')
       and case
         when pending_bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'

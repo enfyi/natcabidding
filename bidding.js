@@ -2848,7 +2848,7 @@ async function submitManualLeaveBid(panel, person, area) {
     round,
     weekUnits,
     weekKeys,
-    summary: `${person.ghostBidder ? "Ghost Leave · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
 
   try {
@@ -3437,6 +3437,10 @@ function isAreaLeaveBalanceExemptItem(item) {
   return isGhostLeaveItem(item) || leaveItemBidAs(item) === "GL";
 }
 
+function isGlLeaveItem(item) {
+  return leaveItemBidAs(item) === "GL";
+}
+
 function leaveSlotUnitsForItem() {
   return 1;
 }
@@ -3636,6 +3640,18 @@ function showInitialsInVisibleSlot(visible, bucket, initials) {
   visible[bucket] = values.slice(0, capacity);
 }
 
+function addVisibleGlBid(visible, item, fallbackInitials = currentUser.initials) {
+  if (!isGlLeaveItem(item)) return;
+  const initials = String(item?.initials || fallbackInitials || "").trim().toUpperCase();
+  if (!initials) return;
+  const status = item?.status || "Pending";
+  const glBids = visible.glBids || [];
+  if (!glBids.some((bid) => bid.initials === initials && bid.status === status)) {
+    glBids.push({ initials, status, label: "GL Bid" });
+  }
+  visible.glBids = glBids;
+}
+
 function visibleLeaveSlotDetailsFromMap(
   key,
   area = currentUser.area,
@@ -3647,12 +3663,13 @@ function visibleLeaveSlotDetailsFromMap(
     ...details,
     cpc: [...(details.cpc || [])],
     dev: [...(details.dev || [])],
+    glBids: [...(details.glBids || [])],
   };
   const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
   if (showCurrentUserOverlay && !currentUser.ghostBidder && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
-    const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
-    showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
+    if (isGlLeaveItem(previewItem)) addVisibleGlBid(visible, previewItem);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(previewItem.bidAs), currentUser.initials);
   }
 
   leaveBids.forEach((item) => {
@@ -3660,15 +3677,16 @@ function visibleLeaveSlotDetailsFromMap(
     if (isGhostLeaveItem(item)) return;
     if (!["Pending", "Approved"].includes(item.status)) return;
     if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
-    showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   leaveDraftQueue.forEach((item) => {
     if (!showCurrentUserOverlay) return;
     if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDateKeys(leaveDateKeysForItem(item), currentUser.initials).includes(key)) return;
-    const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
-    showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   intakeQueue.forEach((item) => {
@@ -3676,8 +3694,8 @@ function visibleLeaveSlotDetailsFromMap(
     if (item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)) return;
     if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDatesForInitials(item.range, item.initials).includes(key)) return;
-    const bucket = leaveSlotBucketForBidAs(item.bidAs);
-    showInitialsInVisibleSlot(visible, bucket, item.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item, item.initials);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs), item.initials);
   });
 
   return visible;
@@ -4072,7 +4090,7 @@ async function submitLeaveDraftBatch() {
     round: draft.round,
     weekUnits: draft.weekUnits || 0,
     weekKeys: draft.weekKeys || [],
-    summary: `${currentUser.ghostBidder ? "Ghost Leave · " : ""}${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
+    summary: `${currentUser.ghostBidder ? "Ghost Leave · " : currentUserBidAs() === "GL" ? "GL Bid · " : ""}${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
@@ -4188,6 +4206,7 @@ function bidRecipientEmail(item) {
 function bidTypeLabel(item) {
   if (item?.type === "RDO Line" && item.ghostBid) return "Ghost Line";
   if (item?.type === "Leave" && item.ghostBid) return "Ghost Leave";
+  if (item?.type === "Leave" && isGlLeaveItem(item)) return "GL Bid";
   return item?.type || "Bid";
 }
 
@@ -4218,7 +4237,9 @@ function queueBidSubmittedEmail(items) {
     const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
     return `${prefix}${bidTypeLabel(item)} bid details: ${bidEmailDetail(item)}`;
   }).join("\n");
-  const subjectType = submissions.length > 1 ? `${submissions.length} ${first.ghostBid ? "ghost leave" : "leave"} bids` : `${bidTypeLabel(first)} bid`;
+  const subjectType = submissions.length > 1
+    ? `${submissions.length} ${first.ghostBid ? "ghost leave" : isGlLeaveItem(first) ? "GL" : "leave"} bids`
+    : `${bidTypeLabel(first)} bid`;
 
   queueNotificationEmail(
     bidRecipientEmail(first),
@@ -4526,7 +4547,7 @@ function captureIntakeOverrideFields(item) {
   item.range = editor.querySelector("[data-override-range]")?.value || item.range;
   item.days = Number(editor.querySelector("[data-override-days]")?.value || item.days);
   item.leaveCapacityOverride = Boolean(editor.querySelector("[data-override-capacity]")?.checked);
-  item.summary = `${item.ghostBid ? "Ghost Leave · " : ""}${item.range} · ${item.days} days`;
+  item.summary = `${item.ghostBid ? "Ghost Leave · " : isGlLeaveItem(item) ? "GL Bid · " : ""}${item.range} · ${item.days} days`;
 }
 
 async function supabaseSubmissionIdForIntakeItem(item) {
@@ -5117,6 +5138,7 @@ function openPublicDateSheet(button) {
       return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
         ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
     }).join("")}
+    ${(details.glBids || []).length ? `<section class="gl-bid-detail"><h3>GL Bids · no slots used</h3>${details.glBids.map((bid) => `<div class="slot-row gl-bid-row"><span>GL Bid</span><b>${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b></div>`).join("")}</section>` : ""}
     ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
   sheet.showModal();
 }
@@ -5327,9 +5349,14 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   );
   const expandedSlots = Boolean(options.expandedSlots);
   const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
+  const visibleSlotDetails = hasDetail
+    ? context ? cachedVisibleLeaveSlotDetails(key, context) : visibleLeaveSlotDetails(key, options.area)
+    : null;
+  const glBids = visibleSlotDetails?.glBids || [];
+  const hasGlBid = glBids.length > 0;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots, context?.slotBucket || options.slotBucket || null)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots, context?.slotBucket || options.slotBucket || null)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5341,6 +5368,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     isApprovedLeave ? "leave-day" : "",
     isRdo ? "rdo-day" : "",
     isClosed ? "closed-day" : "",
+    hasGlBid ? "has-gl-bid" : "",
     fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
     nextFatigueClass ? `fatigue-split fatigue-to-${nextFatigueClass}` : "",
     hasDetail ? "has-slot-detail" : "",
@@ -5351,7 +5379,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
     : `Group ${fatigueGroup} fatigue week`;
   const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
-  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`);
+  const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
+  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5372,8 +5401,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       ${expandedSlots ? `
         <span class="expanded-day-heading">
           <span class="date-number" data-day-number="${day}">${label}</span>
+          ${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}
         </span>
-      ` : `<span class="date-number">${label}</span>`}
+      ` : `<span class="date-number">${label}</span>${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}`}
       ${slotTooltip}
     </button>
   `;
@@ -5600,6 +5630,7 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
     area: details.area || area,
     cpc: details.cpc || [],
     dev: details.dev || [],
+    glBids: details.glBids || [],
     holiday: details.holiday || isHolidayDate(key),
     holidayInLieu,
   };
@@ -5657,6 +5688,7 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: devCapacity }, (_, index) => details.dev[index] || "");
+  const glBids = details.glBids || [];
   const renderSlotRow = (prefix, value, index) => {
     const slotLabel = `${prefix}${index + 1}`;
     const displayValue = value ? escapeHtml(value) : "Open";
@@ -5682,6 +5714,11 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
           <span class="tooltip-slot-heading">DEV</span>
           ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
         ` : ""}
+        ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
+          <span class="tooltip-slot-row gl-bid-row filled">
+            <span class="tooltip-slot-name">GL Bid</span>
+            <b class="tooltip-slot-value">${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b>
+          </span>`).join("")}` : ""}
       </span>
     </span>
   `;
@@ -6770,6 +6807,13 @@ function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
       label: formatCalendarDate(date),
       cpc: Array.isArray(row.cpc_initials) ? row.cpc_initials.filter(Boolean) : [],
       dev: Array.isArray(row.dev_initials) ? row.dev_initials.filter(Boolean) : [],
+      glBids: Array.isArray(row.gl_bids)
+        ? row.gl_bids.map((bid) => ({
+          initials: String(bid?.initials || "").trim().toUpperCase(),
+          status: uiStatusFromDatabase(bid?.status || "pending"),
+          label: "GL Bid",
+        })).filter((bid) => bid.initials)
+        : [],
       cpcCapacity,
       devCapacity,
       cpcOpen: Math.min(cpcCapacity, Math.max(0, Number(row.cpc_open) || 0)),
@@ -6790,6 +6834,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const days = Number(row.charged_days || 0);
   const ghostBid = Boolean(row.is_ghost_bid);
+  const bidAs = normalizeBidRoleForArea(bidder.bid_role || "CPC", area);
 
   return {
     id: `supabase-leave-${row.id}`,
@@ -6806,7 +6851,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
       initials: bidder.initials,
     }),
     initials: bidder.initials || "",
-    bidAs: normalizeBidRoleForArea(bidder.bid_role || "CPC", area),
+    bidAs,
     seniority: bidder.seniority_rank,
     priority: Number(row.priority || 0),
     status: uiStatusFromDatabase(row.status),
@@ -6821,7 +6866,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     weekKeys,
     weekBucketStarts: row.weekBucketStarts || [],
     notes: row.notes || "",
-    summary: `${ghostBid ? "Ghost Leave · " : ""}${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
+    summary: `${ghostBid ? "Ghost Leave · " : bidAs === "GL" ? "GL Bid · " : ""}${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
   };
 }
 
@@ -8989,7 +9034,7 @@ function renderLeaveRows(targetId) {
         <tr>
           <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
         </tr>
@@ -8998,7 +9043,7 @@ function renderLeaveRows(targetId) {
         <tr>
           <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td>
             <span class="status ${bid.status.toLowerCase()}">${bid.status}</span>
@@ -9038,7 +9083,7 @@ function renderLeaveDraftQueue() {
       <article class="leave-draft-item">
         <span>${index + 1}</span>
         <div>
-          <strong>${currentUser.ghostBidder ? '<span class="ghost-bid-badge">Ghost Leave</span> ' : ''}${escapeHtml(item.range)}</strong>
+          <strong>${currentUser.ghostBidder ? '<span class="ghost-bid-badge">Ghost Leave</span> ' : currentUserBidAs() === "GL" ? '<span class="gl-bid-badge">GL Bid</span> ' : ''}${escapeHtml(item.range)}</strong>
           <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged</small>
           ${item.notes ? `<em>${escapeHtml(item.notes)}</em>` : ""}
         </div>
@@ -13121,7 +13166,7 @@ function renderOverrideEditor(item) {
     <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
     <label>Days <input type="number" value="${item.days}" data-override-days ${pending ? "" : "readonly"} /></label>
     ${pending ? "" : "<small>Charged days are recalculated from the replacement range.</small>"}
-    ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : `<label class="override-check">
+    ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : isGlLeaveItem(item) ? '<p class="gl-bid-badge">GL Bid · Visible on the calendar; no area slot is consumed.</p>' : `<label class="override-check">
       <input type="checkbox" data-override-capacity ${item.leaveCapacityOverride ? "checked" : ""} />
       Approve even though one or more dates are full
     </label>`}
@@ -13647,6 +13692,7 @@ function renderIntakeQueueWithCache() {
             <span>Seniority #${item.seniority}</span>
             <span>Bid as ${item.bidAs}</span>
             ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
+            ${item.type === "Leave" && isGlLeaveItem(item) ? `<span class="gl-bid-badge">GL Bid · visible, no slot used</span>` : ""}
             ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
             <span>Submitted ${item.submittedAt}</span>
           </div>
@@ -13834,13 +13880,13 @@ function biddingExportRows() {
 
   leaveBids.forEach((bid) => {
     rows.push([
-      bid.ghostBid ? "Ghost Leave" : "Leave Queue",
+      bid.ghostBid ? "Ghost Leave" : isGlLeaveItem(bid) ? "GL Bid" : "Leave Queue",
       currentUser.area,
       userFullName(),
       currentUser.initials,
       currentUserBidAs(),
       bid.status,
-      `${bid.ghostBid ? "Ghost Leave · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
+      `${bid.ghostBid ? "Ghost Leave · " : isGlLeaveItem(bid) ? "GL Bid · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
       "",
       "",
     ]);
