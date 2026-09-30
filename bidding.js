@@ -7458,8 +7458,8 @@ function syncIntakeShiftForm(form, options = {}) {
   const dateInput = form.querySelector("[data-intake-shift-date]");
   const timeInput = form.querySelector("[data-intake-shift-time]");
   const durationInput = form.querySelector("[data-intake-shift-duration]");
-  const startInput = form.querySelector("[data-schedule-start], [data-admin-schedule-start]");
-  const endInput = form.querySelector("[data-schedule-end], [data-admin-schedule-end]");
+  const startInput = form.querySelector("[data-schedule-start]");
+  const endInput = form.querySelector("[data-schedule-end]");
   if (!dateInput || !timeInput || !durationInput || !startInput || !endInput) return;
 
   if (!dateInput.value) {
@@ -10172,12 +10172,8 @@ function renderLeaveBucketCards() {
   setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
 }
 
-function syncAdminScheduleFormDefaults() {
-  syncIntakeShiftForm(document.querySelector("[data-admin-schedule-start]")?.closest(".schedule-form"));
-}
-
-function setAdminScheduleStatus(message, status = "info") {
-  const target = document.querySelector("[data-admin-schedule-status]");
+function setIntakeTeamStatus(message, status = "info") {
+  const target = document.querySelector("[data-intake-team-status]");
   if (!target) return;
   target.textContent = message;
   target.dataset.status = status;
@@ -10336,7 +10332,6 @@ function renderRosterSelect(selector, people, selectedInitials = "") {
 function syncIntakeTeamControls() {
   const teamPeople = intakeTeamMembers();
   renderIntakeTeamCandidateSearch();
-  renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
   renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
 }
 
@@ -10359,20 +10354,20 @@ async function addSelectedBueToIntakeTeam() {
   const initials = selectedIntakeTeamCandidateInitials;
   const person = bueByInitials(initials);
   if (!person) {
-    setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
+    setIntakeTeamStatus("Choose a BUE to add to the intake team.", "error");
     return;
   }
 
-  setAdminScheduleStatus(`Adding ${personDisplayName(person)} to the intake team...`);
+  setIntakeTeamStatus(`Adding ${personDisplayName(person)} to the intake team...`);
   try {
     await saveIntakeTeamMember(person.initials, true);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
     intakeTeamCandidateQuery = "";
     selectedIntakeTeamCandidateInitials = "";
     renderApp();
-    setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
+    setIntakeTeamStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
   } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake team could not be updated.", "error");
+    setIntakeTeamStatus(error.message || "The intake team could not be updated.", "error");
   }
 }
 
@@ -10380,18 +10375,18 @@ async function removeBueFromIntakeTeam(initials) {
   if (!hasSystemAdminAccess()) return;
   const person = bueByInitials(initials);
   if (!person || person.initials === currentUser.initials) {
-    setAdminScheduleStatus("That intake team member cannot be removed here.", "error");
+    setIntakeTeamStatus("That intake team member cannot be removed here.", "error");
     return;
   }
 
-  setAdminScheduleStatus(`Removing ${personDisplayName(person)} from the intake team...`);
+  setIntakeTeamStatus(`Removing ${personDisplayName(person)} from the intake team...`);
   try {
     await saveIntakeTeamMember(person.initials, false);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} removed ${person.initials} from the intake team.`);
     renderApp();
-    setAdminScheduleStatus(`${personDisplayName(person)} was removed from future intake scheduling choices in Supabase.`, "success");
+    setIntakeTeamStatus(`${personDisplayName(person)} was removed from future intake scheduling choices in Supabase.`, "success");
   } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake team could not be updated.", "error");
+    setIntakeTeamStatus(error.message || "The intake team could not be updated.", "error");
   }
 }
 
@@ -11731,6 +11726,7 @@ function renderAdminConsole() {
         </div>
         <button class="primary-action small" type="button" data-add-intake-team-member disabled>Add to Team</button>
       </div>
+      <p class="form-status" data-intake-team-status role="status" aria-live="polite"></p>
       <div class="intake-team-list" data-intake-team-list>
         ${teamPeople.map((person) => {
           const scheduledCount = intakeSchedules.filter((schedule) => schedule.initials === person.initials).length;
@@ -11757,9 +11753,7 @@ function renderAdminConsole() {
 
 function renderAdminToolsPage() {
   if (!hasSystemAdminAccess()) return;
-  syncAdminScheduleFormDefaults();
   renderRuleEditors();
-  renderManualBidEntry();
   renderEmailLog();
   syncBidWindowTestingControls();
   syncPilotControls();
@@ -12117,48 +12111,6 @@ async function deleteIntakeSchedule(scheduleId) {
   } finally {
     setIntakeScheduleMutationPending(false);
     syncIntakeScheduleEditorControls();
-  }
-}
-
-async function addAdminScheduleFromForm() {
-  if (!hasSystemAdminAccess()) {
-    setAdminScheduleStatus("Only system admins can schedule intake reps from this page.", "error");
-    return;
-  }
-
-  const initials = (document.querySelector("[data-admin-schedule-rep]")?.value || "").trim().toUpperCase();
-  const area = INTAKE_SCHEDULE_AREA;
-  const startRaw = document.querySelector("[data-admin-schedule-start]")?.value || "";
-  const endRaw = document.querySelector("[data-admin-schedule-end]")?.value || "";
-  const start = new Date(startRaw);
-  const end = new Date(endRaw);
-
-  if (!initials) {
-    setAdminScheduleStatus("Add at least one BUE to the intake team before scheduling a shift.", "error");
-    return;
-  }
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
-    setAdminScheduleStatus("Choose a valid start and end time.", "error");
-    return;
-  }
-
-  if (!intakeTeamInitials.has(initials)) {
-    setAdminScheduleStatus("Choose someone from the intake team before adding a shift.", "error");
-    return;
-  }
-
-  const person = bueByInitials(initials);
-  const name = personDisplayName(person) || initials;
-
-  setAdminScheduleStatus(`Saving ${name}'s intake shift...`);
-  try {
-    await saveIntakeScheduleToSupabase(initials, start, end);
-    logHistory(area, "Intake shift scheduled", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
-    renderApp();
-    setAdminScheduleStatus(`${name} is scheduled in Supabase. Intake access will open 15 minutes before the shift.`, "success");
-  } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake shift could not be saved.", "error");
   }
 }
 
@@ -14928,11 +14880,6 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-add-intake-schedule]")) {
     await addIntakeScheduleFromForm();
-    return;
-  }
-
-  if (event.target.closest("[data-admin-add-intake-schedule]")) {
-    await addAdminScheduleFromForm();
     return;
   }
 
