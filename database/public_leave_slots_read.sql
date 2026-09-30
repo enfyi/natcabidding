@@ -67,7 +67,29 @@ as $$
     join target_year on target_year.id = slot.bid_year_id
     group by slot.bid_year_id, slot.area_id, slot.slot_date
   ),
-  schedule as (
+  gl_overlay as (
+    select
+      request.bid_year_id,
+      bidder.area_id,
+      request_date.leave_date as slot_date,
+      jsonb_agg(
+        jsonb_build_object(
+          'initials', bidder.initials,
+          'status', request.status,
+          'label', 'GL Bid'
+        )
+        order by bidder.initials, request.id
+      ) as gl_bids
+    from public.leave_requests request
+    join target_year on target_year.id = request.bid_year_id
+    join public.bidders bidder on bidder.id = request.bidder_id
+    join public.leave_request_dates request_date on request_date.leave_request_id = request.id
+    where bidder.bid_role = 'GL'
+      and request.status in ('pending', 'approved')
+      and not request_date.is_rdo
+    group by request.bid_year_id, bidder.area_id, request_date.leave_date
+  ),
+  base_schedule as (
     select
       coalesce(capacity.bid_year_id, slots.bid_year_id) as bid_year_id,
       coalesce(capacity.area_id, slots.area_id) as area_id,
@@ -92,6 +114,25 @@ as $$
      and capacity.slot_date = slots.slot_date
     join target_year
       on target_year.id = coalesce(capacity.bid_year_id, slots.bid_year_id)
+  ),
+  schedule as (
+    select
+      coalesce(base.bid_year_id, gl.bid_year_id) as bid_year_id,
+      coalesce(base.area_id, gl.area_id) as area_id,
+      coalesce(base.slot_date, gl.slot_date) as slot_date,
+      coalesce(base.cpc_capacity, 0) as cpc_capacity,
+      coalesce(base.dev_capacity, 0) as dev_capacity,
+      coalesce(base.cpc_open, 0) as cpc_open,
+      coalesce(base.dev_open, 0) as dev_open,
+      coalesce(base.cpc_initials, '[]'::jsonb) as cpc_initials,
+      coalesce(base.dev_initials, '[]'::jsonb) as dev_initials,
+      coalesce(gl.gl_bids, '[]'::jsonb) as gl_bids,
+      coalesce(base.unavailable, false) as unavailable
+    from base_schedule base
+    full join gl_overlay gl
+      on gl.bid_year_id = base.bid_year_id
+     and gl.area_id = base.area_id
+     and gl.slot_date = base.slot_date
   )
   select coalesce(
     jsonb_agg(
@@ -105,6 +146,7 @@ as $$
         'dev_open', schedule.dev_open,
         'cpc_initials', schedule.cpc_initials,
         'dev_initials', schedule.dev_initials,
+        'gl_bids', schedule.gl_bids,
         'unavailable', schedule.unavailable
       )
       order by area.display_order, schedule.slot_date
@@ -119,4 +161,4 @@ revoke all on function public.read_public_leave_slots(integer) from public, anon
 grant execute on function public.read_public_leave_slots(integer) to anon, authenticated;
 
 comment on function public.read_public_leave_slots(integer) is
-  'Returns the complete Supabase leave-slot schedule, including saved daily capacity overrides, as one JSON payload.';
+  'Returns the complete Supabase leave-slot schedule plus visible, non-capacity GL bid overlays as one JSON payload.';

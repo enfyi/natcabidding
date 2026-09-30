@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -193,6 +193,7 @@
               <span><i class="previous-leave-year"></i> 2026 Leave Year</span>
               <span><i class="holiday"></i> Holiday</span>
               <span><i class="closed"></i> Leave Slots Full</span>
+              <span><i class="gl-bid">*</i> GL Bid</span>
             </div>
           </div>
         </section>
@@ -250,6 +251,10 @@
             <span class="nav-icon">⚙</span>
             Admin
           </button>
+          <button class="nav-item" type="button" data-page="admin-tools" data-system-admin-only hidden>
+            <span class="nav-icon">≡</span>
+            Bidding Setup
+          </button>
         </nav>
 
         <details class="mobile-app-menu">
@@ -263,6 +268,7 @@
             <button class="nav-item" type="button" data-page="intake" data-admin-only hidden><span class="nav-icon">!</span>Intake<span class="nav-badge" data-intake-count>0</span></button>
             <button class="nav-item" type="button" data-page="intake-schedule" data-intake-rep-only hidden><span class="nav-icon">◫</span>Intake Schedule</button>
             <button class="nav-item" type="button" data-page="admin" data-system-admin-only hidden><span class="nav-icon">⚙</span>Admin</button>
+            <button class="nav-item" type="button" data-page="admin-tools" data-system-admin-only hidden><span class="nav-icon">≡</span>Bidding Setup</button>
             <button class="nav-item" type="button" data-help-toggle><span class="nav-icon">?</span>Live Help</button>
             <button class="nav-item danger" type="button" data-log-out><span class="nav-icon">↪</span>Log Out</button>
           </div>
@@ -451,6 +457,7 @@
                 <span><i class="holiday"></i> Holiday</span>
                 <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
                 <span><i class="closed"></i> Leave Slots Full</span>
+                <span><i class="gl-bid">*</i> GL Bid</span>
               </div>
             </section>
 
@@ -705,6 +712,7 @@
                 <span><i class="holiday"></i> Holiday</span>
                 <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
                 <span><i class="closed"></i> Leave Slots Filled</span>
+                <span><i class="gl-bid">*</i> GL Bid</span>
               </div>
               <section class="leave-bids-detail-panel">
                 <div class="panel-header compact">
@@ -864,6 +872,7 @@
               <span><i class="holiday"></i> Holiday</span>
               <span><i class="holiday-in-lieu"></i> Holiday In-Lieu</span>
               <span><i class="closed"></i> Leave Slots Filled</span>
+              <span><i class="gl-bid">*</i> GL Bid</span>
             </div>
           </section>
         </section>
@@ -1257,9 +1266,6 @@
             <button type="button" data-admin-section-target="admin-bid-window-section">Bid windows</button>
             <button type="button" data-admin-section-target="admin-roster-section">Roster</button>
             <button type="button" data-admin-section-target="admin-access-section">Access</button>
-            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
-            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
-            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
           </nav>
           <div class="workspace-grid admin-workspace">
             <section class="panel admin-console-panel">
@@ -1503,8 +1509,26 @@
                 <div class="admin-user-list" data-admin-user-list></div>
               </section>
             </section>
-            <aside class="right-stack">
-              <section class="panel bid-window-testing-card" data-system-admin-only hidden>
+          </div>
+        </section>
+
+        <section class="page" id="admin-tools-page" data-page-panel="admin-tools">
+          <header class="admin-tools-page-header">
+            <div>
+              <h2>Bidding Setup</h2>
+              <p>Manage bidding policy, pilot rounds, rules, intake scheduling, and administrative data.</p>
+            </div>
+            <span class="pill open">System Admin</span>
+          </header>
+          <nav class="admin-section-nav" aria-label="Bidding setup sections">
+            <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
+            <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
+            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
+            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
+            <button type="button" data-admin-section-target="admin-export-section">Data</button>
+          </nav>
+          <div class="admin-tools-page-grid">
+              <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
                     <h3>Bid Window Policy</h3>
@@ -1527,7 +1551,7 @@
                   </select>
                 </label>
               </section>
-              <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
+              <section class="panel bid-window-testing-card admin-section-target" id="admin-pilot-section" tabindex="-1" data-system-admin-only data-pilot-admin-card hidden>
                 <div class="panel-header compact">
                   <div>
                     <h3>Pilot Access and Rounds</h3>
@@ -1549,6 +1573,8 @@
                 <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="2" disabled /><span>Round 2 bidding on</span></label>
                 <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="3" disabled /><span>Round 3 bidding on</span></label>
                 <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="4" disabled /><span>Round 4 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="5" disabled /><span>Round 5 bidding on</span></label>
+                <label class="toggle-row"><input type="checkbox" data-pilot-round-toggle="6" disabled /><span>Round 6 bidding on</span></label>
                 <div class="button-row">
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
@@ -1564,7 +1590,7 @@
                 <div class="round-rule-editor" data-round-rule-editor></div>
                 <p class="form-status" data-round-rule-status role="status" aria-live="polite"></p>
               </section>
-              <section class="panel editable-rule-card">
+              <section class="panel editable-rule-card admin-section-target" id="admin-approval-rules-section" tabindex="-1">
                 <div class="panel-header compact">
                   <div>
                     <h3>Approval Rules</h3>
@@ -1619,160 +1645,7 @@
                   <p class="form-status" data-admin-schedule-status></p>
                 </div>
               </section>
-              <section class="panel manual-bid-card admin-section-target" id="admin-entry-section" tabindex="-1" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Manual Bid Entry</h3>
-                    <p>Enter an RDO or leave bid on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
-                  <label class="manual-controller-search">
-                    Find Controller
-                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
-                    <small data-manual-controller-search-status aria-live="polite"></small>
-                  </label>
-                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
-                  <label>
-                    Controller
-                    <select data-manual-bid-controller></select>
-                  </label>
-                  <label>
-                    Bid Type
-                    <select data-manual-bid-type>
-                      <option value="RDO Line">RDO Line</option>
-                      <option value="Leave">Leave</option>
-                    </select>
-                  </label>
-                  <label>
-                    Bid Area
-                    <select data-manual-bid-area></select>
-                  </label>
-                  <div class="manual-bid-fields" data-manual-rdo-fields>
-                    <label>
-                      RDO Line
-                      <select data-manual-rdo-line></select>
-                    </label>
-                    <label>
-                      Fatigue Group
-                      <select data-manual-fatigue-group>
-                        <option value="A">Group A</option>
-                        <option value="B">Group B</option>
-                        <option value="C">Group C</option>
-                        <option value="">No preference — assign later</option>
-                      </select>
-                    </label>
-                    <label class="manual-override-check wide">
-                      <input type="checkbox" data-manual-fatigue-override />
-                      Override full fatigue group
-                    </label>
-                    <label>
-                      Flex
-                      <select data-manual-flex>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </select>
-                    </label>
-                    <label>
-                      AWS
-                      <select data-manual-aws>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                      </select>
-                    </label>
-                    <label>
-                      Mid
-                      <select data-manual-mid></select>
-                    </label>
-                  </div>
-                  <div class="manual-bid-fields" data-manual-leave-fields hidden>
-                    <label class="wide">
-                      Leave Range
-                      <input type="text" placeholder="Jan 10 - Jan 16, 2027" data-manual-leave-range />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
-                  <p class="form-status" data-manual-bid-status></p>
-                </div>
-              </section>
-              <section class="panel manual-leave-request-card" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Requested Leave Dates</h3>
-                    <p>Submit requested leave dates on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
-                  <label class="manual-controller-search">
-                    Find Controller
-                    <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
-                    <small data-manual-controller-search-status aria-live="polite"></small>
-                  </label>
-                  <div class="manual-controller-results" role="listbox" aria-label="Matching controllers" data-manual-controller-results hidden></div>
-                  <label>
-                    Controller
-                    <select data-manual-bid-controller></select>
-                  </label>
-                  <select data-manual-bid-type hidden aria-hidden="true">
-                    <option value="Leave" selected>Leave</option>
-                  </select>
-                  <label>
-                    Bid Area
-                    <select data-manual-bid-area></select>
-                  </label>
-                  <div class="manual-bid-fields" data-manual-leave-fields>
-                    <label>
-                      Start Date
-                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-start />
-                    </label>
-                    <label>
-                      End Date
-                      <input type="date" min="2027-01-10" max="2028-01-08" data-manual-leave-end />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days data-manual-leave-days-auto readonly />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
-                  <p class="form-status" data-manual-bid-status></p>
-                </div>
-              </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
                 <h3>Database Export</h3>
                 <p>Download everything captured in this prototype.</p>
                 <div class="export-actions">
@@ -1780,11 +1653,10 @@
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
                 </div>
               </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-email-log-section" tabindex="-1">
                 <h3>Email Log</h3>
                 <div class="email-log" data-email-log></div>
               </section>
-            </aside>
           </div>
         </section>
 
@@ -1955,9 +1827,20 @@
       <header><h2 id="public-date-title">Leave slots</h2><button type="button" data-public-date-close>Close</button></header>
       <div data-public-date-content></div>
     </dialog>
+    <dialog class="late-bid-dialog" aria-labelledby="late-bid-dialog-title" aria-describedby="late-bid-dialog-description" data-late-bid-dialog>
+      <button class="late-bid-dialog-close" type="button" aria-label="Close bidding office contact dialog" data-late-bid-close>×</button>
+      <span class="late-bid-dialog-eyebrow">Bidding window closed</span>
+      <h2 id="late-bid-dialog-title">Contact the Bidding Office</h2>
+      <p id="late-bid-dialog-description">Your scheduled bid window has closed. Call or text the Bidding Office to complete your bid.</p>
+      <a class="late-bid-phone" href="tel:+16614341004">661-434-1004</a>
+      <div class="late-bid-dialog-actions">
+        <a class="primary-action" href="tel:+16614341004">Call Bidding Office</a>
+        <a class="secondary-action" href="sms:+16614341004">Text Bidding Office</a>
+      </div>
+    </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

@@ -59,7 +59,7 @@ begin
   if not private.is_current_admin() then
     raise exception 'Admin access is required.' using errcode = '42501';
   end if;
-  if requested_round not between 1 and 4 or requested_end <= requested_start then
+  if requested_round not between 1 and 6 or requested_end <= requested_start then
     raise exception 'Invalid bid-window values.';
   end if;
   if not exists (
@@ -236,8 +236,8 @@ begin
     if length(initials_value) > 12 then
       raise exception 'Row % initials must be 12 characters or fewer.', row_number;
     end if;
-    if jsonb_typeof(round_values) <> 'array' or jsonb_array_length(round_values) <> 4 then
-      raise exception 'Row % must contain exactly four round values.', row_number;
+    if jsonb_typeof(round_values) <> 'array' or jsonb_array_length(round_values) <> 6 then
+      raise exception 'Row % must contain exactly six round values.', row_number;
     end if;
 
     target_bidder_id := private.bidder_id_for_admin_bid_time_import(target_area_id, rank_value, initials_value);
@@ -249,7 +249,7 @@ begin
     imported_ranks := array_append(imported_ranks, rank_value);
     bidder_window_count := 0;
 
-    for round_number_value in 1..4
+    for round_number_value in 1..6
     loop
       start_value := nullif(trim(round_values ->> (round_number_value - 1)), '');
       if start_value is null then

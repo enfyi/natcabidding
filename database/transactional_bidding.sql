@@ -24,19 +24,19 @@ begin
     alter table public.bidders add constraint bidders_leave_slot_allowance_check check (leave_slot_allowance >= 0);
   end if;
   if not exists (select 1 from pg_constraint where conrelid = 'public.intake_submissions'::regclass and conname = 'intake_submissions_round_number_check') then
-    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 4);
+    alter table public.intake_submissions add constraint intake_submissions_round_number_check check (round_number between 1 and 6);
   end if;
 end
 $$;
 
 alter table public.bid_rounds drop constraint if exists bid_rounds_round_number_check;
-alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 4);
+alter table public.bid_rounds add constraint bid_rounds_round_number_check check (round_number between 1 and 6);
 alter table public.bid_windows drop constraint if exists bid_windows_round_number_check;
-alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 4);
+alter table public.bid_windows add constraint bid_windows_round_number_check check (round_number between 1 and 6);
 alter table public.leave_requests drop constraint if exists leave_requests_round_number_check;
-alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 4);
+alter table public.leave_requests add constraint leave_requests_round_number_check check (round_number between 1 and 6);
 alter table public.leave_credit_events drop constraint if exists leave_credit_events_round_number_check;
-alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 4);
+alter table public.leave_credit_events add constraint leave_credit_events_round_number_check check (round_number between 1 and 6);
 
 do $$
 begin
@@ -614,7 +614,17 @@ begin
       and now() >= bw.opens_at and now() < bw.closes_at
     order by bw.round_number
     limit 1;
-    if resolved_round is null then raise exception 'Your bidding window is not open.'; end if;
+    if resolved_round is null and exists (
+      select 1
+      from public.bid_windows bw
+      where bw.bid_year_id = year_row.id
+        and bw.bidder_id = target.id
+        and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    elsif resolved_round is null then
+      raise exception 'Your bidding window is not open.';
+    end if;
   end if;
 
   if enforce_bid_windows
@@ -844,7 +854,15 @@ begin
   if not manual_entry and enforce_bid_windows and not exists (
     select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
       and bw.round_number = batch_round and now() >= bw.opens_at and now() < bw.closes_at
-  ) then raise exception 'Your bidding window is not open.'; end if;
+  ) then
+    if exists (
+      select 1 from public.bid_windows bw where bw.bid_year_id = year_row.id and bw.bidder_id = target.id
+        and bw.round_number = batch_round and now() >= bw.closes_at
+    ) then
+      raise exception 'Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.';
+    end if;
+    raise exception 'Your bidding window is not open.';
+  end if;
 
   if batch_round = 1 then
     select coalesce(array_agg(distinct wb.bucket_start_date order by wb.bucket_start_date), array[]::date[])

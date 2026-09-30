@@ -2,7 +2,7 @@ import { BidLineImportError, readSpreadsheetRows } from './bid-line-import'
 import type { BidTimeImportPreview, BidTimeImportRow } from './bid-time-import-types'
 
 const MAX_IMPORT_ROWS = 500
-const ROUND_HEADERS = ['round_1_start', 'round_2_start', 'round_3_start', 'round_4_start'] as const
+const ROUND_HEADERS = ['round_1_start', 'round_2_start', 'round_3_start', 'round_4_start', 'round_5_start', 'round_6_start'] as const
 
 const HEADER_ALIASES: Record<string, string> = {
   rank: 'seniority_rank',
@@ -17,6 +17,10 @@ const HEADER_ALIASES: Record<string, string> = {
   round3: 'round_3_start',
   round_4: 'round_4_start',
   round4: 'round_4_start',
+  round_5: 'round_5_start',
+  round5: 'round_5_start',
+  round_6: 'round_6_start',
+  round6: 'round_6_start',
 }
 
 export class BidTimeImportError extends Error {

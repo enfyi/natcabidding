@@ -15,8 +15,8 @@ begin
   if actor.role not in ('admin', 'intake') and not exists (
     select 1 from public.bid_year_pilot_members m where m.bid_year_id = target_year and m.bidder_id = actor.id
   ) then raise exception 'Your account is not included in the current bidding pilot.'; end if;
-  if target_round is null or target_round not between 1 and 4 then
-    raise exception 'Choose a pilot bidding round from 1 through 4.';
+  if target_round is null or target_round not between 1 and 6 then
+    raise exception 'Choose a pilot bidding round from 1 through 6.';
   end if;
   if not target_round = any(settings.pilot_open_rounds) then
     raise exception 'Pilot Round % is turned off by an administrator.', target_round;
