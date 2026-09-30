@@ -9801,6 +9801,56 @@ video {
   margin-bottom: 16px;
 }
 
+.intake-bidder-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.intake-bidder-role {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: #0d0818;
+  background: #7abdc2;
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.intake-bidder-role[hidden] {
+  display: none;
+}
+
+.intake-bidder-role.gl {
+  color: #241707;
+  background: #ffdc86;
+}
+
+.intake-bidder-role.r-dev {
+  color: #ffffff;
+  background: #8b1c62;
+}
+
+.intake-bidder-role.d-dev {
+  color: #ffffff;
+  background: #c0569d;
+}
+
+.intake-bidder-role.tmc {
+  color: #14335f;
+  border-color: #b8ccef;
+  background: #dbe7ff;
+}
+
 .intake-bidder-summary {
   display: grid;
   grid-template-columns: minmax(190px, 1.4fr) repeat(5, minmax(110px, 1fr));
@@ -10005,6 +10055,11 @@ video {
 
   .intake-bidder-overview {
     padding: 16px;
+  }
+
+  .intake-bidder-badges {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .intake-bidder-summary {
