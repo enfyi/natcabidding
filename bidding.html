@@ -1502,7 +1502,6 @@
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
-            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
             <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
           </nav>
@@ -1580,47 +1579,6 @@
                   <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
                 </div>
                 <p class="form-status" data-approval-rule-status role="status" aria-live="polite"></p>
-              </section>
-              <section class="panel admin-section-target" id="admin-schedule-section" tabindex="-1">
-                <h3>Schedule Intake Rep</h3>
-                <p>Access opens 15 minutes before the shift starts.</p>
-                <div class="schedule-form">
-                  <label>
-                    Intake Team Member
-                    <select data-admin-schedule-rep></select>
-                  </label>
-                  <fieldset class="intake-shift-presets">
-                    <legend>Base Shift</legend>
-                    <div class="intake-shift-preset-buttons">
-                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
-                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
-                    </div>
-                  </fieldset>
-                  <div class="intake-shift-fields">
-                    <label>
-                      Start Date
-                      <input type="date" data-intake-shift-date />
-                    </label>
-                    <label>
-                      Start Time
-                      <input type="time" step="900" data-intake-shift-time />
-                    </label>
-                    <label>
-                      Shift Length
-                      <span class="schedule-duration-input">
-                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
-                        <span>hours</span>
-                      </span>
-                    </label>
-                  </div>
-                  <input type="hidden" data-admin-schedule-start />
-                  <label>
-                    Calculated End
-                    <input type="datetime-local" data-admin-schedule-end readonly />
-                  </label>
-                  <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
-                  <p class="form-status" data-admin-schedule-status></p>
-                </div>
               </section>
               <section class="panel manual-bid-card admin-section-target" id="admin-entry-section" tabindex="-1" data-manual-bid-panel>
                 <div class="panel-header compact">
