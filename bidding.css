@@ -4677,7 +4677,7 @@ tr.occupied-row .rdo-tag {
 }
 
 .leave-builder-status[data-status="error"] {
-  color: #991b1b;
+  color: var(--red);
 }
 
 .leave-builder label {
@@ -11013,4 +11013,56 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   .bid-change-footer .primary-action {
     grid-row: 1;
   }
+}
+
+/* Keep schedule badges visible on occupied and personal RDO lines. */
+.public-main .public-rdo-panel tr.occupied-row,
+.public-main .public-rdo-panel tr.occupied-row td,
+.app-main tr.occupied-row,
+.app-main tr.occupied-row td:nth-child(1),
+.app-main tr.occupied-row td:nth-child(2) {
+  background: #eef0f3;
+}
+
+.public-main tr.occupied-row .shift,
+.app-main tr.occupied-row .shift {
+  color: #172033;
+  background: #edf3f8;
+}
+
+.public-main tr.occupied-row .rdo-tag,
+.app-main tr.occupied-row .rdo-tag {
+  color: #14335f;
+  background: #dbe7ff;
+}
+
+.public-main tr.occupied-row .shift.special,
+.app-main tr.occupied-row .shift.special {
+  color: #073d41;
+  background: #cfeff1;
+}
+
+.public-main tr.occupied-row .shift.third-day-swing,
+.app-main tr.occupied-row .shift.third-day-swing {
+  color: #6f4b08;
+  background: var(--fatigue-b-soft);
+  border-color: var(--fatigue-b-line);
+}
+
+.app-main tr.own-rdo-row,
+.app-main tr.own-rdo-row td,
+.app-main tr.own-rdo-row td:nth-child(1),
+.app-main tr.own-rdo-row td:nth-child(2) {
+  color: #172033;
+  background: #e8e3fa;
+}
+
+.app-main tr.own-rdo-row {
+  outline: 2px solid #8b75c5;
+}
+
+.app-main .member-rdo-card.own-rdo-card {
+  background: #e8e3fa;
+  border-color: #8b75c5;
+  box-shadow: 0 0 0 2px rgba(139, 117, 197, 0.2);
 }
