@@ -87,6 +87,10 @@ assert.deepEqual(
   [{ initials: 'GL', status: 'Approved', label: 'GL Bid' }],
   'GL leave remains visible as an annotated calendar overlay',
 );
+assert.match(source, /class="gl-bid-marker"[^>]*>\*<\/span>/, 'GL calendar dates use the compact asterisk marker');
+
+const markup = readFileSync(new URL('../bidding.html', import.meta.url), 'utf8');
+assert.match(markup, /<i class="gl-bid">\*<\/i> GL Bid/, 'The calendar legend explains the GL asterisk marker');
 
 assert.match(source, /round >= 1 && round <= 6/);
 console.log('PASS ghost and GL bidders stay outside area totals while GL uses its personal balance through Round 6');

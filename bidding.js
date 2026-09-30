@@ -5401,9 +5401,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       ${expandedSlots ? `
         <span class="expanded-day-heading">
           <span class="date-number" data-day-number="${day}">${label}</span>
-          ${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used">GL</span>` : ""}
+          ${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}
         </span>
-      ` : `<span class="date-number">${label}</span>${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used">GL</span>` : ""}`}
+      ` : `<span class="date-number">${label}</span>${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}`}
       ${slotTooltip}
     </button>
   `;

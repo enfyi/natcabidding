@@ -2771,6 +2771,18 @@ input {
   background: var(--coral);
 }
 
+.legend .gl-bid {
+  display: inline-grid;
+  place-items: center;
+  color: #8a5700;
+  background: #fff1bd;
+  border: 1px solid #e0a92f;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .legend .previous-leave-year {
   background:
     repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
