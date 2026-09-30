@@ -54,4 +54,24 @@ assert.match(migration, /area_name = 'TMU' and bidder_role = 'TMC' then requeste
 assert.match(migration, /glLineTypeVerified/)
 assert.match(source, /glLineTypeVerified: item\.bidAs !== "GL" \|\| Boolean\(item\.glLineTypeVerified\)/)
 
+const allPathsMigration = fs.readFileSync(
+  new URL('../supabase/migrations/20260930220000_cover_all_rdo_bid_entry_paths.sql', import.meta.url),
+  'utf8',
+)
+assert.match(allPathsMigration, /create trigger intake_submissions_enforce_rdo_eligibility/)
+assert.match(allPathsMigration, /create trigger rdo_lines_enforce_assignment_eligibility/)
+assert.match(allPathsMigration, /GL bids do not populate RDO line assignments/)
+assert.match(allPathsMigration, /private\.save_bidder_editor\(integer,uuid,jsonb,jsonb\)/)
+assert.match(allPathsMigration, /gl_line_type_verified/)
+assert.match(allPathsMigration, /if editor_signature is null then return/)
+
+assert.match(source, /rdoLinesForBidder\(currentUserBidAs\(\), viewArea\)/)
+assert.match(source, /rdoLinesForBidder\(selectedPerson\.bidAs, area\)/)
+assert.match(source, /rdoLinesForBidder\(item\.bidAs, item\.area\)/)
+assert.match(source, /data-editor-gl-line-type-verification/)
+
+const adminEditorSql = fs.readFileSync(new URL('../database/admin_bidder_editor.sql', import.meta.url), 'utf8')
+assert.match(adminEditorSql, /public\.rdo_line_matches_bid_role\(target\.bid_role/)
+assert.match(adminEditorSql, /gl_line_type_verified/)
+
 console.log('PASS bid roles cannot cross line categories; GL can use CPC or DEV after intake verification')

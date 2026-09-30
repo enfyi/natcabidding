@@ -14300,7 +14300,9 @@ function bidderEditorDraft() {
   const field = (name) => form.querySelector(`[data-editor-field="${name}"]`)?.value;
   return {
     rdo: field('line_id') ? { line_id: field('line_id'), fatigue_group: field('fatigue_group'),
-      flex: field('flex') === 'true', aws: field('aws') === 'true', mid: field('mid') } : null,
+      flex: field('flex') === 'true', aws: field('aws') === 'true', mid: field('mid'),
+      gl_line_type_verified: bidderEditor.person?.bid_role !== 'GL'
+        || Boolean(form.querySelector('[data-editor-gl-line-type-verification]')?.checked) } : null,
     leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
       start_date: form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null,
       end_date: form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null,
@@ -14349,6 +14351,8 @@ function renderBidderEditorForm() {
   const select = (label, key, values, value) => `<label>${label}<select data-editor-field="${key}">${values.map(([v,l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(value) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select></label>`;
   const person = bidderEditor.person;
   const ghostBidder = Boolean(snapshot.is_ghost_bidder ?? person.is_ghost_bidder);
+  const selectedLine = lines.find(line => line.id === lineId);
+  const glLineCategory = selectedLine && /DEV/i.test(selectedLine.pattern) ? 'DEV' : person.area === 'TMU' ? 'TMC' : 'CPC';
   document.querySelector('[data-bidder-editor-form]').innerHTML = `
     <h3>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)} · ${escapeHtml(person.initials || 'No initials')}</h3>
     <p>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)} · Changes retain each bid’s current approval status.</p>
@@ -14363,7 +14367,11 @@ function renderBidderEditorForm() {
       ${select('Flex','flex',[[true,'Yes'],[false,'No']],initial.flex)}
       ${select('AWS','aws',[[true,'Yes'],[false,'No']],initial.aws)}
       ${select('Mid','mid',[['No','No'],['Yes','Yes'],['BID','BID']],initial.mid)}
-    </div></fieldset>
+    </div>
+    ${person.bid_role === 'GL' ? `<label class="override-check gl-line-type-verification">
+      <input type="checkbox" data-editor-gl-line-type-verification />
+      I verified this GL is bidding as <span data-editor-gl-line-type-label>${glLineCategory}</span>. All GL rules still apply.
+    </label>` : ''}</fieldset>
     ${[1,2,3,4,5].map(round => {
       const rows = snapshot.leave.filter(row => row.round_number === round);
       return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
@@ -14492,6 +14500,15 @@ document.addEventListener('input', (event) => {
 document.addEventListener('change', (event) => {
   if (event.target.matches('[data-editor-ghost-bidder]')) {
     bidderEditorStatus('Ghost bidding status has not been saved yet. Use the update button in that section.');
+  } else if (event.target.matches('[data-editor-field="line_id"]') && bidderEditor.person?.bid_role === 'GL') {
+    const selectedLine = bidderEditor.record?.lines.find(line => line.id === event.target.value);
+    const category = selectedLine && /DEV/i.test(selectedLine.pattern) ? 'DEV' : bidderEditor.person.area === 'TMU' ? 'TMC' : 'CPC';
+    const form = event.target.closest('[data-bidder-editor-form]');
+    const label = form?.querySelector('[data-editor-gl-line-type-label]');
+    const verification = form?.querySelector('[data-editor-gl-line-type-verification]');
+    if (label) label.textContent = category;
+    if (verification) verification.checked = false;
+    invalidateBidderEditor();
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('click', (event) => {

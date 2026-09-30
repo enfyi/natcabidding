@@ -130,6 +130,9 @@ declare
 begin
   if new.assigned_bidder_id is null then return new; end if;
   select * into strict target from public.bidders where id = new.assigned_bidder_id;
+  if target.bid_role = 'GL' then
+    raise exception 'GL bids do not populate RDO line assignments.';
+  end if;
   select a.name into strict target_area_name from public.areas a where a.id = target.area_id;
   if new.area_id is distinct from target.area_id
      or not public.rdo_line_matches_bid_role(

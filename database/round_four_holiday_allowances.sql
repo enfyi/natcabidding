@@ -2051,6 +2051,10 @@ begin
     raise exception 'Leave records were added or removed. Reload the bidder.';
   end if;
   line_change := changes->'rdo';
+  if target.bid_role = 'GL' and line_change is not null and line_change <> 'null'::jsonb
+     and not coalesce((line_change->>'gl_line_type_verified')::boolean,false) then
+    raise exception 'Verify whether this GL is bidding as CPC/TMC or DEV.';
+  end if;
   if line_change is not null and line_change <> 'null'::jsonb then
     select * into strict line_row from public.rdo_lines where id=(line_change->>'line_id')::uuid
       and bid_year_id=year_id and area_id=target.area_id;
