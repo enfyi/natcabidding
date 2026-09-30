@@ -13513,9 +13513,13 @@ function renderIntakeBidderDetail(person, rows) {
 function renderIntakeBidderSummary() {
   const target = document.querySelector("[data-intake-bidder-summary]");
   const area = document.querySelector("[data-intake-bidder-area]");
-  if (!target || !area) return;
+  const role = document.querySelector("[data-intake-bidder-role]");
+  if (!target || !area || !role) return;
   const person = selectedIntakeBidderPerson();
   if (!person) {
+    role.hidden = true;
+    role.textContent = "";
+    role.className = "intake-bidder-role";
     area.textContent = "Select a controller";
     target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>';
     renderIntakeBidderDetail({}, []);
@@ -13538,7 +13542,11 @@ function renderIntakeBidderSummary() {
   const scheduleLabel = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour schedule" : "8-hour schedule";
   const loadingNote = intakeBidderSelection.loading ? "Refreshing saved details…" : intakeBidderSelection.error;
   const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const bidRole = String(person.bidAs || "BUE").trim().toUpperCase();
 
+  role.hidden = false;
+  role.textContent = bidRole;
+  role.className = `intake-bidder-role ${bidAsClass(bidRole)}`;
   area.textContent = person.area || "Area";
   target.classList.toggle("intake-bidder-loading", intakeBidderSelection.loading);
   target.innerHTML =
