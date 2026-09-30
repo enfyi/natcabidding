@@ -7809,14 +7809,14 @@ function rdoFatigueGroupBadge(group) {
 }
 
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
-  if (!lines.length) return `<tr><td colspan="11">No RDO lines match those filters for ${area}.</td></tr>`;
+  if (!lines.length) return `<tr><td colspan="12">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
   const rows = [];
 
   lines.forEach((line) => {
     if (showPatternGroups && line.pattern !== lastPattern) {
-      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
+      rows.push(`<tr><th colspan="12">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
 
@@ -7827,6 +7827,7 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
         <td><b>${lineOccupant(line)}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
+        <td>${publicPreferenceCell(line.aws)}</td>
         <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
       </tr>
     `);
@@ -7861,6 +7862,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
                 <p>Fatigue group: ${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line)) || "Not assigned"}</p>
+                <p>AWS: ${publicPreferenceCell(line.aws) || "Not answered"}</p>
                 <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
               </details>
             `;
@@ -7874,6 +7876,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
                 <th>Bidder</th>
                 ${dayNames.map((day) => `<th>${day}</th>`).join("")}
                 <th>Group</th>
+                <th>AWS</th>
                 <th>Mid</th>
               </tr>
             </thead>
@@ -8786,7 +8789,7 @@ function renderRdoLines() {
 
   filteredLines.forEach((line) => {
     if (line.pattern !== lastPattern) {
-      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
+      rows.push(`<tr><th colspan="12">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
 
@@ -8806,6 +8809,7 @@ function renderRdoLines() {
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
+        <td>${publicPreferenceCell(line.aws)}</td>
         <td>${userChoiceCell(midValue)}</td>
       </tr>
     `);
@@ -8813,7 +8817,7 @@ function renderRdoLines() {
 
   target.innerHTML = rows.length
     ? rows.join("")
-    : `<tr><td colspan="11">No RDO lines match those filters for ${viewArea}.</td></tr>`;
+    : `<tr><td colspan="12">No RDO lines match those filters for ${viewArea}.</td></tr>`;
 
   const mobileCards = document.querySelector("[data-member-rdo-cards]");
   const mobileResults = document.querySelector("[data-member-rdo-results]");
@@ -8840,7 +8844,7 @@ function renderRdoLines() {
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
             <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
-            <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
+            <div class="member-rdo-card-footer"><span>AWS: ${publicPreferenceCell(line.aws) || "Not answered"} · Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
           </details>
         `;
       }).join("")
