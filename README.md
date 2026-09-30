@@ -91,7 +91,10 @@ practice bidding on or off, and reset the year's practice data. Reset keeps the
 roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
 participant list.
 
-Apply `database/pilot_round_controls.sql` after `pilot_mode.sql`. In Pilot Access
+Apply `database/pilot_round_controls.sql` after `pilot_mode.sql`, then apply
+`database/pilot_submission_window_fix.sql` to upgrade legacy RDO and leave
+submission functions. `scripts/test-pilot-submission-windows.sql` verifies both
+public submission RPCs in a transaction that rolls back all test data. In Pilot Access
 and Rounds, administrators can turn each of rounds 1–4 on or off independently.
 Authorized pilot participants choose an enabled round in the test-site banner
 and submit without scheduled hours. Both pilot access and the chosen round must
