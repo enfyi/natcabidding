@@ -596,7 +596,7 @@ let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().
 const annualMobileCalendars = new Set();
 let calendarRenderRevision = 0;
 let pendingPageCalendarFrame = 0;
-let publicRdoPresentation = "cards";
+let publicRdoPresentation = "table";
 let publicBidTimePresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
@@ -1758,7 +1758,7 @@ let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
 let intakeEditorReturnFocus = null;
-let memberRdoPresentation = "cards";
+let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
 const intakeFilters = {
   status: "all",
@@ -7376,7 +7376,10 @@ function rdoStickyHeaderElement() {
 }
 
 function rdoStickyHeaderTop() {
-  const publicHeader = document.querySelector(".public-shell:not([hidden]) .public-topbar");
+  const publicShell = document.querySelector(".public-shell:not([hidden])");
+  const publicHeader = publicShell
+    ? publicShell.querySelector(window.matchMedia("(max-width: 720px)").matches ? ".public-rail" : ".public-topbar")
+    : null;
   const memberHeader = document.querySelector(".app-shell:not([hidden]) .topbar");
   const header = publicHeader || memberHeader;
   if (!header || !["fixed", "sticky"].includes(getComputedStyle(header).position)) return 0;

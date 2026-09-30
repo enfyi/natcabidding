@@ -10334,6 +10334,11 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
     font-size: 0.7rem;
   }
 
+  .line-table.public-mobile-rdo-table {
+    width: 614px;
+    min-width: 614px;
+  }
+
   .member-rdo-table th,
   .member-rdo-table td,
   .line-table.public-mobile-rdo-table th,
@@ -10361,6 +10366,28 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
     left: 46px;
     width: 42px;
     min-width: 42px;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(2),
+  .line-table.public-mobile-rdo-table td:nth-child(2) {
+    width: 46px;
+    min-width: 46px;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(1),
+  .line-table.public-mobile-rdo-table th:nth-child(2) {
+    z-index: 4;
+    overflow: hidden;
+  }
+
+  .line-table.public-mobile-rdo-table th:nth-child(2) {
+    text-transform: none;
+  }
+
+  .line-table.public-mobile-rdo-table td:nth-child(1),
+  .line-table.public-mobile-rdo-table td:nth-child(2) {
+    z-index: 3;
+    overflow: hidden;
   }
 
   .member-rdo-table th:nth-child(n + 3):nth-child(-n + 9),
