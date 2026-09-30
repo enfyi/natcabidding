@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises'
 
 const sql = await readFile(new URL('../database/bid_line_import.sql', import.meta.url), 'utf8')
 const parser = await readFile(new URL('../lib/bid-line-import.ts', import.meta.url), 'utf8')
+const editorMigration = await readFile(new URL('../supabase/migrations/20260930180000_bid_line_editor.sql', import.meta.url), 'utf8')
+const editor = await readFile(new URL('../app/admin/bid-lines/bid-line-importer.tsx', import.meta.url), 'utf8')
+const bidding = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 
 assert.match(
   sql,
@@ -49,6 +52,23 @@ assert.match(
   /const requiredHeaders = \['line_code', 'four_ten'/,
   'four_ten must be a required import column',
 )
+
+assert.match(editorMigration, /add column if not exists display_order integer/, 'bid lines must persist a display order')
+assert.match(
+  editorMigration,
+  /create or replace function private\.admin_save_bid_line_impl[\s\S]*?if not \(select public\.is_current_admin\(\)\)/,
+  'line edits must run through an admin-checked security-definer function',
+)
+assert.match(
+  editorMigration,
+  /create or replace function private\.admin_reorder_bid_lines_impl[\s\S]*?if not \(select public\.is_current_admin\(\)\)/,
+  'line reordering must run through an admin-checked security-definer function',
+)
+assert.match(editor, /admin_save_bid_line/, 'the admin editor must save individual lines through the secure RPC')
+assert.match(editor, /admin_reorder_bid_lines/, 'the admin editor must persist reordered lines through the secure RPC')
+assert.match(editor, /Mid Bid line/, 'the admin editor must expose the Mid Bid designation')
+assert.match(editor, /R-DEV[\s\S]*D-DEV/, 'the admin editor must expose both development-line designations')
+assert.match(bidding, /displayOrder: row\.display_order/, 'the bidder view must load the persisted line order')
 assert.match(
   parser,
   /if \(!normalized\) \{\s*issues\.push\(`\$\{rowReference\(row\)\}: \$\{label\} must be Yes or No\.`\)/,

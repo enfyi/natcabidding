@@ -6637,6 +6637,13 @@ const RDO_LINE_CODE_COLLATOR = new Intl.Collator(undefined, {
 });
 
 function compareRdoLinesByCode(left, right) {
+  const leftOrder = Number(left.displayOrder);
+  const rightOrder = Number(right.displayOrder);
+  const leftHasOrder = Number.isFinite(leftOrder) && leftOrder > 0;
+  const rightHasOrder = Number.isFinite(rightOrder) && rightOrder > 0;
+  if (leftHasOrder && rightHasOrder && leftOrder !== rightOrder) return leftOrder - rightOrder;
+  if (leftHasOrder !== rightHasOrder) return leftHasOrder ? -1 : 1;
+
   const leftCode = String(left.line || "").trim();
   const rightCode = String(right.line || "").trim();
   const leftNumber = /^\d+$/.test(leftCode) ? Number(leftCode) : null;
@@ -6668,6 +6675,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       area,
       pattern: row.pattern,
       line: row.line_code,
+      displayOrder: row.display_order,
       lineType: row.line_type,
       cpc: row.assigned_initials || row.bidders?.initials || (row.assigned_bidder_id === currentUser?.supabaseProfileId ? currentUser.initials : ""),
       week: days.length === 7 ? days : Array.from({ length: 7 }, () => ""),
@@ -7304,7 +7312,7 @@ async function loadSupabaseReferenceData() {
       _helpThreadsLoaded,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
+      client.from("rdo_lines").select("id,area_id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
