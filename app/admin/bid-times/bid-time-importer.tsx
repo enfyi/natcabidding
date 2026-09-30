@@ -219,7 +219,7 @@ export function BidTimeImporter() {
         <div>
           <p className="eyebrow">System administration</p>
           <h1>Import bid times.</h1>
-          <p className="import-lede">Upload one area at a time, preview each bidder’s four rounds, then save the selected windows to Supabase.</p>
+          <p className="import-lede">Upload one area at a time, preview each bidder’s six rounds, then save the selected windows to Supabase.</p>
         </div>
         <a className="button secondary" href="/templates/zla-bid-time-import-template.xlsx" download>
           Download Excel template
@@ -291,7 +291,7 @@ export function BidTimeImporter() {
           <div className="import-table-wrap bid-time-import-table">
             <table>
               <thead>
-                <tr><th>Row</th><th>Rank</th><th>Initials</th><th>Round 1</th><th>Round 2</th><th>Round 3</th><th>Round 4</th></tr>
+                <tr><th>Row</th><th>Rank</th><th>Initials</th><th>Round 1</th><th>Round 2</th><th>Round 3</th><th>Round 4</th><th>Round 5</th><th>Round 6</th></tr>
               </thead>
               <tbody>
                 {preview.bidders.map((bidder) => (

@@ -23,6 +23,53 @@ returns integer language sql stable set search_path = '' as $function$
   )
 $function$;
 
+create or replace function private.area_leave_balance_days(
+  year_id uuid,
+  target_area_id uuid,
+  target_bucket text
+)
+returns table (total_days numeric, used_days integer, remaining_days numeric)
+language sql
+stable
+security invoker
+set search_path = ''
+as $function$
+  with eligible_bidders as (
+    select bidder.id, bidder.leave_slot_allowance
+    from public.bidders bidder
+    left join public.bidder_bid_year_settings bidder_settings
+      on bidder_settings.bid_year_id = year_id
+     and bidder_settings.bidder_id = bidder.id
+    where bidder.area_id = target_area_id
+      and bidder.active
+      and bidder.bid_role not in ('GL', 'ADM', 'NB')
+      and not coalesce(bidder_settings.is_ghost_bidder, false)
+      and case
+        when bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
+        else 'cpc'
+      end = target_bucket
+  ),
+  totals as (
+    select coalesce(sum(bidder.leave_slot_allowance), 0)::numeric / 8 as total_days
+    from eligible_bidders bidder
+  ),
+  usage as (
+    select coalesce(sum(request.charged_days), 0)::integer as used_days
+    from public.leave_requests request
+    join eligible_bidders bidder on bidder.id = request.bidder_id
+    where request.bid_year_id = year_id
+      and request.status in ('pending', 'approved')
+      and not request.is_ghost_bid
+  )
+  select totals.total_days,
+         usage.used_days,
+         greatest(totals.total_days - usage.used_days, 0)
+  from totals cross join usage
+$function$;
+
+revoke all on function private.area_leave_balance_days(uuid, uuid, text)
+from public, anon, authenticated;
+
 -- This live view calculates the allowance for every bidder before Round 4
 -- opens and stays accurate if an earlier bid is changed or cancelled.
 create or replace view private.round_four_allowances as
@@ -142,7 +189,7 @@ begin
        or end_date > make_date(year_row.bid_year + 1, 1, 8) then
       raise exception 'Leave must stay between Jan 10, % and Jan 8, %.', year_row.bid_year, year_row.bid_year + 1;
     end if;
-    if round_no is null or round_no not between 1 and 4 then raise exception 'Round must be between 1 and 4.'; end if;
+    if round_no is null or round_no not between 1 and 6 then raise exception 'Round must be between 1 and 6.'; end if;
     if batch_round is null then batch_round := round_no;
     elsif batch_round <> round_no then raise exception 'A leave batch must use one round.';
     end if;
@@ -194,7 +241,7 @@ begin
     end_date := (item->>'end_date')::date;
     round_no := (item->>'round')::integer;
     if start_date is null or end_date is null or end_date < start_date then raise exception 'Invalid leave date range.'; end if;
-    if round_no is null or round_no not between 1 and 4 then raise exception 'Round must be between 1 and 4.'; end if;
+    if round_no is null or round_no not between 1 and 6 then raise exception 'Round must be between 1 and 6.'; end if;
     if batch_round is null then batch_round := round_no;
     elsif batch_round <> round_no then raise exception 'A leave batch must use one round.';
     end if;
@@ -248,8 +295,8 @@ begin
       and round_number = batch_round and status in ('pending', 'approved');
     if batch_round in (2, 3) and committed_round_charged + batch_charged > private.round_two_three_limit_for_line(effective_rdo_line_id) then
       raise exception 'Round % can include at most % charged days total.', batch_round, private.round_two_three_limit_for_line(effective_rdo_line_id);
-    elsif batch_round = 4 and committed_round_charged + batch_charged > private.round_four_limit_for_line(effective_rdo_line_id) then
-      raise exception 'Round 4 can include at most % charged days total.', private.round_four_limit_for_line(effective_rdo_line_id);
+    elsif batch_round >= 4 and committed_round_charged + batch_charged > private.round_four_limit_for_line(effective_rdo_line_id) then
+      raise exception 'Round % can include at most % charged days total.', batch_round, private.round_four_limit_for_line(effective_rdo_line_id);
     end if;
   end if;
 
@@ -378,6 +425,9 @@ declare
   projected_leave_hours integer := 0;
   existing_round_usage integer := 0;
   round_leave_limit integer := 0;
+  area_total_days numeric := 0;
+  area_used_days integer := 0;
+  area_remaining_days numeric := 0;
   capacity_conflict_dates date[];
   duplicate_conflict_dates date[];
   conflict_date_labels text;
@@ -477,8 +527,8 @@ begin
       raise exception 'Leave must stay between Jan 10, % and Jan 8, %.',
         year_row.bid_year, year_row.bid_year + 1;
     end if;
-    if round_no not between 1 and 4 then
-      raise exception 'Round must be between 1 and 4.';
+    if round_no not between 1 and 6 then
+      raise exception 'Round must be between 1 and 6.';
     end if;
 
     if batch_round is null then
@@ -866,7 +916,7 @@ begin
     end if;
   end if;
 
-  if batch_round = 4 then
+  if batch_round >= 4 then
     select allowance.returned_days into available_credit_days
     from private.round_four_allowances allowance
     where allowance.bid_year_id = year_row.id and allowance.bidder_id = target.id;
@@ -875,6 +925,26 @@ begin
 
   maximum_leave_hours := target.leave_slot_allowance + (available_credit_days * leave_hours_per_day);
   projected_leave_hours := (existing_charged_days + requested_charged_days) * leave_hours_per_day;
+
+  if target.bid_role = 'GL'
+     and not public.is_ghost_bidder(year_row.id, target.id) then
+    select balance.total_days, balance.used_days, balance.remaining_days
+    into area_total_days, area_used_days, area_remaining_days
+    from private.area_leave_balance_days(year_row.id, target.area_id, target_bucket) balance;
+
+    if area_remaining_days <= 0 then
+      error_messages := array_append(
+        error_messages,
+        format(
+          '%s %s leave balance is exhausted (%s used of %s estimated days).',
+          target_area,
+          upper(target_bucket),
+          area_used_days,
+          area_total_days
+        )
+      );
+    end if;
+  end if;
 
   if projected_leave_hours > maximum_leave_hours then
     error_messages := array_append(
@@ -1368,7 +1438,7 @@ begin
   where request.id = request_row.id;
 
   leave_hours_per_day := private.leave_hours_for_line(target_rdo_line_id);
-  for check_round in 1..4 loop
+  for check_round in 1..6 loop
     select coalesce(sum(request.charged_days), 0) * leave_hours_per_day
     into used_hours
     from public.leave_requests request
@@ -1377,7 +1447,7 @@ begin
       and request.status in ('pending', 'approved')
       and request.round_number <= check_round;
     credit_days := 0;
-    if check_round = 4 then
+    if check_round >= 4 then
       credit_days := private.round_four_credit_days(request_row.bid_year_id, target.id);
     end if;
     if used_hours > target.leave_slot_allowance + credit_days * leave_hours_per_day then
@@ -2074,14 +2144,16 @@ begin
         round_no, private.round_two_three_limit_for_line(line_row.id);
     end if;
   end loop;
-  if (select coalesce(sum(charged_days),0) from public.leave_requests
-      where bid_year_id=year_id and bidder_id=target.id
-        and status in ('pending','approved') and round_number=4)
-     > private.round_four_limit_for_line(line_row.id) then
-    raise exception 'Round 4 exceeds the % day limit for this RDO line.',
-      private.round_four_limit_for_line(line_row.id);
-  end if;
-  for round_no in 1..5 loop
+  for round_no in 4..6 loop
+    if (select coalesce(sum(charged_days),0) from public.leave_requests
+        where bid_year_id=year_id and bidder_id=target.id
+          and status in ('pending','approved') and round_number=round_no)
+       > private.round_four_limit_for_line(line_row.id) then
+      raise exception 'Round % exceeds the % day limit for this RDO line.',
+        round_no, private.round_four_limit_for_line(line_row.id);
+    end if;
+  end loop;
+  for round_no in 1..6 loop
     select coalesce(sum(charged_days),0)*day_hours into used_hours from public.leave_requests
       where bid_year_id=year_id and bidder_id=target.id and status in ('pending','approved') and round_number<=round_no;
     credit_days := 0;

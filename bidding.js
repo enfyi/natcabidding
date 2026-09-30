@@ -1934,7 +1934,7 @@ function isAuthorizedPilotBidder() {
 
 function normalizeBidWindowTestRound(value) {
   const round = Number(value);
-  return Number.isInteger(round) && round >= 1 && round <= 4 ? round : null;
+  return Number.isInteger(round) && round >= 1 && round <= 6 ? round : null;
 }
 
 function activeTestBidRound() {
@@ -2902,7 +2902,7 @@ function orderedLeaveRangeKeys() {
 
 function usesIndividualLeaveDateSelection() {
   const round = currentRoundNumber();
-  return round >= 1 && round <= 4 && !leaveReplacementRequestId;
+  return round >= 1 && round <= 6 && !leaveReplacementRequestId;
 }
 
 function leaveBuilderDateKeys() {
@@ -3189,9 +3189,9 @@ function currentRoundLeaveLimit() {
 }
 
 function leaveDayLimitForRound(round, initials = currentUser.initials) {
-  if (round >= 2 && round <= 4) {
+  if (round >= 2 && round <= 6) {
     const line = submittedRdoLineForInitials(initials);
-    if (round === 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
+    if (round >= 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
     return rdoWeekdaysForLine(line).size === 3 ? 8 : 10;
   }
   return 5;
@@ -3210,11 +3210,11 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  if (round >= 2 && round <= 4) {
+  if (round >= 2 && round <= 6) {
     const line = submittedRdoLineForInitials();
     if (line) {
       const limit = leaveDayLimitForRound(round);
-      const creditDetail = round === 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
+      const creditDetail = round >= 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
       return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.${creditDetail}` };
     }
   }
@@ -3409,25 +3409,33 @@ function isGhostLeaveItem(item) {
   return Boolean(person?.ghostBidder || (!initials && currentUser.ghostBidder));
 }
 
+function isAreaLeaveBalanceExemptPerson(person) {
+  return Boolean(person?.ghostBidder || person?.bidAs === "GL");
+}
+
+function isAreaLeaveBalanceExemptItem(item) {
+  return isGhostLeaveItem(item) || leaveItemBidAs(item) === "GL";
+}
+
 function leaveSlotUnitsForItem() {
   return 1;
 }
 
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
-    .filter((person) => !person.ghostBidder && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
+    .filter((person) => !isAreaLeaveBalanceExemptPerson(person) && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
     .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -3501,13 +3509,13 @@ function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
 function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
   const bucket = leaveSlotBucketForBidAs(bidAs);
   if (!bucket) return "";
-  const total = areaLeaveSlotBudget(area, bucket);
-  const used = areaLeaveSlotUsed(area, bucket);
-  const projectedUsed = areaLeaveSlotUsed(area, bucket, extraItems);
-  if (projectedUsed <= total) return "";
+  const total = estimatedLeaveDaysFromHours(areaLeaveSlotBudget(area, bucket));
+  const used = areaLeaveSlotUsedDays(area, bucket);
+  const projectedUsed = bidAs === "GL" ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
+  if (bidAs === "GL" ? used < total : projectedUsed <= total) return "";
 
   const label = bucket === "dev" ? "DEV" : "CPC";
-  return `${area} ${label} leave slots are exhausted (${used} used of ${total}). No additional leave bids can be submitted in that bucket.`;
+  return `${area} ${label} leave balance is exhausted (${formatRoundedUpLeaveDays(used)} used of ${formatRoundedUpLeaveDays(total)} estimated days). No additional leave bids can be submitted in that bucket.`;
 }
 
 function leaveItemChargedDays(item) {
@@ -3772,7 +3780,7 @@ function addOrUpdateLeaveSubmission() {
 
   const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
-    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials },
+    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays },
   ]);
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
@@ -9404,7 +9412,7 @@ function openLeaveBuilderForMoreDates() {
   const round = currentRoundNumber();
   setLeaveBuilderStatus(round === 1
     ? "Select each additional Round 1 date individually, add the selection to the batch, and submit it before your window closes."
-    : round <= 4
+    : round <= 6
       ? `Select each additional Round ${round} date individually, add the selection to the batch, and submit it before your window closes.`
       : "Select another date range, add it to the batch, and submit it before your window closes.", "info");
 }
@@ -11326,7 +11334,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 4; round += 1) {
+  for (let round = 1; round <= 6; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -11348,7 +11356,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 4) {
+    if (round < 6) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -11406,7 +11414,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 4;
+  const windowCount = totalBues * 6;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -11477,7 +11485,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 4} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -11546,7 +11554,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 4,
+    requested_round_count: 6,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -11570,7 +11578,7 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 4} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
