@@ -5434,6 +5434,13 @@ tr.occupied-row .rdo-tag {
 }
 
 /* Minimal/full calendar detail tabs and permanently expanded annual slot view. */
+.calendar-view-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .calendar-layout-tabs {
   display: inline-flex;
   gap: 4px;
@@ -5442,6 +5449,14 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
   padding: 4px;
   background: #f1f5f9;
+}
+
+.calendar-workforce-tabs {
+  flex: 0 0 auto;
+}
+
+.calendar-workforce-tabs button {
+  min-width: 92px;
 }
 
 .calendar-layout-tabs button {
@@ -5574,7 +5589,19 @@ tr.occupied-row .rdo-tag {
 }
 
 @media (max-width: 720px) {
+  .calendar-view-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
   .calendar-layout-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .calendar-workforce-tabs,
+  .public-main .calendar-workforce-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
@@ -6234,7 +6261,36 @@ tr.occupied-row .rdo-tag {
 }
 
 .admin-workspace {
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-tools-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-tools-page-header h2,
+.admin-tools-page-header p {
+  margin: 0;
+}
+
+.admin-tools-page-header p {
+  margin-top: 4px;
+  color: #627080;
+}
+
+.admin-tools-page-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-tools-page-grid > .manual-bid-card,
+.admin-tools-page-grid > .manual-leave-request-card {
+  grid-column: 1 / -1;
 }
 
 .admin-user-list {
@@ -6569,14 +6625,24 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: end;
+  align-items: start;
   border: 1px solid #d7e3ef;
   border-radius: 8px;
   padding: 14px;
   background: #f8fafc;
 }
 
-.intake-team-add label {
+.intake-team-add > .primary-action {
+  margin-top: 22px;
+}
+
+.intake-team-candidate-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.intake-team-candidate-picker label {
   display: grid;
   gap: 6px;
   color: #64748b;
@@ -6584,7 +6650,7 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font-weight: 900;
 }
 
-.intake-team-add select {
+.intake-team-candidate-picker input {
   width: 100%;
   border: 1px solid #cbd8e6;
   border-radius: 8px;
@@ -6594,6 +6660,67 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font: inherit;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.intake-team-candidate-picker small {
+  min-height: 16px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.intake-team-candidate-results {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.intake-team-candidate-results[hidden] {
+  display: none;
+}
+
+.intake-team-candidate-results button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  color: #172033;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-team-candidate-results button:last-child {
+  border-bottom: 0;
+}
+
+.intake-team-candidate-results button:hover,
+.intake-team-candidate-results button:focus-visible {
+  background: #eef7f8;
+  outline: none;
+}
+
+.intake-team-candidate-results span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .intake-team-add {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-team-add > .primary-action {
+    width: 100%;
+    margin-top: 0;
+  }
 }
 
 .intake-team-list {
@@ -7500,6 +7627,18 @@ body {
 }
 
 @media (max-width: 900px) {
+  .admin-tools-page-header {
+    flex-direction: column;
+  }
+
+  .admin-tools-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tools-page-grid > * {
+    grid-column: auto;
+  }
+
   .slot-capacity-form,
   .bid-window-builder-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9277,6 +9416,11 @@ video {
     width: 100%;
   }
 
+  .public-main .calendar-workforce-tabs,
+  .calendar-workforce-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .public-main .segmented button,
   .segmented button[data-calendar-mode] {
     min-width: 0;
@@ -9384,48 +9528,44 @@ video {
 }
 
 @media (max-width: 720px) {
-  /* The public and dashboard Full views keep the standard seven-day week on
-     phones. Only the dedicated leave/member slot boards use the compact list. */
-  #leave-calendar.expanded-slots-calendar .month-card > .month-grid,
+  /* Public, dashboard, and leave Full views share seven-day weeks on phones.
+     The member slot board keeps its compact list; leave dates remain bid buttons. */
   #full-calendar.expanded-slots-calendar .month-card > .month-grid,
-  #leave-calendar.expanded-slots-calendar .leave-year-continuation-days,
   #full-calendar.expanded-slots-calendar .leave-year-continuation-days {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     min-width: 0 !important;
   }
 
-  #leave-calendar.expanded-slots-calendar .month-grid > .dow,
-  #leave-calendar.expanded-slots-calendar .month-grid > span:not(.dow),
   #full-calendar.expanded-slots-calendar .month-grid > .dow,
   #full-calendar.expanded-slots-calendar .month-grid > span:not(.dow) {
     display: none;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading > .date-number {
     font-size: 0;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading > .date-number::after {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading > .date-number::after {
     content: attr(data-day-number);
     font-size: 0.68rem;
   }
 
   #public-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day,
-  #dashboard-calendar.expanded-slots-calendar .month-grid > button.slot-expanded-day {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .month-grid > button.slot-expanded-day {
     min-height: 92px !important;
     padding: 4px;
   }
 
   #public-calendar.expanded-slots-calendar .expanded-day-heading,
-  #dashboard-calendar.expanded-slots-calendar .expanded-day-heading {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .expanded-day-heading {
     place-items: center;
     margin-bottom: 3px;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary {
     border: 0 !important;
     padding: 0 !important;
     background: transparent !important;
@@ -9435,28 +9575,28 @@ video {
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
     display: none !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
     align-content: start;
     gap: 3px !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.filled {
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 0 !important;
     min-height: 0 !important;
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value,
-  #dashboard-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value {
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-value {
     width: 100% !important;
     min-height: 18px !important;
     padding: 2px !important;

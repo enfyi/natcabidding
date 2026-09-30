@@ -79,8 +79,8 @@ begin
   if requested_review_days is null or requested_review_days not between 0 and 14 then
     raise exception 'Review days must be from 0 through 14.';
   end if;
-  if requested_round_count is null or requested_round_count not between 1 and 5 then
-    raise exception 'Round count must be from 1 through 5.';
+  if requested_round_count is null or requested_round_count not between 1 and 6 then
+    raise exception 'Round count must be from 1 through 6.';
   end if;
   if cardinality(blackout_dates) > 366 then
     raise exception 'No more than 366 blocked dates may be supplied.';

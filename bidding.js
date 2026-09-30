@@ -71,6 +71,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
   try {
@@ -150,6 +151,8 @@ let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
+let intakeTeamCandidateQuery = "";
+let selectedIntakeTeamCandidateInitials = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
@@ -592,6 +595,7 @@ let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "";
 let calendarMode = "combined";
+const calendarWorkforceOverrides = new Map();
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
@@ -1936,7 +1940,7 @@ function isAuthorizedPilotBidder() {
 
 function normalizeBidWindowTestRound(value) {
   const round = Number(value);
-  return Number.isInteger(round) && round >= 1 && round <= 4 ? round : null;
+  return Number.isInteger(round) && round >= 1 && round <= 6 ? round : null;
 }
 
 function activeTestBidRound() {
@@ -2926,7 +2930,7 @@ function orderedLeaveRangeKeys() {
 
 function usesIndividualLeaveDateSelection() {
   const round = currentRoundNumber();
-  return round >= 1 && round <= 4 && !leaveReplacementRequestId;
+  return round >= 1 && round <= 6 && !leaveReplacementRequestId;
 }
 
 function leaveBuilderDateKeys() {
@@ -3213,9 +3217,9 @@ function currentRoundLeaveLimit() {
 }
 
 function leaveDayLimitForRound(round, initials = currentUser.initials) {
-  if (round >= 2 && round <= 4) {
+  if (round >= 2 && round <= 6) {
     const line = submittedRdoLineForInitials(initials);
-    if (round === 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
+    if (round >= 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
     return rdoWeekdaysForLine(line).size === 3 ? 8 : 10;
   }
   return 5;
@@ -3425,25 +3429,33 @@ function isGhostLeaveItem(item) {
   return Boolean(person?.ghostBidder || (!initials && currentUser.ghostBidder));
 }
 
+function isAreaLeaveBalanceExemptPerson(person) {
+  return Boolean(person?.ghostBidder || person?.bidAs === "GL");
+}
+
+function isAreaLeaveBalanceExemptItem(item) {
+  return isGhostLeaveItem(item) || leaveItemBidAs(item) === "GL";
+}
+
 function leaveSlotUnitsForItem() {
   return 1;
 }
 
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
-    .filter((person) => !person.ghostBidder && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
+    .filter((person) => !isAreaLeaveBalanceExemptPerson(person) && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
     .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -3517,13 +3529,13 @@ function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
 function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
   const bucket = leaveSlotBucketForBidAs(bidAs);
   if (!bucket) return "";
-  const total = areaLeaveSlotBudget(area, bucket);
-  const used = areaLeaveSlotUsed(area, bucket);
-  const projectedUsed = areaLeaveSlotUsed(area, bucket, extraItems);
-  if (projectedUsed <= total) return "";
+  const total = estimatedLeaveDaysFromHours(areaLeaveSlotBudget(area, bucket));
+  const used = areaLeaveSlotUsedDays(area, bucket);
+  const projectedUsed = bidAs === "GL" ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
+  if (bidAs === "GL" ? used < total : projectedUsed <= total) return "";
 
   const label = bucket === "dev" ? "DEV" : "CPC";
-  return `${area} ${label} leave slots are exhausted (${used} used of ${total}). No additional leave bids can be submitted in that bucket.`;
+  return `${area} ${label} leave balance is exhausted (${formatRoundedUpLeaveDays(used)} used of ${formatRoundedUpLeaveDays(total)} estimated days). No additional leave bids can be submitted in that bucket.`;
 }
 
 function leaveItemChargedDays(item) {
@@ -3788,7 +3800,7 @@ function addOrUpdateLeaveSubmission() {
 
   const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
-    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials },
+    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays },
   ]);
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
@@ -4394,6 +4406,48 @@ function leaveSlotBucketForBidAs(bidAs) {
   return null;
 }
 
+function defaultCalendarWorkforce(scope) {
+  if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
+  return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
+}
+
+function calendarWorkforceStorageKey(scope) {
+  if (scope === "public") return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:public`;
+  const identity = currentUser?.supabaseProfileId || currentUser?.initials || "anonymous";
+  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:${scope}:${identity}`;
+}
+
+function calendarWorkforceForScope(scope) {
+  if (scope !== "public" && scope !== "dashboard" && scope !== "leave") return null;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  const currentOverride = calendarWorkforceOverrides.get(storageKey);
+  if (currentOverride === "cpc" || currentOverride === "dev") return currentOverride;
+
+  try {
+    const stored = window.sessionStorage?.getItem(storageKey);
+    if (stored === "cpc" || stored === "dev") {
+      calendarWorkforceOverrides.set(storageKey, stored);
+      return stored;
+    }
+  } catch (_error) {
+    // The automatic default still works when browser storage is unavailable.
+  }
+
+  return defaultCalendarWorkforce(scope);
+}
+
+function setCalendarWorkforceForScope(scope, workforce) {
+  if ((scope !== "public" && scope !== "dashboard" && scope !== "leave") || (workforce !== "cpc" && workforce !== "dev")) return;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  calendarWorkforceOverrides.set(storageKey, workforce);
+
+  try {
+    window.sessionStorage?.setItem(storageKey, workforce);
+  } catch (_error) {
+    // Keep the current render usable even when browser storage is unavailable.
+  }
+}
+
 function removeInitialsFromLeaveRange(range, initials) {
   datesInLeaveRange(range).forEach((key) => {
     const area = bueByInitials(initials)?.area || currentUser.area;
@@ -4436,7 +4490,7 @@ function leaveApprovalConflicts(item) {
   return leaveApprovalDates(item).filter((key) => {
     const details = leaveSlotsForDate(key, item.area || currentUser.area);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
+    return (bucket === "cpc" && fullLeaveDates.has(key)) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
 }
 
@@ -4930,10 +4984,11 @@ function cachedLeaveRead(key, read) {
   return leaveReadCache.get(key);
 }
 
-function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false, slotBucket = null }) {
   return {
     area,
     mode: calendarMode,
+    slotBucket,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
@@ -5092,6 +5147,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const slotBucket = calendarWorkforceForScope(calendarScope);
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
   const renderKey = [
     displayedCalendarYear,
@@ -5101,6 +5157,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     expandedSlots,
+    slotBucket,
   ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
 
@@ -5131,6 +5188,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     showPersonalLeave,
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
+    slotBucket,
   });
 
   target.innerHTML = monthIndexes
@@ -5261,16 +5319,17 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
+  const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
   const isClosed = canShowLeaveState && (
     baseSlotDetails
-      ? leaveSlotOpenCountForDetails(baseSlotDetails, "cpc") === 0 || (detailArea === "Area A" && fullLeaveDates.has(key))
-      : isLeaveSlotsFull(key, options.area)
+      ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
+      : isLeaveSlotsFull(key, options.area, availabilityBucket)
   );
   const expandedSlots = Boolean(options.expandedSlots);
   const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots, context?.slotBucket || options.slotBucket || null)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5291,7 +5350,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const fatigueStatus = nextFatigueGroup
     ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
     : `Group ${fatigueGroup} fatigue week`;
-  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
+  const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
+  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `View ${workforceLabel} leave slots`);
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5304,7 +5364,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
   const leaveDateAttribute = canShowLeaveState
     ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
-    : 'aria-disabled="true"';
+    : hasDetail ? "" : 'aria-disabled="true"';
 
   return `
     <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
@@ -5339,11 +5399,19 @@ function updateCalendarViewControls() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-selected", String(isActive));
   });
+  document.querySelectorAll("[data-calendar-workforce]").forEach((button) => {
+    const scope = button.dataset.calendarScope;
+    const isActive = calendarWorkforceForScope(scope) === button.dataset.calendarWorkforce;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
   document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
     const scope = description.dataset.calendarLayoutDescription;
+    const workforce = calendarWorkforceForScope(scope);
+    const workforceLabel = workforce === "dev" ? "developmental" : "CPC";
     description.textContent = calendarLayouts[scope] === "full"
-      ? "Every CPC and developmental slot is shown directly on each date."
-      : "Select a date to view its slots.";
+      ? workforce ? `Every ${workforceLabel} slot is shown directly on each date.` : "Every CPC and developmental slot is shown directly on each date."
+      : workforce ? `Select a date to view its ${workforceLabel} slots.` : "Select a date to view its slots.";
   });
 }
 
@@ -5434,6 +5502,7 @@ function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = 
       showRdo: showPersonalState,
       showPersonalLeave: showPersonalState,
       deferSlotTooltip: false,
+      slotBucket: calendarWorkforceForScope(scope),
     });
 
     uniqueKeys.forEach((key) => {
@@ -5565,9 +5634,9 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
   return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
-function isLeaveSlotsFull(key, area = currentUser.area) {
+function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, "cpc") === 0 || (area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key));
 }
 
 function slotRows(type, initials, capacity) {
@@ -5582,7 +5651,7 @@ function slotRows(type, initials, capacity) {
   }).join("");
 }
 
-function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
+function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false, slotBucket = null) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
@@ -5604,25 +5673,31 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
       ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
       ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
-        <span class="tooltip-slot-heading">CPC</span>
-        ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
-        <span class="tooltip-slot-rule"></span>
-        <span class="tooltip-slot-heading">Dev</span>
-        ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ${slotBucket !== "dev" ? `
+          <span class="tooltip-slot-heading">CPC</span>
+          ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
+        ` : ""}
+        ${!slotBucket ? '<span class="tooltip-slot-rule"></span>' : ""}
+        ${slotBucket !== "cpc" ? `
+          <span class="tooltip-slot-heading">DEV</span>
+          ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ` : ""}
       </span>
     </span>
   `;
 }
 
-function renderLeaveSlotBoard() {
-  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache());
+function renderLeaveSlotBoard(options = {}) {
+  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache(options));
 }
 
-function renderLeaveSlotBoardWithCache() {
+function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = currentViewArea(), inspectOnly = false } = {}) {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
-  const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
+  const details = inspectOnly
+    ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
+    : leaveSlotsForDate(key, area);
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -5668,8 +5743,8 @@ function renderLeaveSlotBoardWithCache() {
 
 let leaveSlotReturnFocus = null;
 
-function openLeaveSlotModal() {
-  renderLeaveSlotBoard();
+function openLeaveSlotModal(options = {}) {
+  renderLeaveSlotBoard(options);
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
   leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -5976,7 +6051,7 @@ function friendlyAuthFailure(error) {
 
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -5987,7 +6062,9 @@ function defaultLandingPageForRole() {
 
 function intendedLandingPage(requestedPage = requestedLandingPage()) {
   const defaultPage = defaultLandingPageForRole();
-  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "admin" || requestedPage === "admin-tools") {
+    return hasSystemAdminAccess() ? requestedPage : defaultPage;
+  }
   if (requestedPage === "intake" || requestedPage === "intake-schedule") {
     return canUseIntakeView() ? requestedPage : defaultPage;
   }
@@ -8013,7 +8090,7 @@ function pageForViewMode(mode) {
 }
 
 function viewModeForPage(pageName) {
-  if (pageName === "admin") return "admin";
+  if (pageName === "admin" || pageName === "admin-tools") return "admin";
   if (pageName === "intake" || pageName === "intake-schedule") return "intake";
   return "bue";
 }
@@ -9402,7 +9479,7 @@ function openLeaveBuilderForMoreDates() {
   const round = currentRoundNumber();
   setLeaveBuilderStatus(round === 1
     ? "Select each additional Round 1 date individually, add the selection to the batch, and submit it before your window closes."
-    : round <= 4
+    : round <= 6
       ? `Select each additional Round ${round} date individually, add the selection to the batch, and submit it before your window closes.`
       : "Select another date range, add it to the batch, and submit it before your window closes.", "info");
 }
@@ -10103,6 +10180,81 @@ function intakeTeamMembers() {
   return bueRoster().filter((person) => intakeTeamInitials.has(person.initials));
 }
 
+function availableIntakeTeamCandidates() {
+  return bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+}
+
+function intakeTeamCandidateMatches(person, query) {
+  if (!query) return true;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const searchable = [
+    rank,
+    Number.isFinite(rank) ? `#${rank}` : "",
+    Number.isFinite(rank) ? `seniority ${rank}` : "",
+    person.firstName,
+    person.lastName,
+    person.initials,
+    person.area,
+    person.bidAs,
+    person.email,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function renderIntakeTeamCandidateSearch() {
+  const input = document.querySelector("[data-intake-team-candidate-search]");
+  const results = document.querySelector("[data-intake-team-candidate-results]");
+  const status = document.querySelector("[data-intake-team-candidate-status]");
+  const addButton = document.querySelector("[data-add-intake-team-member]");
+  if (!input || !results || !status || !addButton) return;
+
+  const availablePeople = availableIntakeTeamCandidates();
+  const selectedPerson = availablePeople.find((person) => person.initials === selectedIntakeTeamCandidateInitials);
+  if (selectedIntakeTeamCandidateInitials && !selectedPerson) selectedIntakeTeamCandidateInitials = "";
+
+  if (selectedPerson) {
+    input.value = personScheduleLabel(selectedPerson);
+    input.setAttribute("aria-expanded", "false");
+    results.innerHTML = "";
+    results.hidden = true;
+    status.textContent = `Selected ${personDisplayName(selectedPerson)} (${selectedPerson.initials}).`;
+    addButton.disabled = false;
+    return;
+  }
+
+  input.value = intakeTeamCandidateQuery;
+  addButton.disabled = true;
+  const query = intakeTeamCandidateQuery.trim();
+  const matches = query
+    ? availablePeople.filter((person) => intakeTeamCandidateMatches(person, query))
+    : [];
+  const visibleMatches = matches.slice(0, 40);
+
+  results.innerHTML = visibleMatches.map((person) => {
+    const rank = Number.isFinite(person.rank) ? `Seniority #${person.rank}` : "Unranked";
+    return `
+      <button id="intake-team-candidate-${escapeHtml(person.initials)}" type="button" role="option" data-intake-team-candidate-result="${escapeHtml(person.initials)}">
+        <strong>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</strong>
+        <span>${escapeHtml(person.area)} · ${escapeHtml(rank)} · ${escapeHtml(person.bidAs || "CPC")}</span>
+      </button>
+    `;
+  }).join("");
+  results.hidden = !query || visibleMatches.length === 0;
+  input.setAttribute("aria-expanded", String(!results.hidden));
+
+  if (!availablePeople.length) {
+    status.textContent = "All rostered BUEs are already on the intake team.";
+  } else if (!query) {
+    status.textContent = `Search ${availablePeople.length} available employees.`;
+  } else if (!matches.length) {
+    status.textContent = "No available employees match that search.";
+  } else if (matches.length > visibleMatches.length) {
+    status.textContent = `${matches.length} matches; showing the first ${visibleMatches.length}. Keep typing to narrow the list.`;
+  } else {
+    status.textContent = `${matches.length} ${matches.length === 1 ? "match" : "matches"}. Select an employee below.`;
+  }
+}
+
 function renderRosterSelect(selector, people, selectedInitials = "") {
   document.querySelectorAll(selector).forEach((select) => {
     const currentValue = selectedInitials || select.value;
@@ -10114,9 +10266,8 @@ function renderRosterSelect(selector, people, selectedInitials = "") {
 }
 
 function syncIntakeTeamControls() {
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
-  renderRosterSelect("[data-intake-team-candidate]", availablePeople);
+  renderIntakeTeamCandidateSearch();
   renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
   renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
 }
@@ -10137,8 +10288,7 @@ async function saveIntakeTeamMember(initials, enabled) {
 
 async function addSelectedBueToIntakeTeam() {
   if (!hasSystemAdminAccess()) return;
-  const select = document.querySelector("[data-intake-team-candidate]");
-  const initials = select?.value || "";
+  const initials = selectedIntakeTeamCandidateInitials;
   const person = bueByInitials(initials);
   if (!person) {
     setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
@@ -10149,6 +10299,8 @@ async function addSelectedBueToIntakeTeam() {
   try {
     await saveIntakeTeamMember(person.initials, true);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
+    intakeTeamCandidateQuery = "";
+    selectedIntakeTeamCandidateInitials = "";
     renderApp();
     setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
   } catch (error) {
@@ -11237,7 +11389,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 4; round += 1) {
+  for (let round = 1; round <= 6; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -11259,7 +11411,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 4) {
+    if (round < 6) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -11317,7 +11469,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 4;
+  const windowCount = totalBues * 6;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -11388,7 +11540,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 4} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -11457,7 +11609,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 4,
+    requested_round_count: 6,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -11481,38 +11633,35 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 4} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
 
 function renderAdminConsole() {
-  syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
   syncSlotCapacityForm();
   renderSlotCapacitySummary();
   syncBidWindowBuilder();
   renderRosterManager();
-  renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
 
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
 
   target.innerHTML = `
     <section class="intake-team-builder">
       <div class="intake-team-add">
-        <label>
-          Add BUE to Intake Team
-          <select data-intake-team-candidate>
-            ${availablePeople.length
-              ? availablePeople.map((person) => `<option value="${escapeHtml(person.initials)}">${escapeHtml(personScheduleLabel(person))}</option>`).join("")
-              : '<option value="">All rostered BUEs are already on the intake team</option>'}
-          </select>
-        </label>
-        <button class="primary-action small" type="button" data-add-intake-team-member ${availablePeople.length ? "" : "disabled"}>Add to Team</button>
+        <div class="intake-team-candidate-picker">
+          <label>
+            Add BUE to Intake Team
+            <input type="search" placeholder="Name, initials, area, rank, role, or email" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="intake-team-candidate-results" data-intake-team-candidate-search />
+          </label>
+          <small data-intake-team-candidate-status role="status" aria-live="polite"></small>
+          <div class="intake-team-candidate-results" id="intake-team-candidate-results" role="listbox" aria-label="Matching employees" data-intake-team-candidate-results hidden></div>
+        </div>
+        <button class="primary-action small" type="button" data-add-intake-team-member disabled>Add to Team</button>
       </div>
       <div class="intake-team-list" data-intake-team-list>
         ${teamPeople.map((person) => {
@@ -11536,6 +11685,16 @@ function renderAdminConsole() {
     </section>
   `;
   syncIntakeTeamControls();
+}
+
+function renderAdminToolsPage() {
+  if (!hasSystemAdminAccess()) return;
+  syncAdminScheduleFormDefaults();
+  renderRuleEditors();
+  renderManualBidEntry();
+  renderEmailLog();
+  syncBidWindowTestingControls();
+  syncPilotControls();
 }
 
 function setSlotCapacityStatus(message, status = "info") {
@@ -13565,7 +13724,7 @@ function setPage(pageName) {
   if (pageName === "intake-schedule" && !canUseIntakeView()) {
     pageName = "dashboard";
   }
-  if (pageName === "admin" && !hasSystemAdminAccess()) {
+  if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
 
@@ -13590,6 +13749,7 @@ function setPage(pageName) {
     intake: "Intake Queue",
     "intake-schedule": "Intake Schedule",
     admin: "Admin Console",
+    "admin-tools": "Bidding Setup",
     history: "Bid History",
     profile: "My Profile",
   };
@@ -14211,9 +14371,9 @@ function renderMemberPageContent(pageName) {
       ensureIntakeBidderSelection();
     }
     if (pageName === "admin") {
-      renderRuleEditors();
       renderAdminConsole();
     }
+    if (pageName === "admin-tools") renderAdminToolsPage();
   });
 }
 
@@ -14288,6 +14448,15 @@ document.addEventListener("click", async (event) => {
       selectIntakeBidder(person.initials, person.profileId);
       controllerSelect.focus();
     }
+    return;
+  }
+
+  const intakeTeamCandidateResult = event.target.closest("[data-intake-team-candidate-result]");
+  if (intakeTeamCandidateResult) {
+    selectedIntakeTeamCandidateInitials = intakeTeamCandidateResult.dataset.intakeTeamCandidateResult || "";
+    intakeTeamCandidateQuery = "";
+    renderIntakeTeamCandidateSearch();
+    document.querySelector("[data-add-intake-team-member]")?.focus();
     return;
   }
 
@@ -14937,6 +15106,16 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  // Inspect dashboard dates without updating the leave builder or rerendering calendars.
+  const dashboardDateButton = event.target.closest("#dashboard-calendar [data-calendar-date]");
+  if (dashboardDateButton) {
+    const key = dashboardDateButton.dataset.calendarDate;
+    if (key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY) {
+      openLeaveSlotModal({ key, area: currentViewArea(), inspectOnly: true });
+    }
+    return;
+  }
+
   const leaveDateButton = event.target.closest("[data-leave-date]");
   if (leaveDateButton) {
     const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
@@ -14970,6 +15149,16 @@ document.addEventListener("click", async (event) => {
       calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
       renderVisibleCalendars();
     }
+    return;
+  }
+
+  const calendarWorkforceButton = event.target.closest("[data-calendar-workforce]");
+  if (calendarWorkforceButton) {
+    setCalendarWorkforceForScope(
+      calendarWorkforceButton.dataset.calendarScope,
+      calendarWorkforceButton.dataset.calendarWorkforce
+    );
+    renderVisibleCalendars();
     return;
   }
 
@@ -15128,6 +15317,14 @@ document.addEventListener("input", (event) => {
   if (manualControllerSearch) {
     const panel = manualControllerSearch.closest("[data-manual-bid-panel]");
     if (panel) renderManualBidPanel(panel);
+    return;
+  }
+
+  const intakeTeamCandidateSearch = event.target.closest("[data-intake-team-candidate-search]");
+  if (intakeTeamCandidateSearch) {
+    intakeTeamCandidateQuery = intakeTeamCandidateSearch.value;
+    selectedIntakeTeamCandidateInitials = "";
+    renderIntakeTeamCandidateSearch();
     return;
   }
 
