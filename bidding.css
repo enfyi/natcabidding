@@ -6549,14 +6549,24 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: end;
+  align-items: start;
   border: 1px solid #d7e3ef;
   border-radius: 8px;
   padding: 14px;
   background: #f8fafc;
 }
 
-.intake-team-add label {
+.intake-team-add > .primary-action {
+  margin-top: 22px;
+}
+
+.intake-team-candidate-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.intake-team-candidate-picker label {
   display: grid;
   gap: 6px;
   color: #64748b;
@@ -6564,7 +6574,7 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font-weight: 900;
 }
 
-.intake-team-add select {
+.intake-team-candidate-picker input {
   width: 100%;
   border: 1px solid #cbd8e6;
   border-radius: 8px;
@@ -6574,6 +6584,67 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
   font: inherit;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.intake-team-candidate-picker small {
+  min-height: 16px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.intake-team-candidate-results {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #cbd8e6;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.intake-team-candidate-results[hidden] {
+  display: none;
+}
+
+.intake-team-candidate-results button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  color: #172033;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-team-candidate-results button:last-child {
+  border-bottom: 0;
+}
+
+.intake-team-candidate-results button:hover,
+.intake-team-candidate-results button:focus-visible {
+  background: #eef7f8;
+  outline: none;
+}
+
+.intake-team-candidate-results span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .intake-team-add {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-team-add > .primary-action {
+    width: 100%;
+    margin-top: 0;
+  }
 }
 
 .intake-team-list {
