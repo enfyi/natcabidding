@@ -873,20 +873,29 @@ button.seniority-pill {
 
 .public-bid-time-table th,
 .public-bid-time-table td {
-  padding: 9px 8px;
+  padding: 12px 14px;
+  vertical-align: middle;
   white-space: normal;
 }
 
-.public-bid-time-table th:nth-child(1),
-.public-bid-time-table td:nth-child(1) {
-  width: 42px;
+.public-bid-time-table .bid-time-rank-column {
+  width: 64px;
 }
 
-.public-bid-time-table th:nth-child(3),
-.public-bid-time-table td:nth-child(3),
-.public-bid-time-table th:nth-child(4),
-.public-bid-time-table td:nth-child(4) {
-  width: 70px;
+.public-bid-time-table .bid-time-name-column {
+  width: 224px;
+}
+
+.public-bid-time-table .bid-time-initials-column {
+  width: 112px;
+}
+
+.public-bid-time-table .bid-time-role-column {
+  width: 104px;
+}
+
+.public-bid-time-table .bid-time-round {
+  white-space: nowrap;
 }
 
 .public-calendar-panel {

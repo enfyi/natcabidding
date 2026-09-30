@@ -7818,16 +7818,23 @@ function renderPublicBidTimeTable(area) {
       </div>
       <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
         <table class="public-bid-time-table">
+          <colgroup>
+            <col class="bid-time-rank-column" />
+            ${showBidderNames ? '<col class="bid-time-name-column" />' : ""}
+            <col class="bid-time-initials-column" />
+            <col class="bid-time-role-column" />
+            ${Array.from({ length: 4 }, () => '<col class="bid-time-round-column" />').join("")}
+          </colgroup>
           <thead>
             <tr>
               <th>#</th>
               ${showBidderNames ? "<th>Name</th>" : ""}
               <th>Initials</th>
               <th>Bid As</th>
-              <th>Round 1</th>
-              <th>Round 2</th>
-              <th>Round 3</th>
-              <th>Round 4</th>
+              <th class="bid-time-round">Round 1</th>
+              <th class="bid-time-round">Round 2</th>
+              <th class="bid-time-round">Round 3</th>
+              <th class="bid-time-round">Round 4</th>
             </tr>
           </thead>
           <tbody>
@@ -7837,7 +7844,7 @@ function renderPublicBidTimeTable(area) {
                 ${showBidderNames ? `<td>${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td>${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
