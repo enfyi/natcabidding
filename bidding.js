@@ -3449,10 +3449,16 @@ function leaveSlotUnitsForItem() {
   return 1;
 }
 
+function leaveBidDayAllowanceForPerson(person) {
+  const allowanceHours = normalizeLeaveSlotAllowance(person?.leaveSlotAllowance);
+  const hoursPerDay = leaveHoursPerDayForInitials(person?.initials);
+  return Math.ceil(estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay));
+}
+
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
     .filter((person) => !isAreaLeaveBalanceExemptPerson(person) && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
-    .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
+    .reduce((total, person) => total + leaveBidDayAllowanceForPerson(person), 0);
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
@@ -3515,9 +3521,12 @@ function submittedRdoLineForInitials(initials = currentUser.initials) {
   return rdoLines.find((line) => line.cpc === normalized && line.status === "Taken" && lineForArea(line, area)) || null;
 }
 
+function leaveHoursPerDayForLine(line) {
+  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+}
+
 function leaveHoursPerDayForInitials(initials = currentUser.initials) {
-  const line = submittedRdoLineForInitials(initials);
-  return rdoWeekdaysForLine(line).size === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  return leaveHoursPerDayForLine(submittedRdoLineForInitials(initials));
 }
 
 function currentUserLeaveAllowanceHours() {
@@ -3544,7 +3553,7 @@ function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
 function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
   const bucket = leaveSlotBucketForBidAs(bidAs);
   if (!bucket) return "";
-  const total = estimatedLeaveDaysFromHours(areaLeaveSlotBudget(area, bucket));
+  const total = areaLeaveSlotBudget(area, bucket);
   const used = areaLeaveSlotUsedDays(area, bucket);
   const projectedUsed = bidAs === "GL" ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
   if (bidAs === "GL" ? used < total : projectedUsed <= total) return "";
@@ -10170,9 +10179,7 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal } = areaLeaveBucketTotals();
-  const cpcTotalDays = estimatedLeaveDaysFromHours(cpcTotal);
-  const devTotalDays = estimatedLeaveDaysFromHours(devTotal);
+  const { cpcTotal: cpcTotalDays, devTotal: devTotalDays } = areaLeaveBucketTotals();
   const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
   const devUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "dev");
   const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
@@ -13406,6 +13413,7 @@ function intakeBidderLine() {
   return savedLine ? {
     line: savedLine.line_code,
     pattern: savedLine.pattern,
+    fourTen: savedLine.four_ten ? "Yes" : "No",
     week: Array.isArray(assignment.week) ? assignment.week : [],
   } : null;
 }
@@ -13500,7 +13508,7 @@ function renderIntakeBidderSummary() {
   const rdoDays = line
     ? [...rdoWeekdaysForLine(line)].sort((left, right) => left - right).map((weekday) => dayNames[weekday])
     : [];
-  const hoursPerDay = rdoDays.length === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  const hoursPerDay = leaveHoursPerDayForLine(line);
   const allowanceHours = normalizeLeaveSlotAllowance(person.leaveSlotAllowance);
   const allowanceDays = estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay);
   const rows = selectedIntakeBidderLeaveRows();
@@ -13509,7 +13517,7 @@ function renderIntakeBidderSummary() {
   const holidaysBid = new Set(activeRows.flatMap((row) => intakeBidderLeaveDates(row)
     .filter((date) => date.is_holiday || date.is_holiday_in_lieu)
     .map((date) => date.leave_date))).size;
-  const scheduleLabel = rdoDays.length === 3 ? "10-hour schedule" : "8-hour schedule";
+  const scheduleLabel = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour schedule" : "8-hour schedule";
   const loadingNote = intakeBidderSelection.loading ? "Refreshing saved details…" : intakeBidderSelection.error;
   const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
 
