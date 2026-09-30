@@ -68,6 +68,9 @@ assert.match(editor, /admin_save_bid_line/, 'the admin editor must save individu
 assert.match(editor, /admin_reorder_bid_lines/, 'the admin editor must persist reordered lines through the secure RPC')
 assert.match(editor, /Mid Bid line/, 'the admin editor must expose the Mid Bid designation')
 assert.match(editor, /R-DEV[\s\S]*D-DEV/, 'the admin editor must expose both development-line designations')
+assert.match(editor, /type BidLineSortKey = [\s\S]*?`day-\$\{number\}`/, 'every bid-line schedule column must be sortable')
+assert.match(editor, /function sortableHeader[\s\S]*?aria-sort=/, 'sortable headers must expose their direction accessibly')
+assert.match(editor, /manualOrderActive[\s\S]*?disabled=\{!manualOrderActive/, 'manual reorder controls must be disabled during a temporary column sort')
 assert.match(bidding, /displayOrder: row\.display_order/, 'the bidder view must load the persisted line order')
 assert.match(
   bidding,

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
 import { getBasePath, getSupabaseEnv } from '@/lib/env'
 import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
@@ -30,6 +30,8 @@ type ExistingBidLine = {
 type SupabaseReadError = { message?: string } | null
 
 type BidLineSection = 'CPC' | 'R-DEV' | 'D-DEV'
+type BidLineSortKey = 'display_order' | 'line_code' | 'section' | 'pattern' | 'mid' | 'status' | `day-${number}`
+type BidLineSort = { key: BidLineSortKey; direction: 'asc' | 'desc' }
 type BidLineDraft = {
   area_code: string
   line_code: string
@@ -44,6 +46,7 @@ type BidLineDraft = {
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const BID_LINE_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 const basePath = getBasePath()
 
 declare global {
@@ -114,6 +117,23 @@ function draftForLine(line: ExistingBidLine, areaCode: string): BidLineDraft {
   }
 }
 
+function daysForLine(line: ExistingBidLine) {
+  const days = Array.from({ length: 7 }, () => '')
+  line.rdo_line_days.forEach((day) => { days[day.weekday] = day.shift_code })
+  return days
+}
+
+function bidLineSortValue(line: ExistingBidLine, key: BidLineSortKey) {
+  if (key === 'display_order') return line.display_order
+  if (key === 'line_code') return line.line_code
+  if (key === 'section') return sectionForLine(line)
+  if (key === 'pattern') return line.pattern
+  if (key === 'mid') return line.mid
+  if (key === 'status') return line.status
+  const weekday = Number(key.slice(4))
+  return daysForLine(line)[weekday] || ''
+}
+
 export function BidLineImporter() {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null)
   const [access, setAccess] = useState<AccessState>('checking')
@@ -135,7 +155,23 @@ export function BidLineImporter() {
   const [reorderingLineId, setReorderingLineId] = useState<string | null>(null)
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [lineDraft, setLineDraft] = useState<BidLineDraft | null>(null)
+  const [lineSort, setLineSort] = useState<BidLineSort>({ key: 'display_order', direction: 'asc' })
   const [linesReloadToken, setLinesReloadToken] = useState(0)
+
+  const sortedExistingLines = useMemo(() => {
+    const direction = lineSort.direction === 'asc' ? 1 : -1
+    return existingLines
+      .map((line, originalIndex) => ({ line, originalIndex }))
+      .sort((left, right) => {
+        const leftValue = bidLineSortValue(left.line, lineSort.key)
+        const rightValue = bidLineSortValue(right.line, lineSort.key)
+        const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+          ? leftValue - rightValue
+          : BID_LINE_COLLATOR.compare(String(leftValue), String(rightValue))
+        return comparison ? comparison * direction : left.originalIndex - right.originalIndex
+      })
+      .map(({ line }) => line)
+  }, [existingLines, lineSort])
 
   useEffect(() => {
     let active = true
@@ -379,6 +415,25 @@ export function BidLineImporter() {
       days[index] = value.toUpperCase()
       return { ...current, days }
     })
+  }
+
+  function changeLineSort(key: BidLineSortKey) {
+    setLineSort((current) => current.key === key
+      ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' })
+  }
+
+  function sortableHeader(key: BidLineSortKey, label: string) {
+    const active = lineSort.key === key
+    const ariaSort = active ? (lineSort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
+    return (
+      <th key={key} aria-sort={ariaSort}>
+        <button className="bid-line-sort-button" type="button" onClick={() => changeLineSort(key)}>
+          <span>{label}</span>
+          <span aria-hidden="true">{active ? lineSort.direction === 'asc' ? '▲' : '▼' : '↕'}</span>
+        </button>
+      </th>
+    )
   }
 
   async function saveBidLine() {
@@ -644,19 +699,28 @@ export function BidLineImporter() {
             <div className="import-table-wrap import-line-manager-table">
               <table>
                 <thead>
-                  <tr><th>Order</th><th>Line</th><th>Section</th><th>Pattern</th><th>Mid</th>{DAY_LABELS.map((day) => <th key={day}>{day}</th>)}<th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+                  <tr>
+                    {sortableHeader('display_order', 'Order')}
+                    {sortableHeader('line_code', 'Line')}
+                    {sortableHeader('section', 'Section')}
+                    {sortableHeader('pattern', 'Pattern')}
+                    {sortableHeader('mid', 'Mid')}
+                    {DAY_LABELS.map((day, dayIndex) => sortableHeader(`day-${dayIndex}`, day))}
+                    {sortableHeader('status', 'Status')}
+                    <th><span className="sr-only">Actions</span></th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {existingLines.map((line, index) => {
+                  {sortedExistingLines.map((line, index) => {
                     const protectedLine = line.status !== 'open' || Boolean(line.assigned_bidder_id)
-                    const days = Array.from({ length: 7 }, () => '')
-                    line.rdo_line_days.forEach((day) => { days[day.weekday] = day.shift_code })
+                    const days = daysForLine(line)
+                    const manualOrderActive = lineSort.key === 'display_order' && lineSort.direction === 'asc'
                     return (
                       <tr key={line.id}>
                         <td>
                           <div className="bid-line-order-buttons">
-                            <button type="button" disabled={index === 0 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, -1)} aria-label={`Move line ${line.line_code} up`}>↑</button>
-                            <button type="button" disabled={index === existingLines.length - 1 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, 1)} aria-label={`Move line ${line.line_code} down`}>↓</button>
+                            <button type="button" disabled={!manualOrderActive || index === 0 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, -1)} aria-label={`Move line ${line.line_code} up`}>↑</button>
+                            <button type="button" disabled={!manualOrderActive || index === sortedExistingLines.length - 1 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, 1)} aria-label={`Move line ${line.line_code} down`}>↓</button>
                           </div>
                         </td>
                         <td><strong>{line.line_code}</strong></td>

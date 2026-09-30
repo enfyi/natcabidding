@@ -306,6 +306,23 @@ h1 {
   font-weight: 800;
 }
 .bid-line-order-buttons button:disabled { cursor: not-allowed; opacity: 0.4; }
+.bid-line-sort-button {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+.bid-line-sort-button:hover,
+.bid-line-sort-button:focus-visible { color: #d8f4e4; }
 .sr-only {
   position: absolute;
   width: 1px;
