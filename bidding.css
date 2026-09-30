@@ -2773,6 +2773,18 @@ input {
   background: var(--coral);
 }
 
+.legend .gl-bid {
+  display: inline-grid;
+  place-items: center;
+  color: #8a5700;
+  background: #fff1bd;
+  border: 1px solid #e0a92f;
+  border-radius: 999px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .legend .previous-leave-year {
   background:
     repeating-linear-gradient(135deg, rgba(100, 116, 139, 0.13) 0 4px, rgba(100, 116, 139, 0.3) 4px 6px),
@@ -3926,6 +3938,53 @@ tr.occupied-row .rdo-tag {
   background: #f2ebfb;
   border-color: #cfb9ea !important;
   font-weight: 800;
+}
+
+.gl-bid-badge,
+.gl-bid-marker {
+  border: 1px solid #e0a92f;
+  color: #5f3b00;
+  background: #fff1bd;
+  font-weight: 900;
+}
+
+.gl-bid-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+}
+
+.month-grid .gl-bid-marker,
+.week-calendar-grid .gl-bid-marker {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  min-height: 16px;
+  border-radius: 999px;
+  padding: 1px 4px;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-heading,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-heading {
+  color: #7a4d00 !important;
+}
+
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-name,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-name,
+.month-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-value,
+.week-calendar-grid .leave-date-tooltip.slot-summary .gl-bid-row .tooltip-slot-value {
+  border-color: #e7c66c !important;
+  color: #5f3b00 !important;
+  background: #fff6d8 !important;
 }
 
 .intake-actions {
@@ -5666,8 +5725,10 @@ tr.occupied-row .rdo-tag {
 }
 
 .schedule-calendar.month-view {
-  grid-template-columns: minmax(0, 520px);
-  max-width: 520px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: none;
 }
 
 .schedule-calendar.week-view {
@@ -5923,6 +5984,11 @@ tr.occupied-row .rdo-tag {
   .schedule-calendar.year-view {
     grid-template-columns: 1fr;
     max-width: 440px;
+  }
+
+  .schedule-calendar.month-view {
+    grid-template-columns: 1fr;
+    max-width: 520px;
   }
 }
 

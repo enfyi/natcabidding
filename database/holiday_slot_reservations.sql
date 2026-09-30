@@ -46,7 +46,21 @@ begin
   from public.bidders bidder
   where bidder.id = request_row.bidder_id;
 
-  if coalesce((to_jsonb(request_row)->>'is_ghost_bid')::boolean, false) then return; end if;
+  if coalesce((to_jsonb(request_row)->>'is_ghost_bid')::boolean, false)
+     or bidder_row.bid_role = 'GL' then
+    delete from public.leave_slots slot
+    where slot.source_leave_request_id = request_row.id
+      and slot.slot_code like 'OVERRIDE-%';
+
+    update public.leave_slots slot
+    set bidder_id = null,
+        slot_initials = null,
+        status = 'open',
+        source_leave_request_id = null,
+        updated_at = now()
+    where slot.source_leave_request_id = request_row.id;
+    return;
+  end if;
 
   target_bucket := case
     when bidder_row.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
@@ -116,6 +130,51 @@ $function$;
 
 revoke all on function private.sync_holiday_leave_slots(uuid)
 from public, anon, authenticated;
+
+create or replace function private.prevent_gl_leave_slot_consumption()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  source_role text;
+begin
+  if new.source_leave_request_id is null then
+    return new;
+  end if;
+
+  select bidder.bid_role
+  into source_role
+  from public.leave_requests request
+  join public.bidders bidder on bidder.id = request.bidder_id
+  where request.id = new.source_leave_request_id;
+
+  if source_role is distinct from 'GL' then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    return null;
+  end if;
+
+  new.bidder_id := null;
+  new.slot_initials := null;
+  new.status := 'open';
+  new.source_leave_request_id := null;
+  new.updated_at := now();
+  return new;
+end
+$function$;
+
+revoke all on function private.prevent_gl_leave_slot_consumption()
+from public, anon, authenticated;
+
+drop trigger if exists prevent_gl_leave_slot_consumption on public.leave_slots;
+create trigger prevent_gl_leave_slot_consumption
+before insert or update of bidder_id, slot_initials, status, source_leave_request_id
+on public.leave_slots
+for each row execute function private.prevent_gl_leave_slot_consumption();
 
 create or replace function private.sync_holiday_leave_slots_from_date()
 returns trigger

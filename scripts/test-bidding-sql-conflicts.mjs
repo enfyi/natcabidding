@@ -404,21 +404,29 @@ console.log('PASS Ghost Line stays open and Ghost Leave consumes no area capacit
 
 const glArea='00000000-0000-0000-0000-000000000310';
 const glAreaCpc='00000000-0000-0000-0000-000000000311';
+const glAreaCpcAuth='00000000-0000-0000-0000-000000000315';
+const glAreaCpcLine='00000000-0000-0000-0000-000000000316';
 const glBidder='00000000-0000-0000-0000-000000000312';
 const glAuth='00000000-0000-0000-0000-000000000313';
 const glLine='00000000-0000-0000-0000-000000000314';
 await db.exec(`insert into areas(id,code,name,display_order)
  values('${glArea}','gl-test','GL Test Area',99);
- insert into bidders(id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
- values('${glAreaCpc}','${glArea}','Area','Controller','AC','area-controller@example.test','CPC',1,16);
+ insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
+ values('${glAreaCpc}','${glAreaCpcAuth}','${glArea}','Area','Controller','AC','area-controller@example.test','CPC',1,16);
  insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
  values('${glBidder}','${glAuth}','${glArea}','Gate','Leader','GL','gl@example.test','GL',2,40);
  insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
  values('${glLine}','${year}','${glArea}','GL-LINE','CPC','S/S','open');
+ insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
+ values('${glAreaCpcLine}','${year}','${glArea}','AREA-CPC-LINE','CPC','S/S','open');
  insert into rdo_line_days(rdo_line_id,weekday,shift_code)
  select '${glLine}',weekday,'0700' from generate_series(0,6) weekday;
+ insert into rdo_line_days(rdo_line_id,weekday,shift_code)
+ select '${glAreaCpcLine}',weekday,'0700' from generate_series(0,6) weekday;
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
  values('${year}','${glArea}','${glBidder}',1,'${glLine}','rdo','pending','{"line":"GL-LINE"}',now());
+ insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+ values('${year}','${glArea}','${glAreaCpc}',1,'${glAreaCpcLine}','rdo','pending','{"line":"AREA-CPC-LINE"}',now());
  insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date,charged_days,submitted_at)
  values('${year}','${glAreaCpc}',1,1,'approved','2027-01-10','2027-01-10',1,now());
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
@@ -431,10 +439,12 @@ const glBalanceBefore=(await db.query(`select total_days::text,used_days,remaini
  from private.area_leave_balance_days($1,$2,'cpc')`,[year,glArea])).rows[0];
 if(Number(glBalanceBefore.total_days)!==2 || glBalanceBefore.used_days!==1 || Number(glBalanceBefore.remaining_days)!==1)
   throw new Error(`GL or area balance fixture was not calculated correctly: ${JSON.stringify(glBalanceBefore)}`);
+const glSubmissionIds=[];
 for(const [round,date] of [[4,'2027-11-01'],[5,'2027-11-02'],[6,'2027-11-03']]) {
   await db.exec(`update bid_year_settings set enforce_bid_windows=false,test_bid_round=${round} where bid_year_id='${year}'`);
-  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
-    [JSON.stringify([{start_date:date,end_date:date,round,rdo_line_code:'GL-LINE'}])]);
+  const submission=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
+    [JSON.stringify([{start_date:date,end_date:date,round,rdo_line_code:'GL-LINE'}])])).rows[0].result;
+  glSubmissionIds.push(submission.submission_ids[0]);
 }
 const glBalanceAfter=(await db.query(`select total_days::text,used_days,remaining_days::text
  from private.area_leave_balance_days($1,$2,'cpc')`,[year,glArea])).rows[0];
@@ -443,9 +453,29 @@ if(Number(glBalanceAfter.total_days)!==2 || glBalanceAfter.used_days!==1 || Numb
 const glPersonalUsage=(await db.query(`select coalesce(sum(charged_days),0)::integer as used
  from leave_requests where bidder_id=$1 and status in ('pending','approved')`,[glBidder])).rows[0].used;
 if(glPersonalUsage!==3) throw new Error('GL personal leave balance did not track Rounds 4-6');
-await db.exec(`insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date,charged_days,submitted_at)
- values('${year}','${glAreaCpc}',1,2,'approved','2027-01-11','2027-01-11',1,now());
+await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+await db.query("select public.review_bidding_submission($1,'approved')",[glSubmissionIds[0]]);
+const glClaimedSlots=(await db.query(`select count(*)::integer as total from leave_slots slot
+ join leave_requests request on request.id=slot.source_leave_request_id
+ where request.bidder_id=$1`,[glBidder])).rows[0].total;
+if(glClaimedSlots!==0) throw new Error('Approved GL leave consumed a daily area slot');
+const publicGlSchedule=(await db.query('select public.read_public_leave_slots(2027) as schedule')).rows[0].schedule;
+const publicGlDate=publicGlSchedule.find(row=>row.area_id===glArea && row.slot_date==='2027-11-01');
+if(!publicGlDate || publicGlDate.cpc_open!==1 || publicGlDate.cpc_initials.length!==0
+   || publicGlDate.gl_bids.length!==1 || publicGlDate.gl_bids[0].initials!=='GL'
+   || publicGlDate.gl_bids[0].status!=='approved')
+  throw new Error(`GL calendar overlay changed slot availability or lost its annotation: ${JSON.stringify(publicGlDate)}`);
+await db.exec(`set test.uid='${glAreaCpcAuth}'; set test.email='area-controller@example.test';
  update bid_year_settings set test_bid_round=6 where bid_year_id='${year}';`);
+const followingCpc=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
+  [JSON.stringify([{start_date:'2027-11-01',end_date:'2027-11-01',round:6,rdo_line_code:'AREA-CPC-LINE'}])])).rows[0].result;
+await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+await db.query("select public.review_bidding_submission($1,'approved')",[followingCpc.submission_ids[0]]);
+const sharedDateSlot=(await db.query(`select slot_initials,status from leave_slots
+ where bid_year_id=$1 and area_id=$2 and slot_date='2027-11-01' and slot_group='cpc'`,[year,glArea])).rows[0];
+if(sharedDateSlot.slot_initials!=='AC' || sharedDateSlot.status!=='approved')
+  throw new Error('The CPC bidder behind the GL bidder could not claim the still-open date');
+await db.exec(`set test.uid='${glAuth}'; set test.email='gl@example.test';`);
 try {
   await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
     [JSON.stringify([{start_date:'2027-11-04',end_date:'2027-11-04',round:6,rdo_line_code:'GL-LINE'}])]);
@@ -453,4 +483,4 @@ try {
 } catch(error) {
   if(!error.message.includes('leave balance is exhausted')) throw error;
 }
-console.log('PASS GL allowance and usage stay outside area totals; GL bids Rounds 4-6 until area leave is exhausted');
+console.log('PASS GL bids stay visible and annotated without consuming slots; the next CPC bidder can take the same date');
