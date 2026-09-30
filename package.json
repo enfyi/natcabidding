@@ -25,6 +25,7 @@
     "test:bid-change-modal": "node scripts/test-bid-change-modal.mjs",
     "test:bid-window-boundaries": "node scripts/test-bid-window-boundaries.mjs",
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
+    "test:round-rules": "node scripts/test-independent-round-rules.mjs",
     "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build",
