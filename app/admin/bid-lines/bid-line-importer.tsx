@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
 import { getBasePath, getSupabaseEnv } from '@/lib/env'
 import { createImportRequestTimeout, importTimeoutMessage } from '@/lib/import-timeout'
@@ -14,13 +14,39 @@ type AccessState = 'checking' | 'admin' | 'signed-out' | 'denied' | 'error'
 type ExistingBidLine = {
   id: string
   line_code: string
+  display_order: number
   line_type: 'CPC' | 'DEV'
   pattern: string
+  fatigue_group: 'A' | 'B' | 'C' | 'C only' | 'B only' | null
+  mid: 'No' | 'BID'
+  aws: boolean
+  four_ten: boolean
+  flex: boolean
   status: 'open' | 'taken' | 'locked'
   assigned_bidder_id: string | null
+  rdo_line_days: { weekday: number; shift_code: string }[]
+}
+
+type SupabaseReadError = { message?: string } | null
+
+type BidLineSection = 'CPC' | 'R-DEV' | 'D-DEV'
+type BidLineSortKey = 'display_order' | 'line_code' | 'section' | 'pattern' | 'mid' | 'status' | `day-${number}`
+type BidLineSort = { key: BidLineSortKey; direction: 'asc' | 'desc' }
+type BidLineDraft = {
+  area_code: string
+  line_code: string
+  section: BidLineSection
+  pattern: string
+  fatigue_group: 'A' | 'B' | 'C' | 'C only' | 'B only'
+  mid: boolean
+  aws: boolean
+  four_ten: boolean
+  flex: boolean
+  days: string[]
 }
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const BID_LINE_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 const basePath = getBasePath()
 
 declare global {
@@ -48,6 +74,66 @@ function bidLineSection(line: BidLineImportRow) {
   return line.pattern === 'D-DEV' ? 'D-Dev' : 'R-Dev'
 }
 
+function isMissingDisplayOrder(error: SupabaseReadError) {
+  const message = error?.message || ''
+  return /display_order/i.test(message)
+    && /does not exist|Could not find|schema cache|PGRST204|PGRST205/i.test(message)
+}
+
+function sectionForLine(line: ExistingBidLine): BidLineSection {
+  if (line.line_type === 'CPC') return 'CPC'
+  return line.pattern === 'D-DEV' ? 'D-DEV' : 'R-DEV'
+}
+
+function emptyDraft(areaCode: string): BidLineDraft {
+  return {
+    area_code: areaCode,
+    line_code: '',
+    section: 'CPC',
+    pattern: '',
+    fatigue_group: 'C',
+    mid: false,
+    aws: false,
+    four_ten: false,
+    flex: true,
+    days: Array.from({ length: 7 }, () => ''),
+  }
+}
+
+function draftForLine(line: ExistingBidLine, areaCode: string): BidLineDraft {
+  const days = Array.from({ length: 7 }, () => '')
+  line.rdo_line_days.forEach((day) => { days[day.weekday] = day.shift_code })
+  return {
+    area_code: areaCode,
+    line_code: line.line_code,
+    section: sectionForLine(line),
+    pattern: line.pattern,
+    fatigue_group: line.fatigue_group || 'C',
+    mid: line.mid === 'BID',
+    aws: line.aws,
+    four_ten: line.four_ten,
+    flex: line.flex,
+    days,
+  }
+}
+
+function daysForLine(line: ExistingBidLine) {
+  const days = Array.from({ length: 7 }, () => '')
+  line.rdo_line_days.forEach((day) => { days[day.weekday] = day.shift_code })
+  return days
+}
+
+function bidLineSortValue(line: ExistingBidLine, key: BidLineSortKey) {
+  if (key === 'display_order') return line.display_order
+  if (key === 'line_code') return line.line_code
+  if (key === 'section') return sectionForLine(line)
+  if (key === 'pattern') return line.pattern
+  if (key === 'mid') return line.mid
+  if (key === 'status') return line.status
+  const weekday = Number(key.slice(4))
+  return daysForLine(line)[weekday] || ''
+}
+
 export function BidLineImporter() {
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null)
   const [access, setAccess] = useState<AccessState>('checking')
@@ -65,7 +151,27 @@ export function BidLineImporter() {
   const [linesLoading, setLinesLoading] = useState(false)
   const [lineManagementStatus, setLineManagementStatus] = useState('')
   const [deletingLineId, setDeletingLineId] = useState<string | null>(null)
+  const [savingLine, setSavingLine] = useState(false)
+  const [reorderingLineId, setReorderingLineId] = useState<string | null>(null)
+  const [editingLineId, setEditingLineId] = useState<string | null>(null)
+  const [lineDraft, setLineDraft] = useState<BidLineDraft | null>(null)
+  const [lineSort, setLineSort] = useState<BidLineSort>({ key: 'display_order', direction: 'asc' })
   const [linesReloadToken, setLinesReloadToken] = useState(0)
+
+  const sortedExistingLines = useMemo(() => {
+    const direction = lineSort.direction === 'asc' ? 1 : -1
+    return existingLines
+      .map((line, originalIndex) => ({ line, originalIndex }))
+      .sort((left, right) => {
+        const leftValue = bidLineSortValue(left.line, lineSort.key)
+        const rightValue = bidLineSortValue(right.line, lineSort.key)
+        const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+          ? leftValue - rightValue
+          : BID_LINE_COLLATOR.compare(String(leftValue), String(rightValue))
+        return comparison ? comparison * direction : left.originalIndex - right.originalIndex
+      })
+      .map(({ line }) => line)
+  }, [existingLines, lineSort])
 
   useEffect(() => {
     let active = true
@@ -126,25 +232,53 @@ export function BidLineImporter() {
     }
 
     let active = true
+    const client = supabase
     setLinesLoading(true)
     setLineManagementStatus('')
 
-    void supabase
-      .from('rdo_lines')
-      .select('id,line_code,line_type,pattern,status,assigned_bidder_id')
-      .eq('bid_year_id', bidYearId)
-      .eq('area_id', areaId)
-      .order('line_code')
-      .then(({ data, error }) => {
-        if (!active) return
-        if (error) {
-          setExistingLines([])
-          setLineManagementStatus(error.message)
-        } else {
-          setExistingLines((data || []) as ExistingBidLine[])
+    async function loadExistingLines() {
+      const orderedResult = await client
+        .from('rdo_lines')
+        .select('id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,rdo_line_days(weekday,shift_code)')
+        .eq('bid_year_id', bidYearId)
+        .eq('area_id', areaId)
+        .order('display_order')
+        .order('line_code')
+      let data: unknown[] | null = orderedResult.data
+      let error: SupabaseReadError = orderedResult.error
+      let migrationPending = false
+
+      if (isMissingDisplayOrder(error)) {
+        migrationPending = true
+        const legacyResult = await client
+          .from('rdo_lines')
+          .select('id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,rdo_line_days(weekday,shift_code)')
+          .eq('bid_year_id', bidYearId)
+          .eq('area_id', areaId)
+          .order('line_code')
+        data = legacyResult.data
+        error = legacyResult.error
+      }
+
+      if (!active) return
+      if (error) {
+        setExistingLines([])
+        setLineManagementStatus(error.message || 'Bid lines could not be loaded.')
+      } else {
+        setExistingLines((data || []).map((line, index) => ({
+          ...(line as object),
+          display_order: typeof line === 'object' && line && 'display_order' in line
+            ? Number(line.display_order)
+            : (index + 1) * 10,
+        })) as ExistingBidLine[])
+        if (migrationPending) {
+          setLineManagementStatus('Existing lines are loaded. Apply the bid-line editor database migration to enable adding, editing, and reordering.')
         }
-        setLinesLoading(false)
-      })
+      }
+      setLinesLoading(false)
+    }
+
+    void loadExistingLines()
 
     return () => { active = false }
   }, [access, areaCode, areas, bidYear, bidYears, linesReloadToken, supabase])
@@ -258,6 +392,128 @@ export function BidLineImporter() {
     }
   }
 
+  function startAddingLine() {
+    setEditingLineId('new')
+    setLineDraft(emptyDraft(areaCode))
+    setLineManagementStatus('')
+  }
+
+  function startEditingLine(line: ExistingBidLine) {
+    setEditingLineId(line.id)
+    setLineDraft(draftForLine(line, areaCode))
+    setLineManagementStatus('')
+  }
+
+  function updateLineDraft(update: Partial<BidLineDraft>) {
+    setLineDraft((current) => current ? { ...current, ...update } : current)
+  }
+
+  function updateDraftDay(index: number, value: string) {
+    setLineDraft((current) => {
+      if (!current) return current
+      const days = [...current.days]
+      days[index] = value.toUpperCase()
+      return { ...current, days }
+    })
+  }
+
+  function changeLineSort(key: BidLineSortKey) {
+    setLineSort((current) => current.key === key
+      ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' })
+  }
+
+  function sortableHeader(key: BidLineSortKey, label: string) {
+    const active = lineSort.key === key
+    const ariaSort = active ? (lineSort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
+    return (
+      <th key={key} aria-sort={ariaSort}>
+        <button className="bid-line-sort-button" type="button" onClick={() => changeLineSort(key)}>
+          <span>{label}</span>
+          <span aria-hidden="true">{active ? lineSort.direction === 'asc' ? '▲' : '▼' : '↕'}</span>
+        </button>
+      </th>
+    )
+  }
+
+  async function saveBidLine() {
+    if (!supabase || !lineDraft) return
+    const normalizedDays = lineDraft.days.map((day) => day.trim().toUpperCase())
+    if (!lineDraft.area_code || !lineDraft.line_code.trim() || normalizedDays.some((day) => !day)) {
+      setLineManagementStatus('Choose an area and enter a line code plus all seven shift times or RDOs.')
+      return
+    }
+    if (lineDraft.section === 'CPC' && !lineDraft.pattern.trim()) {
+      setLineManagementStatus('Enter the CPC line pattern.')
+      return
+    }
+
+    setSavingLine(true)
+    setLineManagementStatus(editingLineId === 'new' ? 'Adding bid line…' : 'Saving bid-line changes…')
+    try {
+      const pattern = lineDraft.section === 'CPC' ? lineDraft.pattern.trim().toUpperCase() : lineDraft.section
+      const { error } = await supabase.rpc('admin_save_bid_line', {
+        target_line_id: editingLineId === 'new' ? null : editingLineId,
+        requested_bid_year: Number(bidYear),
+        requested_area_code: lineDraft.area_code,
+        requested_line: {
+          line_code: lineDraft.line_code.trim(),
+          line_type: lineDraft.section === 'CPC' ? 'CPC' : 'DEV',
+          pattern,
+          fatigue_group: lineDraft.fatigue_group,
+          mid: lineDraft.mid ? 'BID' : 'No',
+          aws: lineDraft.aws,
+          four_ten: lineDraft.four_ten,
+          flex: lineDraft.flex,
+          days: normalizedDays,
+        },
+      })
+      if (error) throw error
+
+      const savedCode = lineDraft.line_code.trim()
+      const savedArea = lineDraft.area_code
+      setEditingLineId(null)
+      setLineDraft(null)
+      setLineManagementStatus(`Line ${savedCode} was saved.`)
+      if (savedArea !== areaCode) setAreaCode(savedArea)
+      else setLinesReloadToken((value) => value + 1)
+      setPreview(null)
+      setResult(null)
+    } catch (error) {
+      setLineManagementStatus(error instanceof Error ? error.message : 'The bid line could not be saved.')
+    } finally {
+      setSavingLine(false)
+    }
+  }
+
+  async function moveBidLine(lineId: string, direction: -1 | 1) {
+    if (!supabase) return
+    const currentIndex = existingLines.findIndex((line) => line.id === lineId)
+    const targetIndex = currentIndex + direction
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= existingLines.length) return
+
+    const reordered = [...existingLines]
+    ;[reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]]
+    setExistingLines(reordered)
+    setReorderingLineId(lineId)
+    setLineManagementStatus('Saving the new line order…')
+
+    try {
+      const { error } = await supabase.rpc('admin_reorder_bid_lines', {
+        requested_bid_year: Number(bidYear),
+        requested_area_code: areaCode,
+        ordered_line_ids: reordered.map((line) => line.id),
+      })
+      if (error) throw error
+      setLineManagementStatus('Line order saved.')
+    } catch (error) {
+      setLineManagementStatus(error instanceof Error ? error.message : 'The line order could not be saved.')
+      setLinesReloadToken((value) => value + 1)
+    } finally {
+      setReorderingLineId(null)
+    }
+  }
+
   if (access !== 'admin') {
     const message = access === 'checking'
       ? 'Checking administrator access…'
@@ -291,8 +547,8 @@ export function BidLineImporter() {
       <header className="import-hero">
         <div>
           <p className="eyebrow">System administration</p>
-          <h1>Import bid lines.</h1>
-          <p className="import-lede">Upload one area at a time. The workbook keeps CPC, R-Dev, and D-Dev lines on separate tabs.</p>
+          <h1>Manage bid lines.</h1>
+          <p className="import-lede">Upload a schedule, then add, edit, delete, or reorder the CPC, R-Dev, and D-Dev lines for each area.</p>
         </div>
         <a className="button secondary" href={`${basePath}/templates/zla-bid-line-import-template.xlsx`} download>
           Download Excel template
@@ -313,13 +569,13 @@ export function BidLineImporter() {
         <div className="import-field-grid">
           <label>
             Bid year
-            <select value={bidYear} onChange={(event) => { setBidYear(event.target.value); setPreview(null); setResult(null) }}>
+            <select value={bidYear} onChange={(event) => { setBidYear(event.target.value); setPreview(null); setResult(null); setEditingLineId(null); setLineDraft(null) }}>
               {bidYears.map((year) => <option key={year.bid_year} value={year.bid_year}>{year.bid_year} · {year.status}</option>)}
             </select>
           </label>
           <label>
             Area
-            <select required value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null) }}>
+            <select required value={areaCode} onChange={(event) => { setAreaCode(event.target.value); setPreview(null); setResult(null); setEditingLineId(null); setLineDraft(null) }}>
               <option value="" disabled>Select an area</option>
               {areas.map((area) => <option key={area.code} value={area.code}>{area.name}</option>)}
             </select>
@@ -352,30 +608,129 @@ export function BidLineImporter() {
             <div>
               <div>
                 <h2 id="line-manager-heading">Manage existing lines</h2>
-                <p>Delete an unused line from {selectedArea} for the {bidYear} bid year.</p>
+                <p>Add, edit, delete, or reorder {selectedArea} lines for the {bidYear} bid year.</p>
               </div>
             </div>
-            <strong className="import-count">{existingLines.length}</strong>
+            <div className="import-line-manager-heading-actions">
+              <strong className="import-count">{existingLines.length}</strong>
+              <button className="button primary compact" type="button" onClick={startAddingLine}>Add line</button>
+            </div>
           </div>
 
-          <p className="import-delete-note">Assigned, taken, locked, or historically referenced lines are protected and cannot be deleted.</p>
+          <p className="import-safety-note import-editor-note"><strong>Area-specific:</strong> Every line belongs to one bid year and area. Up and Down set the order bidders see. Assigned, taken, locked, or historically referenced lines remain protected from deletion.</p>
           {lineManagementStatus ? <p className="import-inline-status" role="status">{lineManagementStatus}</p> : null}
+
+          {lineDraft ? (
+            <section className="bid-line-editor" aria-labelledby="bid-line-editor-heading">
+              <div className="bid-line-editor-heading">
+                <div>
+                  <p className="eyebrow">{editingLineId === 'new' ? 'New bid line' : 'Editing bid line'}</p>
+                  <h3 id="bid-line-editor-heading">{editingLineId === 'new' ? 'Build a line' : `Line ${lineDraft.line_code}`}</h3>
+                </div>
+                <button className="text-button" type="button" disabled={savingLine} onClick={() => { setEditingLineId(null); setLineDraft(null) }}>Cancel</button>
+              </div>
+
+              <div className="bid-line-editor-grid">
+                <label>
+                  Area
+                  <select value={lineDraft.area_code} onChange={(event) => updateLineDraft({ area_code: event.target.value })}>
+                    {areas.map((area) => <option key={area.code} value={area.code}>{area.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Line code
+                  <input maxLength={40} value={lineDraft.line_code} onChange={(event) => updateLineDraft({ line_code: event.target.value })} placeholder="Example: 12" />
+                </label>
+                <label>
+                  Section
+                  <select value={lineDraft.section} onChange={(event) => updateLineDraft({ section: event.target.value as BidLineSection })}>
+                    <option value="CPC">CPC</option>
+                    <option value="R-DEV">R-DEV</option>
+                    <option value="D-DEV">D-DEV</option>
+                  </select>
+                </label>
+                <label>
+                  Pattern
+                  <input
+                    maxLength={40}
+                    disabled={lineDraft.section !== 'CPC'}
+                    value={lineDraft.section === 'CPC' ? lineDraft.pattern : lineDraft.section}
+                    onChange={(event) => updateLineDraft({ pattern: event.target.value })}
+                    placeholder="Example: S/M"
+                  />
+                </label>
+                <label>
+                  Fatigue group
+                  <select value={lineDraft.fatigue_group} onChange={(event) => updateLineDraft({ fatigue_group: event.target.value as BidLineDraft['fatigue_group'] })}>
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="C only">C only</option><option value="B only">B only</option>
+                  </select>
+                </label>
+              </div>
+
+              <fieldset className="bid-line-options">
+                <legend>Line options</legend>
+                <label><input type="checkbox" checked={lineDraft.mid} onChange={(event) => updateLineDraft({ mid: event.target.checked })} /> Mid Bid line</label>
+                <label><input type="checkbox" checked={lineDraft.aws} onChange={(event) => updateLineDraft({ aws: event.target.checked })} /> AWS</label>
+                <label><input type="checkbox" checked={lineDraft.four_ten} onChange={(event) => updateLineDraft({ four_ten: event.target.checked })} /> 4/10</label>
+                <label><input type="checkbox" checked={lineDraft.flex} onChange={(event) => updateLineDraft({ flex: event.target.checked })} /> Flex</label>
+              </fieldset>
+
+              <fieldset className="bid-line-schedule">
+                <legend>Shift start times and RDOs</legend>
+                <p>Enter a start time such as 0630, or enter RDO.</p>
+                <div>
+                  {DAY_LABELS.map((day, index) => (
+                    <label key={day}>
+                      {day}
+                      <input maxLength={20} value={lineDraft.days[index]} onChange={(event) => updateDraftDay(index, event.target.value)} placeholder="RDO" />
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div className="import-actions">
+                <button className="button secondary" type="button" disabled={savingLine} onClick={() => { setEditingLineId(null); setLineDraft(null) }}>Cancel</button>
+                <button className="button primary" type="button" disabled={savingLine} onClick={() => void saveBidLine()}>{savingLine ? 'Saving…' : 'Save bid line'}</button>
+              </div>
+            </section>
+          ) : null}
+
           {linesLoading ? <p className="import-empty-state">Loading existing lines…</p> : existingLines.length ? (
             <div className="import-table-wrap import-line-manager-table">
               <table>
                 <thead>
-                  <tr><th>Line</th><th>Section</th><th>Pattern</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+                  <tr>
+                    {sortableHeader('display_order', 'Order')}
+                    {sortableHeader('line_code', 'Line')}
+                    {sortableHeader('section', 'Section')}
+                    {sortableHeader('pattern', 'Pattern')}
+                    {sortableHeader('mid', 'Mid')}
+                    {DAY_LABELS.map((day, dayIndex) => sortableHeader(`day-${dayIndex}`, day))}
+                    {sortableHeader('status', 'Status')}
+                    <th><span className="sr-only">Actions</span></th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {existingLines.map((line) => {
+                  {sortedExistingLines.map((line, index) => {
                     const protectedLine = line.status !== 'open' || Boolean(line.assigned_bidder_id)
+                    const days = daysForLine(line)
+                    const manualOrderActive = lineSort.key === 'display_order' && lineSort.direction === 'asc'
                     return (
                       <tr key={line.id}>
+                        <td>
+                          <div className="bid-line-order-buttons">
+                            <button type="button" disabled={!manualOrderActive || index === 0 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, -1)} aria-label={`Move line ${line.line_code} up`}>↑</button>
+                            <button type="button" disabled={!manualOrderActive || index === sortedExistingLines.length - 1 || reorderingLineId !== null} onClick={() => void moveBidLine(line.id, 1)} aria-label={`Move line ${line.line_code} down`}>↓</button>
+                          </div>
+                        </td>
                         <td><strong>{line.line_code}</strong></td>
                         <td>{line.line_type === 'CPC' ? 'CPC' : line.pattern === 'D-DEV' ? 'D-Dev' : 'R-Dev'}</td>
                         <td>{line.pattern}</td>
+                        <td>{line.mid === 'BID' ? 'Yes' : 'No'}</td>
+                        {days.map((day, dayIndex) => <td className={day === 'RDO' ? 'rdo' : ''} key={`${line.id}-${dayIndex}`}>{day}</td>)}
                         <td>{protectedLine ? `${line.status} · protected` : 'Open'}</td>
                         <td className="import-line-action-cell">
+                          <button className="button secondary compact" type="button" disabled={savingLine} onClick={() => startEditingLine(line)}>Edit</button>
                           <button
                             className="button danger compact"
                             type="button"

@@ -95,6 +95,7 @@ create table if not exists rdo_lines (
   bid_year_id uuid not null references bid_years(id) on delete cascade,
   area_id uuid not null references areas(id) on delete cascade,
   line_code text not null,
+  display_order integer not null default 0,
   line_type text not null default 'CPC' check (line_type in ('CPC', 'DEV')),
   pattern text not null,
   fatigue_group text check (fatigue_group in ('A', 'B', 'C', 'C only', 'B only')),

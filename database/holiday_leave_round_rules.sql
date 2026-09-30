@@ -1202,6 +1202,11 @@ begin
     for update;
     select * into strict line_row from public.rdo_lines where id = line_row.id;
 
+    if decision = 'approved' and target.bid_role = 'GL'
+       and not coalesce((override_payload->>'glLineTypeVerified')::boolean, false) then
+      raise exception 'Intake must verify whether this GL is bidding as CPC/TMC or DEV.';
+    end if;
+
     if decision = 'approved' and not public.rdo_line_matches_bid_role(
       target.bid_role, target_area_name, line_row.line_type, line_row.pattern
     ) then
@@ -1258,7 +1263,7 @@ begin
       ) then raise exception 'Leave after Round 1 cannot include the bidder''s RDO.'; end if;
 
       bucket := case when target.bid_role in ('R-DEV', 'D-DEV', 'DEV') then 'dev' else 'cpc' end;
-      if not ghost_bid then
+      if not ghost_bid and target.bid_role <> 'GL' then
         for date_row in
           select d.leave_date from public.leave_request_dates d
           where d.leave_request_id = leave_row.id and d.charged
