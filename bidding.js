@@ -5958,7 +5958,7 @@ function friendlyAuthFailure(error) {
 
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -5969,7 +5969,9 @@ function defaultLandingPageForRole() {
 
 function intendedLandingPage(requestedPage = requestedLandingPage()) {
   const defaultPage = defaultLandingPageForRole();
-  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "admin" || requestedPage === "admin-tools") {
+    return hasSystemAdminAccess() ? requestedPage : defaultPage;
+  }
   if (requestedPage === "intake" || requestedPage === "intake-schedule") {
     return canUseIntakeView() ? requestedPage : defaultPage;
   }
@@ -7986,7 +7988,7 @@ function pageForViewMode(mode) {
 }
 
 function viewModeForPage(pageName) {
-  if (pageName === "admin") return "admin";
+  if (pageName === "admin" || pageName === "admin-tools") return "admin";
   if (pageName === "intake" || pageName === "intake-schedule") return "intake";
   return "bue";
 }
@@ -11509,13 +11511,11 @@ async function saveBidWindowBuilderSchedule() {
 }
 
 function renderAdminConsole() {
-  syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
   syncSlotCapacityForm();
   renderSlotCapacitySummary();
   syncBidWindowBuilder();
   renderRosterManager();
-  renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
@@ -11557,6 +11557,16 @@ function renderAdminConsole() {
     </section>
   `;
   syncIntakeTeamControls();
+}
+
+function renderAdminToolsPage() {
+  if (!hasSystemAdminAccess()) return;
+  syncAdminScheduleFormDefaults();
+  renderRuleEditors();
+  renderManualBidEntry();
+  renderEmailLog();
+  syncBidWindowTestingControls();
+  syncPilotControls();
 }
 
 function setSlotCapacityStatus(message, status = "info") {
@@ -13586,7 +13596,7 @@ function setPage(pageName) {
   if (pageName === "intake-schedule" && !canUseIntakeView()) {
     pageName = "dashboard";
   }
-  if (pageName === "admin" && !hasSystemAdminAccess()) {
+  if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
 
@@ -13611,6 +13621,7 @@ function setPage(pageName) {
     intake: "Intake Queue",
     "intake-schedule": "Intake Schedule",
     admin: "Admin Console",
+    "admin-tools": "Bidding Setup",
     history: "Bid History",
     profile: "My Profile",
   };
@@ -14232,9 +14243,9 @@ function renderMemberPageContent(pageName) {
       ensureIntakeBidderSelection();
     }
     if (pageName === "admin") {
-      renderRuleEditors();
       renderAdminConsole();
     }
+    if (pageName === "admin-tools") renderAdminToolsPage();
   });
 }
 

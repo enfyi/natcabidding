@@ -6214,7 +6214,36 @@ tr.occupied-row .rdo-tag {
 }
 
 .admin-workspace {
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-tools-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-tools-page-header h2,
+.admin-tools-page-header p {
+  margin: 0;
+}
+
+.admin-tools-page-header p {
+  margin-top: 4px;
+  color: #627080;
+}
+
+.admin-tools-page-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-tools-page-grid > .manual-bid-card,
+.admin-tools-page-grid > .manual-leave-request-card {
+  grid-column: 1 / -1;
 }
 
 .admin-user-list {
@@ -7551,6 +7580,18 @@ body {
 }
 
 @media (max-width: 900px) {
+  .admin-tools-page-header {
+    flex-direction: column;
+  }
+
+  .admin-tools-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tools-page-grid > * {
+    grid-column: auto;
+  }
+
   .slot-capacity-form,
   .bid-window-builder-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));

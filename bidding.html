@@ -244,6 +244,10 @@
             <span class="nav-icon">⚙</span>
             Admin
           </button>
+          <button class="nav-item" type="button" data-page="admin-tools" data-system-admin-only hidden>
+            <span class="nav-icon">≡</span>
+            Bidding Setup
+          </button>
         </nav>
 
         <details class="mobile-app-menu">
@@ -257,6 +261,7 @@
             <button class="nav-item" type="button" data-page="intake" data-admin-only hidden><span class="nav-icon">!</span>Intake<span class="nav-badge" data-intake-count>0</span></button>
             <button class="nav-item" type="button" data-page="intake-schedule" data-intake-rep-only hidden><span class="nav-icon">◫</span>Intake Schedule</button>
             <button class="nav-item" type="button" data-page="admin" data-system-admin-only hidden><span class="nav-icon">⚙</span>Admin</button>
+            <button class="nav-item" type="button" data-page="admin-tools" data-system-admin-only hidden><span class="nav-icon">≡</span>Bidding Setup</button>
             <button class="nav-item" type="button" data-help-toggle><span class="nav-icon">?</span>Live Help</button>
             <button class="nav-item danger" type="button" data-log-out><span class="nav-icon">↪</span>Log Out</button>
           </div>
@@ -1239,9 +1244,6 @@
             <button type="button" data-admin-section-target="admin-bid-window-section">Bid windows</button>
             <button type="button" data-admin-section-target="admin-roster-section">Roster</button>
             <button type="button" data-admin-section-target="admin-access-section">Access</button>
-            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
-            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
-            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
           </nav>
           <div class="workspace-grid admin-workspace">
             <section class="panel admin-console-panel">
@@ -1485,8 +1487,27 @@
                 <div class="admin-user-list" data-admin-user-list></div>
               </section>
             </section>
-            <aside class="right-stack">
-              <section class="panel bid-window-testing-card" data-system-admin-only hidden>
+          </div>
+        </section>
+
+        <section class="page" id="admin-tools-page" data-page-panel="admin-tools">
+          <header class="admin-tools-page-header">
+            <div>
+              <h2>Bidding Setup</h2>
+              <p>Manage bidding policy, pilot rounds, rules, intake scheduling, manual entry, and administrative data.</p>
+            </div>
+            <span class="pill open">System Admin</span>
+          </header>
+          <nav class="admin-section-nav" aria-label="Bidding setup sections">
+            <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
+            <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
+            <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
+            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
+            <button type="button" data-admin-section-target="admin-entry-section">Manual entry</button>
+            <button type="button" data-admin-section-target="admin-export-section">Data</button>
+          </nav>
+          <div class="admin-tools-page-grid">
+              <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
                     <h3>Bid Window Policy</h3>
@@ -1509,7 +1530,7 @@
                   </select>
                 </label>
               </section>
-              <section class="panel bid-window-testing-card" data-system-admin-only data-pilot-admin-card hidden>
+              <section class="panel bid-window-testing-card admin-section-target" id="admin-pilot-section" tabindex="-1" data-system-admin-only data-pilot-admin-card hidden>
                 <div class="panel-header compact">
                   <div>
                     <h3>Pilot Access and Rounds</h3>
@@ -1546,7 +1567,7 @@
                 <div class="round-rule-editor" data-round-rule-editor></div>
                 <p class="form-status" data-round-rule-status role="status" aria-live="polite"></p>
               </section>
-              <section class="panel editable-rule-card">
+              <section class="panel editable-rule-card admin-section-target" id="admin-approval-rules-section" tabindex="-1">
                 <div class="panel-header compact">
                   <div>
                     <h3>Approval Rules</h3>
@@ -1696,7 +1717,7 @@
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
-              <section class="panel manual-leave-request-card" data-manual-bid-panel>
+              <section class="panel manual-leave-request-card admin-section-target" id="admin-requested-leave-section" tabindex="-1" data-manual-bid-panel>
                 <div class="panel-header compact">
                   <div>
                     <h3>Requested Leave Dates</h3>
@@ -1754,7 +1775,7 @@
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
                 <h3>Database Export</h3>
                 <p>Download everything captured in this prototype.</p>
                 <div class="export-actions">
@@ -1762,11 +1783,10 @@
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
                 </div>
               </section>
-              <section class="panel">
+              <section class="panel admin-section-target" id="admin-email-log-section" tabindex="-1">
                 <h3>Email Log</h3>
                 <div class="email-log" data-email-log></div>
               </section>
-            </aside>
           </div>
         </section>
 
