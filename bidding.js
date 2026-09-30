@@ -3485,6 +3485,13 @@ function formatRoundedUpLeaveDays(days) {
   return Number.isFinite(value) ? Math.ceil(value).toLocaleString("en-US") : "0";
 }
 
+function formatRoundedUpLeaveDaysLabel(days) {
+  const value = Number(days);
+  const roundedDays = Number.isFinite(value) ? Math.ceil(value) : 0;
+  const label = Math.abs(roundedDays) === 1 ? "day" : "days";
+  return `${roundedDays.toLocaleString("en-US")} ${label}`;
+}
+
 function formatLeaveDaysLabel(days) {
   const value = Number(days);
   const label = Math.abs(value - 1) < 0.05 ? "day" : "days";
@@ -9759,7 +9766,7 @@ function renderLeaveAllowanceSummary() {
   setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
   setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(totalAllowanceHours)} hours / ${scheduleText})`);
   setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
-  setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
+  setText("[data-leave-left-days]", formatRoundedUpLeaveDaysLabel(leftDays));
   setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
   setText("[data-leave-balance-summary]", `${formatEstimatedLeaveDays(allowanceHours)} base hours · ${credits * hoursPerDay} returned hours · ${scheduleText}`);
   setText("[data-leave-balance-holidays]", holidayText);
