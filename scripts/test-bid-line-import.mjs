@@ -70,6 +70,16 @@ assert.match(editor, /Mid Bid line/, 'the admin editor must expose the Mid Bid d
 assert.match(editor, /R-DEV[\s\S]*D-DEV/, 'the admin editor must expose both development-line designations')
 assert.match(bidding, /displayOrder: row\.display_order/, 'the bidder view must load the persisted line order')
 assert.match(
+  bidding,
+  /isMissingRdoLineDisplayOrder[\s\S]*?Keep existing schedules visible[\s\S]*?\.select\("id,area_id,line_code,line_type,pattern/,
+  'the bidder view must keep existing lines visible before the display-order migration is applied',
+)
+assert.match(
+  editor,
+  /isMissingDisplayOrder[\s\S]*?migrationPending = true[\s\S]*?\.select\('id,line_code,line_type,pattern/,
+  'the admin editor must keep existing lines visible before the display-order migration is applied',
+)
+assert.match(
   parser,
   /if \(!normalized\) \{\s*issues\.push\(`\$\{rowReference\(row\)\}: \$\{label\} must be Yes or No\.`\)/,
   'blank required boolean cells must produce a validation issue',
