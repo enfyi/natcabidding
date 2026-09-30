@@ -55,13 +55,18 @@ and add these Additional Redirect URLs for development and Vercel previews:
 
 If the Vercel team slug changes, update the preview wildcard to match it. When a
 custom confirmation email template uses `token_hash`, send it directly to the
-selected callback so the deployment origin is preserved:
+selected redirect so the deployment origin is preserved:
 
 ```html
 <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">
   Confirm email address
 </a>
 ```
+
+The public bidding page recognizes this token-hash URL and presents a separate
+`Confirm email and sign in` button before calling `verifyOtp`. The extra user
+gesture prevents Microsoft Safe Links and similar email scanners from consuming
+the one-time token merely by previewing the link.
 
 ## Vercel environment variables
 
@@ -85,6 +90,17 @@ disposable database. The Admin page can then select BUEs by initials, turn
 practice bidding on or off, and reset the year's practice data. Reset keeps the
 roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
 participant list.
+
+Apply `database/pilot_round_controls.sql` after `pilot_mode.sql`, then apply
+`database/pilot_submission_window_fix.sql` to upgrade legacy RDO and leave
+submission functions. `scripts/test-pilot-submission-windows.sql` verifies both
+public submission RPCs in a transaction that rolls back all test data. In Pilot Access
+and Rounds, administrators can turn each of rounds 1–4 on or off independently.
+Authorized pilot participants choose an enabled round in the test-site banner
+and submit without scheduled hours. Both pilot access and the chosen round must
+be on. All rounds start off. Controls refresh every ten seconds; the database
+checks the round at submission time. The selected participant list still controls
+who can submit, and normal leave limits and review rules still apply.
 
 The database refuses pilot activation and reset unless `pilot_seed.sql` marked
 it as isolated. A reset also turns the pilot off, so the administrator must

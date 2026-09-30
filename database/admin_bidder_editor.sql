@@ -1,5 +1,6 @@
 -- Bidder editor: complete-record validation and atomic, audited saves.
 -- Requires the existing bidding routines and leave_submission_preflight.sql.
+-- Also requires fatigue_group_balancing.sql.
 -- The private date helper follows admin_leave_request_edit.sql, preserving pending status.
 create schema if not exists private;
 revoke all on schema private from public, anon;
@@ -158,7 +159,7 @@ begin
     requested_edit_end_date::timestamp,
     interval '1 day'
   ) generated_date
-  where not exists (
+  where (request_row.round_number <= 3 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = request_row.bid_year_id
@@ -170,7 +171,7 @@ begin
       where in_lieu.bid_year_id = request_row.bid_year_id
         and in_lieu.bidder_id = request_row.bidder_id
         and in_lieu.in_lieu_date = generated_date::date
-    )
+    )))
     and not (
       request_row.round_number = 1
       and target_rdo_line_id is not null
@@ -184,23 +185,36 @@ begin
     );
 
   if request_row.round_number = 1 then
-    replacement_week_count := pg_catalog.ceil(
-      (requested_edit_end_date - requested_edit_start_date + 1)::numeric / 7
-    )::integer;
+    select cardinality(private.round_one_week_bucket_starts(array_agg(generated_date::date)))
+    into replacement_week_count
+    from pg_catalog.generate_series(
+      requested_edit_start_date::timestamp,
+      requested_edit_end_date::timestamp,
+      interval '1 day'
+    ) generated_date;
 
-    select count(*)::integer
+    select cardinality(private.round_one_week_bucket_starts(array_agg(week_dates.leave_date)))
     into other_round_usage
-    from public.leave_request_week_buckets bucket
-    join public.leave_requests other_request
-      on other_request.id = bucket.leave_request_id
-    where other_request.bid_year_id = request_row.bid_year_id
-      and other_request.bidder_id = request_row.bidder_id
-      and other_request.round_number = 1
-      and other_request.status in ('pending', 'approved')
-      and other_request.id <> request_row.id;
+    from (
+      select request_date.leave_date
+      from public.leave_request_dates request_date
+      join public.leave_requests other_request on other_request.id = request_date.leave_request_id
+      where other_request.bid_year_id = request_row.bid_year_id
+        and other_request.bidder_id = request_row.bidder_id
+        and other_request.round_number = 1
+        and other_request.status in ('pending', 'approved')
+        and other_request.id <> request_row.id
+      union all
+      select generated_date::date
+      from pg_catalog.generate_series(
+        requested_edit_start_date::timestamp,
+        requested_edit_end_date::timestamp,
+        interval '1 day'
+      ) generated_date
+    ) week_dates;
 
-    if request_row.status in ('pending','approved') and other_round_usage + replacement_week_count > 2 then
-      raise exception 'Round 1 can include no more than 2 bid weeks.';
+    if request_row.status in ('pending','approved') and other_round_usage > 2 then
+      raise exception 'Round 1 can include no more than 2 seven-day bid weeks.';
     end if;
   else
     round_limit := case when request_row.round_number in (2, 3) then 10 else 5 end;
@@ -298,9 +312,9 @@ begin
     request_row.id,
     bucket.id,
     generated_date::date,
-    not holiday.is_holiday
-      and not in_lieu.is_holiday_in_lieu
-      and not (request_row.round_number = 1 and rdo.is_rdo),
+    not (request_row.round_number = 1 and rdo.is_rdo)
+      and (request_row.round_number <= 3
+        or (not holiday.is_holiday and not in_lieu.is_holiday_in_lieu)),
     rdo.is_rdo,
     holiday.is_holiday,
     in_lieu.is_holiday_in_lieu
@@ -345,6 +359,7 @@ begin
       from public.leave_request_dates request_date
       where request_date.leave_request_id = request_row.id
         and request_date.charged
+        and not request_date.is_holiday and not request_date.is_holiday_in_lieu
         and request_row.status in ('pending','approved')
       order by request_date.leave_date
     loop
@@ -372,6 +387,7 @@ begin
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
+      and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
       and pending_bidder.bid_role not in ('ADM', 'NB')
       and case
@@ -476,6 +492,10 @@ begin
     )
   );
 
+  if request_row.round_number = 1 and request_row.status in ('pending', 'approved') then
+    perform private.rebuild_round_one_week_buckets(request_row.bid_year_id, request_row.bidder_id);
+  end if;
+
   return jsonb_build_object(
     'leave_request_id', request_row.id,
     'start_date', replacement_start_date,
@@ -515,9 +535,12 @@ select jsonb_build_object(
   'bidder_version', (select b.updated_at from public.bidders b where b.id=target_id),
   'is_ghost_bidder', public.is_ghost_bidder(year_id, target_id),
   'assignment', (select to_jsonb(x) from (
-    select id, line_code, fatigue_group, flex, aws, mid, four_ten, updated_at
-    from public.rdo_lines where bid_year_id=year_id and assigned_bidder_id=target_id
-      and status='taken' order by updated_at desc,id limit 1
+    select line.id, line.line_code, line.fatigue_group, line.flex, line.aws, line.mid,
+      line.four_ten, line.updated_at,
+      (select coalesce(jsonb_agg(day.shift_code order by day.weekday),'[]'::jsonb)
+       from public.rdo_line_days day where day.rdo_line_id=line.id) week
+    from public.rdo_lines line where line.bid_year_id=year_id and line.assigned_bidder_id=target_id
+      and line.status='taken' order by line.updated_at desc,line.id limit 1
   ) x),
   'rdo', (select to_jsonb(x) from (
     select id, rdo_line_id, round_number, status, payload, is_ghost_bid, updated_at
@@ -526,8 +549,18 @@ select jsonb_build_object(
     order by submitted_at desc nulls last,created_at desc,id limit 1
   ) x),
   'leave', coalesce((select jsonb_agg(to_jsonb(x) order by round_number,priority,id) from (
-    select id, round_number, priority, status, requested_start_date, requested_end_date, charged_days, is_ghost_bid, updated_at
-    from public.leave_requests where bid_year_id=year_id and bidder_id=target_id
+    select request.id, request.round_number, request.priority, request.status,
+      request.requested_start_date, request.requested_end_date, request.charged_days,
+      request.is_ghost_bid, request.updated_at,
+      (select coalesce(jsonb_agg(jsonb_build_object(
+        'leave_date', day.leave_date,
+        'charged', day.charged,
+        'is_rdo', day.is_rdo,
+        'is_holiday', day.is_holiday,
+        'is_holiday_in_lieu', day.is_holiday_in_lieu
+      ) order by day.leave_date),'[]'::jsonb)
+       from public.leave_request_dates day where day.leave_request_id=request.id) dates
+    from public.leave_requests request where request.bid_year_id=year_id and request.bidder_id=target_id
   ) x),'[]'::jsonb)
 ) $$;
 revoke all on function private.bidder_editor_snapshot(uuid,uuid) from public, anon, authenticated;
@@ -550,7 +583,20 @@ begin
     ) x;
     return jsonb_build_object('bidders',result);
   end if;
-  return jsonb_build_object('snapshot',private.bidder_editor_snapshot(year_id,target_bidder_id),
+  return jsonb_build_object(
+    'person',(select jsonb_build_object(
+      'id',b.id,
+      'first_name',b.first_name,
+      'last_name',b.last_name,
+      'initials',b.initials,
+      'email',b.email,
+      'phone',b.phone,
+      'bid_role',b.bid_role,
+      'seniority_rank',b.seniority_rank,
+      'leave_slot_allowance',b.leave_slot_allowance,
+      'area',a.name
+    ) from public.bidders b left join public.areas a on a.id=b.area_id where b.id=target_bidder_id),
+    'snapshot',private.bidder_editor_snapshot(year_id,target_bidder_id),
     'lines',(select coalesce(jsonb_agg(to_jsonb(x) order by line_code),'[]'::jsonb) from (
       select l.id,l.line_code,l.pattern,l.fatigue_group,l.mid,l.four_ten,l.status,l.assigned_bidder_id
       from public.rdo_lines l join public.bidders b on b.id=target_bidder_id join public.areas a on a.id=b.area_id
@@ -566,8 +612,8 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   actor_id uuid; target public.bidders%rowtype; year_id uuid; before_state jsonb;
   line_row public.rdo_lines%rowtype; line_change jsonb; entry jsonb; prior jsonb;
-  rdo_id uuid; rdo_status text; group_name text; area_max integer; crew_max integer;
-  start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer;
+  rdo_id uuid; rdo_status text; group_name text;
+  start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer; manual_credit_days integer;
   bucket text; d date; r record;
   ghost_bid boolean;
 begin
@@ -610,17 +656,9 @@ begin
     if jsonb_typeof(line_change->'flex') is distinct from 'boolean' or jsonb_typeof(line_change->'aws') is distinct from 'boolean'
       or coalesce(line_change->>'mid','') not in ('Yes','No','BID') then raise exception 'Choose valid Flex, AWS, and Mid values.'; end if;
     if line_row.mid='BID' and line_change->>'mid' <> 'BID' then raise exception 'A designated Mid line must retain BID.'; end if;
-    if line_row.line_type='CPC' and target.bid_role <> 'GL' then
-      select greatest(1,floor(count(*)::numeric/3)::integer) into area_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC';
-      select greatest(1,floor(count(*)::numeric/3)::integer) into crew_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC' and pattern=line_row.pattern;
-      if (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= area_max
-        or (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and pattern=line_row.pattern and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= crew_max then
-        raise exception 'Fatigue group % is full for this area or crew.',group_name;
-      end if;
+    if line_row.line_type in ('CPC','DEV') and target.bid_role <> 'GL'
+      and not private.fatigue_group_is_available(year_id,target.area_id,line_row.id,group_name,target.id) then
+      raise exception 'Fatigue group % is full for this area or RDO set.',group_name;
     end if;
     rdo_id := (before_state->'rdo'->>'id')::uuid;
     rdo_status := coalesce(before_state->'rdo'->>'status','approved');
@@ -683,8 +721,18 @@ begin
   for round_no in 1..5 loop
     select coalesce(sum(charged_days),0)*day_hours into used_hours from public.leave_requests
       where bid_year_id=year_id and bidder_id=target.id and status in ('pending','approved') and round_number<=round_no;
-    select coalesce(sum(c.credit_days),0) into credit_days from public.leave_credit_events c
-      where c.bid_year_id=year_id and c.bidder_id=target.id and c.round_number<=round_no and round_no>=4;
+    credit_days := 0;
+    if round_no >= 4 then
+      select count(distinct d.leave_date) into credit_days
+      from public.leave_request_dates d join public.leave_requests request on request.id=d.leave_request_id
+      where request.bid_year_id=year_id and request.bidder_id=target.id
+        and request.round_number between 1 and 3 and request.status in ('pending','approved')
+        and d.charged and (d.is_holiday or d.is_holiday_in_lieu);
+      select coalesce(sum(c.credit_days),0) into manual_credit_days from public.leave_credit_events c
+        where c.bid_year_id=year_id and c.bidder_id=target.id and c.round_number<=round_no
+          and c.source='manual_adjustment';
+      credit_days := credit_days + manual_credit_days;
+    end if;
     if used_hours > target.leave_slot_allowance+credit_days*day_hours then
       raise exception 'Round % would use % leave hours, above the % hour allowance.',round_no,used_hours,target.leave_slot_allowance+credit_days*day_hours;
     end if;
