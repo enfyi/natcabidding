@@ -351,7 +351,7 @@ export function BidLineImporter() {
         })
         .abortSignal(requestTimeout.signal)
       if (requestTimeout.didExpire()) throw new Error(importTimeoutMessage('import'))
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       const imported = data as ImportResult
       setResult(imported)
@@ -380,7 +380,7 @@ export function BidLineImporter() {
 
     try {
       const { error } = await supabase.rpc('admin_delete_bid_line', { target_line_id: line.id })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       setExistingLines((lines) => lines.filter((candidate) => candidate.id !== line.id))
       setLineManagementStatus(`Line ${line.line_code} was deleted.`)
       setPreview(null)
@@ -468,7 +468,7 @@ export function BidLineImporter() {
           days: normalizedDays,
         },
       })
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       const savedCode = lineDraft.line_code.trim()
       const savedArea = lineDraft.area_code
@@ -504,7 +504,7 @@ export function BidLineImporter() {
         requested_area_code: areaCode,
         ordered_line_ids: reordered.map((line) => line.id),
       })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       setLineManagementStatus('Line order saved.')
     } catch (error) {
       setLineManagementStatus(error instanceof Error ? error.message : 'The line order could not be saved.')
