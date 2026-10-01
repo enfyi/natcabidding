@@ -8965,11 +8965,10 @@ function renderRdoLines() {
   let lastPattern = "";
   const rows = [];
   const viewArea = currentViewArea();
-  const areaLines = isViewingHomeArea()
-    ? rdoLinesForBidder(currentUserBidAs(), viewArea)
-    : rdoLinesForArea(viewArea);
-  if (isViewingHomeArea() && !areaLines.some((line) => line.line === selectedLineId)) {
-    selectedLineId = areaLines[0]?.line || "";
+  const areaLines = rdoLinesForArea(viewArea);
+  const eligibleLines = rdoLinesForBidder(currentUserBidAs(), viewArea);
+  if (isViewingHomeArea() && !eligibleLines.some((line) => line.line === selectedLineId)) {
+    selectedLineId = eligibleLines[0]?.line || "";
   }
   setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
@@ -8993,6 +8992,8 @@ function renderRdoLines() {
     const isSelected = line.line === selectedLineId;
     const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
+    const canSelect = isViewingHomeArea() && !bidderSelectionLocked && !isOccupied
+      && rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
     const groupValue = rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line, {
       previewGroup: isSelected && isViewingHomeArea() ? selectedFatigueGroup : "",
       pendingGroup: isViewingHomeArea() && pendingRequest?.line === line.line ? pendingRequest.fatigueGroup : "",
@@ -9000,7 +9001,7 @@ function renderRdoLines() {
     const swingIndex = thirdDaySwingIndex(line.week);
 
     rows.push(`
-      <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${canSelect ? "selectable-row" : "occupied-row"}" ${canSelect ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
@@ -9023,13 +9024,14 @@ function renderRdoLines() {
       ? filteredLines.map((line) => {
         const isSelected = line.line === selectedLineId && isViewingHomeArea();
         const isOccupied = line.status === "Taken";
+        const matchesBidRole = rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
         const rdoDays = line.week
           .map((value, index) => value === "RDO" ? dayNames[index] : "")
           .filter(Boolean)
           .join(", ") || line.pattern;
-        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() && matchesBidRole ? "Open" : "View only";
         const swingIndex = thirdDaySwingIndex(line.week);
-        const selectButton = !isOccupied && isViewingHomeArea() && !bidderSelectionLocked
+        const selectButton = !isOccupied && isViewingHomeArea() && matchesBidRole && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
           : "";
         return `
@@ -15413,8 +15415,9 @@ document.addEventListener("click", async (event) => {
   if (row && !row.classList.contains("occupied-row")) {
     const previousLineId = selectedLineId;
     const previousRdoWeekdays = selectedRdoWeekdays();
-    selectedLineId = row.dataset.lineId;
-    const selectedLine = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === selectedLineId);
+    const selectedLine = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === row.dataset.lineId);
+    if (!selectedLine || selectedLine.status === "Taken" || !isViewingHomeArea() || pendingCurrentUserRdoRequest()) return;
+    selectedLineId = selectedLine.line;
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
       reconcileUnsubmittedLeaveForRdoLine(selectedLine);
     }
