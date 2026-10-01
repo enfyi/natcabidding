@@ -10553,6 +10553,16 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
     margin: 0.2in;
   }
 
+  /* Let the print dialog choose either orientation for public RDO schedules. */
+  @page public-rdo {
+    size: auto;
+    margin: 0.2in;
+  }
+
+  body:has(.public-rdo-panel) {
+    page: public-rdo;
+  }
+
   html,
   body {
     width: auto !important;
@@ -10569,7 +10579,8 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
   .mobile-bid-time-search,
   .mobile-bid-time-cards,
   .public-date-sheet,
-  .rdo-floating-header {
+  .rdo-floating-header,
+  .rdo-floating-table-header {
     display: none !important;
   }
 
@@ -10760,6 +10771,12 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
 
   /* RDO schedules: print the comparison tables rather than phone cards,
      remove interactive filters, and let each section continue naturally. */
+  .public-rdo-panel,
+  .public-rdo-panel * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   .public-rdo-panel > .panel-header,
   .public-rdo-panel > .filter-bar,
   .public-rdo-panel .mobile-rdo-view,
@@ -10783,21 +10800,16 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
 
   .public-main .public-rdo-line-section {
     margin: 0 0 8px;
-    border: 1px solid #8fa3b5;
-    border-radius: 0;
   }
 
   .public-main .public-rdo-line-section-heading {
     break-after: avoid;
     page-break-after: avoid;
     padding: 5px 7px;
-    color: #ffffff !important;
-    background: #14335f !important;
   }
 
   .public-main .public-rdo-line-section-heading h3,
   .public-main .public-rdo-line-section-heading span {
-    color: #ffffff !important;
     font-size: 7pt;
   }
 
@@ -10823,15 +10835,16 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
   .public-main .public-rdo-table th:first-child,
   .public-main .public-rdo-table td:first-child {
     position: static !important;
-    border: 1px solid #b5c2ce !important;
     padding: 3px 4px !important;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
     box-shadow: none !important;
   }
 
   .public-main .public-rdo-table th:nth-child(1),
   .public-main .public-rdo-table td:nth-child(1) {
-    width: 7% !important;
+    width: 6% !important;
     min-width: 0 !important;
   }
 
@@ -10845,8 +10858,25 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
   .public-main .public-rdo-table .shift,
   .public-main .public-rdo-table .rdo-tag {
     padding: 2px 4px;
-    border-radius: 2px;
     font-size: 6pt;
+  }
+
+  /* Keep phone column widths from changing the printed desktop proportions. */
+  .public-main .public-rdo-table th:nth-child(n + 3):nth-child(-n + 9),
+  .public-main .public-rdo-table td:nth-child(n + 3):nth-child(-n + 9) {
+    width: auto !important;
+  }
+
+  .public-main .public-rdo-table th:nth-child(10),
+  .public-main .public-rdo-table td:nth-child(10),
+  .public-main .public-rdo-table th:nth-child(11),
+  .public-main .public-rdo-table td:nth-child(11) {
+    width: 6% !important;
+  }
+
+  .public-main .public-rdo-table th:last-child,
+  .public-main .public-rdo-table td:last-child {
+    width: 9% !important;
   }
 }
 
