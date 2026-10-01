@@ -4010,6 +4010,37 @@ tr.occupied-row .rdo-tag {
   font-size: 0.68rem;
 }
 
+.rdo-gl-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.rdo-line-bidders {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.gl-line-bidder {
+  color: #7b8494;
+  font-weight: 800;
+}
+
+.rdo-line-open-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.rdo-line-bidder-separator {
+  color: #a2aab7;
+  white-space: pre;
+}
+
 .month-grid .gl-bid-marker,
 .week-calendar-grid .gl-bid-marker {
   position: absolute;
