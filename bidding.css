@@ -10389,7 +10389,7 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
     min-width: 0;
     table-layout: auto;
   }
-  .public-bid-time-results[data-presentation="list"] .bid-time-rank-column { width: 28px; }
+  .public-bid-time-results[data-presentation="list"] .bid-time-rank-column { width: 40px; }
   .public-bid-time-results[data-presentation="list"] .bid-time-name-column { width: 128px; }
   .public-bid-time-results[data-presentation="list"] .bid-time-initials-column { width: 52px; }
   .public-bid-time-results[data-presentation="list"] .bid-time-role-column { width: 52px; }
@@ -10402,8 +10402,17 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
     overflow-wrap: anywhere;
   }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-round {
+    padding-inline: 12px;
     white-space: nowrap;
     overflow-wrap: normal;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table th:first-child,
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table td:first-child {
+    min-width: 40px;
+    padding-inline: 8px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-name {
     min-width: 128px;
