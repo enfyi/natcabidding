@@ -1820,6 +1820,7 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
+let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
@@ -13822,6 +13823,8 @@ function renderIntakeQueueWithCache() {
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
+  if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
@@ -13926,6 +13929,7 @@ function openIntakeItemFromAlert(itemId) {
   if (!groupedItem) return;
 
   activeIntakeDetailId = groupedItem.id;
+  alertFocusedIntakeItemId = groupedItem.id;
   activeOverrideId = null;
   activeDenialId = null;
   intakeSearchQuery = "";
@@ -13934,13 +13938,13 @@ function openIntakeItemFromAlert(itemId) {
   setPage("intake");
   renderIntakeQueue();
 
-  window.requestAnimationFrame(() => {
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
     const card = [...document.querySelectorAll("[data-intake-card]")]
       .find((candidate) => candidate.dataset.intakeCard === groupedItem.id);
     if (!card) return;
-    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.scrollIntoView({ behavior: "instant", block: "start" });
     card.focus({ preventScroll: true });
-  });
+  }));
 }
 
 function setPage(pageName) {
