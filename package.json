@@ -28,6 +28,7 @@
     "test:rdo-preview-leave": "node scripts/test-rdo-preview-leave-reconciliation.mjs",
     "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs && node scripts/test-leave-draft-order.mjs",
     "test:bid-change-modal": "node scripts/test-bid-change-modal.mjs",
+    "test:rdo-bid-change-history": "node scripts/test-rdo-bid-change-history.mjs",
     "test:bid-window-boundaries": "node scripts/test-bid-window-boundaries.mjs",
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
     "test:round-rules": "node scripts/test-independent-round-rules.mjs",
