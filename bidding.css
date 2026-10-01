@@ -3881,6 +3881,12 @@ tr.occupied-row .rdo-tag {
   outline: none;
 }
 
+.intake-card.bid-change {
+  border-color: rgba(169, 145, 197, 0.7);
+  background: rgba(132, 108, 162, 0.1);
+  box-shadow: inset 3px 0 rgba(169, 145, 197, 0.65);
+}
+
 .intake-card.approved {
   opacity: 0.82;
 }
@@ -3894,6 +3900,13 @@ tr.occupied-row .rdo-tag {
   margin: 4px 0;
   color: white;
   font-size: 0.98rem;
+}
+
+.intake-card-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
 }
 
 .intake-card p {
@@ -3920,12 +3933,11 @@ tr.occupied-row .rdo-tag {
 
 .intake-change-badge {
   display: inline-flex;
-  margin-left: 6px;
-  border: 1px solid rgba(255, 190, 92, 0.65);
+  border: 1px solid rgba(169, 145, 197, 0.75);
   border-radius: 999px;
   padding: 3px 8px;
-  color: #ffe2a8;
-  background: rgba(190, 119, 17, 0.2);
+  color: #e9dcf5;
+  background: rgba(132, 108, 162, 0.2);
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -7874,6 +7886,18 @@ body {
 .app-main .help-message {
   border-color: #dbe4ef;
   background: #f8fafc;
+}
+
+.app-main .intake-card.bid-change {
+  border-color: #cfc3dc;
+  background: #faf8fc;
+  box-shadow: inset 3px 0 #a991c5;
+}
+
+.app-main .intake-change-badge {
+  border-color: #c5b5d6;
+  color: #5f4779;
+  background: #f0eaf5;
 }
 
 .app-main .alert-list strong,
