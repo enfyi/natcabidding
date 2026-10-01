@@ -6891,6 +6891,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       .map((day) => day.shift_code);
     const area = areaNameForRow(row, areaById);
     const nextLine = {
+      id: row.id,
       area,
       pattern: row.pattern,
       line: row.line_code,
@@ -6904,6 +6905,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       fourTen: row.four_ten ? "Yes" : "No",
       flex: typeof row.flex === "boolean" ? (row.flex ? "Yes" : "No") : "",
       status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
+      glBids: [],
     };
     const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
     if (existingIndex >= 0) {
@@ -6916,6 +6918,29 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
   if (!selectedLineId && rdoLines.length) {
     selectedLineId = rdoLinesForArea(currentUser?.area || "Area A")[0]?.line || rdoLines[0].line;
   }
+}
+
+function applyGlRdoAssignments(rows) {
+  rdoLines.forEach((line) => {
+    line.glBids = [];
+  });
+
+  (rows || []).forEach((row) => {
+    const line = rdoLines.find((candidate) => (
+      (row.rdo_line_id && candidate.id === row.rdo_line_id)
+      || (candidate.line === row.line_code && candidate.area === row.area_name)
+    ));
+    const initials = String(row.initials || "").trim().toUpperCase();
+    if (!line || !initials || line.glBids.some((bid) => bid.initials === initials)) return;
+    line.glBids.push({
+      initials,
+      status: uiStatusFromDatabase(row.status || "pending"),
+    });
+  });
+
+  rdoLines.forEach((line) => {
+    line.glBids.sort((left, right) => left.initials.localeCompare(right.initials));
+  });
 }
 
 function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
@@ -7517,6 +7542,10 @@ async function loadPublishedLeaveSlots(client) {
   return client.rpc("read_public_leave_slots", { requested_bid_year: BID_YEAR });
 }
 
+async function loadPublishedGlRdoAssignments(client) {
+  return client.rpc("read_public_gl_rdo_assignments", { requested_bid_year: BID_YEAR });
+}
+
 async function loadRdoLines(client, bidYearId) {
   const orderedResult = await client
     .from("rdo_lines")
@@ -7570,6 +7599,7 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
+      glRdoAssignmentsResult,
       biddingStateResult,
       leaveSlotsResult,
       leaveRequestsResult,
@@ -7586,6 +7616,7 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       loadRdoLines(client, bidYear.id),
+      loadPublishedGlRdoAssignments(client),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
@@ -7606,6 +7637,7 @@ async function loadSupabaseReferenceData() {
     const loadWarnings = [
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
@@ -7625,6 +7657,7 @@ async function loadSupabaseReferenceData() {
     });
 
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
+    if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
       : biddingStateResult.data?.submissions || [];
@@ -8105,7 +8138,7 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
     rows.push(`
       <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
         <td>${line.line}</td>
-        <td><b>${lineOccupant(line)}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
         <td>${rdoLineAwsReferenceCell(line)}</td>
@@ -8138,7 +8171,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
               <details class="mobile-rdo-card">
                 <summary>
                   <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-line-status">${lineStatusMarkup(line)}</span>
                   <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
@@ -8207,6 +8240,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
+      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL Bid · visible, but does not occupy the line</p>
       <div class="mobile-rdo-view" role="group" aria-label="RDO display">
         <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
         <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
@@ -8879,6 +8913,30 @@ function lineOccupant(line) {
   return "";
 }
 
+function lineGlBids(line) {
+  return Array.isArray(line?.glBids) ? line.glBids : [];
+}
+
+function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
+  const occupant = lineOccupant(line);
+  const glBids = lineGlBids(line);
+  const pieces = [];
+  if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
+  else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
+  glBids.forEach((bid) => {
+    pieces.push(`<span class="gl-line-bidder" title="GL Bid · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+  });
+  return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
+}
+
+function lineStatusMarkup(line, openLabel = "Open") {
+  const label = line.status === "Taken" ? "Taken" : openLabel;
+  const bidders = lineBidderMarkup(line);
+  return bidders
+    ? `${escapeHtml(label)}<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>${bidders}`
+    : escapeHtml(label);
+}
+
 function selectedMidValue(line) {
   return isForcedMid(line) ? line.mid : selectedMidPreference;
 }
@@ -9024,6 +9082,7 @@ function rdoLineMatchesFilterSet(line, filters) {
     const searchable = [
       line.line,
       line.cpc,
+      ...lineGlBids(line).map((bid) => bid.initials),
       line.pattern,
       line.group,
       line.status,
@@ -9091,7 +9150,6 @@ function renderRdoLines() {
     }
 
     const isSelected = line.line === selectedLineId;
-    const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
     const canSelect = isViewingHomeArea() && !bidderSelectionLocked && !isOccupied
       && rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
@@ -9104,7 +9162,7 @@ function renderRdoLines() {
     rows.push(`
       <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${canSelect ? "selectable-row" : "occupied-row"}" ${canSelect ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
-        <td><b>${displayCpc}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
         <td>${rdoLineAwsReferenceCell(line)}</td>
@@ -9130,7 +9188,7 @@ function renderRdoLines() {
           .map((value, index) => value === "RDO" ? dayNames[index] : "")
           .filter(Boolean)
           .join(", ") || line.pattern;
-        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() && matchesBidRole ? "Open" : "View only";
+        const status = lineStatusMarkup(line, isViewingHomeArea() && matchesBidRole ? "Open" : "View only");
         const swingIndex = thirdDaySwingIndex(line.week);
         const selectButton = !isOccupied && isViewingHomeArea() && matchesBidRole && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`

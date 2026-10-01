@@ -715,7 +715,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif exists (
+    elsif target.bid_role <> 'GL' and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id

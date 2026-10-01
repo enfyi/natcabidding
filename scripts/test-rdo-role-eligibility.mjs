@@ -125,6 +125,8 @@ for (const role of ['CPC', 'R-DEV', 'D-DEV']) {
     pendingCurrentUserRdoRequest: () => null,
     isCurrentUserRdoLine: () => false,
     lineOccupant: () => '',
+    lineBidderMarkup: () => '',
+    lineStatusMarkup: (_line, label) => label,
     rdoFatigueGroupBadge: () => '',
     rdoLineDisplayFatigueGroup: () => '',
     thirdDaySwingIndex: () => -1,
