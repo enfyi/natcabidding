@@ -7969,7 +7969,7 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
         <td><b>${lineOccupant(line)}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
-        <td></td>
+        <td>${rdoLineAwsReferenceCell(line)}</td>
         <td>${rdoLineMidReferenceCell(line)}</td>
       </tr>
     `);
@@ -8004,6 +8004,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
                 <p>Fatigue group: ${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line)) || "Not assigned"}</p>
+                ${rdoLineAwsReferenceCell(line) ? `<p>AWS: ${rdoLineAwsReferenceCell(line)}</p>` : ""}
                 ${rdoLineMidReferenceCell(line) ? `<p>Mid: ${rdoLineMidReferenceCell(line)}</p>` : ""}
               </details>
             `;
@@ -8754,8 +8755,15 @@ function lineMidReferenceValue(line) {
   return "UNSELECTED";
 }
 
+function rdoLineAwsReferenceCell(line) {
+  return line.status === "Taken" && ["Yes", "No"].includes(line.aws) ? userChoiceCell(line.aws) : "";
+}
+
 function rdoLineMidReferenceCell(line) {
-  return lineMidReferenceValue(line) === "BID" ? userChoiceCell("BID") : "";
+  const value = lineMidReferenceValue(line);
+  return value === "BID" || (line.status === "Taken" && ["Yes", "No"].includes(value))
+    ? userChoiceCell(value)
+    : "";
 }
 
 function selectedLineStatus(line) {
@@ -8944,7 +8952,6 @@ function renderRdoLines() {
       previewGroup: isSelected && isViewingHomeArea() ? selectedFatigueGroup : "",
       pendingGroup: isViewingHomeArea() && pendingRequest?.line === line.line ? pendingRequest.fatigueGroup : "",
     }));
-    const midValue = lineMidReferenceValue(line);
     const swingIndex = thirdDaySwingIndex(line.week);
 
     rows.push(`
@@ -8953,8 +8960,8 @@ function renderRdoLines() {
         <td><b>${displayCpc}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
-        <td></td>
-        <td>${midValue === "BID" ? userChoiceCell(midValue) : ""}</td>
+        <td>${rdoLineAwsReferenceCell(line)}</td>
+        <td>${rdoLineMidReferenceCell(line)}</td>
       </tr>
     `);
   });
@@ -8988,7 +8995,7 @@ function renderRdoLines() {
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
             <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
-            <div class="member-rdo-card-footer">${rdoLineMidReferenceCell(line) ? `<span>Mid: ${rdoLineMidReferenceCell(line)}</span>` : ""}${selectButton}</div>
+            <div class="member-rdo-card-footer">${rdoLineAwsReferenceCell(line) ? `<span>AWS: ${rdoLineAwsReferenceCell(line)}</span>` : ""}${rdoLineMidReferenceCell(line) ? `<span>Mid: ${rdoLineMidReferenceCell(line)}</span>` : ""}${selectButton}</div>
           </details>
         `;
       }).join("")
