@@ -11703,3 +11703,28 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
     height: 72px;
   }
 }
+
+.bid-change-week-picker,
+.bid-change-week-calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.bid-change-week-calendar { margin: 16px 0; }
+.bid-change-week-calendar button {
+  padding: 12px;
+  border: 1px solid #aab5c5;
+  border-radius: 8px;
+  background: white;
+  color: #172b49;
+  text-align: left;
+  cursor: pointer;
+}
+.bid-change-week-calendar small { display: block; margin-top: 6px; }
+.bid-change-week-calendar button[aria-pressed="true"],
+.bid-change-week-picker button[aria-pressed="true"] {
+  background: #e2efff;
+  border: 2px solid #235aa6;
+}
+.bid-change-week-calendar button:disabled { opacity: .55; cursor: default; }
+.bid-change-week-calendar button:focus-visible { outline: 3px solid #235aa6; outline-offset: 3px; }
