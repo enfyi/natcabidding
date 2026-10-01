@@ -14609,6 +14609,8 @@ function renderMemberPageContent(pageName) {
     if (pageName === "intake-schedule") renderIntakeSchedule();
     if (pageName === "history") renderHistory();
     if (pageName === "intake") {
+      renderRoundRuleSummaryList();
+      renderApprovalRuleSummary();
       renderIntakeQueue();
       renderManualBidEntry();
       ensureIntakeBidderSelection();
