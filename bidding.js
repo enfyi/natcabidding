@@ -12750,6 +12750,7 @@ function alertItems() {
       detail: `${item.summary} · ${item.area}`,
       action: "Review",
       page: "intake",
+      intakeItemId: item.id,
     }));
     const helpAlerts = helpThreads
       .filter((thread) => thread.status !== "Resolved")
@@ -12806,7 +12807,7 @@ function renderAlerts() {
 
   target.innerHTML = items.length
     ? items.map((item) => `
-      <article data-page="${item.page}" ${item.helpThreadId ? `data-help-thread="${item.helpThreadId}"` : ""}>
+      <article data-page="${item.page}" ${item.intakeItemId ? `data-intake-item="${escapeHtml(item.intakeItemId)}"` : ""} ${item.helpThreadId ? `data-help-thread="${item.helpThreadId}"` : ""}>
         <span>${escapeHtml(item.category)}</span>
         <strong>${escapeHtml(item.title)}</strong>
         <small>${escapeHtml(item.detail)}</small>
@@ -13918,6 +13919,30 @@ function revealIntakeDetail() {
   });
 }
 
+function openIntakeItemFromAlert(itemId) {
+  const groupedItem = groupedLeaveIntakeItems().find((item) =>
+    item.id === itemId || item.members?.some((member) => member.id === itemId)
+  );
+  if (!groupedItem) return;
+
+  activeIntakeDetailId = groupedItem.id;
+  activeOverrideId = null;
+  activeDenialId = null;
+  intakeSearchQuery = "";
+  Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
+  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
+  setPage("intake");
+  renderIntakeQueue();
+
+  window.requestAnimationFrame(() => {
+    const card = [...document.querySelectorAll("[data-intake-card]")]
+      .find((candidate) => candidate.dataset.intakeCard === groupedItem.id);
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.focus({ preventScroll: true });
+  });
+}
+
 function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
@@ -14938,6 +14963,10 @@ document.addEventListener("click", async (event) => {
     if (alertItem.dataset.helpThread) {
       setPage(alertItem.dataset.page);
       openHelpPanel(alertItem.dataset.helpThread);
+      return;
+    }
+    if (alertItem.dataset.intakeItem) {
+      openIntakeItemFromAlert(alertItem.dataset.intakeItem);
       return;
     }
     setPage(alertItem.dataset.page);
