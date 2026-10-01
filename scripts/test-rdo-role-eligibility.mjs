@@ -15,8 +15,12 @@ const context = vm.createContext({})
 vm.runInContext([
   functionSource('isCpcLine'),
   functionSource('normalizeBidRoleForArea'),
+  functionSource('isDevelopmentalBidRole'),
+  functionSource('rdoPreferenceForBidRole'),
   functionSource('rdoLineMatchesBidRole'),
   'this.matches = rdoLineMatchesBidRole',
+  'this.isDev = isDevelopmentalBidRole',
+  'this.preference = rdoPreferenceForBidRole',
 ].join('\n'), context)
 
 const cpc = { lineType: 'CPC', pattern: 'S/S' }
@@ -25,6 +29,15 @@ const dDev = { lineType: 'DEV', pattern: 'D-DEV' }
 const tmc = { lineType: 'CPC', pattern: 'TMC' }
 const tmuDev = { lineType: 'DEV', pattern: 'DEV' }
 const matches = context.matches
+
+assert.equal(context.isDev('R-DEV', 'Area A'), true)
+assert.equal(context.isDev('D-DEV', 'Area A'), true)
+assert.equal(context.isDev('DEV', 'TMU'), true)
+assert.equal(context.isDev('CPC', 'Area A'), false)
+assert.equal(context.preference('R-DEV', 'Area A', 'Yes'), 'No')
+assert.equal(context.preference('D-DEV', 'Area A', 'BID'), 'No')
+assert.equal(context.preference('DEV', 'TMU', 'Yes'), 'No')
+assert.equal(context.preference('CPC', 'Area A', 'Yes'), 'Yes')
 
 assert.equal(matches(cpc, 'CPC', 'Area A'), true)
 assert.equal(matches(rDev, 'CPC', 'Area A'), false)
@@ -69,6 +82,15 @@ assert.match(source, /rdoLinesForBidder\(currentUserBidAs\(\), viewArea\)/)
 assert.match(source, /rdoLinesForBidder\(selectedPerson\.bidAs, area\)/)
 assert.match(source, /rdoLinesForBidder\(item\.bidAs, item\.area\)/)
 assert.match(source, /data-editor-gl-line-type-verification/)
+
+const devPreferencesMigration = fs.readFileSync(
+  new URL('../supabase/migrations/20261001090000_dev_bidders_do_not_select_aws_or_mid.sql', import.meta.url),
+  'utf8',
+)
+assert.match(devPreferencesMigration, /target\.bid_role in \('R-DEV', 'D-DEV', 'DEV'\)/)
+assert.match(devPreferencesMigration, /new\.payload := new\.payload \|\| jsonb_build_object\('aws', false, 'mid', 'No'\)/)
+assert.match(devPreferencesMigration, /new\.aws := false/)
+assert.match(devPreferencesMigration, /new\.mid := 'No'/)
 
 const adminEditorSql = fs.readFileSync(new URL('../database/admin_bidder_editor.sql', import.meta.url), 'utf8')
 assert.match(adminEditorSql, /public\.rdo_line_matches_bid_role\(target\.bid_role/)
