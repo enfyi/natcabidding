@@ -10655,18 +10655,9 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
    narrow preview viewport used by the browser's print renderer. */
 @media print {
   @page {
-    size: landscape;
-    margin: 0.2in;
-  }
-
-  /* Let the print dialog choose either orientation for public RDO schedules. */
-  @page public-rdo {
+    /* Use the paper size and orientation selected in the print dialog. */
     size: auto;
     margin: 0.2in;
-  }
-
-  body:has(.public-rdo-panel) {
-    page: public-rdo;
   }
 
   html,
