@@ -14857,7 +14857,6 @@ document.addEventListener("click", async (event) => {
     alertMenu?.setAttribute("hidden", "");
     document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
     if (alertItem.dataset.helpThread) {
-      setPage(alertItem.dataset.page);
       openHelpPanel(alertItem.dataset.helpThread);
       return;
     }
