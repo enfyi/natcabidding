@@ -2060,9 +2060,16 @@ function rdoChangeWindowErrorMessage(date = new Date()) {
   const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
     || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
   if (!hasApprovedRdo) return "";
+  // Pilot rounds use the administrator's open-round controls instead of the
+  // production schedule, just like initial RDO and leave submissions.
+  if (pilotState.database) {
+    return isViewingHomeArea() && bidWindowLockIsBypassed() && activeTestBidRound() === 1
+      ? ""
+      : "RDO changes are only allowed while your pilot Round 1 is open in your home area.";
+  }
   const window = bidWindowForRankRound(currentUserSeniorityRank(currentUser.area), 1, currentUser.area);
   const closesAt = window ? Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000) : 0;
-  if (!isViewingHomeArea() || (pilotState.database && activeTestBidRound() !== 1)
+  if (!isViewingHomeArea()
       || !window || date < window.start || date.getTime() >= closesAt) {
     return "RDO changes are only allowed during your own two-hour Round 1 bid window. Changes are closed outside that window and in Rounds 2–4.";
   }
