@@ -62,7 +62,7 @@ as $function$
       and submission.submission_type = 'rdo'
       and submission.status in ('pending', 'approved')
       and bidder.active
-      and (bidder.bid_role = 'GL' or submission.is_ghost_bid)
+      and bidder.bid_role = 'GL'
   )
   select coalesce(
     jsonb_agg(
