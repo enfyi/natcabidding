@@ -21,9 +21,14 @@ const committed = [
 ];
 const totalsContext = {
   LEAVE_SLOT_HOURS_PER_DAY: 8,
+  CWS_LEAVE_HOURS_PER_DAY: 10,
   currentUser: { initials: 'AA', area: 'Area A', bidAs: 'CPC', ghostBidder: false },
+  intakeQueue: [],
+  rdoLines: [],
   bueRoster: () => people,
   bueByInitials: (initials) => people.find((person) => person.initials === initials),
+  lineForArea: () => true,
+  rdoWeekdaysForLine: () => new Set(),
   currentUserBidAs: () => 'CPC',
   currentViewArea: () => 'Area A',
   leaveSlotBucketForBidAs: () => 'cpc',
@@ -39,7 +44,7 @@ const totalsContext = {
 vm.createContext(totalsContext);
 vm.runInContext(source.slice(totalsStart, totalsEnd), totalsContext);
 
-assert.equal(totalsContext.areaLeaveSlotBudget('Area A', 'cpc'), 80, 'Ghost and GL allowances do not increase the CPC total');
+assert.equal(totalsContext.areaLeaveSlotBudget('Area A', 'cpc'), 10, 'Ghost and GL allowances do not increase the CPC day total');
 assert.equal(totalsContext.areaLeaveSlotUsed('Area A', 'cpc'), 1, 'Ghost and GL leave do not consume the aggregate CPC balance');
 assert.equal(totalsContext.areaLeaveSlotUsedDays('Area A', 'cpc'), 3, 'Ghost and GL leave days do not reduce remaining CPC days');
 assert.equal(

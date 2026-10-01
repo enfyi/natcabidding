@@ -1618,6 +1618,7 @@ input {
 }
 
 .help-menu .panel {
+  background: var(--panel-solid);
   max-height: min(680px, calc(100vh - 48px));
   overflow: auto;
 }
@@ -10024,6 +10025,56 @@ video {
   margin-bottom: 16px;
 }
 
+.intake-bidder-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.intake-bidder-role {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: #0d0818;
+  background: #7abdc2;
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.intake-bidder-role[hidden] {
+  display: none;
+}
+
+.intake-bidder-role.gl {
+  color: #241707;
+  background: #ffdc86;
+}
+
+.intake-bidder-role.r-dev {
+  color: #ffffff;
+  background: #8b1c62;
+}
+
+.intake-bidder-role.d-dev {
+  color: #ffffff;
+  background: #c0569d;
+}
+
+.intake-bidder-role.tmc {
+  color: #14335f;
+  border-color: #b8ccef;
+  background: #dbe7ff;
+}
+
 .intake-bidder-summary {
   display: grid;
   grid-template-columns: minmax(190px, 1.4fr) repeat(5, minmax(110px, 1fr));
@@ -10230,6 +10281,11 @@ video {
     padding: 16px;
   }
 
+  .intake-bidder-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .intake-bidder-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -10331,8 +10387,52 @@ body:has(.late-bid-dialog[open]) { overflow: hidden; }
   .mobile-bid-time-view button { flex: 1; min-height: 44px; border: 1px solid #b8cbce; border-radius: 8px; padding: 8px; color: #19464b; background: #fff; font: inherit; font-size: .875rem; }
   .mobile-bid-time-view button[aria-pressed="true"] { background: #28656c; color: #fff; }
   .public-bid-time-results[data-presentation="list"] .public-bid-time-table {
-    min-width: 980px;
-    table-layout: fixed;
+    min-width: 0;
+    table-layout: auto;
+  }
+  .public-bid-time-results[data-presentation="list"] .bid-time-rank-column { width: 40px; }
+  .public-bid-time-results[data-presentation="list"] .bid-time-name-column { width: 128px; }
+  .public-bid-time-results[data-presentation="list"] .bid-time-initials-column { width: 52px; }
+  .public-bid-time-results[data-presentation="list"] .bid-time-role-column { width: 52px; }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table th,
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table td {
+    padding: 8px 4px;
+    font-size: .75rem;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-round {
+    padding-inline: 12px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table th:first-child,
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table td:first-child {
+    min-width: 40px;
+    padding-inline: 8px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-name {
+    min-width: 128px;
+    padding-inline: 8px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-time-initials {
+    min-width: 52px;
+    padding-inline: 6px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .public-bid-time-results[data-presentation="list"] .public-bid-time-table .bid-as {
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: .6875rem;
+    white-space: nowrap;
   }
   .mobile-bid-time-card { min-width: 0; padding: 16px; border: 1px solid #d3dfe7; border-radius: 12px; background: white; }
   .mobile-bid-time-card h3 { color: #152d3b; display: flex; align-items: start; justify-content: space-between; gap: 10px; margin: 0; font-size: 1rem; line-height: 1.5; }
@@ -11544,3 +11644,87 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   border-color: #8b75c5;
   box-shadow: 0 0 0 2px rgba(139, 117, 197, 0.2);
 }
+
+@media (max-width: 640px) {
+  .help-menu {
+    top: auto;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 71;
+  }
+
+  .help-menu .panel {
+    display: flex;
+    flex-direction: column;
+    height: min(680px, calc(100dvh - 88px - env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - 88px - env(safe-area-inset-bottom));
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .help-menu .panel-header,
+  .help-menu .help-composer,
+  .help-menu .button-row,
+  .help-menu .help-status {
+    flex-shrink: 0;
+  }
+
+  .help-menu .help-layout,
+  .help-menu .help-conversation {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .help-menu .help-thread-list {
+    max-height: min(100px, 15dvh);
+    flex-shrink: 0;
+    overflow: auto;
+  }
+
+  .help-menu .help-message-list {
+    flex: 1;
+    min-height: 60px;
+    max-height: none;
+    align-content: start;
+  }
+
+  .help-menu .help-message {
+    overflow-wrap: anywhere;
+  }
+
+  .help-menu .button-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .help-menu .help-composer textarea {
+    min-height: 72px;
+    height: 72px;
+  }
+}
+
+.bid-change-week-picker,
+.bid-change-week-calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.bid-change-week-calendar { margin: 16px 0; }
+.bid-change-week-calendar button {
+  padding: 12px;
+  border: 1px solid #aab5c5;
+  border-radius: 8px;
+  background: white;
+  color: #172b49;
+  text-align: left;
+  cursor: pointer;
+}
+.bid-change-week-calendar small { display: block; margin-top: 6px; }
+.bid-change-week-calendar button[aria-pressed="true"],
+.bid-change-week-picker button[aria-pressed="true"] {
+  background: #e2efff;
+  border: 2px solid #235aa6;
+}
+.bid-change-week-calendar button:disabled { opacity: .55; cursor: default; }
+.bid-change-week-calendar button:focus-visible { outline: 3px solid #235aa6; outline-offset: 3px; }

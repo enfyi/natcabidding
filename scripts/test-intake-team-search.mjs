@@ -10,6 +10,8 @@ assert.match(source, /function intakeTeamCandidateMatches\(person, query\)/)
 assert.match(source, /person\.firstName,[\s\S]*person\.lastName,[\s\S]*person\.initials,[\s\S]*person\.area,[\s\S]*person\.bidAs,[\s\S]*person\.email/)
 assert.match(source, /selectedIntakeTeamCandidateInitials = intakeTeamCandidateResult\.dataset\.intakeTeamCandidateResult/)
 assert.match(source, /const initials = selectedIntakeTeamCandidateInitials/)
+assert.match(source, /function setIntakeTeamStatus\(message, status = "info"\)/)
+assert.match(source, /data-intake-team-status/)
 assert.doesNotMatch(source, /<select data-intake-team-candidate>/)
 
 console.log('Intake-team employee search checks passed.')

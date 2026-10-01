@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -937,7 +937,10 @@
                 <h2>Bidding Employee</h2>
                 <p>Controller details for the current intake review or manual entry.</p>
               </div>
-              <span class="pill" data-intake-bidder-area>Select a controller</span>
+              <div class="intake-bidder-badges">
+                <span class="intake-bidder-role" data-intake-bidder-role hidden></span>
+                <span class="pill" data-intake-bidder-area>Select a controller</span>
+              </div>
             </div>
             <div class="intake-bidder-summary" data-intake-bidder-summary aria-live="polite">
               <div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>
@@ -1517,7 +1520,7 @@
           <header class="admin-tools-page-header">
             <div>
               <h2>Bidding Setup</h2>
-              <p>Manage bidding policy, pilot rounds, rules, intake scheduling, and administrative data.</p>
+              <p>Manage bidding policy, pilot rounds, rules, and administrative data.</p>
             </div>
             <span class="pill open">System Admin</span>
           </header>
@@ -1525,7 +1528,6 @@
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
-            <button type="button" data-admin-section-target="admin-schedule-section">Scheduling</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
           </nav>
           <div class="admin-tools-page-grid">
@@ -1580,6 +1582,27 @@
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
                 </div>
+                <h4>Reset an allowed bidder</h4>
+                <label class="testing-select-row">
+                  Allowed bidder
+                  <select data-pilot-reset-bidder disabled><option value="">No allowed bidders</option></select>
+                </label>
+                <label class="testing-select-row">
+                  Round to reset
+                  <select data-pilot-reset-round disabled>
+                    <option value="1">Round 1 — resets all rounds and RDO bid</option>
+                    <option value="2">Round 2 only</option>
+                    <option value="3">Round 3 only</option>
+                    <option value="4">Round 4 only</option>
+                    <option value="5">Round 5 only</option>
+                    <option value="6">Round 6 only</option>
+                  </select>
+                </label>
+                <p>Round 1 clears this bidder's RDO bid and leave bids in every round. Rounds 2–6 clear only that round. Their pilot access and enabled rounds are kept.</p>
+                <div class="button-row">
+                  <button class="secondary-action danger" type="button" data-reset-pilot-bidder disabled>Reset bidder round</button>
+                </div>
+                <p class="form-status" data-pilot-reset-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel editable-rule-card admin-section-target" id="admin-rules-section" tabindex="-1">
                 <div class="panel-header compact">
@@ -1604,47 +1627,6 @@
                   <button class="secondary-action small" type="button" data-add-approval-rule>Add</button>
                 </div>
                 <p class="form-status" data-approval-rule-status role="status" aria-live="polite"></p>
-              </section>
-              <section class="panel admin-section-target" id="admin-schedule-section" tabindex="-1">
-                <h3>Schedule Intake Rep</h3>
-                <p>Access opens 15 minutes before the shift starts.</p>
-                <div class="schedule-form">
-                  <label>
-                    Intake Team Member
-                    <select data-admin-schedule-rep></select>
-                  </label>
-                  <fieldset class="intake-shift-presets">
-                    <legend>Base Shift</legend>
-                    <div class="intake-shift-preset-buttons">
-                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
-                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
-                    </div>
-                  </fieldset>
-                  <div class="intake-shift-fields">
-                    <label>
-                      Start Date
-                      <input type="date" data-intake-shift-date />
-                    </label>
-                    <label>
-                      Start Time
-                      <input type="time" step="900" data-intake-shift-time />
-                    </label>
-                    <label>
-                      Shift Length
-                      <span class="schedule-duration-input">
-                        <input type="number" min="0.25" max="24" step="0.25" inputmode="decimal" data-intake-shift-duration />
-                        <span>hours</span>
-                      </span>
-                    </label>
-                  </div>
-                  <input type="hidden" data-admin-schedule-start />
-                  <label>
-                    Calculated End
-                    <input type="datetime-local" data-admin-schedule-end readonly />
-                  </label>
-                  <button class="primary-action small" type="button" data-admin-add-intake-schedule>Add Intake Shift</button>
-                  <p class="form-status" data-admin-schedule-status></p>
-                </div>
               </section>
               <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
                 <h3>Database Export</h3>
@@ -1841,7 +1823,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-alert-review-focus"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
