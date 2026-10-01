@@ -2192,6 +2192,8 @@ async function setPilotRound(round, enabled) {
   renderApp();
 }
 
+let pilotBidderResetPending = false;
+
 function syncPilotControls() {
   const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
   const banner = document.querySelector("[data-pilot-environment-banner]");
@@ -2224,6 +2226,18 @@ function syncPilotControls() {
   }
   document.querySelectorAll("[data-save-pilot-settings], [data-reset-pilot-data]").forEach((button) => {
     button.disabled = !pilotState.database;
+  });
+  const resetBidder = document.querySelector("[data-pilot-reset-bidder]");
+  const allowedMembers = senioritySource.filter((entry) => pilotState.memberIds.includes(seniorityEntryProfileId(entry)));
+  if (resetBidder) {
+    const selectedId = resetBidder.value;
+    resetBidder.innerHTML = allowedMembers.length
+      ? allowedMembers.map((entry) => `<option value="${escapeHtml(seniorityEntryProfileId(entry))}">${escapeHtml(`${entry[3]} · ${entry[1]} ${entry[0]} · ${entry[4]}`)}</option>`).join("")
+      : '<option value="">No allowed bidders — save pilot access first</option>';
+    if (allowedMembers.some((entry) => seniorityEntryProfileId(entry) === selectedId)) resetBidder.value = selectedId;
+  }
+  document.querySelectorAll("[data-pilot-reset-bidder], [data-pilot-reset-round], [data-reset-pilot-bidder]").forEach((control) => {
+    control.disabled = !hasSystemAdminAccess() || !pilotState.database || !allowedMembers.length || pilotBidderResetPending;
   });
   setText("[data-pilot-status]", !pilotState.database ? "Pilot unavailable" : pilotState.enabled ? "Pilot on" : "Pilot off");
   setText(
@@ -2280,6 +2294,41 @@ async function resetPilotData() {
   await loadSupabaseReferenceData();
   renderApp();
   window.alert("Practice data was reset. Tester accounts, roster, schedules, and pilot access were kept.");
+}
+
+async function resetPilotBidderRound() {
+  if (!hasSystemAdminAccess() || !pilotState.database || pilotBidderResetPending) return;
+  const bidderId = document.querySelector("[data-pilot-reset-bidder]")?.value;
+  const round = Number(document.querySelector("[data-pilot-reset-round]")?.value);
+  const entry = senioritySource.find((person) => seniorityEntryProfileId(person) === bidderId);
+  if (!entry || !pilotState.memberIds.includes(bidderId) || !Number.isInteger(round) || round < 1 || round > 6) return;
+  const label = `${entry[3]} (${entry[1]} ${entry[0]})`;
+  const scope = round === 1 ? "the RDO bid and ALL leave rounds" : `leave bids in Round ${round} only`;
+  if (!window.confirm(`Reset ${scope} for ${label}? Their bids and review decisions in this scope will be removed so they can test again. Pilot access and enabled rounds will be kept.`)) return;
+  pilotBidderResetPending = true;
+  syncPilotControls();
+  setText("[data-pilot-reset-status]", `Resetting ${label}…`);
+  let resetSaved = false;
+  try {
+    const { error } = await supabaseClient().rpc("reset_pilot_bidder_round", {
+      requested_bid_year: BID_YEAR, requested_bidder_id: bidderId, requested_round: round,
+    });
+    if (error) throw error;
+    resetSaved = true;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setText("[data-pilot-reset-status]", round === 1
+      ? `${label}: RDO bid and all leave rounds reset. They can restart with Round 1.`
+      : `${label}: Round ${round} reset. They can test that round again.`);
+  } catch (error) {
+    setText("[data-pilot-reset-status]", resetSaved
+      ? "Reset saved, but the page could not refresh. Reload to see the updated bids."
+      : error.message || "This bidder's round could not be reset.");
+  } finally {
+    pilotBidderResetPending = false;
+    syncPilotControls();
+  }
 }
 
 async function saveSupabaseBidWindowTestingSettings() {
@@ -14773,6 +14822,11 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-reset-pilot-data]")) {
     await resetPilotData();
+    return;
+  }
+
+  if (event.target.closest("[data-reset-pilot-bidder]")) {
+    await resetPilotBidderRound();
     return;
   }
 

@@ -112,6 +112,12 @@ The database refuses pilot activation and reset unless `pilot_seed.sql` marked
 it as isolated. A reset also turns the pilot off, so the administrator must
 review the clean state and turn it back on for the next run.
 
+Apply `database/pilot_bidder_round_reset.sql` to add the individual reset in
+Pilot Access and Rounds. Choose a saved allowed bidder and a round: Round 1
+clears their RDO assignment and all leave rounds; Rounds 2–6 clear only the chosen
+round's bids, decisions, slots, and credits. Individual resets preserve pilot
+access, enabled rounds, other bidders, and audit history, and record the reset.
+
 ## Bid notification email
 
 Bid submission, approval, and denial notifications are sent through a Google
