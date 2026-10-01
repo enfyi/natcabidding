@@ -787,6 +787,14 @@ function fatiguePoolForBidRole(bidAs, area) {
   return null;
 }
 
+function isDevelopmentalBidRole(bidAs, area) {
+  return ["R-DEV", "D-DEV", "DEV"].includes(normalizeBidRoleForArea(bidAs, area));
+}
+
+function rdoPreferenceForBidRole(bidAs, area, preference) {
+  return isDevelopmentalBidRole(bidAs, area) ? "No" : preference;
+}
+
 function fatiguePoolForLine(line) {
   return isCpcLine(line) ? "CPC" : "DEV";
 }
@@ -2377,6 +2385,7 @@ async function addOrUpdateRdoSubmission() {
   }
 
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
   if (!line || line.status === "Taken") return;
   if (!rdoLineMatchesBidRole(line, currentUserBidAs(), currentUser.area)) {
     alert(`Line ${line.line} is not eligible for your ${currentUserBidAs()} bid role.`);
@@ -2396,11 +2405,15 @@ async function addOrUpdateRdoSubmission() {
     updateSelectedLine();
     return;
   }
-  if (!isForcedMid(line) && !selectedMidPreference) {
+  if (!developmentalBidder && !isForcedMid(line) && !selectedMidPreference) {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
   }
-  const awsPreference = awsPreferenceForLine(line);
+  const awsPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    awsPreferenceForLine(line)
+  );
   if (!awsPreference) {
     alert("Choose Yes or No for AWS before submitting this RDO bid.");
     return;
@@ -2433,8 +2446,8 @@ async function addOrUpdateRdoSubmission() {
     fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
     aws: awsPreference,
-    mid: selectedMidValue(line),
-    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${selectedMidValue(line)}`,
+    mid: rdoPreferenceForBidRole(currentUserBidAs(), currentUser.area, selectedMidValue(line)),
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${rdoPreferenceForBidRole(currentUserBidAs(), currentUser.area, selectedMidValue(line))}`,
   };
 
   const isChange = Boolean(existing)
@@ -2678,6 +2691,7 @@ function renderManualBidPanel(panel) {
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+  const developmentalBidder = isDevelopmentalBidRole(selectedPerson.bidAs, area);
   const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
   if (fatigueSelect) {
     const requestedGroup = ["", "A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
@@ -2700,7 +2714,11 @@ function renderManualBidPanel(panel) {
   }
   const midSelect = panel.querySelector("[data-manual-mid]");
   if (midSelect) {
-    if (selectedLine && isMidLineByDesign(selectedLine)) {
+    if (developmentalBidder) {
+      midSelect.innerHTML = '<option value="No">No — DEV does not work Mid</option>';
+      midSelect.value = "No";
+      midSelect.disabled = true;
+    } else if (selectedLine && isMidLineByDesign(selectedLine)) {
       midSelect.innerHTML = '<option value="BID">Bid Line</option>';
       midSelect.value = "BID";
       midSelect.disabled = true;
@@ -2717,7 +2735,17 @@ function renderManualBidPanel(panel) {
   const flexSelect = panel.querySelector("[data-manual-flex]");
   if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
   const awsSelect = panel.querySelector("[data-manual-aws]");
-  if (awsSelect) awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+  if (awsSelect) {
+    if (developmentalBidder) {
+      awsSelect.innerHTML = '<option value="No">No — DEV does not work AWS</option>';
+      awsSelect.value = "No";
+      awsSelect.disabled = true;
+    } else {
+      awsSelect.innerHTML = '<option value="Yes">Yes</option><option value="No">No</option>';
+      awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+      awsSelect.disabled = false;
+    }
+  }
 
   const rangeInput = panel.querySelector("[data-manual-leave-range]");
   if (rangeInput) rangeInput.value = values.range;
@@ -2781,8 +2809,12 @@ async function submitManualRdoBid(panel, person, area) {
   }
   const usedFatigueOverride = fatigueOverride && fatigueGroupClosed;
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
-  const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
-  const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
+  const aws = rdoPreferenceForBidRole(person.bidAs, area, panel.querySelector("[data-manual-aws]")?.value || "No");
+  const mid = rdoPreferenceForBidRole(
+    person.bidAs,
+    area,
+    isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No"
+  );
   const submittedAt = formatDateTime(new Date());
   const ghostBid = Boolean(person.ghostBidder);
   const existing = intakeQueue.find((item) =>
@@ -4651,8 +4683,8 @@ function captureIntakeOverrideFields(item) {
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
     item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
-    item.aws = editor.querySelector("[data-override-aws]")?.value || item.aws;
-    item.mid = editor.querySelector("[data-override-mid]")?.value || item.mid;
+    item.aws = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-aws]")?.value || item.aws);
+    item.mid = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-mid]")?.value || item.mid);
     item.summary = `${item.ghostBid ? "Ghost Line" : "Line"} ${item.line} · ${fatigueGroupPreferenceLabel(item.fatigueGroup)} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
     return;
   }
@@ -8848,14 +8880,20 @@ function selectedLineReadinessItems(line) {
   const requestMatchesLine = existingRequest?.line === line.line;
   const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
-  const awsPreference = awsPreferenceForLine(
-    line,
-    selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "")
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
+  const awsPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    awsPreferenceForLine(line, selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : ""))
   );
-  const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
+  const midPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "")
+  );
   const lineStatus = selectedLineStatus(line);
   const selectedLineOpen = lineStatus !== "Taken";
-  const preferencesComplete = Boolean(flexPreference && awsPreference && (isForcedMid(line) || midPreference));
+  const preferencesComplete = Boolean(flexPreference && awsPreference && (developmentalBidder || isForcedMid(line) || midPreference));
 
   return [
     { label: "Selected line open", checked: selectedLineOpen },
@@ -9024,6 +9062,7 @@ function updateSelectedLine() {
     return;
   }
   const midIsBidLine = isMidLineByDesign(line);
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
   const fatigueCapacity = fatigueCapacityForLine(line);
   const lineSchedule = lineScheduleLabel(line);
   const isFourTenLine = lineSchedule === "4-10";
@@ -9092,7 +9131,7 @@ function updateSelectedLine() {
       </span>
       <span class="aws-picker">
         <em>AWS</em>
-        <small>${isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
+        <small>${developmentalBidder ? "Not applicable to DEV" : isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
         <span class="line-mode-options">
           ${["4-10", "5-8"].map((value) => {
             const isCurrentSchedule = lineSchedule === value;
@@ -9105,7 +9144,7 @@ function updateSelectedLine() {
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${!isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
+            <button class="choice-option ${developmentalBidder ? value === "No" ? "active" : "" : !isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${developmentalBidder || isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${developmentalBidder ? 'title="DEV bidders do not work AWS."' : isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
               ${value}
             </button>
           `).join("")}
@@ -9114,11 +9153,13 @@ function updateSelectedLine() {
       <span class="mid-picker">
         <em>Mid</em>
         <span class="line-mode-options mid-line-options">
-          <button class="line-mode-option mid-bid-line-option ${midIsBidLine ? "active locked" : ""}" type="button" disabled>
+          <button class="line-mode-option mid-bid-line-option ${!developmentalBidder && midIsBidLine ? "active locked" : ""}" type="button" disabled>
             Bid Line
           </button>
         </span>
-        ${midIsBidLine
+        ${developmentalBidder
+          ? '<span class="mid-options"><button class="mid-option active" type="button" disabled title="DEV bidders do not work Mid.">No</button></span>'
+          : midIsBidLine
           ? ""
           : `<span class="mid-options">
               ${["Yes", "No"].map((value) => `
@@ -13305,6 +13346,7 @@ function renderOverrideEditor(item) {
     const eligibleLines = rdoLinesForBidder(item.bidAs, item.area);
     const selectedLine = eligibleLines.find((line) => line.line === item.line);
     const glCategory = selectedLine && isCpcLine(selectedLine) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
+    const developmentalBidder = isDevelopmentalBidRole(item.bidAs, item.area);
     return `
       <label>Line
         <select data-override-line>
@@ -13326,13 +13368,13 @@ function renderOverrideEditor(item) {
         </select>
       </label>
       <label>AWS
-        <select data-override-aws>
-          ${["Yes", "No"].map((value) => `<option ${value === item.aws ? "selected" : ""}>${value}</option>`).join("")}
+        <select data-override-aws ${developmentalBidder ? "disabled" : ""}>
+          ${developmentalBidder ? '<option value="No">No — DEV does not work AWS</option>' : ["Yes", "No"].map((value) => `<option ${value === item.aws ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <label>Mid
-        <select data-override-mid>
-          ${["Yes", "No", "BID"].map((value) => `<option ${value === item.mid ? "selected" : ""}>${value}</option>`).join("")}
+        <select data-override-mid ${developmentalBidder ? "disabled" : ""}>
+          ${developmentalBidder ? '<option value="No">No — DEV does not work Mid</option>' : ["Yes", "No", "BID"].map((value) => `<option ${value === item.mid ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <div class="button-row">
