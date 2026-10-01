@@ -33,5 +33,6 @@ assert.match(source, /person\.area} · \$\{person\.bidAs/)
 assert.match(css, /\.intake-change-history/)
 assert.match(css, /\.intake-change-badge/)
 assert.match(css, /\.app-main \.intake-card\.bid-change/)
+assert.match(css, /\.app-main \.intake-detail-list strong/)
 
 console.log('PASS RDO replacements and pending edits retain their original bid and are labeled as changes in intake')
