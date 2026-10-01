@@ -1582,6 +1582,27 @@
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
                 </div>
+                <h4>Reset an allowed bidder</h4>
+                <label class="testing-select-row">
+                  Allowed bidder
+                  <select data-pilot-reset-bidder disabled><option value="">No allowed bidders</option></select>
+                </label>
+                <label class="testing-select-row">
+                  Round to reset
+                  <select data-pilot-reset-round disabled>
+                    <option value="1">Round 1 — resets all rounds and RDO bid</option>
+                    <option value="2">Round 2 only</option>
+                    <option value="3">Round 3 only</option>
+                    <option value="4">Round 4 only</option>
+                    <option value="5">Round 5 only</option>
+                    <option value="6">Round 6 only</option>
+                  </select>
+                </label>
+                <p>Round 1 clears this bidder's RDO bid and leave bids in every round. Rounds 2–6 clear only that round. Their pilot access and enabled rounds are kept.</p>
+                <div class="button-row">
+                  <button class="secondary-action danger" type="button" data-reset-pilot-bidder disabled>Reset bidder round</button>
+                </div>
+                <p class="form-status" data-pilot-reset-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel editable-rule-card admin-section-target" id="admin-rules-section" tabindex="-1">
                 <div class="panel-header compact">

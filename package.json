@@ -35,6 +35,7 @@
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build",
     "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs",
+    "test:pilot-reset": "node scripts/test-pilot-bidder-round-reset.mjs",
     "test:round-one-week-changes": "node scripts/test-round-one-week-changes.mjs"
   },
   "engines": {
