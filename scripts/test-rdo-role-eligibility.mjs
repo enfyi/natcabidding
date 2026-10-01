@@ -97,3 +97,52 @@ assert.match(adminEditorSql, /public\.rdo_line_matches_bid_role\(target\.bid_rol
 assert.match(adminEditorSql, /gl_line_type_verified/)
 
 console.log('PASS bid roles cannot cross line categories; GL can use CPC or DEV after intake verification')
+
+// Render the dashboard for each profile: all categories stay visible, but only
+// eligible rows and mobile cards expose selection controls.
+for (const role of ['CPC', 'R-DEV', 'D-DEV']) {
+  const lines = [cpc, rDev, dDev].map((line, index) => ({
+    ...line, line: String(index + 1), status: 'Open', week: ['RDO'],
+  }))
+  const table = { innerHTML: '' }
+  const cards = { innerHTML: '' }
+  const renderContext = vm.createContext({
+    document: {
+      getElementById: () => table,
+      querySelector: (selector) => selector === '[data-member-rdo-cards]' ? cards : null,
+    },
+    currentViewArea: () => 'Area A',
+    currentUserBidAs: () => role,
+    isViewingHomeArea: () => true,
+    rdoLinesForArea: () => lines,
+    rdoLinesForBidder: () => lines.filter((line) => matches(line, role, 'Area A')),
+    rdoLineMatchesBidRole: matches,
+    selectedLineId: 'invalid',
+    selectedFatigueGroup: '',
+    memberRdoPresentation: 'cards',
+    setText: () => {},
+    rdoLineMatchesFilters: () => true,
+    pendingCurrentUserRdoRequest: () => null,
+    isCurrentUserRdoLine: () => false,
+    lineOccupant: () => '',
+    rdoFatigueGroupBadge: () => '',
+    rdoLineDisplayFatigueGroup: () => '',
+    thirdDaySwingIndex: () => -1,
+    shiftCell: (value) => value,
+    rdoLineAwsReferenceCell: () => '',
+    rdoLineMidReferenceCell: () => '',
+    escapeHtml: (value) => String(value),
+    dayNames: ['Sun'],
+  })
+  vm.runInContext(functionSource('renderRdoLines') + '\nrenderRdoLines()', renderContext)
+  const eligible = lines.find((line) => matches(line, role, 'Area A'))
+  assert.equal(renderContext.selectedLineId, eligible.line)
+  for (const line of lines) {
+    assert.ok(table.innerHTML.includes(`<td>${line.line}</td>`), `${role} sees line ${line.line}`)
+    assert.ok(cards.innerHTML.includes(`Line ${line.line}</strong>`))
+    const selectable = matches(line, role, 'Area A')
+    assert.equal(table.innerHTML.includes(`data-line-id="${line.line}"`), selectable)
+    assert.equal(cards.innerHTML.includes(`data-line-id="${line.line}"`), selectable)
+  }
+}
+console.log('PASS all RDO categories are visible; desktop and mobile selection stays profile-restricted')
