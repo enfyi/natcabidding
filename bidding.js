@@ -170,6 +170,7 @@ let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
 let bidChangeRows = [];
 let bidChangeRound = 0;
+let bidChangeWeek = null;
 let bidChangeReturnFocus = null;
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
@@ -9266,7 +9267,8 @@ function submittedLeaveDateRows(items = submittedLeaveItemsForCurrentRound()) {
   const sortedRows = rows.sort((left, right) => left.oldKey.localeCompare(right.oldKey));
   if (bidChangeRound !== 1) return sortedRows;
 
-  const weekStarts = roundOneWeekKeysForDateKeys(sortedRows.map((row) => row.oldKey));
+  const storedStarts = [...new Set(items.flatMap((item) => item.weekBucketStarts || []))].sort();
+  const weekStarts = storedStarts.length ? storedStarts : roundOneWeekKeysForDateKeys(sortedRows.map((row) => row.oldKey));
   return sortedRows.map((row) => ({
     ...row,
     groupKey: weekStarts.find((startKey) => {
@@ -9284,18 +9286,26 @@ function setBidChangeStatus(message, status = "info") {
 }
 
 function bidChangeCount() {
+  if (bidChangeRound === 1) return bidChangeDraftSelection().changedRows.length;
   return bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey).length;
 }
 
 function bidChangeDraftSelection() {
+  if (bidChangeRound === 1) {
+    if (!bidChangeWeek) return { changedRows: [], affectedRequestIds: new Set(), replacementRows: [] };
+    const originals = bidChangeRows.filter((row) => row.groupKey === bidChangeWeek.groupKey);
+    const oldKeys = originals.map((row) => row.oldKey);
+    const selected = [...bidChangeWeek.dates].sort();
+    const changed = oldKeys.length !== selected.length || oldKeys.some((key) => !bidChangeWeek.dates.has(key));
+    const affectedRequestIds = new Set(originals.map((row) => row.itemKey));
+    // Preserve dates outside this week if a legacy request spans both weeks.
+    const retained = bidChangeRows.filter((row) => affectedRequestIds.has(row.itemKey) && row.groupKey !== bidChangeWeek.groupKey)
+      .map((row) => ({ ...row, newKey: row.oldKey }));
+    const replacements = selected.map((key) => ({ newKey: key, oldKey: key, notes: originals[0]?.notes || '' }));
+    return { changedRows: changed ? originals : [], affectedRequestIds, replacementRows: [...retained, ...replacements] };
+  }
   const changedRows = bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey);
   const affectedRequestIds = new Set(changedRows.map((row) => row.itemKey));
-  if (bidChangeRound === 1) {
-    changedRows.forEach((row) => {
-      bidChangeRows.filter((candidate) => candidate.groupKey === row.groupKey)
-        .forEach((candidate) => affectedRequestIds.add(candidate.itemKey));
-    });
-  }
   const replacementRows = bidChangeRows
     .filter((row) => affectedRequestIds.has(row.itemKey))
     .map((row) => ({ ...row, newKey: row.newKey || row.oldKey }));
@@ -9321,6 +9331,7 @@ function renderBidChangeModal() {
   if (!modal || modal.hidden || !rowsTarget || !saveButton) return;
 
   const isRoundOne = bidChangeRound === 1;
+  if (isRoundOne) { renderRoundOneBidChangeModal(rowsTarget, saveButton); return; }
   const selection = bidChangeDraftSelection();
   const validationMessage = selection.changedRows.length
     ? bidChangeValidationMessage(selection.replacementRows, selection.affectedRequestIds)
@@ -9413,6 +9424,7 @@ function openBidChangeModal() {
 
   bidChangeRound = leaveRoundForItem(items[0]);
   bidChangeRows = submittedLeaveDateRows(items);
+  bidChangeWeek = null;
   const modal = document.querySelector("[data-bid-change-modal]");
   if (!modal) return;
   bidChangeReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -9431,20 +9443,72 @@ function closeBidChangeModal({ restoreFocus = true } = {}) {
   const wasOpen = !modal.hidden;
   modal.hidden = true;
   bidChangeRows = [];
+  bidChangeWeek = null;
   bidChangeRound = 0;
   document.body.classList.remove("modal-open");
   if (wasOpen && restoreFocus && bidChangeReturnFocus?.isConnected) bidChangeReturnFocus.focus();
   bidChangeReturnFocus = null;
 }
 
-function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
-  bidChangeRows = bidChangeRows.map((row) => {
-    if (row.groupKey !== groupKey) return row;
-    if (!newStartKey) return { ...row, newKey: "" };
-    const offset = Math.round((dateFromKey(row.oldKey) - dateFromKey(groupKey)) / 86400000);
-    return { ...row, newKey: addDaysToDateKey(newStartKey, offset) };
-  });
+function selectRoundOneBidChangeWeek(groupKey) {
+  if (leaveManagementPendingId) return;
+  if (bidChangeWeek && bidChangeCount() && !window.confirm('Discard the unsaved changes to this week?')) return;
+  bidChangeWeek = { groupKey, startKey: groupKey, dates: new Set(bidChangeRows.filter((row) => row.groupKey === groupKey).map((row) => row.oldKey).filter((key) => !isRdoDateForInitials(key, currentUser.initials))) };
   renderBidChangeModal();
+}
+
+function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
+  if (leaveManagementPendingId || !bidChangeWeek || groupKey !== bidChangeWeek.groupKey) return;
+  bidChangeWeek.startKey = newStartKey;
+  // Moving a week opens an empty calendar; no dates are selected automatically.
+  bidChangeWeek.dates.clear();
+  renderBidChangeModal();
+}
+
+function toggleRoundOneBidChangeDate(key) {
+  if (leaveManagementPendingId || !bidChangeWeek || !bidChangeWeek.startKey) return;
+  if (key < bidChangeWeek.startKey || key > addDaysToDateKey(bidChangeWeek.startKey, 6)
+      || !isBidLeaveYearDate(key) || isRdoDateForInitials(key, currentUser.initials)) return;
+  if (bidChangeWeek.dates.has(key)) bidChangeWeek.dates.delete(key);
+  else bidChangeWeek.dates.add(key);
+  renderBidChangeModal();
+}
+
+function roundOneBidChangeValidationMessage() {
+  if (!bidChangeWeek || !bidChangeWeek.startKey) return 'Choose the week you want to change and its first date.';
+  const keys = [...bidChangeWeek.dates].sort();
+  if (!keys.length) return 'Select at least one workday for this week. Deselect dates to leave gaps.';
+  if (keys.some((key) => key < bidChangeWeek.startKey || key > addDaysToDateKey(bidChangeWeek.startKey, 6))) return 'All selected dates must fit within this seven-day week.';
+  if (keys.some((key) => isRdoDateForInitials(key, currentUser.initials))) return 'RDO dates cannot be selected.';
+  const otherWeekStarts = [...new Set(bidChangeRows.filter((row) => row.groupKey !== bidChangeWeek.groupKey).map((row) => row.groupKey))];
+  if (otherWeekStarts.some((start) => start <= addDaysToDateKey(bidChangeWeek.startKey, 6) && addDaysToDateKey(start, 6) >= bidChangeWeek.startKey)) return 'This week overlaps your other bid week. Choose a separate seven-day span.';
+  return '';
+}
+
+function renderRoundOneBidChangeModal(rowsTarget, saveButton) {
+  const groups = [...new Set(bidChangeRows.map((row) => row.groupKey))];
+  const selection = bidChangeDraftSelection();
+  const error = roundOneBidChangeValidationMessage() || (selection.changedRows.length ? bidChangeValidationMessage(selection.replacementRows, selection.affectedRequestIds) : '');
+  document.querySelector('[data-bid-change-round]').textContent = 'Round 1';
+  document.querySelector('[data-bid-change-description]').textContent = 'Change one complete bid week at a time. Your other week stays in place.';
+  document.querySelector('[data-bid-change-guidance]').textContent = 'Choose a week, then select its workdays within a seven-day span. Click selected dates to remove them. Dates between selections may be skipped; RDOs are disabled.';
+  rowsTarget.innerHTML = `<div class="bid-change-week-picker">${groups.map((group, index) => `<button type="button" class="secondary-action" data-bid-change-select-week="${group}" aria-pressed="${bidChangeWeek?.groupKey === group}" ${leaveManagementPendingId ? 'disabled' : ''}>Week ${index + 1}: ${escapeHtml(bidChangeDateLabel(group))}</button>`).join('')}</div>`;
+  if (bidChangeWeek) {
+    const originals = bidChangeRows.filter((row) => row.groupKey === bidChangeWeek.groupKey);
+    rowsTarget.innerHTML += `<section class="bid-change-week"><p><strong>Current dates:</strong> ${originals.map((row) => escapeHtml(bidChangeDateLabel(row.oldKey))).join(', ')}</p>
+      <label>Seven-day span begins <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${bidChangeWeek.startKey}" data-bid-change-week-start="${bidChangeWeek.groupKey}" ${leaveManagementPendingId ? 'disabled' : ''}></label>
+      <div class="bid-change-week-calendar">${bidChangeWeek.startKey ? Array.from({ length: 7 }, (_, i) => {
+        const key = addDaysToDateKey(bidChangeWeek.startKey, i);
+        const rdo = isRdoDateForInitials(key, currentUser.initials);
+        const other = bidChangeRows.some((row) => row.groupKey !== bidChangeWeek.groupKey && row.oldKey === key);
+        return `<button type="button" data-bid-change-toggle-date="${key}" aria-pressed="${bidChangeWeek.dates.has(key)}" ${rdo || other || !isBidLeaveYearDate(key) || leaveManagementPendingId ? 'disabled' : ''}>${escapeHtml(bidChangeDateLabel(key))}<small>${rdo ? 'RDO' : other ? 'Other bid week' : bidChangeWeek.dates.has(key) ? 'Selected' : 'Not selected'}</small></button>`;
+      }).join('') : ''}</div>
+      <p><strong>Replacement dates:</strong> ${[...bidChangeWeek.dates].sort().map((key) => escapeHtml(bidChangeDateLabel(key))).join(', ') || 'None selected'}</p>
+      <p>${bidChangeWeek.dates.size} workdays selected. Saving replaces this entire week.</p></section>`;
+  }
+  saveButton.disabled = !selection.changedRows.length || Boolean(error) || Boolean(leaveManagementPendingId);
+  saveButton.textContent = leaveManagementPendingId ? 'Saving Week…' : 'Review & Save Week';
+  setBidChangeStatus(error || (selection.changedRows.length ? 'Review the replacement dates before saving. Availability is checked when you save.' : ''), error ? 'error' : 'info');
 }
 
 function updateIndividualBidChange(rowId, newKey) {
@@ -9453,6 +9517,10 @@ function updateIndividualBidChange(rowId, newKey) {
 }
 
 function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
+  if (bidChangeRound === 1) {
+    const weekError = roundOneBidChangeValidationMessage();
+    if (weekError) return weekError;
+  }
   const newKeys = replacementRows.map((row) => row.newKey || row.oldKey);
   if (newKeys.some((key) => !isBidLeaveYearDate(key))) return "All new dates must be inside the bidding leave year.";
   if (new Set(newKeys).size !== newKeys.length) return "Two bid dates cannot be changed to the same date.";
@@ -9501,6 +9569,7 @@ async function saveBidDateChanges() {
     return;
   }
 
+  if (bidChangeRound === 1 && !window.confirm(`Replace this whole bid week with: ${[...bidChangeWeek.dates].sort().map(bidChangeDateLabel).join(', ')}? Your other week stays in place.`)) return;
   leaveManagementPendingId = "bid-date-change";
   renderBidChangeModal();
   setBidChangeStatus("Checking availability and saving all date changes…");
@@ -9524,10 +9593,11 @@ async function saveBidDateChanges() {
       throw error;
     }
     await loadSupabaseReferenceData();
+    const changedWholeWeek = bidChangeRound === 1;
     leaveManagementPendingId = "";
     closeBidChangeModal({ restoreFocus: false });
     renderApp();
-    setSubmittedLeaveStatus(`${changedRows.length} ${changedRows.length === 1 ? "bid date was" : "bid dates were"} changed and sent to intake review.`, "success");
+    setSubmittedLeaveStatus(changedWholeWeek ? "Your bid week was replaced and sent to intake review. Your other week was kept." : `${changedRows.length} ${changedRows.length === 1 ? "bid date was" : "bid dates were"} changed and sent to intake review.`, "success");
   } catch (error) {
     leaveManagementPendingId = "";
     renderBidChangeModal();
@@ -14942,6 +15012,11 @@ document.addEventListener("click", async (event) => {
     closeBidChangeModal();
     return;
   }
+
+  const weekChoice = event.target.closest('[data-bid-change-select-week]');
+  if (weekChoice) { selectRoundOneBidChangeWeek(weekChoice.dataset.bidChangeSelectWeek); return; }
+  const weekDate = event.target.closest('[data-bid-change-toggle-date]');
+  if (weekDate) { toggleRoundOneBidChangeDate(weekDate.dataset.bidChangeToggleDate); return; }
 
   if (event.target.closest("[data-bid-change-save]")) {
     await saveBidDateChanges();
