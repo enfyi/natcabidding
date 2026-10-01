@@ -6972,9 +6972,37 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
 
 function upsertRdoSubmissionsFromDatabase(rows, areaById) {
   const items = (rows || []).map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+  inferRdoBidChanges(items);
   const ids = new Set(items.map((item) => item.supabaseSubmissionId));
   intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId || !ids.has(item.supabaseSubmissionId));
   intakeQueue.unshift(...items);
+}
+
+function inferRdoBidChanges(items) {
+  items.forEach((item, itemIndex) => {
+    if (item.isChange || !["Pending", "Approved"].includes(item.status)) return;
+    const itemTime = Date.parse(item.submittedAt || "");
+    const original = items
+      .filter((candidate, candidateIndex) => {
+        if (candidate === item || candidate.status !== "Approved") return false;
+        const sameBidder = item.bidderId && candidate.bidderId
+          ? item.bidderId === candidate.bidderId
+          : item.initials === candidate.initials && item.area === candidate.area;
+        if (!sameBidder) return false;
+        const candidateTime = Date.parse(candidate.submittedAt || "");
+        const submittedEarlier = Number.isFinite(itemTime) && Number.isFinite(candidateTime)
+          ? candidateTime < itemTime
+          : candidateIndex > itemIndex;
+        return submittedEarlier && rdoBidValuesChanged(candidate, item);
+      })
+      .sort((left, right) => Date.parse(right.submittedAt || "") - Date.parse(left.submittedAt || ""))[0];
+    if (!original) return;
+
+    item.isChange = true;
+    item.originalBid = rdoBidSnapshotFromIntakeItem(original);
+    item.originalSubmissionId = original.supabaseSubmissionId || "";
+    item.changeInferred = true;
+  });
 }
 
 function biddingStateSubmissionType(row) {
@@ -13613,7 +13641,9 @@ function renderIntakeChangeHistory(item) {
   if (!item?.isChange) return "";
   const source = item.changeSource === "intake"
     ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
-    : "Submitted by the employee as a change";
+    : item.changeSource === "bidder"
+      ? "Submitted by the employee as a change"
+      : "Detected from the employee's earlier approved bid";
   return `
     <div class="intake-change-history">
       <strong>Bid change</strong>
@@ -14068,7 +14098,6 @@ function renderIntakeQueueWithCache() {
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <div class="intake-card-name-row">
             <h3>${item.name} · ${item.initials}</h3>
-            ${item.isChange ? '<span class="intake-change-badge">Bid Change Request</span>' : ""}
           </div>
           <p>${escapeHtml(item.summary)}</p>
           ${renderIntakeChangeHistory(item)}
@@ -14087,6 +14116,7 @@ function renderIntakeQueueWithCache() {
           </div>
         </div>
         <div class="intake-actions">
+          ${item.isChange ? '<span class="intake-change-badge">Change Request</span>' : ""}
           <span class="status ${item.status.toLowerCase()}">${item.status}</span>
           ${item.status === "Pending" && canReview ? `
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>

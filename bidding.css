@@ -3933,12 +3933,13 @@ tr.occupied-row .rdo-tag {
 
 .intake-change-badge {
   display: inline-flex;
-  border: 1px solid rgba(169, 145, 197, 0.75);
+  justify-content: center;
+  border: 1px solid #80619d;
   border-radius: 999px;
-  padding: 3px 8px;
-  color: #e9dcf5;
-  background: rgba(132, 108, 162, 0.2);
-  font-size: 0.68rem;
+  padding: 6px 12px;
+  color: #ffffff;
+  background: #6f518a;
+  font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4044,6 +4045,11 @@ tr.occupied-row .rdo-tag {
   display: grid;
   justify-items: stretch;
   gap: 8px;
+}
+
+.intake-actions .intake-change-badge {
+  justify-self: end;
+  width: fit-content;
 }
 
 .intake-actions small {
@@ -7895,9 +7901,9 @@ body {
 }
 
 .app-main .intake-change-badge {
-  border-color: #c5b5d6;
-  color: #5f4779;
-  background: #f0eaf5;
+  border-color: #80619d;
+  color: #ffffff;
+  background: #6f518a;
 }
 
 .app-main .alert-list strong,
