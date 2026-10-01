@@ -14063,11 +14063,13 @@ function renderIntakeQueueWithCache() {
 
   target.innerHTML = filteredItems.length
     ? filteredItems.map((item) => `
-      <article class="intake-card ${item.status.toLowerCase()} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
+      <article class="intake-card ${item.status.toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
-          ${item.isChange ? '<span class="intake-change-badge">Change</span>' : ""}
-          <h3>${item.name} · ${item.initials}</h3>
+          <div class="intake-card-name-row">
+            <h3>${item.name} · ${item.initials}</h3>
+            ${item.isChange ? '<span class="intake-change-badge">Bid Change Request</span>' : ""}
+          </div>
           <p>${escapeHtml(item.summary)}</p>
           ${renderIntakeChangeHistory(item)}
           ${renderIntakeGroupDates(item, canReview)}
