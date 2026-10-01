@@ -2451,14 +2451,19 @@ async function addOrUpdateRdoSubmission() {
     summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${rdoPreferenceForBidRole(currentUserBidAs(), currentUser.area, selectedMidValue(line))}`,
   };
 
-  const isChange = Boolean(existing)
-    && String(existing.line ?? "") !== String(request.line ?? "");
+  const isChange = Boolean(existing) && rdoBidValuesChanged(existing, request);
+  if (isChange) {
+    request.isChange = true;
+    request.changeSource = "bidder";
+    request.originalBid = existing.originalBid || rdoBidSnapshotFromIntakeItem(existing);
+  }
   if (isChange && pendingCurrentUserLeaveRequests(1).length) {
     alert("Your Round 1 leave dates are awaiting an intake decision. Wait until they are approved or denied before changing your RDO bid.");
     return;
   }
   if (isChange && !window.confirm(
-    "Are you sure you want to change your RDO bid? All approved Round 1 leave dates will expire, and you will have to bid your two weeks of leave again. Pending RDO or leave requests must be approved or denied before you can make this change."
+    rdoBidChangeConfirmation(currentUser, request, request.originalBid) +
+    "\n\nAll approved Round 1 leave dates will expire, and you will have to bid your two weeks of leave again. Pending RDO or leave requests must be approved or denied before you can make this change."
   )) return;
 
   try {
@@ -2510,7 +2515,7 @@ function manualBidControllerOptions(selectedInitials, query = "") {
     : matches;
   return visiblePeople.map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
-    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}${person.ghostBidder ? " · Ghost Bidder" : ""}`;
+    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.area} · ${person.bidAs}${person.ghostBidder ? " · Ghost Bidder" : ""}`;
     return `<option value="${escapeHtml(person.initials)}"${selected}>${escapeHtml(label)}</option>`;
   }).join("");
 }
@@ -2600,6 +2605,49 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
 
 function fatigueGroupPreferenceLabel(group) {
   return group ? `Group ${group}` : "No preference";
+}
+
+function rdoBidPreferenceLabel(value) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return String(value ?? "").trim() || "—";
+}
+
+function rdoBidSnapshotFromIntakeItem(item) {
+  if (!item) return null;
+  return {
+    submissionId: item.supabaseSubmissionId || "",
+    line: item.line || "",
+    fatigueGroup: item.fatigueGroup || "",
+    flex: item.flex,
+    aws: item.aws,
+    mid: item.mid,
+    round: intakeItemRound(item),
+    status: String(item.status || "").toLowerCase(),
+    submittedAt: item.submittedAt || "",
+    reviewedAt: item.approvedAt || "",
+  };
+}
+
+function rdoBidValuesChanged(original, requested) {
+  if (!original || !requested) return false;
+  return String(original.line ?? "") !== String(requested.line ?? "")
+    || String(original.fatigueGroup ?? "") !== String(requested.fatigueGroup ?? "")
+    || rdoBidPreferenceLabel(original.flex) !== rdoBidPreferenceLabel(requested.flex)
+    || rdoBidPreferenceLabel(original.aws) !== rdoBidPreferenceLabel(requested.aws)
+    || rdoBidPreferenceLabel(original.mid) !== rdoBidPreferenceLabel(requested.mid);
+}
+
+function rdoBidSnapshotSummary(snapshot) {
+  if (!snapshot) return "Original bid unavailable";
+  const line = snapshot.line || snapshot.rdo_line_code || "—";
+  const group = snapshot.fatigueGroup ?? snapshot.fatigue_group ?? "";
+  return `Line ${line} · ${fatigueGroupPreferenceLabel(group)} · Flex ${rdoBidPreferenceLabel(snapshot.flex)} · AWS ${rdoBidPreferenceLabel(snapshot.aws)} · Mid ${rdoBidPreferenceLabel(snapshot.mid)}`;
+}
+
+function rdoBidChangeConfirmation(person, requested, originalBid) {
+  const name = controllerName(person).trim() || person.initials || "this employee";
+  return `Confirm RDO bid change for ${name} · ${person.initials} · ${person.area}.\n\nOriginal: ${rdoBidSnapshotSummary(originalBid)}\nRequested: ${rdoBidSnapshotSummary(requested)}`;
 }
 
 function rdoLineOptionLabel(line) {
@@ -2848,6 +2896,18 @@ async function submitManualRdoBid(panel, person, area) {
     mid,
     summary: `${ghostBid ? "Ghost Line" : "Line"} ${line.line} · ${fatigueGroupPreferenceLabel(fatigueGroup)} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
+
+  const isChange = Boolean(existing) && rdoBidValuesChanged(existing, request);
+  if (isChange) {
+    request.isChange = true;
+    request.changeSource = "intake";
+    request.changeEnteredBy = currentUser.initials;
+    request.originalBid = existing.originalBid || rdoBidSnapshotFromIntakeItem(existing);
+    if (!window.confirm(rdoBidChangeConfirmation(person, request, request.originalBid))) {
+      setManualBidStatus(panel, "RDO bid change canceled. Nothing was submitted.");
+      return;
+    }
+  }
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s RDO bid to Supabase...`);
@@ -6869,13 +6929,24 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const mid = payload.mid || "";
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
+  const isChange = Boolean(row.isChange || row.is_change || payload.isChange);
+  const originalBid = row.originalBid || row.original_bid || null;
+  const changeSource = row.changeSource || row.change_source || payload.changeSource || "";
+  const changeEnteredBy = row.changeEnteredBy || row.change_entered_by || "";
 
   return {
     id: `supabase-rdo-${row.id}`,
     supabaseSubmissionId: row.id,
-    bidderId: bidder.id || row.bidder_id || "",
+    bidderId: row.bidderId || row.bidder_id || bidder.profile_id || (row.bidders ? bidder.id : ""),
     type: "RDO Line",
     ghostBid,
+    isChange,
+    originalBid,
+    originalSubmissionId: row.supersedesSubmissionId || row.supersedes_submission_id || "",
+    changeSource,
+    changeEnteredBy,
+    manualEntry: changeSource === "intake",
+    enteredBy: changeEnteredBy,
     area,
     name: controllerName({
       firstName: bidder.first_name || "",
@@ -8497,6 +8568,7 @@ function updateBidWindow(force = false) {
 
 function updateBidWindowWithCache(force = false) {
   const now = new Date();
+  syncIntakeBidderWindowStatus(now);
   const roundState = areaBidRoundState(now);
   const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
@@ -13456,6 +13528,8 @@ function intakeSearchText(item) {
     item.range,
     item.summary,
     item.reviewNote,
+    item.isChange ? "change changed original bid" : "",
+    item.originalBid ? rdoBidSnapshotSummary(item.originalBid) : "",
     item.submittedAt,
     item.approvedAt,
     item.deniedAt,
@@ -13527,9 +13601,25 @@ function renderIntakeDetailPanel(item, visibleItems) {
           <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
           <strong>${escapeHtml(bidTypeLabel(entry))}</strong>
           <p>${escapeHtml(entry.summary)}</p>
+          ${renderIntakeChangeHistory(entry)}
           <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
         </article>
       `).join("")}
+    </div>
+  `;
+}
+
+function renderIntakeChangeHistory(item) {
+  if (!item?.isChange) return "";
+  const source = item.changeSource === "intake"
+    ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
+    : "Submitted by the employee as a change";
+  return `
+    <div class="intake-change-history">
+      <strong>Bid change</strong>
+      <span><b>Original:</b> ${escapeHtml(rdoBidSnapshotSummary(item.originalBid))}</span>
+      <span><b>Requested:</b> ${escapeHtml(item.summary || rdoBidSnapshotSummary(item))}</span>
+      <small>${escapeHtml(source)}</small>
     </div>
   `;
 }
@@ -13623,6 +13713,47 @@ function intakeBidderExactDateLabel(key) {
     day: "numeric",
     year: "numeric",
   }).format(dateFromKey(key));
+}
+
+function intakeBidderWindowState(person, date = new Date()) {
+  const rank = Number.isFinite(person?.rank) ? person.rank : person?.seniorityRank;
+  const area = person?.area || currentViewArea();
+  if (!Number.isFinite(rank)) return { window: null, isOpen: false };
+
+  const roundCount = Math.max(6, roundDateBlocksForArea(area)[0]?.length || 0);
+  const windows = Array.from(
+    { length: roundCount },
+    (_, index) => bidWindowForRankRound(rank, index + 1, area)
+  ).filter(Boolean);
+  const openWindow = windows.find((window) => date >= window.start && date < window.end) || null;
+  const areaRound = areaBidRoundState(date, area)?.round;
+  const currentRoundWindow = areaRound
+    ? windows.find((window) => window.round === areaRound) || null
+    : null;
+  const nextWindow = windows.find((window) => date < window.end) || null;
+  const previousWindow = windows.toReversed().find((window) => date >= window.end) || null;
+
+  return {
+    window: openWindow || currentRoundWindow || nextWindow || previousWindow,
+    isOpen: Boolean(openWindow),
+  };
+}
+
+function syncIntakeBidderWindowStatus(date = new Date()) {
+  const range = document.querySelector("[data-intake-bidder-window-range]");
+  const status = document.querySelector("[data-intake-bidder-window-status]");
+  if (!range || !status) return;
+
+  const person = selectedIntakeBidderPerson();
+  if (!person) return;
+
+  const { window, isOpen } = intakeBidderWindowState(person, date);
+  range.textContent = window
+    ? `Round ${window.round} · ${formatDateRange(window.start, window.end)}`
+    : "No bid window scheduled";
+  status.textContent = window ? (isOpen ? "In bid window" : "Not in bid window") : "Not scheduled";
+  status.classList.toggle("open", isOpen);
+  status.classList.toggle("closed", !isOpen);
 }
 
 function intakeBidderRoundDetail(rows) {
@@ -13731,8 +13862,11 @@ function renderIntakeBidderSummary() {
   target.innerHTML =
     '<div class="intake-bidder-metric"><span>Name</span>' +
       '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="contact">' +
-      escapeHtml(personDisplayName(person)) + "</button><small>" +
-      escapeHtml(person.bidAs || "BUE") + (loadingNote ? " · " + escapeHtml(loadingNote) : "") + "</small></div>" +
+      escapeHtml(personDisplayName(person)) + '</button><small class="intake-bid-window">' +
+      '<span data-intake-bidder-window-range>No bid window scheduled</span>' +
+      '<span class="intake-bid-window-status closed" data-intake-bidder-window-status>Not scheduled</span>' +
+      (loadingNote ? '<span class="intake-bidder-loading-note">' + escapeHtml(loadingNote) + "</span>" : "") +
+      "</small></div>" +
     '<div class="intake-bidder-metric"><span>Initials</span><strong>' +
       escapeHtml(person.initials || "—") + "</strong><small>Seniority #" +
       (Number.isFinite(rank) ? rank : "—") + "</small></div>" +
@@ -13747,6 +13881,7 @@ function renderIntakeBidderSummary() {
       formatEstimatedLeaveDays(daysBid) + " days</button><small>Pending and approved</small></div>" +
     '<div class="intake-bidder-metric"><span>Holidays Bid</span><strong>' +
       holidaysBid + "</strong><small>Holiday and in-lieu dates</small></div>";
+  syncIntakeBidderWindowStatus();
   renderIntakeBidderDetail(person, rows);
 }
 
@@ -13931,8 +14066,10 @@ function renderIntakeQueueWithCache() {
       <article class="intake-card ${item.status.toLowerCase()} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
+          ${item.isChange ? '<span class="intake-change-badge">Change</span>' : ""}
           <h3>${item.name} · ${item.initials}</h3>
           <p>${escapeHtml(item.summary)}</p>
+          ${renderIntakeChangeHistory(item)}
           ${renderIntakeGroupDates(item, canReview)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
           ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveRdoConflicts).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveRdoConflicts))} ${intakeReviewConflicts(item, leaveRdoConflicts).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
