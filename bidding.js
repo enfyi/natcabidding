@@ -2742,11 +2742,11 @@ async function submitManualRdoBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
 
-function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
+function manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges }) {
   if (round === 1) {
     const usedWeeks = roundOneWeekKeySetForItems([
       ...leaveRoundUsageForInitials(person.initials, 1),
-      { range, round },
+      ...requestedRanges.map((keys) => ({ dateKeys: keys, round })),
     ]);
 
     if (usedWeeks.size > roundOneWeekLimit()) {
@@ -2790,11 +2790,7 @@ async function submitManualLeaveBid(panel, person, area) {
   }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const rdoDates = leaveRdoDatesForInitials(range, person.initials);
-  if (round > 1 && rdoDates.length) {
-    setManualBidStatus(panel, `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}.`, "error");
-    return;
-  }
+  const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
   const chargedDays = chargeableDates.length;
   const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
   if (manualDaysInput) manualDaysInput.value = String(chargedDays);
@@ -2802,17 +2798,16 @@ async function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
+  const requestedRanges = contiguousLeaveDateRanges(requestedDates);
 
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(requestedDates) : [];
   const weekUnits = weekKeys.length;
   const validationMessage = manualLeaveValidationMessage({
     person,
-    area,
-    range,
-    dateKeys,
     round,
     days: chargedDays,
     weekKeys,
+    requestedRanges,
   });
   if (validationMessage) {
     setManualBidStatus(panel, validationMessage, "error");
@@ -2850,33 +2845,52 @@ async function submitManualLeaveBid(panel, person, area) {
     weekKeys,
     summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
+  const requests = requestedRanges.map((keys, index) => {
+    const segmentRange = formatLeaveRangeFromKeys(keys);
+    const segmentDays = chargeableLeaveDateKeys(keys, person.initials, round).length;
+    const segmentWeekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
+    return {
+      ...request,
+      id: `${request.id}-${index + 1}`,
+      range: segmentRange,
+      dateKeys: keys,
+      startDateKey: keys[0],
+      endDateKey: keys[keys.length - 1],
+      days: segmentDays,
+      weekUnits: segmentWeekKeys.length,
+      weekKeys: segmentWeekKeys,
+      summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${segmentRange} · ${segmentDays} ${segmentDays === 1 ? "day" : "days"}`,
+    };
+  });
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
-    const savedBatch = await saveSupabaseManualLeaveRequest(request, person, area, notes);
-    const submissionId = savedBatch?.submission_ids?.[0];
-    if (submissionId) request.supabaseSubmissionId = submissionId;
+    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area, notes);
+    requests.forEach((item, index) => {
+      item.supabaseSubmissionId = savedBatch.submission_ids[index];
+    });
   } catch (error) {
     setManualBidStatus(panel, error.message || "The manual leave bid could not be saved. Try again.", "error");
     return;
   }
 
-  intakeQueue.unshift(request);
-  leaveBids.push({
+  intakeQueue.unshift(...requests);
+  requests.forEach((item) => leaveBids.push({
     priority: nextLeavePriority(),
-    range: request.range,
-    days: request.days,
+    range: item.range,
+    dateKeys: item.dateKeys,
+    days: item.days,
     status: "Pending",
     notes,
     initials: person.initials,
     area,
     round,
-    weekUnits,
-    weekKeys,
-  });
+    weekUnits: item.weekUnits,
+    weekKeys: item.weekKeys,
+  }));
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
-  queueBidSubmittedEmail(request);
+  requests.forEach(queueBidSubmittedEmail);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -3345,6 +3359,15 @@ function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
 
 function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
   return datesInLeaveRange(range).filter((key) => isRdoDateForInitials(key, initials));
+}
+
+function contiguousLeaveDateRanges(keys) {
+  return keys.reduce((ranges, key) => {
+    const last = ranges[ranges.length - 1];
+    if (last && addDaysToDateKey(last[last.length - 1], 1) === key) last.push(key);
+    else ranges.push([key]);
+    return ranges;
+  }, []);
 }
 
 function setLeaveDaysInput(days) {
@@ -7150,16 +7173,15 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   return data;
 }
 
-async function saveSupabaseManualLeaveRequest(request, person, area, notes = "") {
+async function saveSupabaseManualLeaveRequest(requests, person, area, notes = "") {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
   }
-  const dateKeys = datesInLeaveRange(request.range);
   const targetRdoLine = rdoLineForInitials(person.initials);
-  const requestedItems = [{
-    start_date: dateKeys[0],
-    end_date: dateKeys[dateKeys.length - 1],
+  const requestedItems = requests.map((request) => ({
+    start_date: request.startDateKey,
+    end_date: request.endDateKey,
     round: request.round,
     rdo_line_code: targetRdoLine?.line || null,
     fatigue_group: targetRdoLine?.group || null,
@@ -7167,7 +7189,7 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     aws: targetRdoLine?.aws || null,
     mid: targetRdoLine?.mid || null,
     notes,
-  }];
+  }));
   const { data, error } = await client.rpc("submit_leave_bid_batch", {
     requested_bid_year: BID_YEAR,
     requested_items: requestedItems,
@@ -7176,7 +7198,7 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     manual_entry: true,
   });
   if (error) throw error;
-  if (!Array.isArray(data?.submission_ids) || !data.submission_ids.length) {
+  if (!Array.isArray(data?.submission_ids) || data.submission_ids.length !== requests.length) {
     throw new Error("Supabase did not return the saved manual leave submission.");
   }
   return data;
