@@ -8555,7 +8555,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
 }
 
 function publicRosterArea(area = publicState.area) {
-  return ZLA_AREAS.includes(area) ? area : currentUser.area;
+  return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section) {
