@@ -1187,10 +1187,7 @@
                   </label>
                   <fieldset class="intake-shift-presets">
                     <legend>Base Shift</legend>
-                    <div class="intake-shift-preset-buttons">
-                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
-                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
-                    </div>
+                    <div class="intake-shift-preset-buttons" data-intake-shift-preset-buttons></div>
                   </fieldset>
                   <div class="intake-shift-fields">
                     <label>
@@ -1220,6 +1217,19 @@
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
+              </section>
+              <section class="panel" data-shift-builder hidden>
+                <h3>Shift Builder</h3>
+                <div class="shift-builder-list" data-shift-builder-list></div>
+                <form class="schedule-form shift-builder-form" data-shift-builder-form>
+                  <label>Start Time <input type="time" step="900" required data-shift-builder-time /></label>
+                  <label>Shift Length <span class="schedule-duration-input"><input type="number" min="0.25" max="24" step="0.25" required data-shift-builder-hours /><span>hours</span></span></label>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="submit" data-save-shift-preset>Add Shift</button>
+                    <button class="secondary-action small" type="button" data-cancel-shift-preset hidden>Cancel</button>
+                  </div>
+                  <p class="form-status" data-shift-builder-status role="status"></p>
+                </form>
               </section>
             </aside>
           </div>
