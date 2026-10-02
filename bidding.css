@@ -3951,7 +3951,8 @@ tr.occupied-row .rdo-tag {
   opacity: 0.82;
 }
 
-.intake-card.expired {
+.intake-card.expired,
+.intake-card.cancelled {
   border-style: dashed;
   opacity: 0.72;
 }

@@ -78,6 +78,13 @@ The operation releases the request's old slots, validates and reserves its new
 dates, rebuilds Round 1 buckets and charged-date details, and writes an audit
 event in one transaction.
 
+Run `database/admin_leave_request_management.sql` after the approved leave edit
+functions to let authorized intake users and administrators remove approved bids
+from pre-approved capacity. Removal releases ordinary and override slots, marks
+the request and its intake submission Cancelled, and retains its date records and
+an audit event for history. Grouped week or batch cards can be cancelled in one
+atomic operation.
+
 For member self-service changes after submission, run
 `database/member_leave_request_management.sql` after the leave submission
 preflight. It lets the authenticated bidder remove their own pending or approved
