@@ -2166,10 +2166,10 @@ input {
   gap: 7px;
 }
 
-.year-calendar.month-view .month-grid span,
-.year-calendar.month-view .month-grid button,
-.year-calendar.large.month-view .month-grid span,
-.year-calendar.large.month-view .month-grid button {
+.year-calendar.month-view .month-grid > span,
+.year-calendar.month-view .month-grid > button,
+.year-calendar.large.month-view .month-grid > span,
+.year-calendar.large.month-view .month-grid > button {
   min-height: 44px;
   font-size: 0.86rem;
 }
@@ -5904,14 +5904,14 @@ tr.occupied-row .rdo-tag {
   gap: 2px;
 }
 
-.calendar-panel.full .schedule-calendar .month-grid span,
-.calendar-panel.full .schedule-calendar .month-grid button {
+.calendar-panel.full .schedule-calendar .month-grid > span,
+.calendar-panel.full .schedule-calendar .month-grid > button {
   min-height: 18px;
   font-size: 0.58rem;
 }
 
-.calendar-panel.full .schedule-calendar.month-view .month-grid span,
-.calendar-panel.full .schedule-calendar.month-view .month-grid button {
+.calendar-panel.full .schedule-calendar.month-view .month-grid > span,
+.calendar-panel.full .schedule-calendar.month-view .month-grid > button {
   min-height: 56px;
   font-size: 0.72rem;
 }

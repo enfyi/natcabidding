@@ -12778,7 +12778,6 @@ function resetIntakeScheduleEditor(options = {}) {
   editingIntakeScheduleId = "";
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (options.resetValues && form) {
-    form.querySelector("[data-intake-shift-date]").value = "";
     form.querySelector("[data-intake-shift-time]").value = "";
     form.querySelector("[data-intake-shift-duration]").value = "";
     syncIntakeShiftForm(form);
