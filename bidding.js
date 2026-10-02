@@ -6998,6 +6998,7 @@ function applyGlRdoAssignments(rows) {
     line.glBids.push({
       initials,
       status: uiStatusFromDatabase(row.status || "pending"),
+      ghostBid: Boolean(row.ghost_bid),
     });
   });
 
@@ -8320,7 +8321,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL Bid · visible, but does not occupy the line</p>
+      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL / Ghost Bid · visible, but does not occupy the line</p>
       <div class="mobile-rdo-view" role="group" aria-label="RDO display">
         <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
         <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
@@ -9004,7 +9005,7 @@ function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
   if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
   else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
   glBids.forEach((bid) => {
-    pieces.push(`<span class="gl-line-bidder" title="GL Bid · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+    pieces.push(`<span class="gl-line-bidder" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
   });
   return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
 }
