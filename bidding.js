@@ -7754,6 +7754,7 @@ async function loadSupabaseReferenceData() {
       leaveRequestsResult,
       ghostStatusResult,
       intakeSchedulesResult,
+      shiftPresetsResult,
       bidYearSettingsResult,
       roundRulesResult,
       approvalRulesResult,
@@ -7771,6 +7772,7 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       loadIntakeSchedules(client),
+      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
       client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
@@ -7792,6 +7794,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      isMissingSupabaseRoutine(shiftPresetsResult.error) ? null : supabaseLoadWarning("intake shift presets", shiftPresetsResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
       isMissingSupabaseRoutine(approvalRulesResult.error) ? null : supabaseLoadWarning("approval rules", approvalRulesResult),
@@ -7828,6 +7831,7 @@ async function loadSupabaseReferenceData() {
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
@@ -7891,8 +7895,130 @@ function formatDateTimeLocalValue(date) {
   return offsetDate.toISOString().slice(0, 16);
 }
 
-const DEFAULT_INTAKE_SHIFT_START = "06:45";
-const DEFAULT_INTAKE_SHIFT_HOURS = 8;
+const DEFAULT_INTAKE_SHIFT_PRESETS = [
+  { id: "default-0645", startTime: "06:45", durationHours: 8 },
+  { id: "default-1115", startTime: "11:15", durationHours: 8 },
+];
+let intakeShiftPresets = [...DEFAULT_INTAKE_SHIFT_PRESETS];
+let editingShiftPresetId = "";
+let shiftPresetMutationPending = false;
+
+function formatShiftPresetTime(value) {
+  const [hour, minute] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2020, 0, 1, hour, minute)));
+}
+
+function renderShiftPresets() {
+  const buttons = document.querySelector("[data-intake-shift-preset-buttons]");
+  if (buttons) {
+    buttons.innerHTML = intakeShiftPresets.map((preset) => `
+      <button type="button" data-intake-shift-preset="${escapeAttribute(preset.id)}" aria-pressed="false">
+        ${escapeHtml(formatShiftPresetTime(preset.startTime))}<small>${escapeHtml(String(preset.durationHours))}h</small>
+      </button>
+    `).join("") || '<span class="empty-state small">No base shifts yet. Enter a time and length below.</span>';
+  }
+  const builder = document.querySelector("[data-shift-builder]");
+  if (builder) builder.hidden = !hasSystemAdminAccess();
+  const list = document.querySelector("[data-shift-builder-list]");
+  if (list) list.innerHTML = intakeShiftPresets.map((preset) => `
+    <div class="shift-builder-row">
+      <span><strong>${escapeHtml(formatShiftPresetTime(preset.startTime))}</strong><small>${escapeHtml(String(preset.durationHours))} hours</small></span>
+      <div class="shift-builder-actions">
+        <button type="button" class="secondary-action small" data-edit-shift-preset="${escapeAttribute(preset.id)}">Edit</button>
+        <button type="button" class="secondary-action small danger-action" data-delete-shift-preset="${escapeAttribute(preset.id)}">Delete</button>
+      </div>
+    </div>
+  `).join("") || '<p class="empty-state small">No base shifts yet.</p>';
+  const form = document.querySelector("[data-shift-builder-form]");
+  if (form) {
+    form.querySelector("[data-save-shift-preset]").textContent = editingShiftPresetId ? "Save Shift" : "Add Shift";
+    form.querySelector("[data-cancel-shift-preset]").hidden = !editingShiftPresetId;
+    form.querySelectorAll("button, input").forEach((control) => { control.disabled = shiftPresetMutationPending; });
+  }
+  syncIntakeShiftForm(document.querySelector("[data-schedule-start]")?.closest(".schedule-form"));
+}
+
+function setShiftBuilderStatus(message, status = "info") {
+  const target = document.querySelector("[data-shift-builder-status]");
+  if (target) { target.textContent = message; target.dataset.status = status; }
+}
+
+function resetShiftPresetEditor() {
+  editingShiftPresetId = "";
+  document.querySelector("[data-shift-builder-form]")?.reset();
+  renderShiftPresets();
+}
+
+async function saveShiftPreset(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const form = event.currentTarget;
+  const startTime = form.querySelector("[data-shift-builder-time]").value;
+  const durationHours = Number(form.querySelector("[data-shift-builder-hours]").value);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 24 || durationHours * 4 % 1 !== 0) {
+    setShiftBuilderStatus("Enter a start time and a length in quarter-hour increments, up to 24 hours.", "error");
+    return;
+  }
+  if (intakeShiftPresets.some((preset) => preset.startTime === startTime && preset.id !== editingShiftPresetId)) {
+    setShiftBuilderStatus("A base shift already starts at that time.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to save base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  const wasEditing = Boolean(editingShiftPresetId);
+  try {
+    const { error } = await client.rpc("save_intake_shift_preset", {
+      requested_id: wasEditing ? editingShiftPresetId : null,
+      requested_start_time: startTime,
+      requested_duration_hours: durationHours,
+    });
+    if (error) throw error;
+    const result = await client.rpc("read_intake_shift_presets");
+    if (result.error) throw result.error;
+    applyIntakeShiftPresets(result.data);
+    resetShiftPresetEditor();
+    setShiftBuilderStatus(wasEditing ? "Base shift updated." : "Base shift added.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be saved.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+async function deleteShiftPreset(id) {
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const preset = intakeShiftPresets.find((item) => item.id === id);
+  if (!preset || !window.confirm(`Delete the ${formatShiftPresetTime(preset.startTime)} base shift? Existing scheduled shifts will stay as they are.`)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to delete base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  try {
+    const result = await client.rpc("delete_intake_shift_preset", { requested_id: id });
+    if (result.error) throw result.error;
+    intakeShiftPresets = intakeShiftPresets.filter((item) => item.id !== id);
+    if (editingShiftPresetId === id) resetShiftPresetEditor();
+    setShiftBuilderStatus("Base shift deleted.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be deleted.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+function applyIntakeShiftPresets(rows) {
+  intakeShiftPresets = (rows || []).map((row) => ({
+    id: row.id,
+    startTime: String(row.start_time).slice(0, 5),
+    durationHours: Number(row.duration_hours),
+  }));
+  renderShiftPresets();
+}
 
 function syncIntakeShiftForm(form, options = {}) {
   if (!form) return;
@@ -7909,8 +8035,8 @@ function syncIntakeShiftForm(form, options = {}) {
     defaultDate.setDate(defaultDate.getDate() + (options.defaultOffsetDays ?? 5));
     dateInput.value = formatDateTimeLocalValue(defaultDate).slice(0, 10);
   }
-  if (!timeInput.value) timeInput.value = DEFAULT_INTAKE_SHIFT_START;
-  if (!durationInput.value) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  if (!timeInput.value && intakeShiftPresets.length) timeInput.value = intakeShiftPresets[0].startTime;
+  if (!durationInput.value && intakeShiftPresets.length) durationInput.value = String(intakeShiftPresets[0].durationHours);
 
   const durationHours = Number(durationInput.value);
   const start = new Date(`${dateInput.value}T${timeInput.value}`);
@@ -7926,7 +8052,8 @@ function syncIntakeShiftForm(form, options = {}) {
   }
 
   form.querySelectorAll("[data-intake-shift-preset]").forEach((button) => {
-    const isActive = button.dataset.intakeShiftPreset === timeInput.value && durationHours === DEFAULT_INTAKE_SHIFT_HOURS;
+    const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+    const isActive = preset?.startTime === timeInput.value && preset?.durationHours === durationHours;
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
@@ -7937,8 +8064,10 @@ function applyIntakeShiftPreset(button) {
   if (!form) return;
   const timeInput = form.querySelector("[data-intake-shift-time]");
   const durationInput = form.querySelector("[data-intake-shift-duration]");
-  if (timeInput) timeInput.value = button.dataset.intakeShiftPreset || DEFAULT_INTAKE_SHIFT_START;
-  if (durationInput) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+  if (!preset) return;
+  if (timeInput) timeInput.value = preset.startTime;
+  if (durationInput) durationInput.value = String(preset.durationHours);
   syncIntakeShiftForm(form);
 }
 
@@ -12846,6 +12975,7 @@ function renderIntakeSchedule() {
   const calendar = document.getElementById("intake-schedule-calendar");
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
+  renderShiftPresets();
   syncIntakeTeamControls();
   updateScheduleCalendarControls();
 
@@ -15636,6 +15766,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const editShiftPresetButton = event.target.closest("[data-edit-shift-preset]");
+  if (editShiftPresetButton && hasSystemAdminAccess()) {
+    const preset = intakeShiftPresets.find((item) => item.id === editShiftPresetButton.dataset.editShiftPreset);
+    if (preset) {
+      editingShiftPresetId = preset.id;
+      const form = document.querySelector("[data-shift-builder-form]");
+      form.querySelector("[data-shift-builder-time]").value = preset.startTime;
+      form.querySelector("[data-shift-builder-hours]").value = String(preset.durationHours);
+      renderShiftPresets();
+      form.querySelector("[data-shift-builder-time]").focus();
+    }
+    return;
+  }
+  const deleteShiftPresetButton = event.target.closest("[data-delete-shift-preset]");
+  if (deleteShiftPresetButton) { await deleteShiftPreset(deleteShiftPresetButton.dataset.deleteShiftPreset); return; }
+  if (event.target.closest("[data-cancel-shift-preset]")) { resetShiftPresetEditor(); setShiftBuilderStatus(""); return; }
+
   const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
   if (scheduleViewButton) {
     scheduleCalendarView = scheduleViewButton.dataset.scheduleCalendarView || "month";
@@ -16055,6 +16202,7 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
+document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
