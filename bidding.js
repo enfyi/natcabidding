@@ -6478,9 +6478,8 @@ function intendedLandingPage(requestedPage = requestedLandingPage()) {
   if (requestedPage === "admin" || requestedPage === "admin-tools") {
     return hasSystemAdminAccess() ? requestedPage : defaultPage;
   }
-  if (requestedPage === "intake" || requestedPage === "intake-schedule") {
-    return canUseIntakeView() ? requestedPage : defaultPage;
-  }
+  if (requestedPage === "intake") return canUseIntakeView() ? requestedPage : defaultPage;
+  if (requestedPage === "intake-schedule") return canViewIntakeSchedule() ? requestedPage : defaultPage;
   if (requestedPage === "dashboard") return "dashboard";
   return defaultPage;
 }
@@ -7476,6 +7475,9 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
         phone: person.phone,
         area: person.area,
         bidAs: person.bidAs,
+        role: seniorityEntryAppRole(currentEntry),
+        roleLabel: seniorityEntryAppRole(currentEntry) === "admin" ? "Bidding Admin" : seniorityEntryAppRole(currentEntry) === "intake" ? "Bidding Intake" : "BUE Controller",
+        systemAdmin: seniorityEntryAppRole(currentEntry) === "admin",
         seniorityRank: person.rank,
         leaveSlotAllowance: person.leaveSlotAllowance,
       };
@@ -7533,7 +7535,6 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
     const initials = bidder.initials || row.initials || "";
     if (!initials) return;
 
-    intakeTeamInitials.add(initials);
     intakeSchedules.push({
       id: row.id,
       initials,
@@ -7549,7 +7550,7 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
 }
 
 function loadIntakeSchedules(client) {
-  if (!supabaseState.authUserId) return Promise.resolve({ data: [], error: null });
+  if (!supabaseState.authUserId || !canViewIntakeSchedule()) return Promise.resolve({ data: [], error: null });
   return client.rpc("read_intake_schedules", { requested_bid_year: BID_YEAR });
 }
 
@@ -8766,6 +8767,45 @@ function canUseIntakeView() {
   return hasIntakeAccess();
 }
 
+function canViewIntakeSchedule() {
+  return hasSystemAdminAccess()
+    || Boolean(currentUser?.supabaseProfileId && intakeTeamInitials.has(currentUser.initials));
+}
+
+async function refreshIntakeScheduleMembership() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.authUserId) return false;
+
+  const { data, error } = await client.rpc("read_bidding_roster");
+  if (error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyRosterFromDatabase(data || []);
+  if (!canViewIntakeSchedule()) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+
+  const schedulesResult = await loadIntakeSchedules(client);
+  supabaseState.intakeSchedulesError = schedulesResult.error?.message || "";
+  if (schedulesResult.error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyIntakeSchedulesFromDatabase(schedulesResult.data || []);
+  renderApp();
+  return true;
+}
+
+function closeIntakeScheduleAfterFailedCheck() {
+  intakeSchedules.splice(0, intakeSchedules.length);
+  if (document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    setPage("dashboard");
+  }
+  renderApp();
+}
+
 function pageForViewMode(mode) {
   if (mode === "admin") return "admin";
   if (mode === "intake") return "intake";
@@ -8823,6 +8863,7 @@ function userSeniorityLongText() {
 
 function renderCurrentUser() {
   const canOpenIntake = canUseIntakeView();
+  const canOpenIntakeSchedule = canViewIntakeSchedule();
   const displayedSeniorityRank = currentUserSeniorityRank();
   const displayedBidderCount = currentUserBidderCount();
   const hasSeniority = Number.isFinite(displayedSeniorityRank);
@@ -8909,7 +8950,7 @@ function renderCurrentUser() {
   });
 
   document.querySelectorAll("[data-intake-rep-only]").forEach((element) => {
-    element.hidden = !canOpenIntake;
+    element.hidden = !canOpenIntakeSchedule;
   });
 
   document.querySelectorAll("[data-system-admin-only]").forEach((element) => {
@@ -14754,7 +14795,7 @@ function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
   }
-  if (pageName === "intake-schedule" && !canUseIntakeView()) {
+  if (pageName === "intake-schedule" && !canViewIntakeSchedule()) {
     pageName = "dashboard";
   }
   if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
@@ -16305,7 +16346,14 @@ document.addEventListener("click", async (event) => {
 
   const trigger = event.target.closest("[data-page]");
   if (!trigger) return;
+  if (trigger.dataset.page === "intake-schedule" && !await refreshIntakeScheduleMembership()) return;
   setPage(trigger.dataset.page);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    void refreshIntakeScheduleMembership();
+  }
 });
 
 document.addEventListener("keydown", async (event) => {
