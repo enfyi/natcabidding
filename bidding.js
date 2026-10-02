@@ -6697,7 +6697,12 @@ async function initializeSupabaseAuth() {
 
       restoreSupabaseSession();
     }
-    if (event === "SIGNED_OUT") clearSupabaseAccountState();
+    if (event === "SIGNED_OUT") {
+      clearSupabaseAccountState();
+      currentUser = null;
+      showPublicHome();
+      setAuthStatus("Signed out. Sign in again to manage intake shifts.", "info");
+    }
   });
 
   const pendingToken = pendingSupabaseEmailToken();
@@ -12711,6 +12716,7 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (!client || !supabaseState.connected) {
     throw new Error("The intake schedule could not reach the database. Check the connection and try again.");
   }
+  if (!await ensureIntakeScheduleSession(client)) return false;
   const routine = scheduleId ? "update_intake_schedule" : "create_intake_schedule";
   const parameters = {
     requested_bid_year: BID_YEAR,
@@ -12725,6 +12731,27 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (error) throw error;
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
+  return true;
+}
+
+async function ensureIntakeScheduleSession(client) {
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    currentUser = null;
+    clearSupabaseAccountState();
+    showPublicHome();
+    setAuthStatus("Your sign-in ended. Sign in again to manage intake shifts.", "error");
+    return false;
+  }
+
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError || !userData.user || userData.user.id !== sessionData.session.user.id) {
+    setScheduleFormStatus("Could not verify your sign-in. Check the connection or sign in again.", "error");
+    return false;
+  }
+
+  syncSupabaseAccountStateFromSession(sessionData.session);
+  return true;
 }
 
 function setIntakeScheduleMutationPending(isPending) {
@@ -12800,6 +12827,7 @@ async function deleteIntakeSchedule(scheduleId) {
     setScheduleFormStatus("The intake schedule could not reach the database. Check the connection and try again.", "error");
     return;
   }
+  if (!await ensureIntakeScheduleSession(client)) return;
 
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`Deleting ${schedule.name}'s intake shift...`);
@@ -13108,7 +13136,7 @@ async function addIntakeScheduleFromForm() {
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`${actionLabel} ${name}'s intake shift...`);
   try {
-    await saveIntakeScheduleToSupabase(initials, start, end, scheduleId);
+    if (!await saveIntakeScheduleToSupabase(initials, start, end, scheduleId)) return;
     logHistory(area, scheduleId ? "Intake shift updated" : "Intake shift assigned", `${currentUser.initials} ${scheduleId ? "updated" : "scheduled"} ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
     resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
