@@ -5875,14 +5875,22 @@ tr.occupied-row .rdo-tag {
   gap: 10px;
 }
 
-.schedule-calendar.month-view {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.schedule-calendar.month-view,
+.schedule-calendar.two-month-view {
   gap: 12px;
   width: 100%;
   max-width: none;
 }
 
-.schedule-calendar.month-view .month-card {
+.schedule-calendar.month-view {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.schedule-calendar.two-month-view {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.schedule-calendar:is(.month-view, .two-month-view) .month-card {
   max-width: none;
 }
 
@@ -5910,8 +5918,8 @@ tr.occupied-row .rdo-tag {
   font-size: 0.58rem;
 }
 
-.calendar-panel.full .schedule-calendar.month-view .month-grid > span,
-.calendar-panel.full .schedule-calendar.month-view .month-grid > button {
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > span,
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > button {
   min-height: 56px;
   font-size: 0.72rem;
 }
@@ -5985,6 +5993,13 @@ tr.occupied-row .rdo-tag {
   white-space: nowrap;
 }
 
+.schedule-day-assignment.mine b,
+.schedule-day-assignment.mine small {
+  color: #0f172a;
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
 .schedule-day.has-schedule {
   color: #075985;
   background: #dbeafe;
@@ -5996,6 +6011,89 @@ tr.occupied-row .rdo-tag {
   background: #bdf5dd;
   box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.22);
 }
+
+.schedule-calendar .schedule-day.intake-mark-holiday {
+  color: #804300;
+  background: #ffe2a6;
+  box-shadow: inset 0 0 0 1px #e8a83f;
+}
+
+.schedule-calendar .schedule-day.intake-mark-natca_validation {
+  color: #63358c;
+  background: #ead8fa;
+  box-shadow: inset 0 0 0 1px #b490d5;
+}
+
+.schedule-calendar .schedule-day.intake-mark-faa_validation {
+  color: #9c2727;
+  background: #ffd9d9;
+  box-shadow: inset 0 0 0 1px #df9292;
+}
+
+.schedule-calendar .intake-day-mark-label {
+  align-self: flex-start;
+  min-height: auto;
+  font-size: 0.52rem;
+  font-weight: 900;
+  line-height: 1.15;
+  text-align: left;
+}
+
+.intake-calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.intake-calendar-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.intake-calendar-legend span::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  content: "";
+  background: #ffe2a6;
+}
+
+.intake-calendar-legend .natca-validation::before { background: #ead8fa; }
+.intake-calendar-legend .faa-validation::before { background: #ffd9d9; }
+
+.intake-calendar-mark-list {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.intake-calendar-mark-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  border: 1px solid #dbe4ef;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #334155;
+  background: #fff;
+  font: inherit;
+  font-size: 0.7rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intake-calendar-mark-item.holiday { border-left: 4px solid #e8a83f; }
+.intake-calendar-mark-item.natca_validation { border-left: 4px solid #b490d5; }
+.intake-calendar-mark-item.faa_validation { border-left: 4px solid #df9292; }
 
 .schedule-tooltip {
   position: absolute;
@@ -6119,12 +6217,14 @@ tr.occupied-row .rdo-tag {
 @media (max-width: 720px) {
   .schedule-view-tabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     width: 100%;
   }
 
   .schedule-view-tabs button {
     min-width: 0;
+    min-height: 42px;
+    font-size: 0.75rem;
   }
 
   .schedule-period-controls {
@@ -6141,7 +6241,7 @@ tr.occupied-row .rdo-tag {
     max-width: 440px;
   }
 
-  .schedule-calendar.month-view {
+  .schedule-calendar:is(.month-view, .two-month-view) {
     grid-template-columns: 1fr;
     max-width: 520px;
   }
