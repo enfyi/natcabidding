@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-intake-panels" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-print-dialog-orientation-intake-panels" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -509,7 +509,7 @@
               <div class="panel-header">
                 <div>
                   <h2>Leave Bids</h2>
-                  <p>Drag to reorder annual leave priority before submitting.</p>
+                  <p>Review annual leave bids before submitting.</p>
                   <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                 </div>
                 <button class="primary-action small" type="button" data-page="leave">Add Leave</button>
@@ -524,7 +524,6 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Priority</th>
                       <th>Round</th>
                       <th>Date Range</th>
                       <th>Days</th>
@@ -602,6 +601,7 @@
                 <button type="button" aria-pressed="true" data-member-rdo-presentation="table">Compare table</button>
               </div>
               <p class="mobile-table-hint member-rdo-table-hint">Swipe horizontally to compare the full weekly schedule.</p>
+              <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL Bid · visible, but does not occupy the line</p>
               <div class="member-rdo-results" data-member-rdo-results data-presentation="table">
                 <div class="mobile-rdo-cards member-rdo-cards" data-member-rdo-cards></div>
                 <div class="table-wrap tall rdo-page-table-wrap" tabindex="0" role="region" aria-label="RDO schedule comparison table, scroll horizontally">
@@ -719,7 +719,7 @@
                 <div class="panel-header compact">
                   <div>
                     <h2>Leave Bids</h2>
-                    <p>Review and prioritize annual leave before submitting.</p>
+                    <p>Review annual leave bids before submitting.</p>
                     <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                   </div>
                 </div>
@@ -733,7 +733,6 @@
                   <table>
                     <thead>
                       <tr>
-                        <th>Priority</th>
                         <th>Round</th>
                         <th>Date Range</th>
                         <th>Days</th>
@@ -1544,6 +1543,27 @@
                   <button class="secondary-action" type="button" data-save-pilot-settings>Save pilot access</button>
                   <button class="secondary-action danger" type="button" data-reset-pilot-data>Reset practice data</button>
                 </div>
+                <h4>Reset an allowed bidder</h4>
+                <label class="testing-select-row">
+                  Allowed bidder
+                  <select data-pilot-reset-bidder disabled><option value="">No allowed bidders</option></select>
+                </label>
+                <label class="testing-select-row">
+                  Round to reset
+                  <select data-pilot-reset-round disabled>
+                    <option value="1">Round 1 — resets all rounds and RDO bid</option>
+                    <option value="2">Round 2 only</option>
+                    <option value="3">Round 3 only</option>
+                    <option value="4">Round 4 only</option>
+                    <option value="5">Round 5 only</option>
+                    <option value="6">Round 6 only</option>
+                  </select>
+                </label>
+                <p>Round 1 clears this bidder's RDO bid and leave bids in every round. Rounds 2–6 clear only that round. Their pilot access and enabled rounds are kept.</p>
+                <div class="button-row">
+                  <button class="secondary-action danger" type="button" data-reset-pilot-bidder disabled>Reset bidder round</button>
+                </div>
+                <p class="form-status" data-pilot-reset-status role="status" aria-live="polite"></p>
               </section>
               <section class="panel editable-rule-card admin-section-target" id="admin-rules-section" tabindex="-1">
                 <div class="panel-header compact">
@@ -1764,7 +1784,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-intake-panels"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus-intake-panels"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

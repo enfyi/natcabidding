@@ -16,6 +16,7 @@
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
+    "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
     "test:intake-bidder-summary": "node scripts/test-intake-bidder-summary.mjs",
     "test:intake-team-search": "node scripts/test-intake-team-search.mjs",
     "test:admin-tools-page": "node scripts/test-admin-tools-page.mjs",
@@ -27,6 +28,7 @@
     "test:rdo-preview-leave": "node scripts/test-rdo-preview-leave-reconciliation.mjs",
     "test:individual-leave": "node scripts/test-round-one-week-buckets.mjs && node scripts/test-individual-leave-selection.mjs && node scripts/test-leave-draft-order.mjs",
     "test:bid-change-modal": "node scripts/test-bid-change-modal.mjs",
+    "test:rdo-bid-change-history": "node scripts/test-rdo-bid-change-history.mjs",
     "test:bid-window-boundaries": "node scripts/test-bid-window-boundaries.mjs",
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
     "test:round-rules": "node scripts/test-independent-round-rules.mjs",
@@ -34,7 +36,9 @@
     "test:leave-hours-usage": "node scripts/test-leave-hours-usage.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build",
-    "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs"
+    "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs",
+    "test:pilot-reset": "node scripts/test-pilot-bidder-round-reset.mjs",
+    "test:round-one-week-changes": "node scripts/test-round-one-week-changes.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
