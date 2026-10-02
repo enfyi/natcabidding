@@ -71,6 +71,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const MANUAL_INTAKE_PANEL_STORAGE_KEY = "natca-zla-manual-intake-panels";
 const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
@@ -2823,6 +2824,19 @@ function renderManualBidPanel(panel) {
 }
 
 function renderManualBidEntry() {
+  const userId = supabaseState.authUserId || currentUser?.supabaseProfileId;
+  if (userId) {
+    const preferenceKey = `${MANUAL_INTAKE_PANEL_STORAGE_KEY}:${userId}`;
+    const preferences = storedJsonValue(preferenceKey, {});
+    document.querySelectorAll("[data-manual-intake-toggle]").forEach((button) => {
+      if (button.dataset.preferenceKey === preferenceKey) return;
+      const panelName = button.dataset.manualIntakeToggle;
+      const open = preferences?.[panelName] !== false;
+      button.dataset.preferenceKey = preferenceKey;
+      button.setAttribute("aria-expanded", String(open));
+      document.querySelector(`[data-manual-intake-content="${panelName}"]`).hidden = !open;
+    });
+  }
   document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
 }
 
@@ -13983,7 +13997,7 @@ function renderIntakeBidderSummary() {
     role.textContent = "";
     role.className = "intake-bidder-role";
     area.textContent = "Select a controller";
-    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>';
+    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue, RDO Selection, or Requested Leave Dates.</div>';
     renderIntakeBidderDetail({}, []);
     return;
   }
@@ -14972,6 +14986,22 @@ document.addEventListener('change', (event) => {
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('click', (event) => {
+  const manualIntakeToggle = event.target.closest('[data-manual-intake-toggle]');
+  if (manualIntakeToggle) {
+    const panelName = manualIntakeToggle.dataset.manualIntakeToggle;
+    const content = document.querySelector(`[data-manual-intake-content="${panelName}"]`);
+    const open = manualIntakeToggle.getAttribute('aria-expanded') !== 'true';
+    manualIntakeToggle.setAttribute('aria-expanded', String(open));
+    if (content) content.hidden = !open;
+    const preferenceKey = manualIntakeToggle.dataset.preferenceKey;
+    if (preferenceKey) {
+      storeJsonValue(preferenceKey, {
+        ...storedJsonValue(preferenceKey, {}),
+        [panelName]: open,
+      });
+    }
+    return;
+  }
   const bidder = event.target.closest('[data-editor-bidder]');
   if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
   if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);

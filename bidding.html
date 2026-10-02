@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-print-dialog-orientation" />
+    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-print-dialog-orientation-intake-panels" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -942,7 +942,7 @@
               </div>
             </div>
             <div class="intake-bidder-summary" data-intake-bidder-summary aria-live="polite">
-              <div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>
+              <div class="intake-bidder-empty">Select a controller from the Intake Queue, RDO Selection, or Requested Leave Dates.</div>
             </div>
             <div class="intake-bidder-detail" data-intake-bidder-detail hidden></div>
           </section>
@@ -1022,13 +1022,10 @@
                 <div class="denial-editor" data-denial-editor></div>
               </section>
               <section class="panel manual-bid-card" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Manual Bid Entry</h3>
-                    <p>Enter an RDO or leave bid on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
+                <button class="manual-intake-toggle" type="button" aria-expanded="true" aria-controls="intake-rdo-selection" data-manual-intake-toggle="rdo">
+                  <span><strong>RDO Selection</strong><small>Enter an RDO bid on behalf of any controller.</small></span>
+                </button>
+                <div class="schedule-form manual-bid-form" id="intake-rdo-selection" data-manual-intake-content="rdo">
                   <label class="manual-controller-search">
                     Find Controller
                     <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
@@ -1038,13 +1035,6 @@
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
-                  </label>
-                  <label>
-                    Bid Type
-                    <select data-manual-bid-type>
-                      <option value="RDO Line">RDO Line</option>
-                      <option value="Leave">Leave</option>
-                    </select>
                   </label>
                   <label>
                     Bid Area
@@ -1087,43 +1077,15 @@
                       <select data-manual-mid></select>
                     </label>
                   </div>
-                  <div class="manual-bid-fields" data-manual-leave-fields hidden>
-                    <label class="wide">
-                      Leave Range
-                      <input type="text" placeholder="Jan 10 - Jan 16, 2027" data-manual-leave-range />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
                   <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
               <section class="panel manual-leave-request-card" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Requested Leave Dates</h3>
-                    <p>Submit requested leave dates on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
+                <button class="manual-intake-toggle" type="button" aria-expanded="true" aria-controls="intake-requested-leave" data-manual-intake-toggle="leave">
+                  <span><strong>Requested Leave Dates</strong><small>Submit requested leave dates on behalf of any controller.</small></span>
+                </button>
+                <div class="schedule-form manual-bid-form" id="intake-requested-leave" data-manual-intake-content="leave">
                   <label class="manual-controller-search">
                     Find Controller
                     <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
@@ -1822,7 +1784,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus-calendar-loading-timestamps"></script>
+    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus-calendar-loading-timestamps-intake-panels"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

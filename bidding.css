@@ -6325,6 +6325,65 @@ tr.occupied-row .rdo-tag {
   width: 100%;
 }
 
+.manual-intake-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-intake-toggle > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.manual-intake-toggle strong {
+  color: #152d3b;
+  font-family: Montserrat, Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.manual-intake-toggle small {
+  color: #627080;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.manual-intake-toggle::after {
+  content: "›";
+  flex: 0 0 auto;
+  color: #47627f;
+  font-size: 1.35rem;
+  font-weight: 900;
+  transition: transform 160ms ease;
+}
+
+.manual-intake-toggle[aria-expanded="true"]::after {
+  transform: rotate(90deg);
+}
+
+.manual-intake-toggle:focus-visible {
+  outline: 3px solid rgba(33, 107, 98, 0.25);
+  outline-offset: 4px;
+}
+
+.manual-bid-form[data-manual-intake-content] {
+  margin-top: 16px;
+}
+
+.manual-bid-form[data-manual-intake-content][hidden] {
+  display: none;
+}
+
 .manual-controller-search small {
   min-height: 16px;
   color: #64748b;
