@@ -177,6 +177,12 @@ const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
 const intakeSchedules = [];
+const intakeCalendarMarks = new Map();
+const INTAKE_CALENDAR_MARK_LABELS = {
+  holiday: "Holiday",
+  natca_validation: "NATCA Validation",
+  faa_validation: "FAA Validation",
+};
 
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
@@ -7404,6 +7410,7 @@ function resetSupabaseBackedData() {
   publicFaqContent.entries = [];
   publicFaqContent.documents = [];
   intakeSchedules.splice(0, intakeSchedules.length);
+  intakeCalendarMarks.clear();
   intakeTeamInitials.clear();
   holidayOverrides.clear();
   fullLeaveDates.clear();
@@ -7779,6 +7786,7 @@ async function loadSupabaseReferenceData() {
       leaveRequestsResult,
       ghostStatusResult,
       intakeSchedulesResult,
+      intakeCalendarMarksResult,
       shiftPresetsResult,
       bidYearSettingsResult,
       roundRulesResult,
@@ -7797,6 +7805,9 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       loadIntakeSchedules(client),
+      supabaseState.authUserId
+        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
+        : Promise.resolve({ data: [], error: null }),
       hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
@@ -7819,6 +7830,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      supabaseLoadWarning("intake calendar days", intakeCalendarMarksResult),
       isMissingSupabaseRoutine(shiftPresetsResult.error) ? null : supabaseLoadWarning("intake shift presets", shiftPresetsResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
@@ -7856,6 +7868,10 @@ async function loadSupabaseReferenceData() {
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!intakeCalendarMarksResult.error) {
+      intakeCalendarMarks.clear();
+      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+    }
     if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
@@ -8681,7 +8697,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
 }
 
 function publicRosterArea(area = publicState.area) {
-  return ZLA_AREAS.includes(area) ? area : currentUser.area;
+  return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section) {
@@ -12902,7 +12918,7 @@ function renderScheduleDayAssignments(schedules) {
   return `
     <span class="schedule-day-assignments">
       ${schedules.map((schedule) => `
-        <span class="schedule-day-assignment">
+        <span class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}">
           <b>${escapeHtml(schedule.initials)}</b>
           <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
         </span>
@@ -12914,12 +12930,15 @@ function renderScheduleDayAssignments(schedules) {
 function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const key = dateKeyFromDate(date);
   const schedules = schedulesForDateKey(key);
+  const markKind = intakeCalendarMarks.get(key);
+  const markLabel = INTAKE_CALENDAR_MARK_LABELS[markKind] || "";
   const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" type="button" data-intake-calendar-date="${key}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
       <span class="date-number">${label}</span>
+      ${markLabel && showAssignments ? `<span class="intake-day-mark-label">${markLabel}</span>` : ""}
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
     </button>
@@ -13000,9 +13019,104 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+    if (scheduleCalendarView === "two-month") {
+      const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+      label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+      return;
+    }
+
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
   });
+}
+
+function renderIntakeCalendarMarkEditor() {
+  const panel = document.querySelector("[data-intake-calendar-mark-editor]");
+  if (!panel) return;
+  panel.hidden = !hasSystemAdminAccess();
+  if (panel.hidden) return;
+
+  const dateInput = panel.querySelector("[data-intake-calendar-mark-date]");
+  const kindInput = panel.querySelector("[data-intake-calendar-mark-kind]");
+  const currentKind = intakeCalendarMarks.get(dateInput?.value);
+  if (currentKind && kindInput && kindInput.dataset.selectedDate !== dateInput.value) {
+    kindInput.value = currentKind;
+  }
+  if (kindInput) kindInput.dataset.selectedDate = dateInput?.value || "";
+  const clearButton = panel.querySelector("[data-clear-intake-calendar-mark]");
+  if (clearButton) clearButton.hidden = !currentKind;
+
+  const list = panel.querySelector("[data-intake-calendar-mark-list]");
+  if (!list) return;
+  list.innerHTML = [...intakeCalendarMarks.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, kind]) => `<button type="button" class="intake-calendar-mark-item ${kind}" data-edit-intake-calendar-mark="${date}"><span>${escapeHtml(formatCalendarDate(date))}</span><strong>${INTAKE_CALENDAR_MARK_LABELS[kind]}</strong></button>`)
+    .join("");
+}
+
+function selectIntakeCalendarMarkDate(date) {
+  const input = document.querySelector("[data-intake-calendar-mark-date]");
+  if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  input.value = date;
+  const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+  if (kindInput) kindInput.dataset.selectedDate = "";
+  renderIntakeCalendarMarkEditor();
+  input.focus();
+}
+
+function setIntakeCalendarMarkStatus(message, status = "info") {
+  const target = document.querySelector("[data-intake-calendar-mark-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+async function saveIntakeCalendarMark(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  const kind = document.querySelector("[data-intake-calendar-mark-kind]")?.value || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !INTAKE_CALENDAR_MARK_LABELS[kind]) {
+    setIntakeCalendarMarkStatus("Choose a date and day type.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-save-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .upsert({ bid_year: BID_YEAR, marked_date: date, kind }, { onConflict: "bid_year,marked_date" });
+    if (error) throw error;
+    intakeCalendarMarks.set(date, kind);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} marked as ${INTAKE_CALENDAR_MARK_LABELS[kind]}.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be saved.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function clearIntakeCalendarMark() {
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  if (!intakeCalendarMarks.has(date)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-clear-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .delete().eq("bid_year", BID_YEAR).eq("marked_date", date);
+    if (error) throw error;
+    intakeCalendarMarks.delete(date);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} cleared.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be cleared.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function moveSchedulePeriod(direction) {
@@ -13012,7 +13126,7 @@ function moveSchedulePeriod(direction) {
   } else if (scheduleCalendarView === "week") {
     nextDate.setDate(nextDate.getDate() + direction * 7);
   } else {
-    nextDate.setMonth(nextDate.getMonth() + direction);
+    nextDate.setMonth(nextDate.getMonth() + direction * (scheduleCalendarView === "two-month" ? 2 : 1));
   }
   scheduleActiveDate = nextDate;
   renderIntakeSchedule();
@@ -13027,7 +13141,7 @@ function renderIntakeSchedule() {
   updateScheduleCalendarControls();
 
   if (calendar) {
-    calendar.classList.remove("month-view", "week-view", "year-view");
+    calendar.classList.remove("month-view", "two-month-view", "week-view", "year-view");
     calendar.classList.add(`${scheduleCalendarView}-view`);
     if (scheduleCalendarView === "year") {
       calendar.innerHTML = monthNames
@@ -13036,7 +13150,8 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      const visibleMonths = [0, 1].map((offset) => new Date(
+      const monthCount = scheduleCalendarView === "two-month" ? 2 : 1;
+      const visibleMonths = Array.from({ length: monthCount }, (_, offset) => new Date(
         scheduleActiveDate.getFullYear(),
         scheduleActiveDate.getMonth() + offset,
         1
@@ -13053,6 +13168,7 @@ function renderIntakeSchedule() {
 
   const adminCard = document.querySelector("[data-admin-schedule-card]");
   if (adminCard) adminCard.hidden = !hasIntakeAccess();
+  renderIntakeCalendarMarkEditor();
 
   const sortedSchedules = [...intakeSchedules].sort((a, b) => a.start - b.start);
   const userSchedules = sortedSchedules.filter((schedule) => schedule.initials === currentUser.initials);
@@ -15851,6 +15967,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const markedDayButton = event.target.closest("[data-intake-calendar-date]");
+  if (markedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(markedDayButton.dataset.intakeCalendarDate);
+    return;
+  }
+
+  const editMarkedDayButton = event.target.closest("[data-edit-intake-calendar-mark]");
+  if (editMarkedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(editMarkedDayButton.dataset.editIntakeCalendarMark);
+    return;
+  }
+
+  if (event.target.closest("[data-clear-intake-calendar-mark]")) {
+    await clearIntakeCalendarMark();
+    return;
+  }
+
   const schedulePeriodButton = event.target.closest("[data-schedule-period-action]");
   if (schedulePeriodButton) {
     moveSchedulePeriod(schedulePeriodButton.dataset.schedulePeriodAction === "next" ? 1 : -1);
@@ -16266,6 +16399,7 @@ document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRos
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
 document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
+document.querySelector("[data-intake-calendar-mark-form]")?.addEventListener("submit", saveIntakeCalendarMark);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -16280,6 +16414,12 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-intake-calendar-mark-date]")) {
+    const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+    if (kindInput) kindInput.dataset.selectedDate = "";
+    renderIntakeCalendarMarkEditor();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;

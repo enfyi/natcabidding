@@ -1159,6 +1159,7 @@
                 <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
                   <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Year</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="two-month">2 Months</button>
                     <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Month</button>
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Week</button>
                   </div>
@@ -1168,6 +1169,11 @@
                     <button type="button" data-schedule-period-action="next" aria-label="Next schedule period">›</button>
                   </div>
                 </div>
+              </div>
+              <div class="intake-calendar-legend" aria-label="Calendar day colors">
+                <span class="holiday">Holiday</span>
+                <span class="natca-validation">NATCA Validation</span>
+                <span class="faa-validation">FAA Validation</span>
               </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
               <div class="intake-schedule-list" data-intake-schedule-list></div>
@@ -1217,6 +1223,25 @@
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
+              </section>
+              <section class="panel" data-intake-calendar-mark-editor hidden>
+                <h3>Calendar Days</h3>
+                <form class="schedule-form" data-intake-calendar-mark-form>
+                  <label>Date <input type="date" required data-intake-calendar-mark-date /></label>
+                  <label>Mark As
+                    <select data-intake-calendar-mark-kind>
+                      <option value="holiday">Holiday</option>
+                      <option value="natca_validation">NATCA Validation</option>
+                      <option value="faa_validation">FAA Validation</option>
+                    </select>
+                  </label>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="submit" data-save-intake-calendar-mark>Save Day</button>
+                    <button class="secondary-action small" type="button" data-clear-intake-calendar-mark hidden>Clear</button>
+                  </div>
+                  <p class="form-status" data-intake-calendar-mark-status role="status"></p>
+                </form>
+                <div class="intake-calendar-mark-list" data-intake-calendar-mark-list></div>
               </section>
               <section class="panel" data-shift-builder hidden>
                 <h3>Shift Builder</h3>
