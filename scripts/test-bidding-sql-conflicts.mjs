@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bi
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
