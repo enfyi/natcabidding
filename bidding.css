@@ -3033,6 +3033,66 @@ input {
   grid-column: span 3;
 }
 
+.attribute-grid .fatigue-summary-card {
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 10px;
+}
+
+.fatigue-summary-card > em,
+.rdo-preference-card > em {
+  color: var(--soft);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.fatigue-summary-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fatigue-summary-segment {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--soft);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.fatigue-summary-segment.a.active {
+  border-color: var(--fatigue-a);
+  color: #ffffff;
+  background: var(--fatigue-a);
+}
+
+.fatigue-summary-segment.b.active {
+  border-color: var(--fatigue-b);
+  color: #111827;
+  background: var(--fatigue-b);
+}
+
+.fatigue-summary-segment.c.active {
+  border-color: var(--fatigue-c);
+  color: #ffffff;
+  background: var(--fatigue-c);
+}
+
+.attribute-grid .rdo-preference-card {
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+}
+
+.attribute-grid .rdo-preference-card b {
+  align-self: center;
+  font-size: 0.96rem;
+  text-align: center;
+}
+
 .fatigue-picker em,
 .mid-picker em,
 .aws-picker em,
@@ -8453,8 +8513,16 @@ body {
 .app-main .mid-picker em,
 .app-main .aws-picker em,
 .app-main .flex-picker em,
+.app-main .fatigue-summary-card > em,
+.app-main .rdo-preference-card > em,
 .app-main .fatigue-option small {
   color: #64748b;
+}
+
+.app-main .fatigue-summary-segment {
+  border-color: #dbe4ef;
+  color: #94a3b8;
+  background: #f8fafc;
 }
 
 .app-main .bid-readiness-list li {
