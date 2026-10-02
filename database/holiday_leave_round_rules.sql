@@ -910,9 +910,7 @@ begin
     );
   end loop;
 
-  -- Ghost leave remains visible to the bidder and intake, but never reserves
-  -- or consumes an area slot.
-  if not ghost_bid then
+  -- Ghost bids require availability at submission, but never reserve or consume a slot.
     -- A configured row is one daily slot. Approved/held slots are already removed
     -- from the open count; pending requests are subtracted as reservations.
     with requested_dates as (
@@ -989,7 +987,6 @@ begin
         format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
       );
     end if;
-  end if;
 
   -- A date already submitted in this or an earlier round cannot consume
   -- another slot.

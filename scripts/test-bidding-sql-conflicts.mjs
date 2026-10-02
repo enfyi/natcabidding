@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bi
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql','20261002015357_ghost_leave_requires_available_slots.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
@@ -387,9 +387,38 @@ await db.query("select public.review_bidding_submission($1,'approved')",[ghostRd
 const openGhostLine=(await db.query('select status,assigned_bidder_id from rdo_lines where id=$1',[ghostLine])).rows[0];
 if(openGhostLine.status!=='open' || openGhostLine.assigned_bidder_id) throw new Error('Ghost Line consumed its source RDO line');
 await db.exec(`set test.uid='${ghostAuth}'; set test.email='ghost@example.test';`);
+await db.exec(`update rdo_lines set status='taken',assigned_bidder_id='${bidder.id}' where id='${ghostLine}';`);
+try {
+  await db.query("select public.submit_rdo_bid(2027,'GHOST-TEST','A',true,false,'No',1)");
+  throw new Error('Ghost RDO unexpectedly accepted a taken line');
+} catch (error) {
+  if (!error.message.includes('already assigned')) throw error;
+}
+await db.exec(`update rdo_lines set status='open',assigned_bidder_id=null where id='${ghostLine}';`);
+console.log('PASS Ghost RDO rejects a taken source line');
+// A ghost must see an open slot at submission, but must not reserve it.
+await db.exec(`delete from leave_slots where bid_year_id='${year}' and area_id='${bidder.area_id}' and slot_date='2027-09-01' and slot_group='cpc';`);
+try {
+  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:'2027-09-01',end_date:'2027-09-01',round:1,rdo_line_code:'GHOST-TEST'}])]);
+  throw new Error('Ghost leave unexpectedly accepted a full date');
+} catch (error) {
+  if (!error.message.includes('No CPC leave slot is available')) throw error;
+}
+const ghostDateReservations=(await db.query(`select count(*)::integer as total
+ from leave_request_dates d join leave_requests lr on lr.id=d.leave_request_id
+ join bidders b on b.id=lr.bidder_id where lr.bid_year_id=$1 and b.area_id=$2
+ and d.leave_date='2027-09-01' and d.charged and lr.status='pending'
+ and not lr.is_ghost_bid and b.bid_role not in ('ADM','NB','GL','R-DEV','D-DEV','DEV','TMCIT')`,[year,bidder.area_id])).rows[0].total;
+const ghostAvailableSlotCount=ghostDateReservations+1;
+await db.exec(`insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code,status)
+ select '${year}','${bidder.area_id}','2027-09-01','cpc','GHOST-AVAILABLE-' || n,'open' from generate_series(1,${ghostAvailableSlotCount}) n;`);
+console.log('PASS Ghost leave rejects full dates');
 const ghostLeave=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
   [JSON.stringify([{start_date:'2027-09-01',end_date:'2027-09-01',round:1,rdo_line_code:'GHOST-TEST'}])])).rows[0].result;
 if(!ghostLeave.is_ghost_bid) throw new Error('Ghost leave submission was not annotated');
+const stillOpen=(await db.query(`select count(*)::integer as total from leave_slots where bid_year_id=$1 and area_id=$2 and slot_date='2027-09-01' and slot_group='cpc' and status='open'`,[year,bidder.area_id])).rows[0].total;
+if(stillOpen!==ghostAvailableSlotCount) throw new Error('Pending ghost leave reserved its source slot');
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
 await db.query("select public.review_bidding_submission($1,'approved')",[ghostLeave.submission_ids[0]]);
 const ghostLeaveRequest=(await db.query('select id,status,is_ghost_bid from leave_requests where bidder_id=$1',[ghostBidder])).rows[0];
