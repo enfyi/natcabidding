@@ -2611,7 +2611,11 @@ function fatigueGroupPreferenceLabel(group) {
 function rdoBidPreferenceLabel(value) {
   if (value === true) return "Yes";
   if (value === false) return "No";
-  return String(value ?? "").trim() || "—";
+  const normalized = String(value ?? "").trim();
+  if (normalized.toLowerCase() === "true") return "Yes";
+  if (normalized.toLowerCase() === "false") return "No";
+  if (normalized.toUpperCase() === "BID") return "Bid Line";
+  return normalized || "—";
 }
 
 function rdoBidSnapshotFromIntakeItem(item) {
@@ -9058,8 +9062,9 @@ function selectedLineStatus(line) {
 
 function rdoAssignmentValue(assignment, key) {
   const requestValue = assignment?.request?.[key];
-  if (requestValue) return requestValue;
-  if (assignment?.line?.[key]) return assignment.line[key];
+  if (requestValue !== undefined && requestValue !== null && requestValue !== "") return requestValue;
+  const lineValue = assignment?.line?.[key];
+  if (lineValue !== undefined && lineValue !== null && lineValue !== "") return lineValue;
   return "";
 }
 
@@ -9094,15 +9099,25 @@ function renderDashboardSelectedLineCard(assignment) {
     const flex = rdoAssignmentValue(assignment, "flex");
     const aws = rdoAssignmentValue(assignment, "aws");
     const mid = rdoAssignmentValue(assignment, "mid");
-    const values = [
-      ["Group", group],
+    const preferences = [
       ["Flex", flex],
       ["AWS", aws],
       ["Mid", mid],
-    ].filter(([, value]) => value);
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    const fatigueGroup = String(group || "").trim().toUpperCase();
 
-    element.innerHTML = values.length
-      ? values.map(([label, value]) => `<span>${label} <b${label === "Group" ? ` class="group ${groupClass(value)}"` : ""}>${value}</b></span>`).join("")
+    element.innerHTML = fatigueGroup || preferences.length
+      ? `
+          ${fatigueGroup ? `
+            <span class="fatigue-summary-card">
+              <em>Fatigue Group</em>
+              <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
+                ${FATIGUE_GROUPS.map((value) => `<strong class="fatigue-summary-segment ${groupClass(value)} ${fatigueGroup === value ? "active" : ""}" aria-hidden="true">${value}</strong>`).join("")}
+              </span>
+            </span>
+          ` : ""}
+          ${preferences.map(([label, value]) => `<span class="rdo-preference-card"><em>${label}</em><b>${rdoBidPreferenceLabel(value)}</b></span>`).join("")}
+        `
       : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
   });
 
