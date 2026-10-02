@@ -9401,7 +9401,6 @@ function renderLeaveRows(targetId) {
       return compact
         ? `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
@@ -9410,7 +9409,6 @@ function renderLeaveRows(targetId) {
       `
         : `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
