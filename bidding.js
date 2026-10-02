@@ -1824,6 +1824,7 @@ let activeDenialId = null;
 let activeIntakeDetailId = null;
 let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
+let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
 const intakeBidderSelection = {
@@ -5014,6 +5015,69 @@ async function saveSupabaseApprovedLeaveEdit(item) {
   return true;
 }
 
+async function removeApprovedLeaveBid(id) {
+  const item = intakeReviewItemById(id);
+  if (!item || item.type !== "Leave" || item.status !== "Approved" || !hasIntakeAccess()) return;
+
+  const requests = item.members || [item];
+  const requestIds = requests.map((request) => request.supabaseRequestId).filter(Boolean);
+  if (requestIds.length !== requests.length) {
+    const reviewNote = "One or more leave dates are not linked to saved database records. Reload the queue before removing this bid.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderIntakeQueue();
+    return;
+  }
+
+  const dateCount = item.dateKeys?.length || requests.reduce((total, request) => total + leaveDateKeysForItem(request).length, 0);
+  const description = item.members
+    ? `${dateCount} selected ${dateCount === 1 ? "date" : "dates"}`
+    : item.range;
+  if (!window.confirm(
+    `Remove ${description} from ${item.initials}'s pre-approved leave slots?\n\n` +
+    "The bid will be marked Cancelled and remain visible in history, but it will no longer reserve leave capacity."
+  )) return;
+
+  intakeLeaveRemovalPendingId = id;
+  renderIntakeQueue();
+  try {
+    const client = supabaseClient();
+    if (!client || !supabaseState.connected) {
+      throw new Error("The leave bid could not reach the database. Check the connection and try again.");
+    }
+    const { error } = await client.rpc("admin_cancel_leave_requests", {
+      requested_leave_request_ids: requestIds,
+    });
+    if (error) {
+      if (isMissingSupabaseRoutine(error)) {
+        throw new Error("Admin leave removal is not installed. Run the latest Supabase migration, then try again.");
+      }
+      throw error;
+    }
+
+    logHistory(
+      item.area,
+      "Approved leave bid removed",
+      `${currentUser.initials} removed ${item.initials}'s ${description} from pre-approved leave slots. The cancelled bid remains in history.`
+    );
+    intakeLeaveRemovalPendingId = null;
+    if (item.members) intakeGroupReviewState.delete(item.id);
+    activeOverrideId = null;
+    activeDenialId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setPage("intake");
+  } catch (error) {
+    intakeLeaveRemovalPendingId = null;
+    const reviewNote = error.message || "The approved leave bid could not be removed.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderApp();
+    setPage("intake");
+  }
+}
+
 async function saveSupabasePendingRdoEdit(item) {
   const client = supabaseClient();
   if (!client) throw new Error("Supabase is not configured on this page.");
@@ -7223,6 +7287,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
     denialReason: row.denial_reason || "",
     range,
     days,
@@ -14200,8 +14265,17 @@ function renderIntakeGroupDates(item, canReview) {
   return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
     <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
     ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
-    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">Edit / Override date</button>` : ""}
+    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
     </div>`).join("")}</details>`;
+}
+
+function revealIntakeLeaveDates(id) {
+  const card = [...document.querySelectorAll("[data-intake-card]")]
+    .find((candidate) => candidate.dataset.intakeCard === id);
+  const details = card?.querySelector("details");
+  if (!details) return;
+  details.open = true;
+  window.requestAnimationFrame(() => details.querySelector("[data-intake-edit]")?.focus());
 }
 
 async function reviewIntakeLeaveGroup(item, decision, reason = "") {
@@ -14280,10 +14354,13 @@ function renderIntakeQueueWithCache() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && item.members && item.status === "Approved" ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
+          ${canReview && item.type === "Leave" && item.status === "Approved" ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
+          ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
         </div>
       </article>
     `).join("")
@@ -15720,6 +15797,18 @@ document.addEventListener("click", async (event) => {
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
     await saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
+    return;
+  }
+
+  const intakeManageLeave = event.target.closest("[data-intake-manage-leave]");
+  if (intakeManageLeave) {
+    revealIntakeLeaveDates(intakeManageLeave.dataset.intakeManageLeave);
+    return;
+  }
+
+  const intakeRemoveLeave = event.target.closest("[data-intake-remove-leave]");
+  if (intakeRemoveLeave) {
+    await removeApprovedLeaveBid(intakeRemoveLeave.dataset.intakeRemoveLeave);
     return;
   }
 
