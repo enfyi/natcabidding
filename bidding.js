@@ -5792,7 +5792,6 @@ function renderLeaveRows(targetId) {
       return compact
         ? `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
@@ -5801,7 +5800,6 @@ function renderLeaveRows(targetId) {
       `
         : `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.range}</td>
           <td>${bid.days}</td>
