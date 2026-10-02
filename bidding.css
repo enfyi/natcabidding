@@ -6108,13 +6108,21 @@ tr.occupied-row .rdo-tag {
   border-radius: 8px;
   padding: 10px;
   color: #172033;
-  background: #f3f4f6;
+  background: #ffffff !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.24);
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, 4px);
   visibility: hidden;
-  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  transition: none;
+}
+
+.schedule-calendar .schedule-day:hover,
+.schedule-calendar .schedule-day:focus-visible {
+  z-index: 100;
 }
 
 .schedule-tooltip::after {
@@ -6126,7 +6134,7 @@ tr.occupied-row .rdo-tag {
   border-right: 1px solid rgba(15, 23, 42, 0.14);
   border-bottom: 1px solid rgba(15, 23, 42, 0.14);
   content: "";
-  background: #f3f4f6;
+  background: #ffffff;
   transform: translate(-50%, -5px) rotate(45deg);
 }
 
