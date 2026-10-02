@@ -12923,7 +12923,7 @@ function renderHistory() {
         <div>
           <h3>${title}</h3>
           <p>${detail}</p>
-          <small class="audit-actor">Actor: ${actor}</small>
+          <small class="audit-actor">Action by: ${actor}</small>
         </div>
         <span class="pill open">${area}</span>
       </article>
@@ -14291,7 +14291,7 @@ function updateSelectedBidYear(year) {
 
 function biddingExportRows() {
   const rows = [
-    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Actor", "Timestamp"],
+    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Action by", "Timestamp"],
   ];
 
   intakeQueue.forEach((item) => {
