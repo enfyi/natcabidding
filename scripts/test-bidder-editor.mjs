@@ -65,10 +65,10 @@ insert into rdo_line_days(rdo_line_id,weekday,shift_code) select l.id,d,case whe
   from rdo_lines l cross join generate_series(0,6) d where l.area_id='${id(4)}';`);
 assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(13)])).rows.map((row)=>row.line_code),['TMU-1']);
 assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(14)])).rows.map((row)=>row.line_code),['TMU-2']);
-assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(15)])).rows.map((row)=>row.line_code),['TMU-1']);
+assert.deepEqual((await db.query(`select line_code from rdo_lines l join bidders b on b.id=$1 join areas a on a.id=b.area_id where l.area_id=b.area_id and public.rdo_line_matches_bid_role(b.bid_role,a.name,l.line_type,l.pattern) order by line_code`,[id(15)])).rows.map((row)=>row.line_code),['TMU-1','TMU-2']);
 assert.equal((await db.query("select public.rdo_line_matches_bid_role('ADM','Area A','CPC','A') eligible")).rows[0].eligible,false);
 assert.equal((await db.query("select public.rdo_line_matches_bid_role('NB','Area A','CPC','A') eligible")).rows[0].eligible,false);
-console.log('PASS TMU roles map to eligible RDO lines');
+console.log('PASS TMU roles stay separated while GL can use TMC or DEV lines');
 await db.exec(`insert into leave_requests(id,bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date) values('${id(32)}','${id(1)}','${id(11)}',3,1,'denied','2027-08-02','2027-08-03')`);
 expected=await snap();
 changes.leave.push({id:id(32),start_date:'2027-08-04',end_date:'2027-08-05'});

@@ -91,6 +91,53 @@ assert.deepEqual(
 assert.equal((await db.query('select seniority_rank from bidders where id = $1', [id(12)])).rows[0].seniority_rank, 1)
 console.log('PASS every editable field persists, including area, rank, role, and leave allowance')
 
+await db.exec(`
+  insert into bid_years (id, bid_year, status) values ('${id(20)}', 2027, 'draft');
+  insert into bid_windows (id, bid_year_id, bidder_id, round_number, opens_at, closes_at) values
+    ('${id(40)}', '${id(20)}', '${id(13)}', 1, '2026-10-01 07:00-07', '2026-10-01 09:00-07'),
+    ('${id(41)}', '${id(20)}', '${id(11)}', 1, '2026-10-01 09:00-07', '2026-10-01 11:00-07'),
+    ('${id(42)}', '${id(20)}', '${id(13)}', 2, '2026-11-01 07:00-08', '2026-11-01 09:00-08'),
+    ('${id(43)}', '${id(20)}', '${id(11)}', 2, '2026-11-01 09:00-08', '2026-11-01 11:00-08');
+  set test.uid = '${id(110)}';
+  set test.email = 'admin@example.test';
+  set role authenticated;
+`)
+const reorderedRows = [
+  rosterRow({
+    profile_id: id(11), original_area_name: 'Area B', original_initials: 'MC', original_seniority_rank: 2,
+    profile_first_name: 'Moved', profile_last_name: 'Controller', profile_initials: 'MC',
+    profile_email: 'moved@example.test', profile_phone: '555-9999', profile_area_name: 'Area B',
+    profile_bid_role: 'GL', profile_seniority_rank: 1, profile_leave_slot_allowance: 320,
+  }),
+  rosterRow({
+    profile_id: id(13), original_area_name: 'Area B', original_initials: 'B3', original_seniority_rank: 1,
+    profile_first_name: 'Third', profile_last_name: 'Bidder', profile_initials: 'B3',
+    profile_email: 'b3@example.test', profile_phone: '555-0003', profile_area_name: 'Area B',
+    profile_seniority_rank: 2,
+  }),
+]
+const reordered = (await db.query(
+  'select public.admin_save_bidder_roster_rows($1) as result',
+  [JSON.stringify(reorderedRows)],
+)).rows[0].result
+assert.equal(reordered.bid_windows_reassigned, 4)
+await db.exec('reset role')
+assert.deepEqual(
+  (await db.query(`
+    select id, bidder_id, round_number
+    from bid_windows
+    where bid_year_id = $1
+    order by round_number, opens_at
+  `, [id(20)])).rows,
+  [
+    { id: id(40), bidder_id: id(11), round_number: 1 },
+    { id: id(41), bidder_id: id(13), round_number: 1 },
+    { id: id(42), bidder_id: id(11), round_number: 2 },
+    { id: id(43), bidder_id: id(13), round_number: 2 },
+  ],
+)
+console.log('PASS bid-window IDs and times follow seniority positions after a roster reorder')
+
 await db.exec(`set test.uid = '${id(110)}'; set test.email = 'admin@example.test'; set role authenticated;`)
 const legacyRow = rosterRow({
   original_initials: 'B2', original_seniority_rank: 1,

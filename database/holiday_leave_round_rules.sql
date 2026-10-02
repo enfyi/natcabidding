@@ -849,7 +849,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif not ghost_bid and exists (
+    elsif target.bid_role <> 'GL' and not ghost_bid and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id
@@ -910,9 +910,7 @@ begin
     );
   end loop;
 
-  -- Ghost leave remains visible to the bidder and intake, but never reserves
-  -- or consumes an area slot.
-  if not ghost_bid then
+  -- Ghost bids require availability at submission, but never reserve or consume a slot.
     -- A configured row is one daily slot. Approved/held slots are already removed
     -- from the open count; pending requests are subtracted as reservations.
     with requested_dates as (
@@ -989,7 +987,6 @@ begin
         format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
       );
     end if;
-  end if;
 
   -- A date already submitted in this or an earlier round cannot consume
   -- another slot.
@@ -1202,6 +1199,11 @@ begin
     for update;
     select * into strict line_row from public.rdo_lines where id = line_row.id;
 
+    if decision = 'approved' and target.bid_role = 'GL'
+       and not coalesce((override_payload->>'glLineTypeVerified')::boolean, false) then
+      raise exception 'Intake must verify whether this GL is bidding as CPC/TMC or DEV.';
+    end if;
+
     if decision = 'approved' and not public.rdo_line_matches_bid_role(
       target.bid_role, target_area_name, line_row.line_type, line_row.pattern
     ) then
@@ -1258,7 +1260,7 @@ begin
       ) then raise exception 'Leave after Round 1 cannot include the bidder''s RDO.'; end if;
 
       bucket := case when target.bid_role in ('R-DEV', 'D-DEV', 'DEV') then 'dev' else 'cpc' end;
-      if not ghost_bid then
+      if not ghost_bid and target.bid_role <> 'GL' then
         for date_row in
           select d.leave_date from public.leave_request_dates d
           where d.leave_request_id = leave_row.id and d.charged

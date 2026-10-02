@@ -11,6 +11,7 @@ material while its bidding workflows are migrated into Next.js.
 The current Next.js application provides:
 
 - email/password signup and sign-in through Supabase Auth
+- self-service password recovery and password updates
 - confirmation and PKCE callback routes
 - server-validated sessions and a protected dashboard
 - a deployment-safe environment-variable setup
@@ -32,6 +33,9 @@ Requirements: Node.js 20.9 or newer and pnpm 11.19.
 Before committing, run `pnpm check`. It performs both the TypeScript check and a
 production build.
 
+For the `natcazla.com/bidding` self-hosted deployment path, see
+`SELF_HOSTING.md`.
+
 The local Supabase project URL and publishable key are stored in the gitignored
 `.env.local`. Copy `.env.example` when configuring another environment. Never put
 a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
@@ -41,7 +45,9 @@ a Supabase secret or service-role key in a `NEXT_PUBLIC_` variable.
 In Supabase Authentication → URL Configuration, add these redirect URLs:
 
 - `http://localhost:3000/auth/callback`
+- `http://localhost:3000/auth/callback?next=/update-password`
 - `https://your-production-domain/auth/callback`
+- `https://your-production-domain/auth/callback?next=/update-password`
 
 Set `NEXT_PUBLIC_SITE_URL` to the matching deployed origin in production. The app
 uses Vercel's deployment URL automatically for Preview deployments and also
@@ -91,13 +97,26 @@ practice bidding on or off, and reset the year's practice data. Reset keeps the
 roster, login links, schedules, bid windows, holidays, leave capacity, and pilot
 participant list.
 
-Authorized pilot participants can submit practice bids at any time. Pilot
-databases always disable scheduled bid-window enforcement; the selected pilot
-participant list still controls who is allowed to write practice bids.
+Apply `database/pilot_round_controls.sql` after `pilot_mode.sql`, then apply
+`database/pilot_submission_window_fix.sql` to upgrade legacy RDO and leave
+submission functions. `scripts/test-pilot-submission-windows.sql` verifies both
+public submission RPCs in a transaction that rolls back all test data. In Pilot Access
+and Rounds, administrators can turn each of rounds 1–4 on or off independently.
+Authorized pilot participants choose an enabled round in the test-site banner
+and submit without scheduled hours. Both pilot access and the chosen round must
+be on. All rounds start off. Controls refresh every ten seconds; the database
+checks the round at submission time. The selected participant list still controls
+who can submit, and normal leave limits and review rules still apply.
 
 The database refuses pilot activation and reset unless `pilot_seed.sql` marked
 it as isolated. A reset also turns the pilot off, so the administrator must
 review the clean state and turn it back on for the next run.
+
+Apply `database/pilot_bidder_round_reset.sql` to add the individual reset in
+Pilot Access and Rounds. Choose a saved allowed bidder and a round: Round 1
+clears their RDO assignment and all leave rounds; Rounds 2–6 clear only the chosen
+round's bids, decisions, slots, and credits. Individual resets preserve pilot
+access, enabled rounds, other bidders, and audit history, and record the reset.
 
 ## Bid notification email
 

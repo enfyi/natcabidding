@@ -1,3 +1,5 @@
+let leaveReadCache = null;
+
 const monthNames = [
   "January",
   "February",
@@ -53,6 +55,8 @@ const DEFAULT_ROUND_RULES = {
   },
 };
 const MANUAL_AFTER_WINDOW_RULE = "After a BUE's personal window closes, intake or an administrator may enter the bid manually only while that same round remains open.";
+const LATE_BID_MESSAGE = "Your scheduled bid window has closed. You must call or text the Bidding Office at 661-434-1004 to complete your bid.";
+const BID_OFFICE_PHONE_DISPLAY = "661-434-1004";
 const CLOSED_ROUND_RULE = "Once the round is closed, no BUE, intake user, or administrator may enter a bid for that round.";
 const DEFAULT_APPROVAL_RULES = [
   "Approve applies the BUE initials automatically.",
@@ -67,6 +71,8 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const MANUAL_INTAKE_PANEL_STORAGE_KEY = "natca-zla-manual-intake-panels";
+const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
   try {
@@ -103,6 +109,9 @@ let roundRulesDatabaseComplete = false;
 let approvalRules = Array.isArray(storedApprovalRules) ? storedApprovalRules : [...DEFAULT_APPROVAL_RULES];
 let enforceBidWindows = true;
 let bidWindowTestRound = null;
+let pilotOpenRounds = [];
+let selectedPilotRound = null;
+let pilotRoundRefreshPending = false;
 let bidWindowSettingsFallbackMessage = "";
 let pilotState = {
   available: false,
@@ -143,6 +152,8 @@ let currentUser = { ...testAccounts.bue };
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
+let intakeTeamCandidateQuery = "";
+let selectedIntakeTeamCandidateInitials = "";
 let alertAudioContext = null;
 let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
@@ -160,6 +171,7 @@ let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
 let bidChangeRows = [];
 let bidChangeRound = 0;
+let bidChangeWeek = null;
 let bidChangeReturnFocus = null;
 const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
@@ -585,6 +597,7 @@ let selectedMidPreference = "";
 let selectedAwsPreference = "";
 let selectedFlexPreference = "";
 let calendarMode = "combined";
+const calendarWorkforceOverrides = new Map();
 const calendarLayouts = {
   public: "minimal",
   dashboard: "minimal",
@@ -594,7 +607,10 @@ const calendarLayouts = {
 let displayedCalendarYear = BID_YEAR;
 let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
 const annualMobileCalendars = new Set();
-let publicRdoPresentation = "cards";
+let calendarRenderRevision = 0;
+let pendingPageCalendarFrame = 0;
+let publicRdoPresentation = "table";
+let publicBidTimePresentation = "cards";
 let scheduleCalendarView = "month";
 let scheduleActiveDate = new Date();
 let editingIntakeScheduleId = "";
@@ -663,6 +679,10 @@ function isMissingSupabaseRoutine(error) {
 
 function isMissingSupabaseColumn(error) {
   return /column .* does not exist|relation .* does not exist|Could not find .* column|Could not find the table|schema cache|PGRST204|PGRST205/i.test(error?.message || "");
+}
+
+function isMissingRdoLineDisplayOrder(error) {
+  return /display_order/i.test(error?.message || "") && isMissingSupabaseColumn(error);
 }
 
 function isUuid(value) {
@@ -768,6 +788,14 @@ function fatiguePoolForBidRole(bidAs, area) {
   return null;
 }
 
+function isDevelopmentalBidRole(bidAs, area) {
+  return ["R-DEV", "D-DEV", "DEV"].includes(normalizeBidRoleForArea(bidAs, area));
+}
+
+function rdoPreferenceForBidRole(bidAs, area, preference) {
+  return isDevelopmentalBidRole(bidAs, area) ? "No" : preference;
+}
+
 function fatiguePoolForLine(line) {
   return isCpcLine(line) ? "CPC" : "DEV";
 }
@@ -854,6 +882,30 @@ function isCpcLine(line) {
   return line.lineType !== "DEV" && !/DEV/i.test(line.pattern);
 }
 
+function rdoLineMatchesBidRole(line, bidAs, area) {
+  if (!line) return false;
+  const role = normalizeBidRoleForArea(bidAs, area);
+  const cpcLine = isCpcLine(line);
+  const pattern = String(line.pattern || "").trim().toUpperCase();
+
+  // GL is the only role that may cross between CPC/TMC and developmental
+  // lines. Intake verifies the selected side before approving the bid.
+  if (role === "GL") return true;
+  if (area === "TMU") {
+    if (role === "TMC") return cpcLine;
+    if (role === "DEV") return !cpcLine;
+    return false;
+  }
+  if (role === "CPC") return cpcLine;
+  if (role === "R-DEV") return !cpcLine && pattern === "R-DEV";
+  if (role === "D-DEV") return !cpcLine && pattern === "D-DEV";
+  return false;
+}
+
+function rdoLinesForBidder(bidAs, area) {
+  return rdoLinesForArea(area).filter((line) => rdoLineMatchesBidRole(line, bidAs, area));
+}
+
 function isGroupAvailable(item) {
   return item.available;
 }
@@ -884,6 +936,10 @@ function lineFourTenValue(line) {
 
 function lineScheduleLabel(line) {
   return lineFourTenValue(line) === "Yes" ? "4-10" : "5-8";
+}
+
+function awsPreferenceForLine(line, preference = selectedAwsPreference) {
+  return lineFourTenValue(line) === "Yes" ? "Yes" : preference;
 }
 
 function confirmFlexNo() {
@@ -1276,6 +1332,10 @@ let bidWindowBuilderPreview = null;
 let bidWindowBuilderSaving = false;
 
 function roundDateBlocksForArea(area = currentViewArea()) {
+  return cachedLeaveRead(JSON.stringify(["roundDateBlocksForArea", area]), () => roundDateBlocksForAreaUncached(area));
+}
+
+function roundDateBlocksForAreaUncached(area = currentViewArea()) {
   const requiredDateCount = Math.max(roundDateBlocks.length, Math.ceil(activeRosterEntries(area).length / bidStartTimes.length));
   return areaRoundDateBlocksFromStart(requiredDateCount, roundDateBlocks[0]?.length || 4);
 }
@@ -1454,6 +1514,10 @@ function currentUserBidWindow(date = new Date(), area = currentUser.area) {
 }
 
 function roundWindows(roundNumber, area = currentViewArea()) {
+  return cachedLeaveRead(JSON.stringify(["roundWindows", roundNumber, area]), () => roundWindowsUncached(roundNumber, area));
+}
+
+function roundWindowsUncached(roundNumber, area = currentViewArea()) {
   return activeRosterEntries(area)
     .map((_, index) => bidWindowForRankRound(index + 1, roundNumber, area))
     .filter(Boolean);
@@ -1638,6 +1702,10 @@ function personMatchesCurrentUser(person) {
 }
 
 function activeRosterEntries(area = null) {
+  return cachedLeaveRead(JSON.stringify(["activeRosterEntries", area]), () => activeRosterEntriesUncached(area));
+}
+
+function activeRosterEntriesUncached(area = null) {
   return senioritySource.filter((entry) =>
     seniorityEntryActive(entry) &&
     seniorityEntryParticipatesInBidding(entry) &&
@@ -1754,9 +1822,20 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
+let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
-let memberRdoPresentation = "cards";
+let intakeLeaveRemovalPendingId = null;
+let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
+const intakeBidderSelection = {
+  initials: "",
+  profileId: "",
+  record: null,
+  detail: "",
+  loading: false,
+  error: "",
+  generation: 0,
+};
 const intakeFilters = {
   status: "all",
   type: "all",
@@ -1901,20 +1980,22 @@ function isAuthorizedPilotBidder() {
 
 function normalizeBidWindowTestRound(value) {
   const round = Number(value);
-  return Number.isInteger(round) && round >= 1 && round <= 4 ? round : null;
+  return Number.isInteger(round) && round >= 1 && round <= 6 ? round : null;
 }
 
 function activeTestBidRound() {
-  return bidWindowLockIsBypassed() ? bidWindowTestRound : null;
+  return pilotState.database && isAuthorizedPilotBidder()
+    ? (pilotOpenRounds.includes(selectedPilotRound) ? selectedPilotRound : pilotOpenRounds[0] || null)
+    : null;
 }
 
 function bidWindowLockIsBypassed() {
-  if (pilotState.database) return isAuthorizedPilotBidder();
+  if (pilotState.database) return isAuthorizedPilotBidder() && Boolean(activeTestBidRound());
   return false;
 }
 
 function currentUserBidWindowStatus(date = new Date()) {
-  const window = currentUserBidWindow(date);
+  const window = pilotState.database ? (activeTestBidRound() ? { round: activeTestBidRound() } : null) : currentUserBidWindow(date);
   const inHomeArea = isViewingHomeArea();
   return {
     window,
@@ -1925,12 +2006,34 @@ function currentUserBidWindowStatus(date = new Date()) {
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
+  if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
   const { window, isOpen } = currentUserBidWindowStatus(date);
   if (isOpen) return "";
   if (!isViewingHomeArea()) return `${actionLabel} can only be submitted from your home area view.`;
+
+  if (!pilotState.database) {
+    const rank = currentUserSeniorityRank(currentUser.area);
+    const activeRound = areaBidRoundState(date, currentUser.area)?.round;
+    const activeRoundWindow = Number.isFinite(rank) && activeRound
+      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      : null;
+    if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
+
+    if (!window) {
+      const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
+      const hasClosedWindow = Number.isFinite(rank) && Array.from(
+        { length: roundCount },
+        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+      ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
+      return hasClosedWindow
+        ? LATE_BID_MESSAGE
+        : `${actionLabel} can only be submitted during your allotted bid window.`;
+    }
+  }
+
   if (!window) return `${actionLabel} can only be submitted during your allotted bid window.`;
   if (date < window.start) return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window opens ${formatDateTime(window.start)}.`;
-  return `${actionLabel} can only be submitted during your allotted bid window. Your Round ${window.round} window is no longer open.`;
+  return LATE_BID_MESSAGE;
 }
 
 function leaveBidWindowErrorMessage(date = new Date()) {
@@ -1964,11 +2067,31 @@ function syncLeaveBidWindowControls(date = new Date()) {
   }
 }
 
+function rdoChangeWindowErrorMessage(date = new Date()) {
+  const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
+    || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
+  if (!hasApprovedRdo) return "";
+  // Pilot rounds use the administrator's open-round controls instead of the
+  // production schedule, just like initial RDO and leave submissions.
+  if (pilotState.database) {
+    return isViewingHomeArea() && bidWindowLockIsBypassed() && activeTestBidRound() === 1
+      ? ""
+      : "RDO changes are only allowed while your pilot Round 1 is open in your home area.";
+  }
+  const window = bidWindowForRankRound(currentUserSeniorityRank(currentUser.area), 1, currentUser.area);
+  const closesAt = window ? Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000) : 0;
+  if (!isViewingHomeArea()
+      || !window || date < window.start || date.getTime() >= closesAt) {
+    return "RDO changes are only allowed during your own two-hour Round 1 bid window. Changes are closed outside that window and in Rounds 2–4.";
+  }
+  return "";
+}
+
 function rdoBidWindowErrorMessage(date = new Date()) {
   if (pendingCurrentUserRdoRequest()) {
     return "Your RDO bid is awaiting an intake decision. You can submit another change after it is approved or denied.";
   }
-  return bidWindowErrorMessage("RDO bids", date);
+  return rdoChangeWindowErrorMessage(date) || bidWindowErrorMessage("RDO bids", date);
 }
 
 async function setBidWindowEnforcement(enabled) {
@@ -2010,10 +2133,10 @@ function syncBidWindowTestingControls() {
     select.disabled = true;
   });
 
-  setText("[data-bid-window-enforcement-state]", "Strict Windows Required");
+  setText("[data-bid-window-enforcement-state]", pilotState.database ? "Pilot Round Controls" : "Strict Windows Required");
   setText(
     "[data-bid-window-enforcement-copy]",
-    bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
+    pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
 }
 
@@ -2046,6 +2169,49 @@ function pilotInitialsForMemberIds() {
     .join(", ");
 }
 
+async function refreshPilotRounds() {
+  if (!pilotState.database || !supabaseState.authUserId || pilotRoundRefreshPending) return;
+  pilotRoundRefreshPending = true;
+  const previousState = JSON.stringify([pilotOpenRounds, pilotState]);
+  try {
+    const [rounds, access] = await Promise.all([
+      supabaseClient().rpc("read_pilot_rounds", { requested_bid_year: BID_YEAR }),
+      supabaseClient().rpc("read_pilot_settings", { requested_bid_year: BID_YEAR }),
+    ]);
+    const { data, error } = rounds;
+    if (!access.error && access.data) applyPilotSettings(Array.isArray(access.data) ? access.data[0] : access.data);
+    else pilotState.enabled = false;
+    pilotOpenRounds = !error && Array.isArray(data) ? data.map(Number).filter((round) => normalizeBidWindowTestRound(round)) : [];
+    if (JSON.stringify([pilotOpenRounds, pilotState]) !== previousState) {
+      syncPilotControls();
+      renderApp();
+    }
+  } catch {
+    pilotOpenRounds = [];
+    syncPilotControls();
+    updateBidWindow(true);
+  } finally {
+    pilotRoundRefreshPending = false;
+  }
+}
+
+async function setPilotRound(round, enabled) {
+  if (!hasSystemAdminAccess() || !pilotState.database) return;
+  const { data, error } = await supabaseClient().rpc("set_pilot_round", {
+    requested_bid_year: BID_YEAR, requested_round: round, should_enable: enabled,
+  });
+  if (error) {
+    window.alert(error.message || "Pilot round could not be changed.");
+    syncPilotControls();
+    return;
+  }
+  pilotOpenRounds = data || [];
+  syncPilotControls();
+  renderApp();
+}
+
+let pilotBidderResetPending = false;
+
 function syncPilotControls() {
   const environment = window.NATCA_SUPABASE_CONFIG?.environment || "production";
   const banner = document.querySelector("[data-pilot-environment-banner]");
@@ -2053,6 +2219,18 @@ function syncPilotControls() {
 
   document.querySelectorAll("[data-pilot-admin-card]").forEach((card) => {
     card.hidden = !hasSystemAdminAccess();
+  });
+  document.querySelectorAll("[data-pilot-round-toggle]").forEach((toggle) => {
+    toggle.checked = pilotOpenRounds.includes(Number(toggle.dataset.pilotRoundToggle));
+    toggle.disabled = !pilotState.database;
+  });
+  document.querySelectorAll("[data-pilot-round-picker]").forEach((select) => {
+    select.closest("[data-pilot-round-picker-row]").hidden = !pilotState.database || !isConfirmedHelpUser();
+    select.innerHTML = pilotOpenRounds.length
+      ? pilotOpenRounds.map((round) => `<option value="${round}">Round ${round}</option>`).join("")
+      : '<option value="">All rounds off</option>';
+    select.value = String(activeTestBidRound() || "");
+    select.disabled = !isAuthorizedPilotBidder() || !pilotOpenRounds.length;
   });
   const toggle = document.querySelector("[data-pilot-enabled-toggle]");
   const initials = document.querySelector("[data-pilot-member-initials]");
@@ -2066,6 +2244,18 @@ function syncPilotControls() {
   }
   document.querySelectorAll("[data-save-pilot-settings], [data-reset-pilot-data]").forEach((button) => {
     button.disabled = !pilotState.database;
+  });
+  const resetBidder = document.querySelector("[data-pilot-reset-bidder]");
+  const allowedMembers = senioritySource.filter((entry) => pilotState.memberIds.includes(seniorityEntryProfileId(entry)));
+  if (resetBidder) {
+    const selectedId = resetBidder.value;
+    resetBidder.innerHTML = allowedMembers.length
+      ? allowedMembers.map((entry) => `<option value="${escapeHtml(seniorityEntryProfileId(entry))}">${escapeHtml(`${entry[3]} · ${entry[1]} ${entry[0]} · ${entry[4]}`)}</option>`).join("")
+      : '<option value="">No allowed bidders — save pilot access first</option>';
+    if (allowedMembers.some((entry) => seniorityEntryProfileId(entry) === selectedId)) resetBidder.value = selectedId;
+  }
+  document.querySelectorAll("[data-pilot-reset-bidder], [data-pilot-reset-round], [data-reset-pilot-bidder]").forEach((control) => {
+    control.disabled = !hasSystemAdminAccess() || !pilotState.database || !allowedMembers.length || pilotBidderResetPending;
   });
   setText("[data-pilot-status]", !pilotState.database ? "Pilot unavailable" : pilotState.enabled ? "Pilot on" : "Pilot off");
   setText(
@@ -2124,6 +2314,41 @@ async function resetPilotData() {
   window.alert("Practice data was reset. Tester accounts, roster, schedules, and pilot access were kept.");
 }
 
+async function resetPilotBidderRound() {
+  if (!hasSystemAdminAccess() || !pilotState.database || pilotBidderResetPending) return;
+  const bidderId = document.querySelector("[data-pilot-reset-bidder]")?.value;
+  const round = Number(document.querySelector("[data-pilot-reset-round]")?.value);
+  const entry = senioritySource.find((person) => seniorityEntryProfileId(person) === bidderId);
+  if (!entry || !pilotState.memberIds.includes(bidderId) || !Number.isInteger(round) || round < 1 || round > 6) return;
+  const label = `${entry[3]} (${entry[1]} ${entry[0]})`;
+  const scope = round === 1 ? "the RDO bid and ALL leave rounds" : `leave bids in Round ${round} only`;
+  if (!window.confirm(`Reset ${scope} for ${label}? Their bids and review decisions in this scope will be removed so they can test again. Pilot access and enabled rounds will be kept.`)) return;
+  pilotBidderResetPending = true;
+  syncPilotControls();
+  setText("[data-pilot-reset-status]", `Resetting ${label}…`);
+  let resetSaved = false;
+  try {
+    const { error } = await supabaseClient().rpc("reset_pilot_bidder_round", {
+      requested_bid_year: BID_YEAR, requested_bidder_id: bidderId, requested_round: round,
+    });
+    if (error) throw error;
+    resetSaved = true;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setText("[data-pilot-reset-status]", round === 1
+      ? `${label}: RDO bid and all leave rounds reset. They can restart with Round 1.`
+      : `${label}: Round ${round} reset. They can test that round again.`);
+  } catch (error) {
+    setText("[data-pilot-reset-status]", resetSaved
+      ? "Reset saved, but the page could not refresh. Reload to see the updated bids."
+      : error.message || "This bidder's round could not be reset.");
+  } finally {
+    pilotBidderResetPending = false;
+    syncPilotControls();
+  }
+}
+
 async function saveSupabaseBidWindowTestingSettings() {
   const client = supabaseClient();
   if (!client || !supabaseState.connected) {
@@ -2163,7 +2388,14 @@ async function addOrUpdateRdoSubmission() {
   }
 
   const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
   if (!line || line.status === "Taken") return;
+  if (!rdoLineMatchesBidRole(line, currentUserBidAs(), currentUser.area)) {
+    alert(`Line ${line.line} is not eligible for your ${currentUserBidAs()} bid role.`);
+    renderRdoLines();
+    updateSelectedLine();
+    return;
+  }
   if (!selectedFatigueGroup) {
     alert("Choose a fatigue group or No preference before submitting this RDO bid.");
     return;
@@ -2176,11 +2408,16 @@ async function addOrUpdateRdoSubmission() {
     updateSelectedLine();
     return;
   }
-  if (!isForcedMid(line) && !selectedMidPreference) {
+  if (!developmentalBidder && !isForcedMid(line) && !selectedMidPreference) {
     alert("Choose Yes or No for Mid before submitting this RDO bid.");
     return;
   }
-  if (!selectedAwsPreference) {
+  const awsPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    awsPreferenceForLine(line)
+  );
+  if (!awsPreference) {
     alert("Choose Yes or No for AWS before submitting this RDO bid.");
     return;
   }
@@ -2211,19 +2448,24 @@ async function addOrUpdateRdoSubmission() {
     line: line.line,
     fatigueGroup: requestedFatigueGroup,
     flex: selectedFlexPreference,
-    aws: selectedAwsPreference,
-    mid: selectedMidValue(line),
-    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${selectedAwsPreference} · Mid ${selectedMidValue(line)}`,
+    aws: awsPreference,
+    mid: rdoPreferenceForBidRole(currentUserBidAs(), currentUser.area, selectedMidValue(line)),
+    summary: `Round ${round} · ${ghostBid ? "Ghost Line" : "Line"} ${line.line} · Group ${fatigueGroupSummary} · Flex ${selectedFlexPreference} · AWS ${awsPreference} · Mid ${rdoPreferenceForBidRole(currentUserBidAs(), currentUser.area, selectedMidValue(line))}`,
   };
 
-  const isChange = Boolean(existing)
-    && String(existing.line ?? "") !== String(request.line ?? "");
+  const isChange = Boolean(existing) && rdoBidValuesChanged(existing, request);
+  if (isChange) {
+    request.isChange = true;
+    request.changeSource = "bidder";
+    request.originalBid = existing.originalBid || rdoBidSnapshotFromIntakeItem(existing);
+  }
   if (isChange && pendingCurrentUserLeaveRequests(1).length) {
     alert("Your Round 1 leave dates are awaiting an intake decision. Wait until they are approved or denied before changing your RDO bid.");
     return;
   }
   if (isChange && !window.confirm(
-    "Are you sure you want to change your RDO bid? All approved Round 1 leave dates will expire, and you will have to bid your two weeks of leave again. Pending RDO or leave requests must be approved or denied before you can make this change."
+    rdoBidChangeConfirmation(currentUser, request, request.originalBid) +
+    "\n\nAll approved Round 1 leave dates will expire, and you will have to bid your two weeks of leave again. Pending RDO or leave requests must be approved or denied before you can make this change."
   )) return;
 
   try {
@@ -2275,7 +2517,7 @@ function manualBidControllerOptions(selectedInitials, query = "") {
     : matches;
   return visiblePeople.map((person) => {
     const selected = person.initials === selectedInitials ? " selected" : "";
-    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.bidAs}${person.ghostBidder ? " · Ghost Bidder" : ""}`;
+    const label = `#${person.rank} ${person.firstName} ${person.lastName} · ${person.initials} · ${person.area} · ${person.bidAs}${person.ghostBidder ? " · Ghost Bidder" : ""}`;
     return `<option value="${escapeHtml(person.initials)}"${selected}>${escapeHtml(label)}</option>`;
   }).join("");
 }
@@ -2336,6 +2578,12 @@ function manualLeaveRangeFromDateInputs(panel) {
   return formatLeaveRangeFromKeys(keys);
 }
 
+function defaultManualLeaveEndDate(panel) {
+  const startInput = panel.querySelector("[data-manual-leave-start]");
+  const endInput = panel.querySelector("[data-manual-leave-end]");
+  if (startInput?.value && endInput) endInput.value = startInput.value;
+}
+
 function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
@@ -2365,6 +2613,53 @@ function manualFatigueGroupOptions(line, selectedGroup, allowOverride = false) {
 
 function fatigueGroupPreferenceLabel(group) {
   return group ? `Group ${group}` : "No preference";
+}
+
+function rdoBidPreferenceLabel(value) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  const normalized = String(value ?? "").trim();
+  if (normalized.toLowerCase() === "true") return "Yes";
+  if (normalized.toLowerCase() === "false") return "No";
+  if (normalized.toUpperCase() === "BID") return "Bid Line";
+  return normalized || "—";
+}
+
+function rdoBidSnapshotFromIntakeItem(item) {
+  if (!item) return null;
+  return {
+    submissionId: item.supabaseSubmissionId || "",
+    line: item.line || "",
+    fatigueGroup: item.fatigueGroup || "",
+    flex: item.flex,
+    aws: item.aws,
+    mid: item.mid,
+    round: intakeItemRound(item),
+    status: String(item.status || "").toLowerCase(),
+    submittedAt: item.submittedAt || "",
+    reviewedAt: item.approvedAt || "",
+  };
+}
+
+function rdoBidValuesChanged(original, requested) {
+  if (!original || !requested) return false;
+  return String(original.line ?? "") !== String(requested.line ?? "")
+    || String(original.fatigueGroup ?? "") !== String(requested.fatigueGroup ?? "")
+    || rdoBidPreferenceLabel(original.flex) !== rdoBidPreferenceLabel(requested.flex)
+    || rdoBidPreferenceLabel(original.aws) !== rdoBidPreferenceLabel(requested.aws)
+    || rdoBidPreferenceLabel(original.mid) !== rdoBidPreferenceLabel(requested.mid);
+}
+
+function rdoBidSnapshotSummary(snapshot) {
+  if (!snapshot) return "Original bid unavailable";
+  const line = snapshot.line || snapshot.rdo_line_code || "—";
+  const group = snapshot.fatigueGroup ?? snapshot.fatigue_group ?? "";
+  return `Line ${line} · ${fatigueGroupPreferenceLabel(group)} · Flex ${rdoBidPreferenceLabel(snapshot.flex)} · AWS ${rdoBidPreferenceLabel(snapshot.aws)} · Mid ${rdoBidPreferenceLabel(snapshot.mid)}`;
+}
+
+function rdoBidChangeConfirmation(person, requested, originalBid) {
+  const name = controllerName(person).trim() || person.initials || "this employee";
+  return `Confirm RDO bid change for ${name} · ${person.initials} · ${person.area}.\n\nOriginal: ${rdoBidSnapshotSummary(originalBid)}\nRequested: ${rdoBidSnapshotSummary(requested)}`;
 }
 
 function rdoLineOptionLabel(line) {
@@ -2442,7 +2737,8 @@ function renderManualBidPanel(panel) {
   if (leaveFields) leaveFields.hidden = !isLeave;
 
   const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const areaLines = rdoLinesForArea(areaSelect?.value || lockedArea);
+  const area = areaSelect?.value || lockedArea;
+  const areaLines = rdoLinesForBidder(selectedPerson.bidAs, area);
   if (lineSelect) {
     const openLines = areaLines.filter((line) => line.status !== "Taken");
     lineSelect.innerHTML = areaLines.map((line) => {
@@ -2456,6 +2752,7 @@ function renderManualBidPanel(panel) {
   }
 
   const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+  const developmentalBidder = isDevelopmentalBidRole(selectedPerson.bidAs, area);
   const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
   if (fatigueSelect) {
     const requestedGroup = ["", "A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
@@ -2478,7 +2775,11 @@ function renderManualBidPanel(panel) {
   }
   const midSelect = panel.querySelector("[data-manual-mid]");
   if (midSelect) {
-    if (selectedLine && isMidLineByDesign(selectedLine)) {
+    if (developmentalBidder) {
+      midSelect.innerHTML = '<option value="No">No — DEV does not work Mid</option>';
+      midSelect.value = "No";
+      midSelect.disabled = true;
+    } else if (selectedLine && isMidLineByDesign(selectedLine)) {
       midSelect.innerHTML = '<option value="BID">Bid Line</option>';
       midSelect.value = "BID";
       midSelect.disabled = true;
@@ -2495,7 +2796,17 @@ function renderManualBidPanel(panel) {
   const flexSelect = panel.querySelector("[data-manual-flex]");
   if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
   const awsSelect = panel.querySelector("[data-manual-aws]");
-  if (awsSelect) awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+  if (awsSelect) {
+    if (developmentalBidder) {
+      awsSelect.innerHTML = '<option value="No">No — DEV does not work AWS</option>';
+      awsSelect.value = "No";
+      awsSelect.disabled = true;
+    } else {
+      awsSelect.innerHTML = '<option value="Yes">Yes</option><option value="No">No</option>';
+      awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+      awsSelect.disabled = false;
+    }
+  }
 
   const rangeInput = panel.querySelector("[data-manual-leave-range]");
   if (rangeInput) rangeInput.value = values.range;
@@ -2524,6 +2835,19 @@ function renderManualBidPanel(panel) {
 }
 
 function renderManualBidEntry() {
+  const userId = supabaseState.authUserId || currentUser?.supabaseProfileId;
+  if (userId) {
+    const preferenceKey = `${MANUAL_INTAKE_PANEL_STORAGE_KEY}:${userId}`;
+    const preferences = storedJsonValue(preferenceKey, {});
+    document.querySelectorAll("[data-manual-intake-toggle]").forEach((button) => {
+      if (button.dataset.preferenceKey === preferenceKey) return;
+      const panelName = button.dataset.manualIntakeToggle;
+      const open = preferences?.[panelName] !== false;
+      button.dataset.preferenceKey = preferenceKey;
+      button.setAttribute("aria-expanded", String(open));
+      document.querySelector(`[data-manual-intake-content="${panelName}"]`).hidden = !open;
+    });
+  }
   document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
 }
 
@@ -2537,6 +2861,11 @@ async function submitManualRdoBid(panel, person, area) {
   const line = rdoLinesForArea(area).find((item) => item.line === lineId);
   if (!line) {
     setManualBidStatus(panel, "Choose an RDO line before adding this bid.", "error");
+    return;
+  }
+  if (!rdoLineMatchesBidRole(line, person.bidAs, area)) {
+    setManualBidStatus(panel, `Line ${line.line} is not eligible for ${person.initials}'s ${person.bidAs} bid role.`, "error");
+    renderManualBidPanel(panel);
     return;
   }
   if (line.status === "Taken") {
@@ -2554,8 +2883,12 @@ async function submitManualRdoBid(panel, person, area) {
   }
   const usedFatigueOverride = fatigueOverride && fatigueGroupClosed;
   const flex = panel.querySelector("[data-manual-flex]")?.value || "Yes";
-  const aws = panel.querySelector("[data-manual-aws]")?.value || "No";
-  const mid = isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No";
+  const aws = rdoPreferenceForBidRole(person.bidAs, area, panel.querySelector("[data-manual-aws]")?.value || "No");
+  const mid = rdoPreferenceForBidRole(
+    person.bidAs,
+    area,
+    isMidLineByDesign(line) ? "BID" : panel.querySelector("[data-manual-mid]")?.value || "No"
+  );
   const submittedAt = formatDateTime(new Date());
   const ghostBid = Boolean(person.ghostBidder);
   const existing = intakeQueue.find((item) =>
@@ -2589,6 +2922,18 @@ async function submitManualRdoBid(panel, person, area) {
     summary: `${ghostBid ? "Ghost Line" : "Line"} ${line.line} · ${fatigueGroupPreferenceLabel(fatigueGroup)} · Flex ${flex} · AWS ${aws} · Mid ${mid}${usedFatigueOverride ? " · Fatigue override" : ""}`,
   };
 
+  const isChange = Boolean(existing) && rdoBidValuesChanged(existing, request);
+  if (isChange) {
+    request.isChange = true;
+    request.changeSource = "intake";
+    request.changeEnteredBy = currentUser.initials;
+    request.originalBid = existing.originalBid || rdoBidSnapshotFromIntakeItem(existing);
+    if (!window.confirm(rdoBidChangeConfirmation(person, request, request.originalBid))) {
+      setManualBidStatus(panel, "RDO bid change canceled. Nothing was submitted.");
+      return;
+    }
+  }
+
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s RDO bid to Supabase...`);
     const savedSubmission = await saveSupabaseManualRdoRequest(request, person, area);
@@ -2612,11 +2957,11 @@ async function submitManualRdoBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
 
-function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
+function manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges }) {
   if (round === 1) {
     const usedWeeks = roundOneWeekKeySetForItems([
       ...leaveRoundUsageForInitials(person.initials, 1),
-      { range, round },
+      ...requestedRanges.map((keys) => ({ dateKeys: keys, round })),
     ]);
 
     if (usedWeeks.size > roundOneWeekLimit()) {
@@ -2660,11 +3005,7 @@ async function submitManualLeaveBid(panel, person, area) {
   }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const rdoDates = leaveRdoDatesForInitials(range, person.initials);
-  if (round > 1 && rdoDates.length) {
-    setManualBidStatus(panel, `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}.`, "error");
-    return;
-  }
+  const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
   const chargedDays = chargeableDates.length;
   const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
   if (manualDaysInput) manualDaysInput.value = String(chargedDays);
@@ -2672,17 +3013,16 @@ async function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
+  const requestedRanges = contiguousLeaveDateRanges(requestedDates);
 
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(requestedDates) : [];
   const weekUnits = weekKeys.length;
   const validationMessage = manualLeaveValidationMessage({
     person,
-    area,
-    range,
-    dateKeys,
     round,
     days: chargedDays,
     weekKeys,
+    requestedRanges,
   });
   if (validationMessage) {
     setManualBidStatus(panel, validationMessage, "error");
@@ -2718,35 +3058,54 @@ async function submitManualLeaveBid(panel, person, area) {
     round,
     weekUnits,
     weekKeys,
-    summary: `${person.ghostBidder ? "Ghost Leave · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
+  const requests = requestedRanges.map((keys, index) => {
+    const segmentRange = formatLeaveRangeFromKeys(keys);
+    const segmentDays = chargeableLeaveDateKeys(keys, person.initials, round).length;
+    const segmentWeekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
+    return {
+      ...request,
+      id: `${request.id}-${index + 1}`,
+      range: segmentRange,
+      dateKeys: keys,
+      startDateKey: keys[0],
+      endDateKey: keys[keys.length - 1],
+      days: segmentDays,
+      weekUnits: segmentWeekKeys.length,
+      weekKeys: segmentWeekKeys,
+      summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${segmentRange} · ${segmentDays} ${segmentDays === 1 ? "day" : "days"}`,
+    };
+  });
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
-    const savedBatch = await saveSupabaseManualLeaveRequest(request, person, area, notes);
-    const submissionId = savedBatch?.submission_ids?.[0];
-    if (submissionId) request.supabaseSubmissionId = submissionId;
+    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area, notes);
+    requests.forEach((item, index) => {
+      item.supabaseSubmissionId = savedBatch.submission_ids[index];
+    });
   } catch (error) {
     setManualBidStatus(panel, error.message || "The manual leave bid could not be saved. Try again.", "error");
     return;
   }
 
-  intakeQueue.unshift(request);
-  leaveBids.push({
+  intakeQueue.unshift(...requests);
+  requests.forEach((item) => leaveBids.push({
     priority: nextLeavePriority(),
-    range: request.range,
-    days: request.days,
+    range: item.range,
+    dateKeys: item.dateKeys,
+    days: item.days,
     status: "Pending",
     notes,
     initials: person.initials,
     area,
     round,
-    weekUnits,
-    weekKeys,
-  });
+    weekUnits: item.weekUnits,
+    weekKeys: item.weekKeys,
+  }));
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
-  queueBidSubmittedEmail(request);
+  requests.forEach(queueBidSubmittedEmail);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -2800,7 +3159,7 @@ function orderedLeaveRangeKeys() {
 
 function usesIndividualLeaveDateSelection() {
   const round = currentRoundNumber();
-  return round >= 1 && round <= 4 && !leaveReplacementRequestId;
+  return round >= 1 && round <= 6 && !leaveReplacementRequestId;
 }
 
 function leaveBuilderDateKeys() {
@@ -2917,7 +3276,21 @@ function isLeavePreviewRangeDate(key) {
   return leaveRangePreviewActive && isLeaveBuilderRangeDate(key);
 }
 
+function previouslyBidLeaveDateKeys() {
+  const dates = new Set();
+  activeLeaveItemsForInitials(currentUser.initials).forEach((item) => {
+    if (leaveReplacementRequestId && submittedLeaveItemKey(item) === leaveReplacementRequestId) return;
+    leaveDateKeysForItem(item).forEach((key) => dates.add(key));
+  });
+  return dates;
+}
+
 function selectLeaveBuilderDate(key) {
+  if (previouslyBidLeaveDateKeys().has(key)) {
+    setLeaveBuilderStatus(`${formatCalendarDate(key)} is already in your submitted leave bids and cannot be selected again.`, "error");
+    return false;
+  }
+
   if (isRdoDateForInitials(key, currentUser.initials)) {
     setLeaveBuilderStatus(`${formatCalendarDate(key)} is an RDO on your submitted line and cannot be selected for leave.`, "error");
     return false;
@@ -3024,6 +3397,7 @@ function renderLeaveDatePicker() {
   const firstDay = new Date(leavePickerYear, leavePickerMonthIndex, 1).getDay();
   const daysInMonth = new Date(leavePickerYear, leavePickerMonthIndex + 1, 0).getDate();
   const selectedKeys = new Set(leaveBuilderDateKeys());
+  const previouslyBidDates = previouslyBidLeaveDateKeys();
   const cells = [];
 
   dayNames.forEach((day) => cells.push(`<span class="picker-dow">${day[0]}</span>`));
@@ -3035,8 +3409,11 @@ function renderLeaveDatePicker() {
     const isEdge = isLeaveBuilderRangeEdge(key);
     const isOutsideLeaveYear = !isBidLeaveYearDate(key);
     const isRdo = isRdoDateForInitials(key, currentUser.initials);
-    const isUnavailable = isOutsideLeaveYear || isRdo;
-    const unavailableLabel = isRdo
+    const isAlreadyBid = previouslyBidDates.has(key);
+    const isUnavailable = isOutsideLeaveYear || isRdo || isAlreadyBid;
+    const unavailableLabel = isAlreadyBid
+      ? ": already submitted for leave; cannot be selected again"
+      : isRdo
       ? ": RDO on your submitted line; leave bidding unavailable"
       : isOutsideLeaveYear
         ? ": leave bidding unavailable"
@@ -3069,9 +3446,9 @@ function currentRoundLeaveLimit() {
 }
 
 function leaveDayLimitForRound(round, initials = currentUser.initials) {
-  if (round >= 2 && round <= 4) {
+  if (round >= 2 && round <= 6) {
     const line = submittedRdoLineForInitials(initials);
-    if (round === 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
+    if (round >= 4) return rdoWeekdaysForLine(line).size === 3 ? 4 : 5;
     return rdoWeekdaysForLine(line).size === 3 ? 8 : 10;
   }
   return 5;
@@ -3090,14 +3467,6 @@ function roundOneWeekLimit() {
 }
 
 function roundRuleForRound(round = currentRoundNumber()) {
-  if (round >= 2 && round <= 4) {
-    const line = submittedRdoLineForInitials();
-    if (line) {
-      const limit = leaveDayLimitForRound(round);
-      const creditDetail = round === 4 ? " Earlier holiday and in-lieu bid days return to your allotted hours." : "";
-      return { label: `${limit} days`, detail: `Up to ${limit} charged days in this round. RDO dates cannot be bid.${creditDetail}` };
-    }
-  }
   return roundRules[round] || {
     label: "5 days",
     detail: "Leave may include up to 5 charged days.",
@@ -3195,9 +3564,8 @@ function chargeableLeaveDatesForInitials(range, initials = currentUser.initials,
 }
 
 function leaveSlotDateKeys(keys, initials = currentUser.initials) {
-  return keys.filter((key) =>
-    !isRdoDateForInitials(key, initials) && !isHolidayDate(key, initials)
-  );
+  // Slot occupancy is separate from charged leave hours.
+  return keys.filter((key) => !isRdoDateForInitials(key, initials));
 }
 
 function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
@@ -3206,6 +3574,15 @@ function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
 
 function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
   return datesInLeaveRange(range).filter((key) => isRdoDateForInitials(key, initials));
+}
+
+function contiguousLeaveDateRanges(keys) {
+  return keys.reduce((ranges, key) => {
+    const last = ranges[ranges.length - 1];
+    if (last && addDaysToDateKey(last[last.length - 1], 1) === key) last.push(key);
+    else ranges.push([key]);
+    return ranges;
+  }, []);
 }
 
 function setLeaveDaysInput(days) {
@@ -3290,25 +3667,43 @@ function isGhostLeaveItem(item) {
   return Boolean(person?.ghostBidder || (!initials && currentUser.ghostBidder));
 }
 
+function isAreaLeaveBalanceExemptPerson(person) {
+  return Boolean(person?.ghostBidder || person?.bidAs === "GL");
+}
+
+function isAreaLeaveBalanceExemptItem(item) {
+  return isGhostLeaveItem(item) || leaveItemBidAs(item) === "GL";
+}
+
+function isGlLeaveItem(item) {
+  return leaveItemBidAs(item) === "GL";
+}
+
 function leaveSlotUnitsForItem() {
   return 1;
 }
 
+function leaveBidDayAllowanceForPerson(person) {
+  const allowanceHours = normalizeLeaveSlotAllowance(person?.leaveSlotAllowance);
+  const hoursPerDay = leaveHoursPerDayForInitials(person?.initials);
+  return Math.ceil(estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay));
+}
+
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
-    .filter((person) => !person.ghostBidder && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
-    .reduce((total, person) => total + normalizeLeaveSlotAllowance(person.leaveSlotAllowance), 0);
+    .filter((person) => !isAreaLeaveBalanceExemptPerson(person) && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
+    .reduce((total, person) => total + leaveBidDayAllowanceForPerson(person), 0);
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
   return [...leaveCommittedItems(), ...extraItems]
-    .filter((item) => !isGhostLeaveItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
+    .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveItemChargedDays(item), 0);
 }
 
@@ -3328,6 +3723,13 @@ function formatEstimatedLeaveDays(days) {
 function formatRoundedUpLeaveDays(days) {
   const value = Number(days);
   return Number.isFinite(value) ? Math.ceil(value).toLocaleString("en-US") : "0";
+}
+
+function formatRoundedUpLeaveDaysLabel(days) {
+  const value = Number(days);
+  const roundedDays = Number.isFinite(value) ? Math.ceil(value) : 0;
+  const label = Math.abs(roundedDays) === 1 ? "day" : "days";
+  return `${roundedDays.toLocaleString("en-US")} ${label}`;
 }
 
 function formatLeaveDaysLabel(days) {
@@ -3353,9 +3755,12 @@ function submittedRdoLineForInitials(initials = currentUser.initials) {
   return rdoLines.find((line) => line.cpc === normalized && line.status === "Taken" && lineForArea(line, area)) || null;
 }
 
+function leaveHoursPerDayForLine(line) {
+  return line && lineFourTenValue(line) === "Yes" ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+}
+
 function leaveHoursPerDayForInitials(initials = currentUser.initials) {
-  const line = submittedRdoLineForInitials(initials);
-  return rdoWeekdaysForLine(line).size === 3 ? CWS_LEAVE_HOURS_PER_DAY : LEAVE_SLOT_HOURS_PER_DAY;
+  return leaveHoursPerDayForLine(submittedRdoLineForInitials(initials));
 }
 
 function currentUserLeaveAllowanceHours() {
@@ -3376,15 +3781,19 @@ function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
 }
 
 function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
+  return withLeaveReadCache(() => leaveAreaCapacityMessageWithCache(area, bidAs, extraItems));
+}
+
+function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
   const bucket = leaveSlotBucketForBidAs(bidAs);
   if (!bucket) return "";
   const total = areaLeaveSlotBudget(area, bucket);
-  const used = areaLeaveSlotUsed(area, bucket);
-  const projectedUsed = areaLeaveSlotUsed(area, bucket, extraItems);
-  if (projectedUsed <= total) return "";
+  const used = areaLeaveSlotUsedDays(area, bucket);
+  const projectedUsed = bidAs === "GL" ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
+  if (bidAs === "GL" ? used < total : projectedUsed <= total) return "";
 
   const label = bucket === "dev" ? "DEV" : "CPC";
-  return `${area} ${label} leave slots are exhausted (${used} used of ${total}). No additional leave bids can be submitted in that bucket.`;
+  return `${area} ${label} leave balance is exhausted (${formatRoundedUpLeaveDays(used)} used of ${formatRoundedUpLeaveDays(total)} estimated days). No additional leave bids can be submitted in that bucket.`;
 }
 
 function leaveItemChargedDays(item) {
@@ -3485,6 +3894,18 @@ function showInitialsInVisibleSlot(visible, bucket, initials) {
   visible[bucket] = values.slice(0, capacity);
 }
 
+function addVisibleGlBid(visible, item, fallbackInitials = currentUser.initials) {
+  if (!isGlLeaveItem(item)) return;
+  const initials = String(item?.initials || fallbackInitials || "").trim().toUpperCase();
+  if (!initials) return;
+  const status = item?.status || "Pending";
+  const glBids = visible.glBids || [];
+  if (!glBids.some((bid) => bid.initials === initials && bid.status === status)) {
+    glBids.push({ initials, status, label: "GL Bid" });
+  }
+  visible.glBids = glBids;
+}
+
 function visibleLeaveSlotDetailsFromMap(
   key,
   area = currentUser.area,
@@ -3496,12 +3917,13 @@ function visibleLeaveSlotDetailsFromMap(
     ...details,
     cpc: [...(details.cpc || [])],
     dev: [...(details.dev || [])],
+    glBids: [...(details.glBids || [])],
   };
   const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
   const previewItem = activeLeavePreviewItem();
   if (showCurrentUserOverlay && !currentUser.ghostBidder && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
-    const bucket = leaveSlotBucketForBidAs(previewItem.bidAs);
-    showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
+    if (isGlLeaveItem(previewItem)) addVisibleGlBid(visible, previewItem);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(previewItem.bidAs), currentUser.initials);
   }
 
   leaveBids.forEach((item) => {
@@ -3509,15 +3931,16 @@ function visibleLeaveSlotDetailsFromMap(
     if (isGhostLeaveItem(item)) return;
     if (!["Pending", "Approved"].includes(item.status)) return;
     if (!leaveSlotDatesForInitials(item.range, currentUser.initials).includes(key)) return;
-    showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   leaveDraftQueue.forEach((item) => {
     if (!showCurrentUserOverlay) return;
     if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDateKeys(leaveDateKeysForItem(item), currentUser.initials).includes(key)) return;
-    const bucket = leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs());
-    showInitialsInVisibleSlot(visible, bucket, currentUser.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs || currentUserBidAs()), currentUser.initials);
   });
 
   intakeQueue.forEach((item) => {
@@ -3525,8 +3948,8 @@ function visibleLeaveSlotDetailsFromMap(
     if (item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)) return;
     if (isGhostLeaveItem(item)) return;
     if (!leaveSlotDatesForInitials(item.range, item.initials).includes(key)) return;
-    const bucket = leaveSlotBucketForBidAs(item.bidAs);
-    showInitialsInVisibleSlot(visible, bucket, item.initials);
+    if (isGlLeaveItem(item)) addVisibleGlBid(visible, item, item.initials);
+    else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(item.bidAs), item.initials);
   });
 
   return visible;
@@ -3649,7 +4072,7 @@ function addOrUpdateLeaveSubmission() {
 
   const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
-    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials },
+    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays },
   ]);
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
@@ -3776,8 +4199,7 @@ function previewLeaveSubmission() {
   selectedLeaveDateKey = dateKeys[0];
   displayedCalendarYear = previewYear;
   if (calendarYearChanged) {
-    updateCalendarYearLabels();
-    makeCalendar("leave-calendar");
+    renderCalendars({ includePublic: false });
   } else {
     syncMemberCalendarSelection([...previousPreviewKeys, ...dateKeys]);
   }
@@ -3798,12 +4220,20 @@ function removeLeaveDraft(id) {
 }
 
 function refreshLeaveDraftUi(affectedDateKeys = []) {
+  return withLeaveReadCache(() => refreshLeaveDraftUiWithCache(affectedDateKeys));
+}
+
+function refreshLeaveDraftUiWithCache(affectedDateKeys = []) {
   syncMemberCalendarSelection(affectedDateKeys);
   renderLeaveDraftQueue();
   renderLeaveAllowanceSummary();
 }
 
 function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
+  return withLeaveReadCache(() => leaveDraftPreSubmissionMessageWithCache(drafts));
+}
+
+function leaveDraftPreSubmissionMessageWithCache(drafts = leaveDraftQueue) {
   const requestedDates = new Map();
   const overlappingDates = new Set();
 
@@ -3914,7 +4344,7 @@ async function submitLeaveDraftBatch() {
     round: draft.round,
     weekUnits: draft.weekUnits || 0,
     weekKeys: draft.weekKeys || [],
-    summary: `${currentUser.ghostBidder ? "Ghost Leave · " : ""}${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
+    summary: `${currentUser.ghostBidder ? "Ghost Leave · " : currentUserBidAs() === "GL" ? "GL Bid · " : ""}${draft.range} · ${draft.days} ${draft.days === 1 ? "day" : "days"}${draft.weekUnits ? ` · ${draft.weekUnits} bid week` : ""}`,
   }));
 
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
@@ -4030,6 +4460,7 @@ function bidRecipientEmail(item) {
 function bidTypeLabel(item) {
   if (item?.type === "RDO Line" && item.ghostBid) return "Ghost Line";
   if (item?.type === "Leave" && item.ghostBid) return "Ghost Leave";
+  if (item?.type === "Leave" && isGlLeaveItem(item)) return "GL Bid";
   return item?.type || "Bid";
 }
 
@@ -4060,7 +4491,9 @@ function queueBidSubmittedEmail(items) {
     const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
     return `${prefix}${bidTypeLabel(item)} bid details: ${bidEmailDetail(item)}`;
   }).join("\n");
-  const subjectType = submissions.length > 1 ? `${submissions.length} ${first.ghostBid ? "ghost leave" : "leave"} bids` : `${bidTypeLabel(first)} bid`;
+  const subjectType = submissions.length > 1
+    ? `${submissions.length} ${first.ghostBid ? "ghost leave" : isGlLeaveItem(first) ? "GL" : "leave"} bids`
+    : `${bidTypeLabel(first)} bid`;
 
   queueNotificationEmail(
     bidRecipientEmail(first),
@@ -4248,6 +4681,48 @@ function leaveSlotBucketForBidAs(bidAs) {
   return null;
 }
 
+function defaultCalendarWorkforce(scope) {
+  if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
+  return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
+}
+
+function calendarWorkforceStorageKey(scope) {
+  if (scope === "public") return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:public`;
+  const identity = currentUser?.supabaseProfileId || currentUser?.initials || "anonymous";
+  return `${CALENDAR_WORKFORCE_SESSION_KEY_PREFIX}:${scope}:${identity}`;
+}
+
+function calendarWorkforceForScope(scope) {
+  if (scope !== "public" && scope !== "dashboard" && scope !== "leave") return null;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  const currentOverride = calendarWorkforceOverrides.get(storageKey);
+  if (currentOverride === "cpc" || currentOverride === "dev") return currentOverride;
+
+  try {
+    const stored = window.sessionStorage?.getItem(storageKey);
+    if (stored === "cpc" || stored === "dev") {
+      calendarWorkforceOverrides.set(storageKey, stored);
+      return stored;
+    }
+  } catch (_error) {
+    // The automatic default still works when browser storage is unavailable.
+  }
+
+  return defaultCalendarWorkforce(scope);
+}
+
+function setCalendarWorkforceForScope(scope, workforce) {
+  if ((scope !== "public" && scope !== "dashboard" && scope !== "leave") || (workforce !== "cpc" && workforce !== "dev")) return;
+  const storageKey = calendarWorkforceStorageKey(scope);
+  calendarWorkforceOverrides.set(storageKey, workforce);
+
+  try {
+    window.sessionStorage?.setItem(storageKey, workforce);
+  } catch (_error) {
+    // Keep the current render usable even when browser storage is unavailable.
+  }
+}
+
 function removeInitialsFromLeaveRange(range, initials) {
   datesInLeaveRange(range).forEach((key) => {
     const area = bueByInitials(initials)?.area || currentUser.area;
@@ -4290,7 +4765,7 @@ function leaveApprovalConflicts(item) {
   return leaveApprovalDates(item).filter((key) => {
     const details = leaveSlotsForDate(key, item.area || currentUser.area);
     const values = details[bucket] || [];
-    return fullLeaveDates.has(key) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
+    return (bucket === "cpc" && fullLeaveDates.has(key)) || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !values.includes(item.initials));
   });
 }
 
@@ -4317,8 +4792,8 @@ function captureIntakeOverrideFields(item) {
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
     item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
-    item.aws = editor.querySelector("[data-override-aws]")?.value || item.aws;
-    item.mid = editor.querySelector("[data-override-mid]")?.value || item.mid;
+    item.aws = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-aws]")?.value || item.aws);
+    item.mid = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-mid]")?.value || item.mid);
     item.summary = `${item.ghostBid ? "Ghost Line" : "Line"} ${item.line} · ${fatigueGroupPreferenceLabel(item.fatigueGroup)} · Flex ${item.flex} · AWS ${item.aws} · Mid ${item.mid}`;
     return;
   }
@@ -4326,7 +4801,7 @@ function captureIntakeOverrideFields(item) {
   item.range = editor.querySelector("[data-override-range]")?.value || item.range;
   item.days = Number(editor.querySelector("[data-override-days]")?.value || item.days);
   item.leaveCapacityOverride = Boolean(editor.querySelector("[data-override-capacity]")?.checked);
-  item.summary = `${item.ghostBid ? "Ghost Leave · " : ""}${item.range} · ${item.days} days`;
+  item.summary = `${item.ghostBid ? "Ghost Leave · " : isGlLeaveItem(item) ? "GL Bid · " : ""}${item.range} · ${item.days} days`;
 }
 
 async function supabaseSubmissionIdForIntakeItem(item) {
@@ -4351,6 +4826,7 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
         flex: item.flex === true || item.flex === "Yes",
         aws: item.aws === true || item.aws === "Yes",
         mid: item.mid,
+        glLineTypeVerified: item.bidAs !== "GL" || Boolean(item.glLineTypeVerified),
       }
     : { leaveCapacityOverride: Boolean(item.leaveCapacityOverride) };
   const { error } = await supabaseClient().rpc("review_bidding_submission", {
@@ -4365,9 +4841,33 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
 }
 
 async function approveIntakeItem(id) {
-  const item = intakeQueue.find((entry) => entry.id === id);
+  const item = intakeReviewItemById(id);
   if (!item || item.status !== "Pending") return;
+  if (item.members) {
+    try { await reviewIntakeLeaveGroup(item, "approved"); }
+    catch (error) {
+      intakeGroupReviewState.set(id, { reviewNote: error.message || "This week or batch could not be approved." });
+      renderIntakeQueue();
+    }
+    return;
+  }
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (item.type === "RDO Line" && item.bidAs === "GL") {
+    const verification = activeOverrideId === id
+      ? document.querySelector("[data-gl-line-type-verification]")
+      : null;
+    if (!verification?.checked) {
+      const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
+      const category = line && isCpcLine(line) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
+      item.reviewNote = `Verify that this GL is bidding as ${category}, then approve from the review panel.`;
+      activeOverrideId = id;
+      activeDenialId = null;
+      renderApp();
+      setPage("intake");
+      return;
+    }
+    item.glLineTypeVerified = true;
+  }
   if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
     item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
     activeOverrideId = id;
@@ -4419,12 +4919,13 @@ async function approveIntakeItem(id) {
 }
 
 async function denyIntakeItem(id) {
-  const item = intakeQueue.find((entry) => entry.id === id);
+  const item = intakeReviewItemById(id);
   if (!item || item.status !== "Pending") return;
 
   const reason = document.querySelector("[data-denial-reason]")?.value.trim() || "";
   if (!reason) {
     item.denialDraftError = "Enter a denial reason before sending this back to the BUE.";
+    if (item.members) intakeGroupReviewState.set(id, { denialDraftError: item.denialDraftError });
     activeDenialId = id;
     activeOverrideId = null;
     renderApp();
@@ -4432,6 +4933,14 @@ async function denyIntakeItem(id) {
     return;
   }
 
+  if (item.members) {
+    try { await reviewIntakeLeaveGroup(item, "denied", reason); }
+    catch (error) {
+      intakeGroupReviewState.set(id, { denialDraftError: error.message || "This week or batch could not be denied." });
+      renderIntakeQueue();
+    }
+    return;
+  }
   let persisted = false;
   try {
     persisted = await persistIntakeDecision(item, "denied", reason);
@@ -4504,6 +5013,69 @@ async function saveSupabaseApprovedLeaveEdit(item) {
 
   await loadSupabaseReferenceData();
   return true;
+}
+
+async function removeApprovedLeaveBid(id) {
+  const item = intakeReviewItemById(id);
+  if (!item || item.type !== "Leave" || item.status !== "Approved" || !hasIntakeAccess()) return;
+
+  const requests = item.members || [item];
+  const requestIds = requests.map((request) => request.supabaseRequestId).filter(Boolean);
+  if (requestIds.length !== requests.length) {
+    const reviewNote = "One or more leave dates are not linked to saved database records. Reload the queue before removing this bid.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderIntakeQueue();
+    return;
+  }
+
+  const dateCount = item.dateKeys?.length || requests.reduce((total, request) => total + leaveDateKeysForItem(request).length, 0);
+  const description = item.members
+    ? `${dateCount} selected ${dateCount === 1 ? "date" : "dates"}`
+    : item.range;
+  if (!window.confirm(
+    `Remove ${description} from ${item.initials}'s pre-approved leave slots?\n\n` +
+    "The bid will be marked Cancelled and remain visible in history, but it will no longer reserve leave capacity."
+  )) return;
+
+  intakeLeaveRemovalPendingId = id;
+  renderIntakeQueue();
+  try {
+    const client = supabaseClient();
+    if (!client || !supabaseState.connected) {
+      throw new Error("The leave bid could not reach the database. Check the connection and try again.");
+    }
+    const { error } = await client.rpc("admin_cancel_leave_requests", {
+      requested_leave_request_ids: requestIds,
+    });
+    if (error) {
+      if (isMissingSupabaseRoutine(error)) {
+        throw new Error("Admin leave removal is not installed. Run the latest Supabase migration, then try again.");
+      }
+      throw error;
+    }
+
+    logHistory(
+      item.area,
+      "Approved leave bid removed",
+      `${currentUser.initials} removed ${item.initials}'s ${description} from pre-approved leave slots. The cancelled bid remains in history.`
+    );
+    intakeLeaveRemovalPendingId = null;
+    if (item.members) intakeGroupReviewState.delete(item.id);
+    activeOverrideId = null;
+    activeDenialId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setPage("intake");
+  } catch (error) {
+    intakeLeaveRemovalPendingId = null;
+    const reviewNote = error.message || "The approved leave bid could not be removed.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderApp();
+    setPage("intake");
+  }
 }
 
 async function saveSupabasePendingRdoEdit(item) {
@@ -4643,7 +5215,8 @@ async function saveIntakeOverride(id) {
 
 function selectedRdoWeekdays() {
   const submittedLine = submittedRdoLineForInitials(currentUser.initials);
-  const line = submittedLine || rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId) || rdoLinesForArea(currentUser.area)[0] || rdoLines[0];
+  const eligibleLines = rdoLinesForBidder(currentUserBidAs(), currentUser.area);
+  const line = submittedLine || eligibleLines.find((item) => item.line === selectedLineId) || eligibleLines[0] || null;
   return rdoWeekdaysForLine(line);
 }
 
@@ -4751,10 +5324,27 @@ function calendarActiveDate() {
   return new Date(displayedCalendarYear, activeDate.getMonth(), day);
 }
 
-function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false }) {
+// Share derived read data only during one synchronous operation. Always discard
+// it before returning so edits, RDO changes, and database refreshes remain fresh.
+
+function withLeaveReadCache(read) {
+  if (leaveReadCache) return read();
+  leaveReadCache = new Map();
+  try { return read(); }
+  finally { leaveReadCache = null; }
+}
+
+function cachedLeaveRead(key, read) {
+  if (!leaveReadCache) return read();
+  if (!leaveReadCache.has(key)) leaveReadCache.set(key, read());
+  return leaveReadCache.get(key);
+}
+
+function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false, slotBucket = null }) {
   return {
     area,
     mode: calendarMode,
+    slotBucket,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
@@ -4873,6 +5463,11 @@ function openPublicDateSheet(button) {
   const details = visibleLeaveSlotDetails(key, publicState.area);
   const sheet = document.querySelector("[data-public-date-sheet]");
   document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
+  if (!leaveSlotDataIsLoaded(details)) {
+    sheet.querySelector("[data-public-date-content]").innerHTML = `<p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p>`;
+    sheet.showModal();
+    return;
+  }
   const holiday = calendarHolidayKind(key, { area: publicState.area });
   sheet.querySelector("[data-public-date-content]").innerHTML = `
     <p>${escapeHtml(publicState.area)} · Read-only availability</p>
@@ -4883,16 +5478,24 @@ function openPublicDateSheet(button) {
       return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
         ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
     }).join("")}
+    ${(details.glBids || []).length ? `<section class="gl-bid-detail"><h3>GL Bids · no slots used</h3>${details.glBids.map((bid) => `<div class="slot-row gl-bid-row"><span>GL Bid</span><b>${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b></div>`).join("")}</section>` : ""}
     ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
   sheet.showModal();
 }
 
-function makeCalendar(targetId) {
+function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   const target = document.getElementById(targetId);
   if (!target) return;
   const isPublicCalendar = targetId === "public-calendar";
   const ownerPage = target.closest(".page");
   if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
+  if (
+    reuseCurrent &&
+    target.childElementCount > 0 &&
+    Number(target.dataset.calendarRevision) === calendarRenderRevision
+  ) {
+    return;
+  }
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
@@ -4906,19 +5509,49 @@ function makeCalendar(targetId) {
           ? "member"
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
+  const slotBucket = calendarWorkforceForScope(calendarScope);
   const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
+  const renderKey = [
+    displayedCalendarYear,
+    calendarMode,
+    area,
+    showRdo,
+    showPersonalLeave,
+    deferSlotTooltip,
+    expandedSlots,
+    slotBucket,
+  ].join("|");
   const monthIndexes = monthNames.map((_, index) => index);
+
+  syncMobileCalendarControls(target);
+  target.classList.remove("month-view", "week-view");
+  target.classList.toggle("expanded-slots-calendar", expandedSlots);
+
+  if (reuseCurrent) {
+    const reusableCalendar = [...document.querySelectorAll(".app-shell .year-calendar[id]")].find(
+      (calendar) =>
+        calendar !== target &&
+        calendar.childElementCount > 0 &&
+        Number(calendar.dataset.calendarRevision) === calendarRenderRevision &&
+        calendar.dataset.calendarRenderKey === renderKey
+    );
+    if (reusableCalendar) {
+      target.replaceChildren(...[...reusableCalendar.childNodes].map((node) => node.cloneNode(true)));
+      syncMobileCalendarMonths(target);
+      target.dataset.calendarRevision = String(calendarRenderRevision);
+      target.dataset.calendarRenderKey = renderKey;
+      return;
+    }
+  }
+
   const context = makeCalendarRenderContext({
     area,
     showRdo,
     showPersonalLeave,
     deferSlotTooltip,
     publicReadOnly: isPublicCalendar,
+    slotBucket,
   });
-
-  syncMobileCalendarControls(target);
-  target.classList.remove("month-view", "week-view");
-  target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
   target.innerHTML = monthIndexes
     .map((monthIndex) => renderMonthCard(monthIndex, displayedCalendarYear, {
@@ -4938,6 +5571,8 @@ function makeCalendar(targetId) {
       context,
     });
   syncMobileCalendarMonths(target);
+  target.dataset.calendarRevision = String(calendarRenderRevision);
+  target.dataset.calendarRenderKey = renderKey;
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -5046,16 +5681,23 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const holidayKind = !isInsideLeaveYear || !showVacationLayer ? null : context ? cachedCalendarHolidayKind(key, context, options) : calendarHolidayKind(key, options);
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
-  const isClosed = canShowLeaveState && (
+  const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
+  const slotDataLoaded = leaveSlotDataIsLoaded(baseSlotDetails || leaveSlotsForDate(key, detailArea));
+  const isClosed = canShowLeaveState && slotDataLoaded && (
     baseSlotDetails
-      ? leaveSlotOpenCountForDetails(baseSlotDetails, "cpc") === 0 || (detailArea === "Area A" && fullLeaveDates.has(key))
-      : isLeaveSlotsFull(key, options.area)
+      ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
+      : isLeaveSlotsFull(key, options.area, availabilityBucket)
   );
   const expandedSlots = Boolean(options.expandedSlots);
   const hasDetail = isInsideLeaveYear && (showVacationLayer || expandedSlots);
+  const visibleSlotDetails = hasDetail
+    ? context ? cachedVisibleLeaveSlotDetails(key, context) : visibleLeaveSlotDetails(key, options.area)
+    : null;
+  const glBids = visibleSlotDetails?.glBids || [];
+  const hasGlBid = glBids.length > 0;
   const isSelected = canShowLeaveState && key === selectedLeaveDateKey;
   const slotTooltip = hasDetail && !options.deferSlotTooltip
-    ? quickLeaveSlotTooltip(key, holidayKind, options.area, context ? cachedVisibleLeaveSlotDetails(key, context) : null, expandedSlots)
+    ? quickLeaveSlotTooltip(key, holidayKind, options.area, visibleSlotDetails, expandedSlots)
     : "";
   const className = [
     holidayKind?.className || "",
@@ -5067,6 +5709,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     isApprovedLeave ? "leave-day" : "",
     isRdo ? "rdo-day" : "",
     isClosed ? "closed-day" : "",
+    hasGlBid ? "has-gl-bid" : "",
     fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
     nextFatigueClass ? `fatigue-split fatigue-to-${nextFatigueClass}` : "",
     hasDetail ? "has-slot-detail" : "",
@@ -5076,7 +5719,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const fatigueStatus = nextFatigueGroup
     ? `Group ${fatigueGroup} / Group ${nextFatigueGroup} transition fatigue day`
     : `Group ${fatigueGroup} fatigue week`;
-  const vacationStatus = holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? "CPC leave slots filled" : "View leave slots");
+  const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
+  const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
+  const vacationStatus = `${holidayKind?.label || (!slotDataLoaded ? leaveSlotLoadingMessage() : isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5089,7 +5734,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
   const leaveDateAttribute = canShowLeaveState
     ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
-    : 'aria-disabled="true"';
+    : hasDetail ? "" : 'aria-disabled="true"';
 
   return `
     <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
@@ -5097,8 +5742,9 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
       ${expandedSlots ? `
         <span class="expanded-day-heading">
           <span class="date-number" data-day-number="${day}">${label}</span>
+          ${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}
         </span>
-      ` : `<span class="date-number">${label}</span>`}
+      ` : `<span class="date-number">${label}</span>${hasGlBid ? `<span class="gl-bid-marker" title="GL Bid · no slot used" aria-label="GL Bid">*</span>` : ""}`}
       ${slotTooltip}
     </button>
   `;
@@ -5124,45 +5770,93 @@ function updateCalendarViewControls() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-selected", String(isActive));
   });
+  document.querySelectorAll("[data-calendar-workforce]").forEach((button) => {
+    const scope = button.dataset.calendarScope;
+    const isActive = calendarWorkforceForScope(scope) === button.dataset.calendarWorkforce;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
   document.querySelectorAll("[data-calendar-layout-description]").forEach((description) => {
     const scope = description.dataset.calendarLayoutDescription;
+    const workforce = calendarWorkforceForScope(scope);
     description.textContent = calendarLayouts[scope] === "full"
       ? "Every CPC and developmental slot is shown directly on each date."
-      : "Select a date to view its slots.";
+      : workforce ? "Select a date to view its CPC and developmental slots." : "Select a date to view its slots.";
   });
 }
 
-function renderCalendars({ includePublic = true, includeMember = true } = {}) {
+function renderCalendars({ includePublic = true, includeMember = true, reuseCurrent = false } = {}) {
+  return withLeaveReadCache(() => renderCalendarsWithCache({ includePublic, includeMember, reuseCurrent }));
+}
+
+function renderCalendarsWithCache({ includePublic = true, includeMember = true, reuseCurrent = false } = {}) {
+  if (!reuseCurrent) calendarRenderRevision += 1;
   updateCalendarViewControls();
   updateCalendarYearLabels();
-  if (includePublic) makeCalendar("public-calendar");
+  if (includePublic) makeCalendar("public-calendar", { reuseCurrent });
   if (includeMember) {
-    makeCalendar("dashboard-calendar");
-    makeCalendar("leave-calendar");
-    makeCalendar("full-calendar");
+    makeCalendar("dashboard-calendar", { reuseCurrent });
+    makeCalendar("leave-calendar", { reuseCurrent });
+    makeCalendar("full-calendar", { reuseCurrent });
   }
 }
 
-function renderMemberCalendarForPage(pageName) {
+function memberCalendarForPage(pageName) {
   const calendarIds = {
     dashboard: "dashboard-calendar",
     leave: "leave-calendar",
     calendar: "full-calendar",
   };
   const calendarId = calendarIds[pageName];
-  if (!calendarId) return;
-  updateCalendarViewControls();
-  updateCalendarYearLabels();
-  makeCalendar(calendarId);
+  return calendarId ? document.getElementById(calendarId) : null;
 }
 
-function refreshMemberCalendarDates(dateKeys = []) {
+function memberPageCalendarNeedsRender(pageName) {
+  const calendar = memberCalendarForPage(pageName);
+  return Boolean(
+    calendar && (
+      calendar.childElementCount === 0 ||
+      Number(calendar.dataset.calendarRevision) !== calendarRenderRevision
+    )
+  );
+}
+
+function renderMemberCalendarForPage(pageName, { defer = false } = {}) {
+  if (pendingPageCalendarFrame) {
+    window.cancelAnimationFrame(pendingPageCalendarFrame);
+    pendingPageCalendarFrame = 0;
+  }
+
+  const render = () => {
+    pendingPageCalendarFrame = 0;
+    if (document.querySelector(".page.active")?.dataset.pagePanel !== pageName) return;
+    renderCalendars({ includePublic: false, reuseCurrent: true });
+    memberCalendarForPage(pageName)?.removeAttribute("aria-busy");
+  };
+
+  if (defer) {
+    memberCalendarForPage(pageName)?.setAttribute("aria-busy", "true");
+    pendingPageCalendarFrame = window.requestAnimationFrame(() => {
+      pendingPageCalendarFrame = window.requestAnimationFrame(render);
+    });
+    return;
+  }
+
+  render();
+}
+
+function refreshMemberCalendarDates(dateKeys = [], { includeInactive = false } = {}) {
+  return withLeaveReadCache(() => refreshMemberCalendarDatesWithCache(dateKeys, { includeInactive }));
+}
+
+function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = false } = {}) {
   const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
   if (!uniqueKeys.length) return;
 
   document.querySelectorAll(".app-shell .year-calendar[id]").forEach((calendar) => {
+    if (!calendar.childElementCount) return;
     const ownerPage = calendar.closest(".page");
-    if (ownerPage && !ownerPage.classList.contains("active")) return;
+    if (!includeInactive && ownerPage && !ownerPage.classList.contains("active")) return;
 
     const area = currentViewArea();
     const showPersonalState = area === currentUser.area;
@@ -5178,10 +5872,11 @@ function refreshMemberCalendarDates(dateKeys = []) {
       showRdo: showPersonalState,
       showPersonalLeave: showPersonalState,
       deferSlotTooltip: false,
+      slotBucket: calendarWorkforceForScope(scope),
     });
 
     uniqueKeys.forEach((key) => {
-      const button = calendar.querySelector(`[data-leave-date="${key}"]`);
+      const button = calendar.querySelector(`[data-calendar-date="${key}"]`);
       if (!button) return;
       const date = dateFromKey(key);
       button.outerHTML = renderCalendarDay(date.getMonth(), date.getDate(), false, date.getFullYear(), {
@@ -5194,6 +5889,23 @@ function refreshMemberCalendarDates(dateKeys = []) {
       });
     });
   });
+}
+
+function refreshMemberCalendarRdoPattern(previousWeekdays = new Set()) {
+  const nextWeekdays = selectedRdoWeekdays();
+  const changedWeekdays = new Set(
+    [...previousWeekdays, ...nextWeekdays].filter(
+      (weekday) => previousWeekdays.has(weekday) !== nextWeekdays.has(weekday)
+    )
+  );
+  if (!changedWeekdays.size) return;
+
+  const affectedDateKeys = new Set();
+  document.querySelectorAll(".app-shell .year-calendar [data-calendar-date]").forEach((button) => {
+    const key = button.dataset.calendarDate;
+    if (key && changedWeekdays.has(dateFromKey(key).getDay())) affectedDateKeys.add(key);
+  });
+  refreshMemberCalendarDates([...affectedDateKeys], { includeInactive: true });
 }
 
 function syncMemberCalendarSelection(previousPreviewKeys = []) {
@@ -5258,6 +5970,7 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
     area: details.area || area,
     cpc: details.cpc || [],
     dev: details.dev || [],
+    glBids: details.glBids || [],
     holiday: details.holiday || isHolidayDate(key),
     holidayInLieu,
   };
@@ -5265,6 +5978,19 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
 
 function leaveSlotsForDate(key, area = currentUser.area) {
   return leaveSlotsForDateFromMap(key, area);
+}
+
+function leaveSlotDataIsLoaded(details) {
+  return ["cpcCapacity", "devCapacity", "cpcOpen", "devOpen"].every((field) => (
+    details?.[field] !== null && details?.[field] !== undefined
+    && Number.isFinite(Number(details[field])) && Number(details[field]) >= 0
+  ));
+}
+
+function leaveSlotLoadingMessage() {
+  return supabaseState.loading || !supabaseState.referenceDataLoaded
+    ? "Loading leave slots…"
+    : "Leave slots could not be loaded. Refresh to try again.";
 }
 
 function leaveSlotCapacityForDetails(details, bucket) {
@@ -5292,9 +6018,9 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
   return Boolean(leaveSlotMap(area)[key]) || isHolidayDate(key) || (area === "Area A" && fullLeaveDates.has(key));
 }
 
-function isLeaveSlotsFull(key, area = currentUser.area) {
+function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, "cpc") === 0 || (area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotDataIsLoaded(details) && (leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key)));
 }
 
 function slotRows(type, initials, capacity) {
@@ -5311,10 +6037,14 @@ function slotRows(type, initials, capacity) {
 
 function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    return `<span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}"><span>${escapeHtml(leaveSlotLoadingMessage())}</span></span>`;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: devCapacity }, (_, index) => details.dev[index] || "");
+  const glBids = details.glBids || [];
   const renderSlotRow = (prefix, value, index) => {
     const slotLabel = `${prefix}${index + 1}`;
     const displayValue = value ? escapeHtml(value) : "Open";
@@ -5334,18 +6064,33 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
         <span class="tooltip-slot-heading">CPC</span>
         ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
         <span class="tooltip-slot-rule"></span>
-        <span class="tooltip-slot-heading">Dev</span>
+        <span class="tooltip-slot-heading">DEV</span>
         ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
+          <span class="tooltip-slot-row gl-bid-row filled">
+            <span class="tooltip-slot-name">GL Bid</span>
+            <b class="tooltip-slot-value">${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b>
+          </span>`).join("")}` : ""}
       </span>
     </span>
   `;
 }
 
-function renderLeaveSlotBoard() {
+function renderLeaveSlotBoard(options = {}) {
+  return withLeaveReadCache(() => renderLeaveSlotBoardWithCache(options));
+}
+
+function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = currentViewArea(), inspectOnly = false } = {}) {
   const target = document.getElementById("leave-slot-board");
   if (!target) return;
 
-  const details = leaveSlotsForDate(selectedLeaveDateKey, currentViewArea());
+  const details = inspectOnly
+    ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
+    : leaveSlotsForDate(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    target.innerHTML = `<article class="leave-day-detail"><h3>${escapeHtml(details.label)}</h3><p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p></article>`;
+    return;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -5391,8 +6136,8 @@ function renderLeaveSlotBoard() {
 
 let leaveSlotReturnFocus = null;
 
-function openLeaveSlotModal() {
-  renderLeaveSlotBoard();
+function openLeaveSlotModal(options = {}) {
+  renderLeaveSlotBoard(options);
   const modal = document.querySelector("[data-leave-slot-modal]");
   if (!modal) return;
   leaveSlotReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -5427,6 +6172,10 @@ function lastWeekdayOfMonth(year, monthIndex, weekday) {
 }
 
 function legalHolidayDatesForYear(year) {
+  return cachedLeaveRead(JSON.stringify(["legalHolidayDatesForYear", year]), () => legalHolidayDatesForYearUncached(year));
+}
+
+function legalHolidayDatesForYearUncached(year) {
   return new Set([
     dateKey(year, 1, 1),
     dateKey(year, 1, nthWeekdayOfMonth(year, 0, 1, 3)),
@@ -5484,6 +6233,10 @@ function inLieuHolidayKey(actualKey, initials = currentUser.initials, blocked = 
 }
 
 function federalHolidayDatesForYear(year, initials = currentUser.initials) {
+  return cachedLeaveRead(JSON.stringify(["federalHolidayDatesForYear", year, initials]), () => federalHolidayDatesForYearUncached(year, initials));
+}
+
+function federalHolidayDatesForYearUncached(year, initials = currentUser.initials) {
   const holidays = new Set();
   const inLieuDates = holidayInLieuDatesForYear(year, initials);
   inLieuDates.forEach((key) => holidays.add(key));
@@ -5496,6 +6249,10 @@ function federalHolidayDatesForYear(year, initials = currentUser.initials) {
 }
 
 function holidayInLieuDatesForYear(year, initials = currentUser.initials) {
+  return cachedLeaveRead(JSON.stringify(["holidayInLieuDatesForYear", year, initials]), () => holidayInLieuDatesForYearUncached(year, initials));
+}
+
+function holidayInLieuDatesForYearUncached(year, initials = currentUser.initials) {
   const inLieuDates = new Set();
 
   legalHolidayDatesForYear(year).forEach((key) => {
@@ -5687,7 +6444,7 @@ function friendlyAuthFailure(error) {
 
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -5698,7 +6455,9 @@ function defaultLandingPageForRole() {
 
 function intendedLandingPage(requestedPage = requestedLandingPage()) {
   const defaultPage = defaultLandingPageForRole();
-  if (requestedPage === "admin") return hasSystemAdminAccess() ? "admin" : defaultPage;
+  if (requestedPage === "admin" || requestedPage === "admin-tools") {
+    return hasSystemAdminAccess() ? requestedPage : defaultPage;
+  }
   if (requestedPage === "intake" || requestedPage === "intake-schedule") {
     return canUseIntakeView() ? requestedPage : defaultPage;
   }
@@ -5748,7 +6507,7 @@ function syncAccountFields() {
     hasSession
       ? supabaseState.pendingAuthEmail
         ? `Email change pending confirmation for ${supabaseState.pendingAuthEmail}.`
-        : "You can set a password for future email/password sign-in or request a login email change."
+        : "You can set a first password, change an existing password, or request a login email change."
       : "Login email and password changes are available after signing in with Supabase."
   );
 
@@ -5756,7 +6515,7 @@ function syncAccountFields() {
     input.disabled = !hasSession;
     input.placeholder = hasSession ? "new.email@example.com" : "";
   });
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.disabled = !hasSession;
   });
   document.querySelectorAll("[data-update-account-email], [data-update-account-password]").forEach((button) => {
@@ -5796,9 +6555,26 @@ function accountEmailInputValue() {
 }
 
 function clearAccountPasswordInputs() {
-  document.querySelectorAll("[data-account-password], [data-account-password-confirm]").forEach((input) => {
+  document.querySelectorAll("[data-account-current-password], [data-account-password], [data-account-password-confirm]").forEach((input) => {
     input.value = "";
   });
+}
+
+function friendlyAccountPasswordFailure(error) {
+  const code = error?.code || "";
+  if (code === "current_password_required") {
+    return "Enter your current password above, then choose a different new password. If you do not know it, use Set or reset password on the login screen.";
+  }
+  if (code === "current_password_mismatch") {
+    return "The current password is incorrect. Try again or use Set or reset password on the login screen.";
+  }
+  if (code === "same_password") {
+    return "That is already your password. Choose a different new password.";
+  }
+  if (code === "reauthentication_needed") {
+    return "For security, request a fresh Set or reset password email from the login screen before changing this password.";
+  }
+  return error?.message || "Password could not be updated.";
 }
 
 async function requireSupabaseAccountSession() {
@@ -5991,7 +6767,7 @@ async function sendSupabaseLoginLink(email) {
     return;
   }
 
-  setAuthStatus("Login link sent. Check that email inbox.", "success");
+  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
@@ -6161,6 +6937,7 @@ async function updateSupabaseAccountPassword() {
   const session = await requireSupabaseAccountSession();
   if (!session) return;
 
+  const currentPassword = document.querySelector("[data-account-current-password]")?.value || "";
   const password = document.querySelector("[data-account-password]")?.value || "";
   const confirmPassword = document.querySelector("[data-account-password-confirm]")?.value || "";
 
@@ -6174,9 +6951,12 @@ async function updateSupabaseAccountPassword() {
   }
 
   setAccountFormStatus("Updating password...");
-  const { error } = await supabaseClient().auth.updateUser({ password });
+  const passwordUpdate = currentPassword
+    ? { password, current_password: currentPassword }
+    : { password };
+  const { error } = await supabaseClient().auth.updateUser(passwordUpdate);
   if (error) {
-    setAccountFormStatus(error.message || "Password could not be updated.", "error");
+    setAccountFormStatus(friendlyAccountPasswordFailure(error), "error");
     return;
   }
 
@@ -6213,6 +6993,13 @@ const RDO_LINE_CODE_COLLATOR = new Intl.Collator(undefined, {
 });
 
 function compareRdoLinesByCode(left, right) {
+  const leftOrder = Number(left.displayOrder);
+  const rightOrder = Number(right.displayOrder);
+  const leftHasOrder = Number.isFinite(leftOrder) && leftOrder > 0;
+  const rightHasOrder = Number.isFinite(rightOrder) && rightOrder > 0;
+  if (leftHasOrder && rightHasOrder && leftOrder !== rightOrder) return leftOrder - rightOrder;
+  if (leftHasOrder !== rightHasOrder) return leftHasOrder ? -1 : 1;
+
   const leftCode = String(left.line || "").trim();
   const rightCode = String(right.line || "").trim();
   const leftNumber = /^\d+$/.test(leftCode) ? Number(leftCode) : null;
@@ -6241,9 +7028,11 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       .map((day) => day.shift_code);
     const area = areaNameForRow(row, areaById);
     const nextLine = {
+      id: row.id,
       area,
       pattern: row.pattern,
       line: row.line_code,
+      displayOrder: row.display_order,
       lineType: row.line_type,
       cpc: row.assigned_initials || row.bidders?.initials || (row.assigned_bidder_id === currentUser?.supabaseProfileId ? currentUser.initials : ""),
       week: days.length === 7 ? days : Array.from({ length: 7 }, () => ""),
@@ -6253,6 +7042,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       fourTen: row.four_ten ? "Yes" : "No",
       flex: typeof row.flex === "boolean" ? (row.flex ? "Yes" : "No") : "",
       status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
+      glBids: [],
     };
     const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
     if (existingIndex >= 0) {
@@ -6267,6 +7057,30 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
   }
 }
 
+function applyGlRdoAssignments(rows) {
+  rdoLines.forEach((line) => {
+    line.glBids = [];
+  });
+
+  (rows || []).forEach((row) => {
+    const line = rdoLines.find((candidate) => (
+      (row.rdo_line_id && candidate.id === row.rdo_line_id)
+      || (candidate.line === row.line_code && candidate.area === row.area_name)
+    ));
+    const initials = String(row.initials || "").trim().toUpperCase();
+    if (!line || !initials || line.glBids.some((bid) => bid.initials === initials)) return;
+    line.glBids.push({
+      initials,
+      status: uiStatusFromDatabase(row.status || "pending"),
+      ghostBid: Boolean(row.ghost_bid),
+    });
+  });
+
+  rdoLines.forEach((line) => {
+    line.glBids.sort((left, right) => left.initials.localeCompare(right.initials));
+  });
+}
+
 function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const bidder = row.bidders || row;
   const payload = row.payload || {};
@@ -6278,12 +7092,24 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const mid = payload.mid || "";
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
+  const isChange = Boolean(row.isChange || row.is_change || payload.isChange);
+  const originalBid = row.originalBid || row.original_bid || null;
+  const changeSource = row.changeSource || row.change_source || payload.changeSource || "";
+  const changeEnteredBy = row.changeEnteredBy || row.change_entered_by || "";
 
   return {
     id: `supabase-rdo-${row.id}`,
     supabaseSubmissionId: row.id,
+    bidderId: row.bidderId || row.bidder_id || bidder.profile_id || (row.bidders ? bidder.id : ""),
     type: "RDO Line",
     ghostBid,
+    isChange,
+    originalBid,
+    originalSubmissionId: row.supersedesSubmissionId || row.supersedes_submission_id || "",
+    changeSource,
+    changeEnteredBy,
+    manualEntry: changeSource === "intake",
+    enteredBy: changeEnteredBy,
     area,
     name: controllerName({
       firstName: bidder.first_name || "",
@@ -6309,9 +7135,37 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
 
 function upsertRdoSubmissionsFromDatabase(rows, areaById) {
   const items = (rows || []).map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+  inferRdoBidChanges(items);
   const ids = new Set(items.map((item) => item.supabaseSubmissionId));
   intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId || !ids.has(item.supabaseSubmissionId));
   intakeQueue.unshift(...items);
+}
+
+function inferRdoBidChanges(items) {
+  items.forEach((item, itemIndex) => {
+    if (item.isChange || !["Pending", "Approved"].includes(item.status)) return;
+    const itemTime = Date.parse(item.submittedAt || "");
+    const original = items
+      .filter((candidate, candidateIndex) => {
+        if (candidate === item || candidate.status !== "Approved") return false;
+        const sameBidder = item.bidderId && candidate.bidderId
+          ? item.bidderId === candidate.bidderId
+          : item.initials === candidate.initials && item.area === candidate.area;
+        if (!sameBidder) return false;
+        const candidateTime = Date.parse(candidate.submittedAt || "");
+        const submittedEarlier = Number.isFinite(itemTime) && Number.isFinite(candidateTime)
+          ? candidateTime < itemTime
+          : candidateIndex > itemIndex;
+        return submittedEarlier && rdoBidValuesChanged(candidate, item);
+      })
+      .sort((left, right) => Date.parse(right.submittedAt || "") - Date.parse(left.submittedAt || ""))[0];
+    if (!original) return;
+
+    item.isChange = true;
+    item.originalBid = rdoBidSnapshotFromIntakeItem(original);
+    item.originalSubmissionId = original.supabaseSubmissionId || "";
+    item.changeInferred = true;
+  });
 }
 
 function biddingStateSubmissionType(row) {
@@ -6382,6 +7236,13 @@ function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
       label: formatCalendarDate(date),
       cpc: Array.isArray(row.cpc_initials) ? row.cpc_initials.filter(Boolean) : [],
       dev: Array.isArray(row.dev_initials) ? row.dev_initials.filter(Boolean) : [],
+      glBids: Array.isArray(row.gl_bids)
+        ? row.gl_bids.map((bid) => ({
+          initials: String(bid?.initials || "").trim().toUpperCase(),
+          status: uiStatusFromDatabase(bid?.status || "pending"),
+          label: "GL Bid",
+        })).filter((bid) => bid.initials)
+        : [],
       cpcCapacity,
       devCapacity,
       cpcOpen: Math.min(cpcCapacity, Math.max(0, Number(row.cpc_open) || 0)),
@@ -6402,11 +7263,14 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
   const days = Number(row.charged_days || 0);
   const ghostBid = Boolean(row.is_ghost_bid);
+  const bidAs = normalizeBidRoleForArea(bidder.bid_role || "CPC", area);
 
   return {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
+    submissionBatchKey: row.submitted_at || row.created_at || row.id,
     supabaseSubmissionId: row.submission_id || "",
+    bidderId: row.bidder_id || bidder.id || "",
     type: "Leave",
     ghostBid,
     area,
@@ -6416,13 +7280,14 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
       initials: bidder.initials,
     }),
     initials: bidder.initials || "",
-    bidAs: normalizeBidRoleForArea(bidder.bid_role || "CPC", area),
+    bidAs,
     seniority: bidder.seniority_rank,
     priority: Number(row.priority || 0),
     status: uiStatusFromDatabase(row.status),
     submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
     denialReason: row.denial_reason || "",
     range,
     days,
@@ -6431,7 +7296,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     weekKeys,
     weekBucketStarts: row.weekBucketStarts || [],
     notes: row.notes || "",
-    summary: `${ghostBid ? "Ghost Leave · " : ""}${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
+    summary: `${ghostBid ? "Ghost Leave · " : bidAs === "GL" ? "GL Bid · " : ""}${range} · ${days} ${days === 1 ? "day" : "days"}${weekKeys.length ? ` · ${weekKeys.length} bid week${weekKeys.length === 1 ? "" : "s"}` : ""}`,
   };
 }
 
@@ -6524,6 +7389,10 @@ function resetSupabaseBackedData() {
   holidayOverrides.clear();
   fullLeaveDates.clear();
   ghostBidderIds.clear();
+  intakeBidderSelection.record = null;
+  intakeBidderSelection.error = "";
+  intakeBidderSelection.loading = false;
+  intakeBidderSelection.generation += 1;
   if (currentUser) currentUser.ghostBidder = false;
   selectedLineId = "";
   supabaseState.placeholdersCleared = true;
@@ -6716,16 +7585,15 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   return data;
 }
 
-async function saveSupabaseManualLeaveRequest(request, person, area, notes = "") {
+async function saveSupabaseManualLeaveRequest(requests, person, area, notes = "") {
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
   }
-  const dateKeys = datesInLeaveRange(request.range);
   const targetRdoLine = rdoLineForInitials(person.initials);
-  const requestedItems = [{
-    start_date: dateKeys[0],
-    end_date: dateKeys[dateKeys.length - 1],
+  const requestedItems = requests.map((request) => ({
+    start_date: request.startDateKey,
+    end_date: request.endDateKey,
     round: request.round,
     rdo_line_code: targetRdoLine?.line || null,
     fatigue_group: targetRdoLine?.group || null,
@@ -6733,7 +7601,7 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     aws: targetRdoLine?.aws || null,
     mid: targetRdoLine?.mid || null,
     notes,
-  }];
+  }));
   const { data, error } = await client.rpc("submit_leave_bid_batch", {
     requested_bid_year: BID_YEAR,
     requested_items: requestedItems,
@@ -6742,7 +7610,7 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     manual_entry: true,
   });
   if (error) throw error;
-  if (!Array.isArray(data?.submission_ids) || !data.submission_ids.length) {
+  if (!Array.isArray(data?.submission_ids) || data.submission_ids.length !== requests.length) {
     throw new Error("Supabase did not return the saved manual leave submission.");
   }
   return data;
@@ -6812,6 +7680,42 @@ async function loadPublishedLeaveSlots(client) {
   return client.rpc("read_public_leave_slots", { requested_bid_year: BID_YEAR });
 }
 
+async function loadPublishedGlRdoAssignments(client) {
+  return client.rpc("read_public_gl_rdo_assignments", { requested_bid_year: BID_YEAR });
+}
+
+async function loadPublicPilotCalendar() {
+  const client = supabaseClient();
+  if (!client) return;
+  supabaseState.loading = true;
+  try {
+    const result = await loadPublishedLeaveSlots(client);
+    if (result.error) throw result.error;
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
+    calendarRenderRevision += 1;
+  } catch (error) {
+    console.warn(`Public leave slots could not load: ${error.message || error}`);
+  } finally {
+    supabaseState.loading = false;
+    supabaseState.referenceDataLoaded = true;
+  }
+}
+
+async function loadRdoLines(client, bidYearId) {
+  const orderedResult = await client
+    .from("rdo_lines")
+    .select("id,area_id,line_code,display_order,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)")
+    .eq("bid_year_id", bidYearId);
+
+  if (!isMissingRdoLineDisplayOrder(orderedResult.error)) return orderedResult;
+
+  // Keep existing schedules visible while the bid-line editor migration is pending.
+  return client
+    .from("rdo_lines")
+    .select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)")
+    .eq("bid_year_id", bidYearId);
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -6850,11 +7754,13 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
+      glRdoAssignmentsResult,
       biddingStateResult,
       leaveSlotsResult,
       leaveRequestsResult,
       ghostStatusResult,
       intakeSchedulesResult,
+      shiftPresetsResult,
       bidYearSettingsResult,
       roundRulesResult,
       approvalRulesResult,
@@ -6865,12 +7771,14 @@ async function loadSupabaseReferenceData() {
       _helpThreadsLoaded,
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      client.from("rdo_lines").select("id,area_id,line_code,line_type,pattern,fatigue_group,mid,aws,four_ten,flex,status,assigned_bidder_id,assigned_initials,rdo_line_days(weekday,shift_code)").eq("bid_year_id", bidYear.id),
+      loadRdoLines(client, bidYear.id),
+      loadPublishedGlRdoAssignments(client),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       loadIntakeSchedules(client),
+      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
       client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
@@ -6886,11 +7794,13 @@ async function loadSupabaseReferenceData() {
     const loadWarnings = [
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      isMissingSupabaseRoutine(shiftPresetsResult.error) ? null : supabaseLoadWarning("intake shift presets", shiftPresetsResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
       isMissingSupabaseRoutine(approvalRulesResult.error) ? null : supabaseLoadWarning("approval rules", approvalRulesResult),
@@ -6904,7 +7814,9 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
+    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
+    if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
       : biddingStateResult.data?.submissions || [];
@@ -6913,7 +7825,6 @@ async function loadSupabaseReferenceData() {
       && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())
     ));
     if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
-    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!leaveRequestsResult.error) {
       upsertLeaveRequestsFromDatabase(
         attachSubmissionIdsToLeaveRequests(
@@ -6926,10 +7837,14 @@ async function loadSupabaseReferenceData() {
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
-    if (!pilotSettingsResult.error && pilotSettingsResult.data) applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+    if (!pilotSettingsResult.error && pilotSettingsResult.data) {
+      applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
+      await refreshPilotRounds();
+    }
     if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
@@ -6971,6 +7886,7 @@ function formatDuration(milliseconds) {
 }
 
 function formatDateTime(date) {
+  if (!date || !Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -6985,8 +7901,130 @@ function formatDateTimeLocalValue(date) {
   return offsetDate.toISOString().slice(0, 16);
 }
 
-const DEFAULT_INTAKE_SHIFT_START = "06:45";
-const DEFAULT_INTAKE_SHIFT_HOURS = 8;
+const DEFAULT_INTAKE_SHIFT_PRESETS = [
+  { id: "default-0645", startTime: "06:45", durationHours: 8 },
+  { id: "default-1115", startTime: "11:15", durationHours: 8 },
+];
+let intakeShiftPresets = [...DEFAULT_INTAKE_SHIFT_PRESETS];
+let editingShiftPresetId = "";
+let shiftPresetMutationPending = false;
+
+function formatShiftPresetTime(value) {
+  const [hour, minute] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2020, 0, 1, hour, minute)));
+}
+
+function renderShiftPresets() {
+  const buttons = document.querySelector("[data-intake-shift-preset-buttons]");
+  if (buttons) {
+    buttons.innerHTML = intakeShiftPresets.map((preset) => `
+      <button type="button" data-intake-shift-preset="${escapeAttribute(preset.id)}" aria-pressed="false">
+        ${escapeHtml(formatShiftPresetTime(preset.startTime))}<small>${escapeHtml(String(preset.durationHours))}h</small>
+      </button>
+    `).join("") || '<span class="empty-state small">No base shifts yet. Enter a time and length below.</span>';
+  }
+  const builder = document.querySelector("[data-shift-builder]");
+  if (builder) builder.hidden = !hasSystemAdminAccess();
+  const list = document.querySelector("[data-shift-builder-list]");
+  if (list) list.innerHTML = intakeShiftPresets.map((preset) => `
+    <div class="shift-builder-row">
+      <span><strong>${escapeHtml(formatShiftPresetTime(preset.startTime))}</strong><small>${escapeHtml(String(preset.durationHours))} hours</small></span>
+      <div class="shift-builder-actions">
+        <button type="button" class="secondary-action small" data-edit-shift-preset="${escapeAttribute(preset.id)}">Edit</button>
+        <button type="button" class="secondary-action small danger-action" data-delete-shift-preset="${escapeAttribute(preset.id)}">Delete</button>
+      </div>
+    </div>
+  `).join("") || '<p class="empty-state small">No base shifts yet.</p>';
+  const form = document.querySelector("[data-shift-builder-form]");
+  if (form) {
+    form.querySelector("[data-save-shift-preset]").textContent = editingShiftPresetId ? "Save Shift" : "Add Shift";
+    form.querySelector("[data-cancel-shift-preset]").hidden = !editingShiftPresetId;
+    form.querySelectorAll("button, input").forEach((control) => { control.disabled = shiftPresetMutationPending; });
+  }
+  syncIntakeShiftForm(document.querySelector("[data-schedule-start]")?.closest(".schedule-form"));
+}
+
+function setShiftBuilderStatus(message, status = "info") {
+  const target = document.querySelector("[data-shift-builder-status]");
+  if (target) { target.textContent = message; target.dataset.status = status; }
+}
+
+function resetShiftPresetEditor() {
+  editingShiftPresetId = "";
+  document.querySelector("[data-shift-builder-form]")?.reset();
+  renderShiftPresets();
+}
+
+async function saveShiftPreset(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const form = event.currentTarget;
+  const startTime = form.querySelector("[data-shift-builder-time]").value;
+  const durationHours = Number(form.querySelector("[data-shift-builder-hours]").value);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 24 || durationHours * 4 % 1 !== 0) {
+    setShiftBuilderStatus("Enter a start time and a length in quarter-hour increments, up to 24 hours.", "error");
+    return;
+  }
+  if (intakeShiftPresets.some((preset) => preset.startTime === startTime && preset.id !== editingShiftPresetId)) {
+    setShiftBuilderStatus("A base shift already starts at that time.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to save base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  const wasEditing = Boolean(editingShiftPresetId);
+  try {
+    const { error } = await client.rpc("save_intake_shift_preset", {
+      requested_id: wasEditing ? editingShiftPresetId : null,
+      requested_start_time: startTime,
+      requested_duration_hours: durationHours,
+    });
+    if (error) throw error;
+    const result = await client.rpc("read_intake_shift_presets");
+    if (result.error) throw result.error;
+    applyIntakeShiftPresets(result.data);
+    resetShiftPresetEditor();
+    setShiftBuilderStatus(wasEditing ? "Base shift updated." : "Base shift added.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be saved.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+async function deleteShiftPreset(id) {
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const preset = intakeShiftPresets.find((item) => item.id === id);
+  if (!preset || !window.confirm(`Delete the ${formatShiftPresetTime(preset.startTime)} base shift? Existing scheduled shifts will stay as they are.`)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to delete base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  try {
+    const result = await client.rpc("delete_intake_shift_preset", { requested_id: id });
+    if (result.error) throw result.error;
+    intakeShiftPresets = intakeShiftPresets.filter((item) => item.id !== id);
+    if (editingShiftPresetId === id) resetShiftPresetEditor();
+    setShiftBuilderStatus("Base shift deleted.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be deleted.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+function applyIntakeShiftPresets(rows) {
+  intakeShiftPresets = (rows || []).map((row) => ({
+    id: row.id,
+    startTime: String(row.start_time).slice(0, 5),
+    durationHours: Number(row.duration_hours),
+  }));
+  renderShiftPresets();
+}
 
 function syncIntakeShiftForm(form, options = {}) {
   if (!form) return;
@@ -6994,8 +8032,8 @@ function syncIntakeShiftForm(form, options = {}) {
   const dateInput = form.querySelector("[data-intake-shift-date]");
   const timeInput = form.querySelector("[data-intake-shift-time]");
   const durationInput = form.querySelector("[data-intake-shift-duration]");
-  const startInput = form.querySelector("[data-schedule-start], [data-admin-schedule-start]");
-  const endInput = form.querySelector("[data-schedule-end], [data-admin-schedule-end]");
+  const startInput = form.querySelector("[data-schedule-start]");
+  const endInput = form.querySelector("[data-schedule-end]");
   if (!dateInput || !timeInput || !durationInput || !startInput || !endInput) return;
 
   if (!dateInput.value) {
@@ -7003,8 +8041,8 @@ function syncIntakeShiftForm(form, options = {}) {
     defaultDate.setDate(defaultDate.getDate() + (options.defaultOffsetDays ?? 5));
     dateInput.value = formatDateTimeLocalValue(defaultDate).slice(0, 10);
   }
-  if (!timeInput.value) timeInput.value = DEFAULT_INTAKE_SHIFT_START;
-  if (!durationInput.value) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  if (!timeInput.value && intakeShiftPresets.length) timeInput.value = intakeShiftPresets[0].startTime;
+  if (!durationInput.value && intakeShiftPresets.length) durationInput.value = String(intakeShiftPresets[0].durationHours);
 
   const durationHours = Number(durationInput.value);
   const start = new Date(`${dateInput.value}T${timeInput.value}`);
@@ -7020,7 +8058,8 @@ function syncIntakeShiftForm(form, options = {}) {
   }
 
   form.querySelectorAll("[data-intake-shift-preset]").forEach((button) => {
-    const isActive = button.dataset.intakeShiftPreset === timeInput.value && durationHours === DEFAULT_INTAKE_SHIFT_HOURS;
+    const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+    const isActive = preset?.startTime === timeInput.value && preset?.durationHours === durationHours;
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
@@ -7031,8 +8070,10 @@ function applyIntakeShiftPreset(button) {
   if (!form) return;
   const timeInput = form.querySelector("[data-intake-shift-time]");
   const durationInput = form.querySelector("[data-intake-shift-duration]");
-  if (timeInput) timeInput.value = button.dataset.intakeShiftPreset || DEFAULT_INTAKE_SHIFT_START;
-  if (durationInput) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+  if (!preset) return;
+  if (timeInput) timeInput.value = preset.startTime;
+  if (durationInput) durationInput.value = String(preset.durationHours);
   syncIntakeShiftForm(form);
 }
 
@@ -7053,6 +8094,7 @@ function formatBidWindowStart(start) {
 }
 
 function latestAreaRound(date = new Date(), roundState = areaBidRoundState(date)) {
+  if (activeTestBidRound()) return activeTestBidRound();
   if (roundState) return roundState.round;
 
   const activePerson = seniority.find((person) => person.openRound);
@@ -7267,7 +8309,10 @@ function rdoStickyHeaderElement() {
 }
 
 function rdoStickyHeaderTop() {
-  const publicHeader = document.querySelector(".public-shell:not([hidden]) .public-topbar");
+  const publicShell = document.querySelector(".public-shell:not([hidden])");
+  const publicHeader = publicShell
+    ? publicShell.querySelector(window.matchMedia("(max-width: 720px)").matches ? ".public-rail" : ".public-topbar")
+    : null;
   const memberHeader = document.querySelector(".app-shell:not([hidden]) .topbar");
   const header = publicHeader || memberHeader;
   if (!header || !["fixed", "sticky"].includes(getComputedStyle(header).position)) return 0;
@@ -7351,15 +8396,26 @@ function publicRdoLineSection(line) {
   return /D[-\s]?DEV/i.test(line.pattern) ? "D-Dev" : "R-Dev";
 }
 
+function rdoLineDisplayFatigueGroup(line, { previewGroup = "", pendingGroup = "" } = {}) {
+  const group = line.status === "Taken" ? line.group : pendingGroup || previewGroup;
+  return ["A", "B", "C"].includes(group) ? group : "";
+}
+
+function rdoFatigueGroupBadge(group) {
+  return ["A", "B", "C"].includes(group)
+    ? `<span class="group ${groupClass(group)}">${group}</span>`
+    : "";
+}
+
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
-  if (!lines.length) return `<tr><td colspan="11">No RDO lines match those filters for ${area}.</td></tr>`;
+  if (!lines.length) return `<tr><td colspan="12">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
   const rows = [];
 
   lines.forEach((line) => {
     if (showPatternGroups && line.pattern !== lastPattern) {
-      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
+      rows.push(`<tr><th colspan="12">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
 
@@ -7367,10 +8423,11 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
     rows.push(`
       <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
         <td>${line.line}</td>
-        <td><b>${lineOccupant(line)}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
-        <td></td>
-        <td>${userChoiceCell(lineMidReferenceValue(line))}</td>
+        <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
+        <td>${rdoLineAwsReferenceCell(line)}</td>
+        <td>${rdoLineMidReferenceCell(line)}</td>
       </tr>
     `);
   });
@@ -7399,11 +8456,13 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
               <details class="mobile-rdo-card">
                 <summary>
                   <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-line-status">${lineStatusMarkup(line)}</span>
                   <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
-                <p>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</p>
+                <p>Fatigue group: ${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line)) || "Not assigned"}</p>
+                ${rdoLineAwsReferenceCell(line) ? `<p>AWS: ${rdoLineAwsReferenceCell(line)}</p>` : ""}
+                ${rdoLineMidReferenceCell(line) ? `<p>Mid: ${rdoLineMidReferenceCell(line)}</p>` : ""}
               </details>
             `;
           }).join("")}
@@ -7416,6 +8475,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
                 <th>Bidder</th>
                 ${dayNames.map((day) => `<th>${day}</th>`).join("")}
                 <th>Group</th>
+                <th>AWS</th>
                 <th>Mid</th>
               </tr>
             </thead>
@@ -7465,6 +8525,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
+      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL / Ghost Bid · visible, but does not occupy the line</p>
       <div class="mobile-rdo-view" role="group" aria-label="RDO display">
         <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
         <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
@@ -7478,48 +8539,63 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  const showBidderNames = Boolean(supabaseState.authUserId);
+
   return `
     <div class="public-table-heading flat">
       <small>All rounds are two-hour bid windows. Times shown are bid-window start times.</small>
     </div>
-    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="Name or initials" aria-label="Find your bid times" data-mobile-bid-search /></label>
-    <div class="mobile-bid-time-cards">
-      ${seniority.map((person) => `
-        <article class="mobile-bid-time-card">
-          <h3 data-bidder-name><span>${person.rank}. ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
-          <p>${escapeHtml(person.initials)}</p>
-          <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
-        </article>
-      `).join("")}
-      ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
-      <p data-mobile-bid-empty hidden role="status">No bidders match that name or initials.</p>
+    <div class="mobile-bid-time-view" role="group" aria-label="Bid time display">
+      <button type="button" data-bid-time-presentation="cards" aria-pressed="${publicBidTimePresentation === "cards"}">Cards</button>
+      <button type="button" data-bid-time-presentation="list" aria-pressed="${publicBidTimePresentation === "list"}">List</button>
     </div>
-    <div class="table-wrap public-table-wrap flat desktop-bid-times">
-      <table class="public-bid-time-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Name</th>
-            <th>Initials</th>
-            <th>Bid As</th>
-            <th>Round 1</th>
-            <th>Round 2</th>
-            <th>Round 3</th>
-            <th>Round 4</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${seniority.map((person) => `
+    <label class="mobile-bid-time-search">Find your bid times<input type="search" placeholder="${showBidderNames ? "Name or initials" : "Initials"}" aria-label="Find your bid times" data-mobile-bid-search /></label>
+    <div class="public-bid-time-results" data-public-bid-time-results data-presentation="${publicBidTimePresentation}">
+      <div class="mobile-bid-time-cards">
+        ${seniority.map((person) => `
+          <article class="mobile-bid-time-card" data-public-bid-time-card>
+            <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <p>${escapeHtml(person.initials)}</p>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+          </article>
+        `).join("")}
+        ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
+      </div>
+      <div class="table-wrap public-table-wrap flat desktop-bid-times public-bid-time-list-wrap" tabindex="0" role="region" aria-label="Bid time list, scroll horizontally">
+        <table class="public-bid-time-table">
+          <colgroup>
+            <col class="bid-time-rank-column" />
+            ${showBidderNames ? '<col class="bid-time-name-column" />' : ""}
+            <col class="bid-time-initials-column" />
+            <col class="bid-time-role-column" />
+            ${Array.from({ length: 4 }, () => '<col class="bid-time-round-column" />').join("")}
+          </colgroup>
+          <thead>
             <tr>
-              <td>${person.rank}</td>
-              <td>${person.firstName} ${person.lastName}</td>
-              <td>${person.initials}</td>
-              <td><span class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</span></td>
-              ${person.rounds.map((round) => `<td>${publicBidTimeLabel(round)}</td>`).join("")}
+              <th>#</th>
+              ${showBidderNames ? '<th class="bid-time-name">Name</th>' : ""}
+              <th class="bid-time-initials">Initials</th>
+              <th>Bid As</th>
+              <th class="bid-time-round">Round 1</th>
+              <th class="bid-time-round">Round 2</th>
+              <th class="bid-time-round">Round 3</th>
+              <th class="bid-time-round">Round 4</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            ${seniority.map((person) => `
+              <tr data-public-bid-time-row>
+                <td>${person.rank}</td>
+                ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
+                <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
+                <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+      <p data-mobile-bid-empty hidden role="status">No bidders match ${showBidderNames ? "that name or those initials" : "those initials"}.</p>
     </div>
   `;
 }
@@ -7662,7 +8738,7 @@ function pageForViewMode(mode) {
 }
 
 function viewModeForPage(pageName) {
-  if (pageName === "admin") return "admin";
+  if (pageName === "admin" || pageName === "admin-tools") return "admin";
   if (pageName === "intake" || pageName === "intake-schedule") return "intake";
   return "bue";
 }
@@ -7817,25 +8893,47 @@ function hasSubmittedRdoBid() {
   return currentUserHasRdoRequestForLeave();
 }
 
+function shouldShowLateBidContact(date = new Date()) {
+  return !pilotState.database
+    && bidWindowErrorMessage("RDO bids", date) === LATE_BID_MESSAGE
+    && !hasSubmittedRdoBid();
+}
+
+function openLateBidDialog() {
+  const dialog = document.querySelector("[data-late-bid-dialog]");
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+}
+
+function closeLateBidDialog() {
+  document.querySelector("[data-late-bid-dialog]")?.close();
+}
+
 function updateBidWindow(force = false) {
+  return withLeaveReadCache(() => updateBidWindowWithCache(force));
+}
+
+function updateBidWindowWithCache(force = false) {
   const now = new Date();
+  syncIntakeBidderWindowStatus(now);
   const roundState = areaBidRoundState(now);
-  const isValidationPeriod = roundState?.phase === "validation";
+  const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
   const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
   const viewingHomeArea = isViewingHomeArea();
-  const isBefore = viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
-  const isOpen = viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
+  const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
+  const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
   const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
   const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
-  const statusText = areaRoundOpen ? "Open" : "Closed";
-  const showCurrentBidder = !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = isOpen ? "Bid Window Open" : "Bid Window Closed";
-  const countdownText = isOpen
+  const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
+  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen;
+  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
       ? formatDuration(personalBidWindow.start - now)
@@ -7844,7 +8942,7 @@ function updateBidWindow(force = false) {
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
         : "Closed";
-  const countdownLabel = isOpen
+  const countdownLabel = pilotState.database ? "Pilot Bidding" : isOpen
       ? "Window Closes In"
       : isBefore
       ? "Next Window In"
@@ -7856,6 +8954,7 @@ function updateBidWindow(force = false) {
   const currentRoundRule = roundRuleForRound(currentRound);
   const pendingRequest = pendingCurrentUserRdoRequest();
   const hasRdoBid = currentUserHasRdoRequestForLeave();
+  const rdoChangeError = rdoChangeWindowErrorMessage(now);
 
   // The countdown changes every second; the rest of the controls only need work
   // when a bid window, round, active bidder, or rendered page state changes.
@@ -7893,6 +8992,8 @@ function updateBidWindow(force = false) {
     currentRoundRule.detail,
     pendingRequest?.id || null,
     hasRdoBid,
+    rdoChangeError,
+    showLateBidContact,
   ]);
 
   if (!force && stateKey === bidWindowUiStateKey) return;
@@ -7942,8 +9043,10 @@ function updateBidWindow(force = false) {
   });
 
   document.querySelectorAll(".window-action").forEach((button) => {
-    const disabled = !canUseBidActions;
+    const isLateBidContactAction = button.matches("[data-bid-entry-action]") && showLateBidContact;
+    const disabled = !canUseBidActions && !isLateBidContactAction;
     button.disabled = disabled;
+    button.dataset.lateBidContact = String(isLateBidContactAction);
     button.classList.toggle("disabled", disabled);
   });
 
@@ -7955,6 +9058,27 @@ function updateBidWindow(force = false) {
       button.classList.add("disabled");
       button.textContent = "Awaiting Intake Decision";
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
+      return;
+    }
+    if (!isOpen && !isTestingBypass && hasRdoBid) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "Bid Submitted";
+      button.title = "";
+      return;
+    }
+    if (showLateBidContact) {
+      button.disabled = false;
+      button.classList.remove("disabled");
+      button.textContent = `Call or Text ${BID_OFFICE_PHONE_DISPLAY}`;
+      button.title = "Contact the Bidding Office to complete your bid.";
+      return;
+    }
+    if (rdoChangeError) {
+      button.disabled = true;
+      button.classList.add("disabled");
+      button.textContent = "RDO Changes Closed";
+      button.title = rdoChangeError;
       return;
     }
     button.title = "";
@@ -7991,6 +9115,7 @@ function thirdDaySwingIndex(week) {
 
   const normalizedWeek = week.map((value) => String(value || "").trim().toUpperCase());
   if (normalizedWeek.every((value) => value === "RDO")) return -1;
+  if (normalizedWeek.some((value) => /^M\d/.test(value))) return -1;
 
   let longestRdoRun = null;
   normalizedWeek.forEach((value, index) => {
@@ -8073,6 +9198,30 @@ function lineOccupant(line) {
   return "";
 }
 
+function lineGlBids(line) {
+  return Array.isArray(line?.glBids) ? line.glBids : [];
+}
+
+function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
+  const occupant = lineOccupant(line);
+  const glBids = lineGlBids(line);
+  const pieces = [];
+  if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
+  else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
+  glBids.forEach((bid) => {
+    pieces.push(`<span class="gl-line-bidder" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+  });
+  return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
+}
+
+function lineStatusMarkup(line, openLabel = "Open") {
+  const label = line.status === "Taken" ? "Taken" : openLabel;
+  const bidders = lineBidderMarkup(line);
+  return bidders
+    ? `${escapeHtml(label)}<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>${bidders}`
+    : escapeHtml(label);
+}
+
 function selectedMidValue(line) {
   return isForcedMid(line) ? line.mid : selectedMidPreference;
 }
@@ -8084,15 +9233,20 @@ function userChoiceCell(value) {
   return value;
 }
 
-function publicPreferenceCell(value) {
-  const normalized = String(value || "").trim();
-  if (!normalized || normalized === "—" || normalized.toUpperCase() === "UNSELECTED") return "";
-  return userChoiceCell(normalized);
-}
-
 function lineMidReferenceValue(line) {
   if (line.mid === "BID" || line.mid === "Yes" || line.mid === "No") return line.mid;
   return "UNSELECTED";
+}
+
+function rdoLineAwsReferenceCell(line) {
+  return line.status === "Taken" && ["Yes", "No"].includes(line.aws) ? userChoiceCell(line.aws) : "";
+}
+
+function rdoLineMidReferenceCell(line) {
+  const value = lineMidReferenceValue(line);
+  return value === "BID" || (line.status === "Taken" && ["Yes", "No"].includes(value))
+    ? userChoiceCell(value)
+    : "";
 }
 
 function selectedLineStatus(line) {
@@ -8108,8 +9262,9 @@ function selectedLineStatus(line) {
 
 function rdoAssignmentValue(assignment, key) {
   const requestValue = assignment?.request?.[key];
-  if (requestValue) return requestValue;
-  if (assignment?.line?.[key]) return assignment.line[key];
+  if (requestValue !== undefined && requestValue !== null && requestValue !== "") return requestValue;
+  const lineValue = assignment?.line?.[key];
+  if (lineValue !== undefined && lineValue !== null && lineValue !== "") return lineValue;
   return "";
 }
 
@@ -8144,15 +9299,25 @@ function renderDashboardSelectedLineCard(assignment) {
     const flex = rdoAssignmentValue(assignment, "flex");
     const aws = rdoAssignmentValue(assignment, "aws");
     const mid = rdoAssignmentValue(assignment, "mid");
-    const values = [
-      ["Group", group],
+    const preferences = [
       ["Flex", flex],
       ["AWS", aws],
       ["Mid", mid],
-    ].filter(([, value]) => value);
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    const fatigueGroup = String(group || "").trim().toUpperCase();
 
-    element.innerHTML = values.length
-      ? values.map(([label, value]) => `<span>${label} <b${label === "Group" ? ` class="group ${groupClass(value)}"` : ""}>${value}</b></span>`).join("")
+    element.innerHTML = fatigueGroup || preferences.length
+      ? `
+          ${fatigueGroup ? `
+            <span class="fatigue-summary-card">
+              <em>Fatigue Group</em>
+              <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
+                ${FATIGUE_GROUPS.map((value) => `<strong class="fatigue-summary-segment ${groupClass(value)} ${fatigueGroup === value ? "active" : ""}" aria-hidden="true">${value}</strong>`).join("")}
+              </span>
+            </span>
+          ` : ""}
+          ${preferences.map(([label, value]) => `<span class="rdo-preference-card"><em>${label}</em><b>${rdoBidPreferenceLabel(value)}</b></span>`).join("")}
+        `
       : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
   });
 
@@ -8170,11 +9335,20 @@ function selectedLineReadinessItems(line) {
   const requestMatchesLine = existingRequest?.line === line.line;
   const fatiguePreferenceSelected = Boolean(selectedFatigueGroup || requestMatchesLine);
   const flexPreference = selectedFlexPreference || (requestMatchesLine ? existingRequest.flex : "");
-  const awsPreference = selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : "");
-  const midPreference = selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "");
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
+  const awsPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    awsPreferenceForLine(line, selectedAwsPreference || (requestMatchesLine ? existingRequest.aws : ""))
+  );
+  const midPreference = rdoPreferenceForBidRole(
+    currentUserBidAs(),
+    currentUser.area,
+    selectedMidValue(line) || (requestMatchesLine ? existingRequest.mid : "")
+  );
   const lineStatus = selectedLineStatus(line);
   const selectedLineOpen = lineStatus !== "Taken";
-  const preferencesComplete = Boolean(flexPreference && awsPreference && (isForcedMid(line) || midPreference));
+  const preferencesComplete = Boolean(flexPreference && awsPreference && (developmentalBidder || isForcedMid(line) || midPreference));
 
   return [
     { label: "Selected line open", checked: selectedLineOpen },
@@ -8204,6 +9378,7 @@ function rdoLineMatchesFilterSet(line, filters) {
     const searchable = [
       line.line,
       line.cpc,
+      ...lineGlBids(line).map((bid) => bid.initials),
       line.pattern,
       line.group,
       line.status,
@@ -8232,6 +9407,13 @@ function isRdoFilterActive() {
   );
 }
 
+function isCurrentUserRdoLine(line) {
+  return isViewingHomeArea() && (
+    (line.status === "Taken" && line.cpc === currentUser.initials) ||
+    currentUserRdoRequest()?.line === line.line
+  );
+}
+
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
@@ -8240,6 +9422,11 @@ function renderRdoLines() {
   const rows = [];
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
+  const eligibleLines = rdoLinesForBidder(currentUserBidAs(), viewArea);
+  if (isViewingHomeArea() && !eligibleLines.some((line) => line.line === selectedLineId)) {
+    selectedLineId = eligibleLines[0]?.line || "";
+  }
+  setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
   const countTarget = document.querySelector("[data-rdo-filter-count]");
   const pendingRequest = pendingCurrentUserRdoRequest();
@@ -8254,33 +9441,35 @@ function renderRdoLines() {
 
   filteredLines.forEach((line) => {
     if (line.pattern !== lastPattern) {
-      rows.push(`<tr><th colspan="11">${line.pattern}</th></tr>`);
+      rows.push(`<tr><th colspan="12">${line.pattern}</th></tr>`);
       lastPattern = line.pattern;
     }
 
     const isSelected = line.line === selectedLineId;
-    const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
-    const groupValue = isSelected && selectedFatigueGroup !== NO_FATIGUE_PREFERENCE
-      ? `<span class="group ${groupClass(selectedFatigueGroup)}">${selectedFatigueGroup}</span>`
-      : "";
-    const midValue = lineMidReferenceValue(line);
+    const canSelect = isViewingHomeArea() && !bidderSelectionLocked && !isOccupied
+      && rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
+    const groupValue = rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line, {
+      previewGroup: isSelected && isViewingHomeArea() ? selectedFatigueGroup : "",
+      pendingGroup: isViewingHomeArea() && pendingRequest?.line === line.line ? pendingRequest.fatigueGroup : "",
+    }));
     const swingIndex = thirdDaySwingIndex(line.week);
 
     rows.push(`
-      <tr class="${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${isOccupied || !isViewingHomeArea() || bidderSelectionLocked ? "occupied-row" : "selectable-row"}" ${isViewingHomeArea() && !bidderSelectionLocked ? `data-line-id="${line.line}"` : ""}>
+      <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${canSelect ? "selectable-row" : "occupied-row"}" ${canSelect ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
-        <td><b>${displayCpc}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
-        <td>${userChoiceCell(midValue)}</td>
+        <td>${rdoLineAwsReferenceCell(line)}</td>
+        <td>${rdoLineMidReferenceCell(line)}</td>
       </tr>
     `);
   });
 
   target.innerHTML = rows.length
     ? rows.join("")
-    : `<tr><td colspan="11">No RDO lines match those filters for ${viewArea}.</td></tr>`;
+    : `<tr><td colspan="12">No RDO lines match those filters for ${viewArea}.</td></tr>`;
 
   const mobileCards = document.querySelector("[data-member-rdo-cards]");
   const mobileResults = document.querySelector("[data-member-rdo-results]");
@@ -8290,24 +9479,25 @@ function renderRdoLines() {
       ? filteredLines.map((line) => {
         const isSelected = line.line === selectedLineId && isViewingHomeArea();
         const isOccupied = line.status === "Taken";
+        const matchesBidRole = rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
         const rdoDays = line.week
           .map((value, index) => value === "RDO" ? dayNames[index] : "")
           .filter(Boolean)
           .join(", ") || line.pattern;
-        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() ? "Open" : "View only";
+        const status = lineStatusMarkup(line, isViewingHomeArea() && matchesBidRole ? "Open" : "View only");
         const swingIndex = thirdDaySwingIndex(line.week);
-        const selectButton = !isOccupied && isViewingHomeArea() && !bidderSelectionLocked
+        const selectButton = !isOccupied && isViewingHomeArea() && matchesBidRole && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
           : "";
         return `
-          <details class="mobile-rdo-card member-rdo-card ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
+          <details class="mobile-rdo-card member-rdo-card ${isCurrentUserRdoLine(line) ? "own-rdo-card" : ""} ${isSelected ? "selected" : ""}" ${isSelected ? "open" : ""}>
             <summary>
               <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${escapeHtml(rdoDays)}</span></span>
               <span class="mobile-line-status">${status}</span>
               <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
             </summary>
             <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
-            <div class="member-rdo-card-footer"><span>Mid: ${userChoiceCell(lineMidReferenceValue(line))}</span>${selectButton}</div>
+            <div class="member-rdo-card-footer">${rdoLineAwsReferenceCell(line) ? `<span>AWS: ${rdoLineAwsReferenceCell(line)}</span>` : ""}${rdoLineMidReferenceCell(line) ? `<span>Mid: ${rdoLineMidReferenceCell(line)}</span>` : ""}${selectButton}</div>
           </details>
         `;
       }).join("")
@@ -8316,17 +9506,23 @@ function renderRdoLines() {
 }
 
 function updateSelectedLine() {
-  const areaLines = rdoLinesForArea(currentViewArea());
-  const line = areaLines.find((item) => item.line === selectedLineId) || areaLines[0] || rdoLines[0];
+  const viewArea = currentViewArea();
+  const areaLines = isViewingHomeArea()
+    ? rdoLinesForBidder(currentUserBidAs(), viewArea)
+    : rdoLinesForArea(viewArea);
+  const line = areaLines.find((item) => item.line === selectedLineId)
+    || areaLines[0]
+    || (isViewingHomeArea() ? null : rdoLines[0]);
   const dashboardAssignment = currentUserRdoAssignment();
   if (!line) {
     renderDashboardSelectedLineCard(dashboardAssignment);
     return;
   }
   const midIsBidLine = isMidLineByDesign(line);
+  const developmentalBidder = isDevelopmentalBidRole(currentUserBidAs(), currentUser.area);
   const fatigueCapacity = fatigueCapacityForLine(line);
-  const canEditLineSchedule = hasSystemAdminAccess();
   const lineSchedule = lineScheduleLabel(line);
+  const isFourTenLine = lineSchedule === "4-10";
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
   const lineRequest = selectedLineRequest(line);
@@ -8392,19 +9588,20 @@ function updateSelectedLine() {
       </span>
       <span class="aws-picker">
         <em>AWS</em>
-        <small>Line schedule</small>
+        <small>${developmentalBidder ? "Not applicable to DEV" : isFourTenLine ? "Line schedule · AWS included" : "Line schedule"}</small>
         <span class="line-mode-options">
-          ${canEditLineSchedule
-            ? ["4-10", "5-8"].map((value) => `
-                <button class="line-mode-option ${lineSchedule === value ? "active" : ""}" type="button" data-four-ten-choice="${value === "4-10" ? "Yes" : "No"}">
-                  ${value}
-                </button>
-              `).join("")
-            : `<button class="line-mode-option active locked" type="button" disabled>${lineSchedule}</button>`}
+          ${["4-10", "5-8"].map((value) => {
+            const isCurrentSchedule = lineSchedule === value;
+            return `
+              <button class="line-mode-option locked ${isCurrentSchedule ? "active" : "schedule-unavailable"}" type="button" disabled aria-pressed="${isCurrentSchedule}">
+                ${value}
+              </button>
+            `;
+          }).join("")}
         </span>
         <span class="choice-options aws-choice-options">
           ${["Yes", "No"].map((value) => `
-            <button class="choice-option ${selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${bidderSelectionLocked ? "disabled" : ""}>
+            <button class="choice-option ${developmentalBidder ? value === "No" ? "active" : "" : !isFourTenLine && selectedAwsPreference === value ? "active" : ""}" type="button" data-aws-choice="${value}" ${developmentalBidder || isFourTenLine || bidderSelectionLocked ? "disabled" : ""} ${developmentalBidder ? 'title="DEV bidders do not work AWS."' : isFourTenLine ? 'title="AWS is included with a 4-10 line."' : ""}>
               ${value}
             </button>
           `).join("")}
@@ -8413,11 +9610,13 @@ function updateSelectedLine() {
       <span class="mid-picker">
         <em>Mid</em>
         <span class="line-mode-options mid-line-options">
-          <button class="line-mode-option mid-bid-line-option ${midIsBidLine ? "active locked" : ""}" type="button" disabled>
+          <button class="line-mode-option mid-bid-line-option ${!developmentalBidder && midIsBidLine ? "active locked" : ""}" type="button" disabled>
             Bid Line
           </button>
         </span>
-        ${midIsBidLine
+        ${developmentalBidder
+          ? '<span class="mid-options"><button class="mid-option active" type="button" disabled title="DEV bidders do not work Mid.">No</button></span>'
+          : midIsBidLine
           ? ""
           : `<span class="mid-options">
               ${["Yes", "No"].map((value) => `
@@ -8498,18 +9697,16 @@ function renderLeaveRows(targetId) {
       return compact
         ? `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td><span class="status ${bid.status.toLowerCase()}">${bid.status}</span></td>
         </tr>
       `
         : `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
-          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : ''}${bid.range}</td>
+          <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
           <td>
             <span class="status ${bid.status.toLowerCase()}">${bid.status}</span>
@@ -8549,7 +9746,7 @@ function renderLeaveDraftQueue() {
       <article class="leave-draft-item">
         <span>${index + 1}</span>
         <div>
-          <strong>${currentUser.ghostBidder ? '<span class="ghost-bid-badge">Ghost Leave</span> ' : ''}${escapeHtml(item.range)}</strong>
+          <strong>${currentUser.ghostBidder ? '<span class="ghost-bid-badge">Ghost Leave</span> ' : currentUserBidAs() === "GL" ? '<span class="gl-bid-badge">GL Bid</span> ' : ''}${escapeHtml(item.range)}</strong>
           <small>${item.weekUnits ? `${item.weekUnits} bid week · ` : ""}${item.days} ${item.days === 1 ? "day" : "days"} charged</small>
           ${item.notes ? `<em>${escapeHtml(item.notes)}</em>` : ""}
         </div>
@@ -8629,7 +9826,8 @@ function submittedLeaveDateRows(items = submittedLeaveItemsForCurrentRound()) {
   const sortedRows = rows.sort((left, right) => left.oldKey.localeCompare(right.oldKey));
   if (bidChangeRound !== 1) return sortedRows;
 
-  const weekStarts = roundOneWeekKeysForDateKeys(sortedRows.map((row) => row.oldKey));
+  const storedStarts = [...new Set(items.flatMap((item) => item.weekBucketStarts || []))].sort();
+  const weekStarts = storedStarts.length ? storedStarts : roundOneWeekKeysForDateKeys(sortedRows.map((row) => row.oldKey));
   return sortedRows.map((row) => ({
     ...row,
     groupKey: weekStarts.find((startKey) => {
@@ -8647,18 +9845,26 @@ function setBidChangeStatus(message, status = "info") {
 }
 
 function bidChangeCount() {
+  if (bidChangeRound === 1) return bidChangeDraftSelection().changedRows.length;
   return bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey).length;
 }
 
 function bidChangeDraftSelection() {
+  if (bidChangeRound === 1) {
+    if (!bidChangeWeek) return { changedRows: [], affectedRequestIds: new Set(), replacementRows: [] };
+    const originals = bidChangeRows.filter((row) => row.groupKey === bidChangeWeek.groupKey);
+    const oldKeys = originals.map((row) => row.oldKey);
+    const selected = [...bidChangeWeek.dates].sort();
+    const changed = oldKeys.length !== selected.length || oldKeys.some((key) => !bidChangeWeek.dates.has(key));
+    const affectedRequestIds = new Set(originals.map((row) => row.itemKey));
+    // Preserve dates outside this week if a legacy request spans both weeks.
+    const retained = bidChangeRows.filter((row) => affectedRequestIds.has(row.itemKey) && row.groupKey !== bidChangeWeek.groupKey)
+      .map((row) => ({ ...row, newKey: row.oldKey }));
+    const replacements = selected.map((key) => ({ newKey: key, oldKey: key, notes: originals[0]?.notes || '' }));
+    return { changedRows: changed ? originals : [], affectedRequestIds, replacementRows: [...retained, ...replacements] };
+  }
   const changedRows = bidChangeRows.filter((row) => row.newKey && row.newKey !== row.oldKey);
   const affectedRequestIds = new Set(changedRows.map((row) => row.itemKey));
-  if (bidChangeRound === 1) {
-    changedRows.forEach((row) => {
-      bidChangeRows.filter((candidate) => candidate.groupKey === row.groupKey)
-        .forEach((candidate) => affectedRequestIds.add(candidate.itemKey));
-    });
-  }
   const replacementRows = bidChangeRows
     .filter((row) => affectedRequestIds.has(row.itemKey))
     .map((row) => ({ ...row, newKey: row.newKey || row.oldKey }));
@@ -8684,6 +9890,7 @@ function renderBidChangeModal() {
   if (!modal || modal.hidden || !rowsTarget || !saveButton) return;
 
   const isRoundOne = bidChangeRound === 1;
+  if (isRoundOne) { renderRoundOneBidChangeModal(rowsTarget, saveButton); return; }
   const selection = bidChangeDraftSelection();
   const validationMessage = selection.changedRows.length
     ? bidChangeValidationMessage(selection.replacementRows, selection.affectedRequestIds)
@@ -8776,6 +9983,7 @@ function openBidChangeModal() {
 
   bidChangeRound = leaveRoundForItem(items[0]);
   bidChangeRows = submittedLeaveDateRows(items);
+  bidChangeWeek = null;
   const modal = document.querySelector("[data-bid-change-modal]");
   if (!modal) return;
   bidChangeReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -8794,20 +10002,72 @@ function closeBidChangeModal({ restoreFocus = true } = {}) {
   const wasOpen = !modal.hidden;
   modal.hidden = true;
   bidChangeRows = [];
+  bidChangeWeek = null;
   bidChangeRound = 0;
   document.body.classList.remove("modal-open");
   if (wasOpen && restoreFocus && bidChangeReturnFocus?.isConnected) bidChangeReturnFocus.focus();
   bidChangeReturnFocus = null;
 }
 
-function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
-  bidChangeRows = bidChangeRows.map((row) => {
-    if (row.groupKey !== groupKey) return row;
-    if (!newStartKey) return { ...row, newKey: "" };
-    const offset = Math.round((dateFromKey(row.oldKey) - dateFromKey(groupKey)) / 86400000);
-    return { ...row, newKey: addDaysToDateKey(newStartKey, offset) };
-  });
+function selectRoundOneBidChangeWeek(groupKey) {
+  if (leaveManagementPendingId) return;
+  if (bidChangeWeek && bidChangeCount() && !window.confirm('Discard the unsaved changes to this week?')) return;
+  bidChangeWeek = { groupKey, startKey: groupKey, dates: new Set(bidChangeRows.filter((row) => row.groupKey === groupKey).map((row) => row.oldKey).filter((key) => !isRdoDateForInitials(key, currentUser.initials))) };
   renderBidChangeModal();
+}
+
+function updateRoundOneBidChangeWeek(groupKey, newStartKey) {
+  if (leaveManagementPendingId || !bidChangeWeek || groupKey !== bidChangeWeek.groupKey) return;
+  bidChangeWeek.startKey = newStartKey;
+  // Moving a week opens an empty calendar; no dates are selected automatically.
+  bidChangeWeek.dates.clear();
+  renderBidChangeModal();
+}
+
+function toggleRoundOneBidChangeDate(key) {
+  if (leaveManagementPendingId || !bidChangeWeek || !bidChangeWeek.startKey) return;
+  if (key < bidChangeWeek.startKey || key > addDaysToDateKey(bidChangeWeek.startKey, 6)
+      || !isBidLeaveYearDate(key) || isRdoDateForInitials(key, currentUser.initials)) return;
+  if (bidChangeWeek.dates.has(key)) bidChangeWeek.dates.delete(key);
+  else bidChangeWeek.dates.add(key);
+  renderBidChangeModal();
+}
+
+function roundOneBidChangeValidationMessage() {
+  if (!bidChangeWeek || !bidChangeWeek.startKey) return 'Choose the week you want to change and its first date.';
+  const keys = [...bidChangeWeek.dates].sort();
+  if (!keys.length) return 'Select at least one workday for this week. Deselect dates to leave gaps.';
+  if (keys.some((key) => key < bidChangeWeek.startKey || key > addDaysToDateKey(bidChangeWeek.startKey, 6))) return 'All selected dates must fit within this seven-day week.';
+  if (keys.some((key) => isRdoDateForInitials(key, currentUser.initials))) return 'RDO dates cannot be selected.';
+  const otherWeekStarts = [...new Set(bidChangeRows.filter((row) => row.groupKey !== bidChangeWeek.groupKey).map((row) => row.groupKey))];
+  if (otherWeekStarts.some((start) => start <= addDaysToDateKey(bidChangeWeek.startKey, 6) && addDaysToDateKey(start, 6) >= bidChangeWeek.startKey)) return 'This week overlaps your other bid week. Choose a separate seven-day span.';
+  return '';
+}
+
+function renderRoundOneBidChangeModal(rowsTarget, saveButton) {
+  const groups = [...new Set(bidChangeRows.map((row) => row.groupKey))];
+  const selection = bidChangeDraftSelection();
+  const error = roundOneBidChangeValidationMessage() || (selection.changedRows.length ? bidChangeValidationMessage(selection.replacementRows, selection.affectedRequestIds) : '');
+  document.querySelector('[data-bid-change-round]').textContent = 'Round 1';
+  document.querySelector('[data-bid-change-description]').textContent = 'Change one complete bid week at a time. Your other week stays in place.';
+  document.querySelector('[data-bid-change-guidance]').textContent = 'Choose a week, then select its workdays within a seven-day span. Click selected dates to remove them. Dates between selections may be skipped; RDOs are disabled.';
+  rowsTarget.innerHTML = `<div class="bid-change-week-picker">${groups.map((group, index) => `<button type="button" class="secondary-action" data-bid-change-select-week="${group}" aria-pressed="${bidChangeWeek?.groupKey === group}" ${leaveManagementPendingId ? 'disabled' : ''}>Week ${index + 1}: ${escapeHtml(bidChangeDateLabel(group))}</button>`).join('')}</div>`;
+  if (bidChangeWeek) {
+    const originals = bidChangeRows.filter((row) => row.groupKey === bidChangeWeek.groupKey);
+    rowsTarget.innerHTML += `<section class="bid-change-week"><p><strong>Current dates:</strong> ${originals.map((row) => escapeHtml(bidChangeDateLabel(row.oldKey))).join(', ')}</p>
+      <label>Seven-day span begins <input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR + 1}-01-08" value="${bidChangeWeek.startKey}" data-bid-change-week-start="${bidChangeWeek.groupKey}" ${leaveManagementPendingId ? 'disabled' : ''}></label>
+      <div class="bid-change-week-calendar">${bidChangeWeek.startKey ? Array.from({ length: 7 }, (_, i) => {
+        const key = addDaysToDateKey(bidChangeWeek.startKey, i);
+        const rdo = isRdoDateForInitials(key, currentUser.initials);
+        const other = bidChangeRows.some((row) => row.groupKey !== bidChangeWeek.groupKey && row.oldKey === key);
+        return `<button type="button" data-bid-change-toggle-date="${key}" aria-pressed="${bidChangeWeek.dates.has(key)}" ${rdo || other || !isBidLeaveYearDate(key) || leaveManagementPendingId ? 'disabled' : ''}>${escapeHtml(bidChangeDateLabel(key))}<small>${rdo ? 'RDO' : other ? 'Other bid week' : bidChangeWeek.dates.has(key) ? 'Selected' : 'Not selected'}</small></button>`;
+      }).join('') : ''}</div>
+      <p><strong>Replacement dates:</strong> ${[...bidChangeWeek.dates].sort().map((key) => escapeHtml(bidChangeDateLabel(key))).join(', ') || 'None selected'}</p>
+      <p>${bidChangeWeek.dates.size} workdays selected. Saving replaces this entire week.</p></section>`;
+  }
+  saveButton.disabled = !selection.changedRows.length || Boolean(error) || Boolean(leaveManagementPendingId);
+  saveButton.textContent = leaveManagementPendingId ? 'Saving Week…' : 'Review & Save Week';
+  setBidChangeStatus(error || (selection.changedRows.length ? 'Review the replacement dates before saving. Availability is checked when you save.' : ''), error ? 'error' : 'info');
 }
 
 function updateIndividualBidChange(rowId, newKey) {
@@ -8816,6 +10076,10 @@ function updateIndividualBidChange(rowId, newKey) {
 }
 
 function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
+  if (bidChangeRound === 1) {
+    const weekError = roundOneBidChangeValidationMessage();
+    if (weekError) return weekError;
+  }
   const newKeys = replacementRows.map((row) => row.newKey || row.oldKey);
   if (newKeys.some((key) => !isBidLeaveYearDate(key))) return "All new dates must be inside the bidding leave year.";
   if (new Set(newKeys).size !== newKeys.length) return "Two bid dates cannot be changed to the same date.";
@@ -8864,6 +10128,7 @@ async function saveBidDateChanges() {
     return;
   }
 
+  if (bidChangeRound === 1 && !window.confirm(`Replace this whole bid week with: ${[...bidChangeWeek.dates].sort().map(bidChangeDateLabel).join(', ')}? Your other week stays in place.`)) return;
   leaveManagementPendingId = "bid-date-change";
   renderBidChangeModal();
   setBidChangeStatus("Checking availability and saving all date changes…");
@@ -8887,10 +10152,11 @@ async function saveBidDateChanges() {
       throw error;
     }
     await loadSupabaseReferenceData();
+    const changedWholeWeek = bidChangeRound === 1;
     leaveManagementPendingId = "";
     closeBidChangeModal({ restoreFocus: false });
     renderApp();
-    setSubmittedLeaveStatus(`${changedRows.length} ${changedRows.length === 1 ? "bid date was" : "bid dates were"} changed and sent to intake review.`, "success");
+    setSubmittedLeaveStatus(changedWholeWeek ? "Your bid week was replaced and sent to intake review. Your other week was kept." : `${changedRows.length} ${changedRows.length === 1 ? "bid date was" : "bid dates were"} changed and sent to intake review.`, "success");
   } catch (error) {
     leaveManagementPendingId = "";
     renderBidChangeModal();
@@ -8990,7 +10256,7 @@ function openLeaveBuilderForMoreDates() {
   const round = currentRoundNumber();
   setLeaveBuilderStatus(round === 1
     ? "Select each additional Round 1 date individually, add the selection to the batch, and submit it before your window closes."
-    : round <= 4
+    : round <= 6
       ? `Select each additional Round ${round} date individually, add the selection to the batch, and submit it before your window closes.`
       : "Select another date range, add it to the batch, and submit it before your window closes.", "info");
 }
@@ -9202,7 +10468,7 @@ function renderLeaveAllowanceSummary() {
   setText("[data-leave-already-detail]", `Approved: ${formatLeaveDaysLabel(approvedDays)} · Pending: ${formatLeaveDaysLabel(pendingDays)} · ${holidayText}`);
   setText("[data-leave-balance-heading]", `Leave Balance (${formatEstimatedLeaveDays(totalAllowanceHours)} hours / ${scheduleText})`);
   setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
-  setText("[data-leave-left-days]", formatLeaveDaysLabel(leftDays));
+  setText("[data-leave-left-days]", formatRoundedUpLeaveDaysLabel(leftDays));
   setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
   setText("[data-leave-balance-summary]", `${formatEstimatedLeaveDays(allowanceHours)} base hours · ${credits * hoursPerDay} returned hours · ${scheduleText}`);
   setText("[data-leave-balance-holidays]", holidayText);
@@ -9213,7 +10479,9 @@ function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundStat
   const testRound = activeTestBidRound();
   const round = testRound || latestAreaRound(date, roundState);
   const rule = roundRuleForRound(round);
-  const phaseDetail = testRound
+  const phaseDetail = pilotState.database && !testRound
+    ? "Pilot bidding is turned off. An administrator must enable pilot access and a round."
+    : testRound
     ? "Authorized pilot mode is using this round for practice submissions."
     : roundState?.phase === "validation"
     ? "Validation period is active. No bids may be entered."
@@ -9332,32 +10600,20 @@ async function saveSupabaseRoundRule(round, label, detail) {
     throw new Error("Round Rules could not reach the database. Check the connection and try again.");
   }
 
-  const nextRules = {
-    ...roundRules,
-    [round]: { label, detail },
-  };
-  const rulesToSave = roundRulesDatabaseComplete
-    ? [[round, nextRules[round]]]
-    : Object.entries(nextRules);
-  let savedRules = null;
-
-  for (const [ruleNumber, rule] of rulesToSave) {
-    const { data, error } = await client.rpc("set_round_rule", {
-      requested_bid_year: BID_YEAR,
-      requested_round: Number(ruleNumber),
-      rule_label: rule.label,
-      rule_detail: rule.detail,
-    });
-    if (error) {
-      if (isMissingSupabaseRoutine(error)) {
-        throw new Error("Round Rules database support is not installed yet.");
-      }
-      throw error;
+  const { data, error } = await client.rpc("set_round_rule", {
+    requested_bid_year: BID_YEAR,
+    requested_round: round,
+    rule_label: label,
+    rule_detail: detail,
+  });
+  if (error) {
+    if (isMissingSupabaseRoutine(error)) {
+      throw new Error("Round Rules database support is not installed yet.");
     }
-    savedRules = data;
+    throw error;
   }
 
-  applyRoundRules(savedRules);
+  applyRoundRules(data);
 }
 
 function roundRuleNumbers() {
@@ -9611,9 +10867,7 @@ function areaLeaveSlotTotals() {
 }
 
 function renderLeaveBucketCards() {
-  const { cpcTotal, devTotal } = areaLeaveBucketTotals();
-  const cpcTotalDays = estimatedLeaveDaysFromHours(cpcTotal);
-  const devTotalDays = estimatedLeaveDaysFromHours(devTotal);
+  const { cpcTotal: cpcTotalDays, devTotal: devTotalDays } = areaLeaveBucketTotals();
   const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
   const devUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "dev");
   const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
@@ -9625,18 +10879,18 @@ function renderLeaveBucketCards() {
   setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
 }
 
-function syncAdminScheduleFormDefaults() {
-  syncIntakeShiftForm(document.querySelector("[data-admin-schedule-start]")?.closest(".schedule-form"));
-}
-
-function setAdminScheduleStatus(message, status = "info") {
-  const target = document.querySelector("[data-admin-schedule-status]");
+function setIntakeTeamStatus(message, status = "info") {
+  const target = document.querySelector("[data-intake-team-status]");
   if (!target) return;
   target.textContent = message;
   target.dataset.status = status;
 }
 
 function bueRoster() {
+  return cachedLeaveRead("roster", () => bueRosterUncached());
+}
+
+function bueRosterUncached() {
   const currentEntry = {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
@@ -9674,6 +10928,10 @@ function bueRoster() {
 }
 
 function bueByInitials(initials) {
+  return cachedLeaveRead(JSON.stringify(["bueByInitials", initials]), () => bueByInitialsUncached(initials));
+}
+
+function bueByInitialsUncached(initials) {
   const normalized = String(initials || "").trim().toUpperCase();
   return bueRoster().find((person) => person.initials === normalized) || null;
 }
@@ -9693,6 +10951,81 @@ function intakeTeamMembers() {
   return bueRoster().filter((person) => intakeTeamInitials.has(person.initials));
 }
 
+function availableIntakeTeamCandidates() {
+  return bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
+}
+
+function intakeTeamCandidateMatches(person, query) {
+  if (!query) return true;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const searchable = [
+    rank,
+    Number.isFinite(rank) ? `#${rank}` : "",
+    Number.isFinite(rank) ? `seniority ${rank}` : "",
+    person.firstName,
+    person.lastName,
+    person.initials,
+    person.area,
+    person.bidAs,
+    person.email,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return searchable.includes(query.toLowerCase());
+}
+
+function renderIntakeTeamCandidateSearch() {
+  const input = document.querySelector("[data-intake-team-candidate-search]");
+  const results = document.querySelector("[data-intake-team-candidate-results]");
+  const status = document.querySelector("[data-intake-team-candidate-status]");
+  const addButton = document.querySelector("[data-add-intake-team-member]");
+  if (!input || !results || !status || !addButton) return;
+
+  const availablePeople = availableIntakeTeamCandidates();
+  const selectedPerson = availablePeople.find((person) => person.initials === selectedIntakeTeamCandidateInitials);
+  if (selectedIntakeTeamCandidateInitials && !selectedPerson) selectedIntakeTeamCandidateInitials = "";
+
+  if (selectedPerson) {
+    input.value = personScheduleLabel(selectedPerson);
+    input.setAttribute("aria-expanded", "false");
+    results.innerHTML = "";
+    results.hidden = true;
+    status.textContent = `Selected ${personDisplayName(selectedPerson)} (${selectedPerson.initials}).`;
+    addButton.disabled = false;
+    return;
+  }
+
+  input.value = intakeTeamCandidateQuery;
+  addButton.disabled = true;
+  const query = intakeTeamCandidateQuery.trim();
+  const matches = query
+    ? availablePeople.filter((person) => intakeTeamCandidateMatches(person, query))
+    : [];
+  const visibleMatches = matches.slice(0, 40);
+
+  results.innerHTML = visibleMatches.map((person) => {
+    const rank = Number.isFinite(person.rank) ? `Seniority #${person.rank}` : "Unranked";
+    return `
+      <button id="intake-team-candidate-${escapeHtml(person.initials)}" type="button" role="option" data-intake-team-candidate-result="${escapeHtml(person.initials)}">
+        <strong>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</strong>
+        <span>${escapeHtml(person.area)} · ${escapeHtml(rank)} · ${escapeHtml(person.bidAs || "CPC")}</span>
+      </button>
+    `;
+  }).join("");
+  results.hidden = !query || visibleMatches.length === 0;
+  input.setAttribute("aria-expanded", String(!results.hidden));
+
+  if (!availablePeople.length) {
+    status.textContent = "All rostered BUEs are already on the intake team.";
+  } else if (!query) {
+    status.textContent = `Search ${availablePeople.length} available employees.`;
+  } else if (!matches.length) {
+    status.textContent = "No available employees match that search.";
+  } else if (matches.length > visibleMatches.length) {
+    status.textContent = `${matches.length} matches; showing the first ${visibleMatches.length}. Keep typing to narrow the list.`;
+  } else {
+    status.textContent = `${matches.length} ${matches.length === 1 ? "match" : "matches"}. Select an employee below.`;
+  }
+}
+
 function renderRosterSelect(selector, people, selectedInitials = "") {
   document.querySelectorAll(selector).forEach((select) => {
     const currentValue = selectedInitials || select.value;
@@ -9704,10 +11037,8 @@ function renderRosterSelect(selector, people, selectedInitials = "") {
 }
 
 function syncIntakeTeamControls() {
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
-  renderRosterSelect("[data-intake-team-candidate]", availablePeople);
-  renderRosterSelect("[data-admin-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
+  renderIntakeTeamCandidateSearch();
   renderRosterSelect("[data-schedule-rep]", teamPeople, teamPeople[0]?.initials || "");
 }
 
@@ -9727,22 +11058,23 @@ async function saveIntakeTeamMember(initials, enabled) {
 
 async function addSelectedBueToIntakeTeam() {
   if (!hasSystemAdminAccess()) return;
-  const select = document.querySelector("[data-intake-team-candidate]");
-  const initials = select?.value || "";
+  const initials = selectedIntakeTeamCandidateInitials;
   const person = bueByInitials(initials);
   if (!person) {
-    setAdminScheduleStatus("Choose a BUE to add to the intake team.", "error");
+    setIntakeTeamStatus("Choose a BUE to add to the intake team.", "error");
     return;
   }
 
-  setAdminScheduleStatus(`Adding ${personDisplayName(person)} to the intake team...`);
+  setIntakeTeamStatus(`Adding ${personDisplayName(person)} to the intake team...`);
   try {
     await saveIntakeTeamMember(person.initials, true);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} added ${person.initials} to the intake team.`);
+    intakeTeamCandidateQuery = "";
+    selectedIntakeTeamCandidateInitials = "";
     renderApp();
-    setAdminScheduleStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
+    setIntakeTeamStatus(`${personDisplayName(person)} is now available for intake scheduling and saved to Supabase.`, "success");
   } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake team could not be updated.", "error");
+    setIntakeTeamStatus(error.message || "The intake team could not be updated.", "error");
   }
 }
 
@@ -9750,18 +11082,18 @@ async function removeBueFromIntakeTeam(initials) {
   if (!hasSystemAdminAccess()) return;
   const person = bueByInitials(initials);
   if (!person || person.initials === currentUser.initials) {
-    setAdminScheduleStatus("That intake team member cannot be removed here.", "error");
+    setIntakeTeamStatus("That intake team member cannot be removed here.", "error");
     return;
   }
 
-  setAdminScheduleStatus(`Removing ${personDisplayName(person)} from the intake team...`);
+  setIntakeTeamStatus(`Removing ${personDisplayName(person)} from the intake team...`);
   try {
     await saveIntakeTeamMember(person.initials, false);
     logHistory("All Areas", "Intake team updated", `${currentUser.initials} removed ${person.initials} from the intake team.`);
     renderApp();
-    setAdminScheduleStatus(`${personDisplayName(person)} was removed from future intake scheduling choices in Supabase.`, "success");
+    setIntakeTeamStatus(`${personDisplayName(person)} was removed from future intake scheduling choices in Supabase.`, "success");
   } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake team could not be updated.", "error");
+    setIntakeTeamStatus(error.message || "The intake team could not be updated.", "error");
   }
 }
 
@@ -10106,7 +11438,7 @@ async function saveSupabaseRosterRows(rows) {
     originalInitials: row.originalInitials || row.initials,
   }));
 
-  const { error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
+  const { data, error } = await client.rpc("admin_save_bidder_roster_rows", { roster_rows: rosterRows });
   if (error) {
     if (/admin_save_bidder_roster_rows|function .*not found|Could not find/i.test(error.message || "")) {
       for (const row of rows) {
@@ -10132,7 +11464,10 @@ async function saveSupabaseRosterRows(rows) {
     };
   }
 
-  return { saved: true };
+  return {
+    saved: true,
+    bidWindowsReassigned: Number(data?.bid_windows_reassigned || 0),
+  };
 }
 
 async function deactivateSupabaseRosterEntry(person) {
@@ -10310,7 +11645,7 @@ async function saveRosterEntry(event) {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${values.firstName} ${values.lastName} saved to Supabase.`
+      ? `${values.firstName} ${values.lastName} saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );
@@ -10545,7 +11880,7 @@ async function applyBulkRosterChanges() {
   }
   setRosterStatus(
     supabaseSave.saved
-      ? `${editedEntries.length} visible roster rows saved to Supabase.`
+      ? `${editedEntries.length} visible roster rows saved to Supabase.${supabaseSave.bidWindowsReassigned ? ` ${supabaseSave.bidWindowsReassigned} bid-time assignments were updated by seniority.` : ""}`
       : supabaseSave.message,
     supabaseSave.saved ? "success" : "error"
   );
@@ -10824,7 +12159,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 4; round += 1) {
+  for (let round = 1; round <= 6; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -10846,7 +12181,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 4) {
+    if (round < 6) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -10904,7 +12239,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 4;
+  const windowCount = totalBues * 6;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -10975,7 +12310,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 4} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -11044,7 +12379,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 4,
+    requested_round_count: 6,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -11068,39 +12403,37 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 4} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
 
 function renderAdminConsole() {
-  syncAdminScheduleFormDefaults();
   syncIntakeTeamControls();
   syncSlotCapacityForm();
   renderSlotCapacitySummary();
   syncBidWindowBuilder();
   renderRosterManager();
-  renderEmailLog();
 
   const target = document.querySelector("[data-admin-user-list]");
   if (!target) return;
 
-  const availablePeople = bueRoster().filter((person) => !intakeTeamInitials.has(person.initials));
   const teamPeople = intakeTeamMembers();
 
   target.innerHTML = `
     <section class="intake-team-builder">
       <div class="intake-team-add">
-        <label>
-          Add BUE to Intake Team
-          <select data-intake-team-candidate>
-            ${availablePeople.length
-              ? availablePeople.map((person) => `<option value="${escapeHtml(person.initials)}">${escapeHtml(personScheduleLabel(person))}</option>`).join("")
-              : '<option value="">All rostered BUEs are already on the intake team</option>'}
-          </select>
-        </label>
-        <button class="primary-action small" type="button" data-add-intake-team-member ${availablePeople.length ? "" : "disabled"}>Add to Team</button>
+        <div class="intake-team-candidate-picker">
+          <label>
+            Add BUE to Intake Team
+            <input type="search" placeholder="Name, initials, area, rank, role, or email" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="intake-team-candidate-results" data-intake-team-candidate-search />
+          </label>
+          <small data-intake-team-candidate-status role="status" aria-live="polite"></small>
+          <div class="intake-team-candidate-results" id="intake-team-candidate-results" role="listbox" aria-label="Matching employees" data-intake-team-candidate-results hidden></div>
+        </div>
+        <button class="primary-action small" type="button" data-add-intake-team-member disabled>Add to Team</button>
       </div>
+      <p class="form-status" data-intake-team-status role="status" aria-live="polite"></p>
       <div class="intake-team-list" data-intake-team-list>
         ${teamPeople.map((person) => {
           const scheduledCount = intakeSchedules.filter((schedule) => schedule.initials === person.initials).length;
@@ -11123,6 +12456,14 @@ function renderAdminConsole() {
     </section>
   `;
   syncIntakeTeamControls();
+}
+
+function renderAdminToolsPage() {
+  if (!hasSystemAdminAccess()) return;
+  renderRuleEditors();
+  renderEmailLog();
+  syncBidWindowTestingControls();
+  syncPilotControls();
 }
 
 function setSlotCapacityStatus(message, status = "info") {
@@ -11480,48 +12821,6 @@ async function deleteIntakeSchedule(scheduleId) {
   }
 }
 
-async function addAdminScheduleFromForm() {
-  if (!hasSystemAdminAccess()) {
-    setAdminScheduleStatus("Only system admins can schedule intake reps from this page.", "error");
-    return;
-  }
-
-  const initials = (document.querySelector("[data-admin-schedule-rep]")?.value || "").trim().toUpperCase();
-  const area = INTAKE_SCHEDULE_AREA;
-  const startRaw = document.querySelector("[data-admin-schedule-start]")?.value || "";
-  const endRaw = document.querySelector("[data-admin-schedule-end]")?.value || "";
-  const start = new Date(startRaw);
-  const end = new Date(endRaw);
-
-  if (!initials) {
-    setAdminScheduleStatus("Add at least one BUE to the intake team before scheduling a shift.", "error");
-    return;
-  }
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
-    setAdminScheduleStatus("Choose a valid start and end time.", "error");
-    return;
-  }
-
-  if (!intakeTeamInitials.has(initials)) {
-    setAdminScheduleStatus("Choose someone from the intake team before adding a shift.", "error");
-    return;
-  }
-
-  const person = bueByInitials(initials);
-  const name = personDisplayName(person) || initials;
-
-  setAdminScheduleStatus(`Saving ${name}'s intake shift...`);
-  try {
-    await saveIntakeScheduleToSupabase(initials, start, end);
-    logHistory(area, "Intake shift scheduled", `${currentUser.initials} scheduled ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
-    renderApp();
-    setAdminScheduleStatus(`${name} is scheduled in Supabase. Intake access will open 15 minutes before the shift.`, "success");
-  } catch (error) {
-    setAdminScheduleStatus(error.message || "The intake shift could not be saved.", "error");
-  }
-}
-
 function schedulesForDateKey(key) {
   return intakeSchedules
     .filter((schedule) => dateKeyFromDate(schedule.start) === key)
@@ -11660,7 +12959,8 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
+    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
   });
 }
 
@@ -11681,6 +12981,7 @@ function renderIntakeSchedule() {
   const calendar = document.getElementById("intake-schedule-calendar");
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
+  renderShiftPresets();
   syncIntakeTeamControls();
   updateScheduleCalendarControls();
 
@@ -11694,10 +12995,16 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      calendar.innerHTML = renderScheduleMonthCard(scheduleActiveDate.getMonth(), scheduleActiveDate.getFullYear(), {
+      const visibleMonths = [0, 1].map((offset) => new Date(
+        scheduleActiveDate.getFullYear(),
+        scheduleActiveDate.getMonth() + offset,
+        1
+      ));
+      calendar.innerHTML = visibleMonths.map((month) => renderScheduleMonthCard(month.getMonth(), month.getFullYear(), {
         showAssignments: true,
         showYear: true,
-      });
+      }))
+        .join("");
     }
   }
 
@@ -11969,7 +13276,7 @@ function renderHistory() {
         <div>
           <h3>${title}</h3>
           <p>${detail}</p>
-          <small class="audit-actor">Actor: ${actor}</small>
+          <small class="audit-actor">Action by: ${actor}</small>
         </div>
         <span class="pill open">${area}</span>
       </article>
@@ -11986,6 +13293,7 @@ function alertItems() {
       detail: `${item.summary} · ${item.area}`,
       action: "Review",
       page: "intake",
+      intakeItemId: item.id,
     }));
     const helpAlerts = helpThreads
       .filter((thread) => thread.status !== "Resolved")
@@ -12042,7 +13350,7 @@ function renderAlerts() {
 
   target.innerHTML = items.length
     ? items.map((item) => `
-      <article data-page="${item.page}" ${item.helpThreadId ? `data-help-thread="${item.helpThreadId}"` : ""}>
+      <article data-page="${item.page}" ${item.intakeItemId ? `data-intake-item="${escapeHtml(item.intakeItemId)}"` : ""} ${item.helpThreadId ? `data-help-thread="${item.helpThreadId}"` : ""}>
         <span>${escapeHtml(item.category)}</span>
         <strong>${escapeHtml(item.title)}</strong>
         <small>${escapeHtml(item.detail)}</small>
@@ -12492,12 +13800,20 @@ function renderOverrideEditor(item) {
     : "";
 
   if (item.type === "RDO Line") {
+    const eligibleLines = rdoLinesForBidder(item.bidAs, item.area);
+    const selectedLine = eligibleLines.find((line) => line.line === item.line);
+    const glCategory = selectedLine && isCpcLine(selectedLine) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
+    const developmentalBidder = isDevelopmentalBidRole(item.bidAs, item.area);
     return `
       <label>Line
         <select data-override-line>
-          ${rdoLinesForArea(item.area).map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
+          ${eligibleLines.map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
         </select>
       </label>
+      ${item.bidAs === "GL" ? `<label class="override-check gl-line-type-verification">
+        <input type="checkbox" data-gl-line-type-verification />
+        I verified this GL is bidding as <span data-gl-line-type-label>${glCategory}</span>. All GL rules still apply.
+      </label>` : ""}
       <label>Fatigue Group
         <select data-override-group>
           ${[["", "No preference — assign later"], ["A", "A"], ["B", "B"], ["C", "C"]].map(([value, label]) => `<option value="${value}" ${value === item.fatigueGroup ? "selected" : ""}>${label}</option>`).join("")}
@@ -12509,13 +13825,13 @@ function renderOverrideEditor(item) {
         </select>
       </label>
       <label>AWS
-        <select data-override-aws>
-          ${["Yes", "No"].map((value) => `<option ${value === item.aws ? "selected" : ""}>${value}</option>`).join("")}
+        <select data-override-aws ${developmentalBidder ? "disabled" : ""}>
+          ${developmentalBidder ? '<option value="No">No — DEV does not work AWS</option>' : ["Yes", "No"].map((value) => `<option ${value === item.aws ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <label>Mid
-        <select data-override-mid>
-          ${["Yes", "No", "BID"].map((value) => `<option ${value === item.mid ? "selected" : ""}>${value}</option>`).join("")}
+        <select data-override-mid ${developmentalBidder ? "disabled" : ""}>
+          ${developmentalBidder ? '<option value="No">No — DEV does not work Mid</option>' : ["Yes", "No", "BID"].map((value) => `<option ${value === item.mid ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <div class="button-row">
@@ -12542,7 +13858,7 @@ function renderOverrideEditor(item) {
     <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
     <label>Days <input type="number" value="${item.days}" data-override-days ${pending ? "" : "readonly"} /></label>
     ${pending ? "" : "<small>Charged days are recalculated from the replacement range.</small>"}
-    ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : `<label class="override-check">
+    ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : isGlLeaveItem(item) ? '<p class="gl-bid-badge">GL Bid · Visible on the calendar; no area slot is consumed.</p>' : `<label class="override-check">
       <input type="checkbox" data-override-capacity ${item.leaveCapacityOverride ? "checked" : ""} />
       Approve even though one or more dates are full
     </label>`}
@@ -12593,6 +13909,8 @@ function intakeSearchText(item) {
     item.range,
     item.summary,
     item.reviewNote,
+    item.isChange ? "change changed original bid" : "",
+    item.originalBid ? rdoBidSnapshotSummary(item.originalBid) : "",
     item.submittedAt,
     item.approvedAt,
     item.deniedAt,
@@ -12664,6 +13982,7 @@ function renderIntakeDetailPanel(item, visibleItems) {
           <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
           <strong>${escapeHtml(bidTypeLabel(entry))}</strong>
           <p>${escapeHtml(entry.summary)}</p>
+          ${renderIntakeChangeHistory(entry)}
           <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
         </article>
       `).join("")}
@@ -12671,48 +13990,507 @@ function renderIntakeDetailPanel(item, visibleItems) {
   `;
 }
 
+function renderIntakeChangeHistory(item) {
+  if (!item?.isChange) return "";
+  const source = item.changeSource === "intake"
+    ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
+    : item.changeSource === "bidder"
+      ? "Submitted by the employee as a change"
+      : "Detected from the employee's earlier approved bid";
+  return `
+    <div class="intake-change-history">
+      <strong>Bid change</strong>
+      <span><b>Original:</b> ${escapeHtml(rdoBidSnapshotSummary(item.originalBid))}</span>
+      <span><b>Requested:</b> ${escapeHtml(item.summary || rdoBidSnapshotSummary(item))}</span>
+      <small>${escapeHtml(source)}</small>
+    </div>
+  `;
+}
+
+function selectedIntakeBidderPerson() {
+  const rosterPerson = bueByInitials(intakeBidderSelection.initials);
+  const savedPerson = intakeBidderSelection.record?.person;
+  if (!savedPerson) return rosterPerson;
+  return {
+    ...rosterPerson,
+    profileId: savedPerson.id || rosterPerson?.profileId || intakeBidderSelection.profileId,
+    firstName: savedPerson.first_name || rosterPerson?.firstName || "",
+    lastName: savedPerson.last_name || rosterPerson?.lastName || "",
+    initials: savedPerson.initials || rosterPerson?.initials || intakeBidderSelection.initials,
+    area: savedPerson.area || rosterPerson?.area || "",
+    bidAs: savedPerson.bid_role || rosterPerson?.bidAs || "",
+    seniorityRank: savedPerson.seniority_rank ?? rosterPerson?.seniorityRank ?? rosterPerson?.rank,
+    email: savedPerson.email || rosterPerson?.email || "",
+    phone: savedPerson.phone || rosterPerson?.phone || "",
+    leaveSlotAllowance: normalizeLeaveSlotAllowance(
+      savedPerson.leave_slot_allowance ?? rosterPerson?.leaveSlotAllowance
+    ),
+  };
+}
+
+function intakeBidderLocalLeaveRows(initials) {
+  return activeLeaveItemsForInitials(initials).map((item) => ({
+    id: item.supabaseRequestId || item.id,
+    round_number: leaveRoundForItem(item),
+    priority: Number(item.priority || 0),
+    status: String(item.status || "Pending").toLowerCase(),
+    charged_days: leaveItemChargedDays(item),
+    requested_start_date: leaveDateKeysForItem(item)[0] || "",
+    requested_end_date: leaveDateKeysForItem(item).at(-1) || "",
+    dates: leaveDateKeysForItem(item)
+      .filter((key) => !isRdoDateForInitials(key, initials))
+      .map((key) => ({
+        leave_date: key,
+        charged: true,
+        is_rdo: false,
+        is_holiday: isHolidayDate(key, initials) && !isHolidayInLieuDate(key, initials),
+        is_holiday_in_lieu: isHolidayInLieuDate(key, initials),
+      })),
+  }));
+}
+
+function selectedIntakeBidderLeaveRows() {
+  const savedRows = intakeBidderSelection.record?.snapshot?.leave;
+  return Array.isArray(savedRows) ? savedRows : intakeBidderLocalLeaveRows(intakeBidderSelection.initials);
+}
+
+function intakeBidderActiveLeaveRows(rows) {
+  return rows.filter((row) => ["pending", "approved"].includes(String(row.status || "").toLowerCase()));
+}
+
+function intakeBidderLeaveDates(row) {
+  if (Array.isArray(row.dates) && row.dates.length) {
+    return row.dates
+      .filter((date) => !date.is_rdo)
+      .sort((left, right) => String(left.leave_date).localeCompare(String(right.leave_date)));
+  }
+  const start = row.requested_start_date;
+  const end = row.requested_end_date || start;
+  return start && end
+    ? datesBetweenKeys(start, end)
+      .filter((key) => !isRdoDateForInitials(key, intakeBidderSelection.initials))
+      .map((key) => ({ leave_date: key, charged: true }))
+    : [];
+}
+
+function intakeBidderLine() {
+  const initials = intakeBidderSelection.initials;
+  const localLine = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
+  if (localLine) return localLine;
+  const assignment = intakeBidderSelection.record?.snapshot?.assignment;
+  if (!assignment) return null;
+  const savedLine = intakeBidderSelection.record?.lines?.find((line) => line.id === assignment.id);
+  return savedLine ? {
+    line: savedLine.line_code,
+    pattern: savedLine.pattern,
+    fourTen: savedLine.four_ten ? "Yes" : "No",
+    week: Array.isArray(assignment.week) ? assignment.week : [],
+  } : null;
+}
+
+function intakeBidderExactDateLabel(key) {
+  if (!key) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(dateFromKey(key));
+}
+
+function intakeBidderWindowState(person, date = new Date()) {
+  const rank = Number.isFinite(person?.rank) ? person.rank : person?.seniorityRank;
+  const area = person?.area || currentViewArea();
+  if (!Number.isFinite(rank)) return { window: null, isOpen: false };
+
+  const roundCount = Math.max(6, roundDateBlocksForArea(area)[0]?.length || 0);
+  const windows = Array.from(
+    { length: roundCount },
+    (_, index) => bidWindowForRankRound(rank, index + 1, area)
+  ).filter(Boolean);
+  const openWindow = windows.find((window) => date >= window.start && date < window.end) || null;
+  const areaRound = areaBidRoundState(date, area)?.round;
+  const currentRoundWindow = areaRound
+    ? windows.find((window) => window.round === areaRound) || null
+    : null;
+  const nextWindow = windows.find((window) => date < window.end) || null;
+  const previousWindow = windows.toReversed().find((window) => date >= window.end) || null;
+
+  return {
+    window: openWindow || currentRoundWindow || nextWindow || previousWindow,
+    isOpen: Boolean(openWindow),
+  };
+}
+
+function syncIntakeBidderWindowStatus(date = new Date()) {
+  const range = document.querySelector("[data-intake-bidder-window-range]");
+  const status = document.querySelector("[data-intake-bidder-window-status]");
+  if (!range || !status) return;
+
+  const person = selectedIntakeBidderPerson();
+  if (!person) return;
+
+  const { window, isOpen } = intakeBidderWindowState(person, date);
+  range.textContent = window
+    ? `Round ${window.round} · ${formatDateRange(window.start, window.end)}`
+    : "No bid window scheduled";
+  status.textContent = window ? (isOpen ? "In bid window" : "Not in bid window") : "Not scheduled";
+  status.classList.toggle("open", isOpen);
+  status.classList.toggle("closed", !isOpen);
+}
+
+function intakeBidderRoundDetail(rows) {
+  const rounds = Array.from({ length: 6 }, (_, index) => index + 1);
+  return rounds.map((round) => {
+    const roundRows = rows
+      .filter((row) => Number(row.round_number) === round)
+      .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+    const entries = roundRows.length ? roundRows.map((row) => {
+      const dates = intakeBidderLeaveDates(row);
+      const dateList = dates.length
+        ? dates.map((date) => {
+          const holiday = date.is_holiday_in_lieu ? " · Holiday in-lieu" : date.is_holiday ? " · Holiday" : "";
+          return '<time datetime="' + escapeHtml(date.leave_date) + '">' +
+            escapeHtml(intakeBidderExactDateLabel(date.leave_date)) + holiday + "</time>";
+        }).join(", ")
+        : "No exact dates are stored for this bid.";
+      const status = uiStatusFromDatabase(row.status || "pending");
+      const priority = Number(row.priority || 0);
+      const chargedDays = Number(row.charged_days || 0);
+      return '<div class="intake-bid-round-entry"><strong>' +
+        (priority ? "Priority " + priority + " · " : "") + escapeHtml(status) +
+        "</strong><span>" + dateList + "</span><small>" +
+        formatLeaveDaysLabel(chargedDays) + " charged</small></div>";
+    }).join("") : "<span>No leave bids in this round.</span>";
+    return '<section class="intake-bid-round"><strong>Round ' + round +
+      '</strong><div class="intake-bid-round-list">' + entries + "</div></section>";
+  }).join("");
+}
+
+function renderIntakeBidderDetail(person, rows) {
+  const target = document.querySelector("[data-intake-bidder-detail]");
+  if (!target) return;
+  const mode = intakeBidderSelection.detail;
+  target.hidden = !mode;
+  if (!mode) {
+    target.replaceChildren();
+    return;
+  }
+
+  const closeButton = '<button class="secondary-action small" type="button" data-intake-bidder-detail-close>Close</button>';
+  if (mode === "contact") {
+    const phone = person.phone || "Not provided";
+    const email = person.email || "Not provided";
+    const phoneValue = person.phone
+      ? '<a href="tel:' + escapeHtml(person.phone) + '">' + escapeHtml(phone) + "</a>"
+      : "<strong>" + escapeHtml(phone) + "</strong>";
+    const emailValue = person.email
+      ? '<a href="mailto:' + escapeHtml(person.email) + '">' + escapeHtml(email) + "</a>"
+      : "<strong>" + escapeHtml(email) + "</strong>";
+    target.innerHTML =
+      '<div class="intake-bidder-detail-header"><div><h3>' +
+      escapeHtml(personDisplayName(person)) +
+      "</h3><p>Contact information</p></div>" + closeButton + "</div>" +
+      '<div class="intake-bidder-contact-grid"><div><span>Phone</span>' + phoneValue +
+      "</div><div><span>Email</span>" + emailValue + "</div></div>";
+    return;
+  }
+
+  target.innerHTML =
+    '<div class="intake-bidder-detail-header"><div><h3>Leave bids by round</h3><p>' +
+    escapeHtml(personDisplayName(person)) + " · Bid Year " + BID_YEAR +
+    "</p></div>" + closeButton + '</div><div class="intake-bid-rounds">' +
+    intakeBidderRoundDetail(rows) + "</div>";
+}
+
+function renderIntakeBidderSummary() {
+  const target = document.querySelector("[data-intake-bidder-summary]");
+  const area = document.querySelector("[data-intake-bidder-area]");
+  const role = document.querySelector("[data-intake-bidder-role]");
+  if (!target || !area || !role) return;
+  const person = selectedIntakeBidderPerson();
+  if (!person) {
+    role.hidden = true;
+    role.textContent = "";
+    role.className = "intake-bidder-role";
+    area.textContent = "Select a controller";
+    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue, RDO Selection, or Requested Leave Dates.</div>';
+    renderIntakeBidderDetail({}, []);
+    return;
+  }
+
+  const line = intakeBidderLine();
+  const rdoDays = line
+    ? [...rdoWeekdaysForLine(line)].sort((left, right) => left - right).map((weekday) => dayNames[weekday])
+    : [];
+  const hoursPerDay = leaveHoursPerDayForLine(line);
+  const allowanceHours = normalizeLeaveSlotAllowance(person.leaveSlotAllowance);
+  const allowanceDays = estimatedLeaveDaysFromHours(allowanceHours, hoursPerDay);
+  const rows = selectedIntakeBidderLeaveRows();
+  const activeRows = intakeBidderActiveLeaveRows(rows);
+  const daysBid = activeRows.reduce((total, row) => total + Number(row.charged_days || 0), 0);
+  const holidaysBid = new Set(activeRows.flatMap((row) => intakeBidderLeaveDates(row)
+    .filter((date) => date.is_holiday || date.is_holiday_in_lieu)
+    .map((date) => date.leave_date))).size;
+  const scheduleLabel = hoursPerDay === CWS_LEAVE_HOURS_PER_DAY ? "10-hour schedule" : "8-hour schedule";
+  const loadingNote = intakeBidderSelection.loading ? "Refreshing saved details…" : intakeBidderSelection.error;
+  const rank = Number.isFinite(person.rank) ? person.rank : person.seniorityRank;
+  const bidRole = String(person.bidAs || "BUE").trim().toUpperCase();
+
+  role.hidden = false;
+  role.textContent = bidRole;
+  role.className = `intake-bidder-role ${bidAsClass(bidRole)}`;
+  area.textContent = person.area || "Area";
+  target.classList.toggle("intake-bidder-loading", intakeBidderSelection.loading);
+  target.innerHTML =
+    '<div class="intake-bidder-metric"><span>Name</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="contact">' +
+      escapeHtml(personDisplayName(person)) + '</button><small class="intake-bid-window">' +
+      '<span data-intake-bidder-window-range>No bid window scheduled</span>' +
+      '<span class="intake-bid-window-status closed" data-intake-bidder-window-status>Not scheduled</span>' +
+      (loadingNote ? '<span class="intake-bidder-loading-note">' + escapeHtml(loadingNote) + "</span>" : "") +
+      "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Initials</span><strong>' +
+      escapeHtml(person.initials || "—") + "</strong><small>Seniority #" +
+      (Number.isFinite(rank) ? rank : "—") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Line &amp; RDOs</span><strong>' +
+      (line?.line ? "Line " + escapeHtml(line.line) : "Not selected") + "</strong><small>" +
+      (rdoDays.length ? escapeHtml(rdoDays.join(" / ")) : "RDOs unavailable") + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>' + BID_YEAR + " Accrual</span><strong>" +
+      formatEstimatedLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
+      " hours · " + scheduleLabel + "</small></div>" +
+    '<div class="intake-bidder-metric"><span>Days Bid</span>' +
+      '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="bids">' +
+      formatEstimatedLeaveDays(daysBid) + " days</button><small>Pending and approved</small></div>" +
+    '<div class="intake-bidder-metric"><span>Holidays Bid</span><strong>' +
+      holidaysBid + "</strong><small>Holiday and in-lieu dates</small></div>";
+  syncIntakeBidderWindowStatus();
+  renderIntakeBidderDetail(person, rows);
+}
+
+async function loadSelectedIntakeBidder() {
+  const client = supabaseClient();
+  const profileId = intakeBidderSelection.profileId;
+  if (!client || !supabaseState.connected || !profileId || !hasIntakeAccess()) return;
+  const generation = ++intakeBidderSelection.generation;
+  intakeBidderSelection.loading = true;
+  intakeBidderSelection.error = "";
+  renderIntakeBidderSummary();
+  try {
+    const { data, error } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR,
+      target_bidder_id: profileId,
+    });
+    if (generation !== intakeBidderSelection.generation) return;
+    if (error) throw error;
+    intakeBidderSelection.record = data;
+  } catch (_error) {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.error = "Saved details unavailable";
+    }
+  } finally {
+    if (generation === intakeBidderSelection.generation) {
+      intakeBidderSelection.loading = false;
+      renderIntakeBidderSummary();
+    }
+  }
+}
+
+function selectIntakeBidder(initials, profileId = "") {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const person = bueByInitials(normalized);
+  if (!normalized || !person) return;
+  const nextProfileId = profileId || person.profileId || "";
+  const changed = normalized !== intakeBidderSelection.initials || nextProfileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = normalized;
+  intakeBidderSelection.profileId = nextProfileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.detail = "";
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+  }
+  renderIntakeBidderSummary();
+  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+}
+
+function ensureIntakeBidderSelection() {
+  if (!hasIntakeAccess()) return;
+  const selected = bueByInitials(intakeBidderSelection.initials)
+    || bueByInitials(currentUser.initials)
+    || manualBidControllerRoster()[0];
+  if (!selected) return;
+  const profileId = selected.profileId || "";
+  const changed = selected.initials !== intakeBidderSelection.initials || profileId !== intakeBidderSelection.profileId;
+  intakeBidderSelection.initials = selected.initials;
+  intakeBidderSelection.profileId = profileId;
+  if (changed) {
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.error = "";
+  }
+  renderIntakeBidderSummary();
+  if (!intakeBidderSelection.record && !intakeBidderSelection.loading) void loadSelectedIntakeBidder();
+}
+
+// Keep each date's saved request so intake can still edit or decide individual
+// dates. Present those requests as one week (Round 1) or submission batch.
+const intakeGroupReviewState = new Map();
+
+function groupedLeaveIntakeItems(items = intakeQueue) {
+  const weekStartsByBidder = new Map();
+  items.forEach((item) => {
+    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved"].includes(item.status)) return;
+    const owner = `${item.area}|${item.initials}`;
+    const dates = weekStartsByBidder.get(owner) || [];
+    dates.push(...leaveDateKeysForItem(item));
+    weekStartsByBidder.set(owner, dates);
+  });
+  weekStartsByBidder.forEach((dates, owner) => weekStartsByBidder.set(owner, roundOneWeekKeysForDateKeys(dates)));
+  const groups = new Map();
+  const result = [];
+  items.forEach((item) => {
+    if (item.type !== "Leave" || !item.submissionBatchKey) { result.push(item); return; }
+    const round = intakeItemRound(item);
+    const dates = leaveDateKeysForItem(item).sort();
+    if (!dates.length) { result.push(item); return; }
+    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}`) || roundOneWeekKeysForDateKeys(dates);
+    const weekStart = round === 1 ? starts.find((start) => dates[0] >= start && dates[0] <= dateKeyFromDate(new Date(dateFromKey(start).getTime() + 6 * 86400000))) : "";
+    // Legacy continuous requests spanning two weeks already have one approval;
+    // keep their edit/review controls instead of approving half a saved range.
+    if (round === 1 && (!weekStart || dates.some((key) => Math.round((dateFromKey(key) - dateFromKey(weekStart)) / 86400000) > 6))) {
+      result.push(item); return;
+    }
+    const key = JSON.stringify([item.area, item.initials, round, item.submissionBatchKey, weekStart, item.status, Boolean(item.ghostBid)]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { ...item, id: `leave-group-${item.id}`, members: [], weekStart, round, days: 0, dateKeys: [], weekUnits: round === 1 ? 1 : 0 };
+      groups.set(key, group);
+      result.push(group);
+    }
+    group.members.push(item);
+    group.dateKeys.push(...dates);
+    group.days += Number(item.days || 0);
+  });
+  groups.forEach((group) => {
+    group.members.sort((a,b) => leaveDateKeysForItem(a)[0].localeCompare(leaveDateKeysForItem(b)[0]));
+    group.dateKeys = [...new Set(group.dateKeys)].sort();
+    group.range = formatIndividualLeaveDates(group.dateKeys);
+    group.groupLabel = group.round === 1 ? `Round 1 · Week starting ${formatCalendarDate(group.weekStart)}` : `Round ${group.round} · Leave batch`;
+    group.summary = `${group.groupLabel} · ${group.range} · ${group.days} charged ${group.days === 1 ? "day" : "days"}`;
+    Object.assign(group, intakeGroupReviewState.get(group.id) || {});
+  });
+  return result;
+}
+
+function intakeReviewItemById(id) {
+  return intakeQueue.find((item) => item.id === id) || groupedLeaveIntakeItems().find((item) => item.id === id);
+}
+
+function intakeReviewConflicts(item, check) {
+  return [...new Set((item.members || [item]).flatMap(check))].sort();
+}
+
+function renderIntakeGroupDates(item, canReview) {
+  if (!item.members) return "";
+  return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
+    <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
+    ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
+    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
+    </div>`).join("")}</details>`;
+}
+
+function revealIntakeLeaveDates(id) {
+  const card = [...document.querySelectorAll("[data-intake-card]")]
+    .find((candidate) => candidate.dataset.intakeCard === id);
+  const details = card?.querySelector("details");
+  if (!details) return;
+  details.open = true;
+  window.requestAnimationFrame(() => details.querySelector("[data-intake-edit]")?.focus());
+}
+
+async function reviewIntakeLeaveGroup(item, decision, reason = "") {
+  if (!supabaseState.connected) throw new Error("This intake decision could not reach the database. Check the connection and try again.");
+  let submissions = [];
+  if (item.members.some((member) => !member.supabaseSubmissionId)) {
+    const { data, error } = await supabaseClient().rpc("read_bidding_state", { requested_bid_year: BID_YEAR });
+    if (error) throw error;
+    submissions = data?.submissions || [];
+  }
+  const ids = item.members.map((member) => member.supabaseSubmissionId || intakeSubmissionIdFromBiddingState(member, submissions));
+  if (ids.some((id) => !id)) throw new Error("A saved request could not be found. Reload the queue before reviewing this group.");
+  const { error } = await supabaseClient().rpc("review_leave_submission_group", {
+    submission_ids: ids, decision, denial_reason_text: reason || null,
+  });
+  if (error) throw error;
+  if (decision === "approved") queueBidVerifiedEmail(item);
+  else { item.denialReason = reason; queueBidDeniedEmail(item); }
+  intakeGroupReviewState.delete(item.id);
+  activeOverrideId = null;
+  activeDenialId = null;
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
+  renderApp();
+  setPage("intake");
+}
+
 function renderIntakeQueue() {
+  return withLeaveReadCache(() => renderIntakeQueueWithCache());
+}
+
+function renderIntakeQueueWithCache() {
   const target = document.getElementById("intake-queue");
   if (!target) return;
 
   syncIntakeSearchControls();
   const canReview = hasIntakeAccess();
+  const groupedItems = groupedLeaveIntakeItems();
   const visibleItems = canReview
-    ? intakeQueue
-    : intakeQueue.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
+    ? groupedItems
+    : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
+  if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
   target.innerHTML = filteredItems.length
     ? filteredItems.map((item) => `
-      <article class="intake-card ${item.status.toLowerCase()} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
+      <article class="intake-card ${item.status.toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
-          <h3>${item.name} · ${item.initials}</h3>
-          <p>${item.summary}</p>
+          <div class="intake-card-name-row">
+            <h3>${item.name} · ${item.initials}</h3>
+          </div>
+          <p>${escapeHtml(item.summary)}</p>
+          ${renderIntakeChangeHistory(item)}
+          ${renderIntakeGroupDates(item, canReview)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
-          ${item.type === "Leave" && item.status === "Pending" && leaveRdoConflicts(item).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(leaveRdoConflicts(item))} ${leaveRdoConflicts(item).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
-          ${item.type === "Leave" && item.status === "Pending" && leaveApprovalConflicts(item).length ? `<p class="intake-warning">Requires override before approval: ${formatLeaveConflictDates(leaveApprovalConflicts(item))} is full.</p>` : ""}
+          ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveRdoConflicts).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveRdoConflicts))} ${intakeReviewConflicts(item, leaveRdoConflicts).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
+          ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveApprovalConflicts).length ? `<p class="intake-warning">Requires override before approval: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveApprovalConflicts))} is full.</p>` : ""}
           <div class="intake-meta">
             <span>${item.area}</span>
             <span>Seniority #${item.seniority}</span>
             <span>Bid as ${item.bidAs}</span>
             ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
+            ${item.type === "Leave" && isGlLeaveItem(item) ? `<span class="gl-bid-badge">GL Bid · visible, no slot used</span>` : ""}
             ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
             <span>Submitted ${item.submittedAt}</span>
           </div>
         </div>
         <div class="intake-actions">
+          ${item.isChange ? '<span class="intake-change-badge">Change Request</span>' : ""}
           <span class="status ${item.status.toLowerCase()}">${item.status}</span>
           ${item.status === "Pending" && canReview ? `
-            <button class="primary-action small" type="button" data-intake-approve="${item.id}">Approve</button>
-            <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">Deny</button>
+            <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
+            <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && item.members && item.status === "Approved" ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
+          ${canReview && item.type === "Leave" && item.status === "Approved" ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
+          ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
         </div>
       </article>
     `).join("")
@@ -12728,7 +14506,7 @@ function renderIntakeQueue() {
 
   const denialPanel = document.getElementById("denial-panel");
   const denialEditor = document.querySelector("[data-denial-editor]");
-  const denialItem = intakeQueue.find((item) => item.id === activeDenialId);
+  const denialItem = intakeReviewItemById(activeDenialId);
   if (denialPanel && denialEditor) {
     denialPanel.hidden = !denialItem;
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
@@ -12776,6 +14554,31 @@ function revealIntakeDetail() {
   });
 }
 
+function openIntakeItemFromAlert(itemId) {
+  const groupedItem = groupedLeaveIntakeItems().find((item) =>
+    item.id === itemId || item.members?.some((member) => member.id === itemId)
+  );
+  if (!groupedItem) return;
+
+  activeIntakeDetailId = groupedItem.id;
+  alertFocusedIntakeItemId = groupedItem.id;
+  activeOverrideId = null;
+  activeDenialId = null;
+  intakeSearchQuery = "";
+  Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
+  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
+  setPage("intake");
+  renderIntakeQueue();
+
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    const card = [...document.querySelectorAll("[data-intake-card]")]
+      .find((candidate) => candidate.dataset.intakeCard === groupedItem.id);
+    if (!card) return;
+    card.scrollIntoView({ behavior: "instant", block: "start" });
+    card.focus({ preventScroll: true });
+  }));
+}
+
 function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
@@ -12783,7 +14586,7 @@ function setPage(pageName) {
   if (pageName === "intake-schedule" && !canUseIntakeView()) {
     pageName = "dashboard";
   }
-  if (pageName === "admin" && !hasSystemAdminAccess()) {
+  if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
 
@@ -12808,17 +14611,22 @@ function setPage(pageName) {
     intake: "Intake Queue",
     "intake-schedule": "Intake Schedule",
     admin: "Admin Console",
+    "admin-tools": "Bidding Setup",
     history: "Bid History",
     profile: "My Profile",
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
+  if (isMemberAppVisible() && activePageName !== pageName) renderMemberPageContent(pageName);
   if (activePageName !== pageName) {
     window.scrollTo({ top: 0, behavior: "instant" });
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
   if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
-    renderMemberCalendarForPage(pageName);
+    const needsFullRender = memberPageCalendarNeedsRender(pageName);
+    renderMemberCalendarForPage(pageName, {
+      defer: activePageName !== pageName && needsFullRender,
+    });
     if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
   }
 }
@@ -12848,7 +14656,7 @@ function updateSelectedBidYear(year) {
 
 function biddingExportRows() {
   const rows = [
-    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Actor", "Timestamp"],
+    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Action by", "Timestamp"],
   ];
 
   intakeQueue.forEach((item) => {
@@ -12881,13 +14689,13 @@ function biddingExportRows() {
 
   leaveBids.forEach((bid) => {
     rows.push([
-      bid.ghostBid ? "Ghost Leave" : "Leave Queue",
+      bid.ghostBid ? "Ghost Leave" : isGlLeaveItem(bid) ? "GL Bid" : "Leave Queue",
       currentUser.area,
       userFullName(),
       currentUser.initials,
       currentUserBidAs(),
       bid.status,
-      `${bid.ghostBid ? "Ghost Leave · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
+      `${bid.ghostBid ? "Ghost Leave · " : isGlLeaveItem(bid) ? "GL Bid · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
       "",
       "",
     ]);
@@ -13195,10 +15003,13 @@ function bidderEditorDraft() {
   const field = (name) => form.querySelector(`[data-editor-field="${name}"]`)?.value;
   return {
     rdo: field('line_id') ? { line_id: field('line_id'), fatigue_group: field('fatigue_group'),
-      flex: field('flex') === 'true', aws: field('aws') === 'true', mid: field('mid') } : null,
+      flex: field('flex') === 'true', aws: field('aws') === 'true', mid: field('mid'),
+      gl_line_type_verified: bidderEditor.person?.bid_role !== 'GL'
+        || Boolean(form.querySelector('[data-editor-gl-line-type-verification]')?.checked) } : null,
     leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
-      start_date: form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null,
-      end_date: form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null,
+      // Hidden requests must retain their dates in the complete database save payload.
+      start_date: row.status === 'approved' ? form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null : row.requested_start_date,
+      end_date: row.status === 'approved' ? form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null : row.requested_end_date,
     })),
   };
 }
@@ -13244,6 +15055,8 @@ function renderBidderEditorForm() {
   const select = (label, key, values, value) => `<label>${label}<select data-editor-field="${key}">${values.map(([v,l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(value) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select></label>`;
   const person = bidderEditor.person;
   const ghostBidder = Boolean(snapshot.is_ghost_bidder ?? person.is_ghost_bidder);
+  const selectedLine = lines.find(line => line.id === lineId);
+  const glLineCategory = selectedLine && /DEV/i.test(selectedLine.pattern) ? 'DEV' : person.area === 'TMU' ? 'TMC' : 'CPC';
   document.querySelector('[data-bidder-editor-form]').innerHTML = `
     <h3>${escapeHtml(person.first_name)} ${escapeHtml(person.last_name)} · ${escapeHtml(person.initials || 'No initials')}</h3>
     <p>${escapeHtml(person.area)} · ${escapeHtml(person.bid_role)} · Changes retain each bid’s current approval status.</p>
@@ -13258,14 +15071,18 @@ function renderBidderEditorForm() {
       ${select('Flex','flex',[[true,'Yes'],[false,'No']],initial.flex)}
       ${select('AWS','aws',[[true,'Yes'],[false,'No']],initial.aws)}
       ${select('Mid','mid',[['No','No'],['Yes','Yes'],['BID','BID']],initial.mid)}
-    </div></fieldset>
+    </div>
+    ${person.bid_role === 'GL' ? `<label class="override-check gl-line-type-verification">
+      <input type="checkbox" data-editor-gl-line-type-verification />
+      I verified this GL is bidding as <span data-editor-gl-line-type-label>${glLineCategory}</span>. All GL rules still apply.
+    </label>` : ''}</fieldset>
     ${[1,2,3,4,5].map(round => {
-      const rows = snapshot.leave.filter(row => row.round_number === round);
+      const rows = snapshot.leave.filter(row => row.round_number === round && row.status === 'approved');
       return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
         <div class="bidder-editor-date-row"><div><strong>Priority ${row.priority}</strong> · ${escapeHtml(row.status)}<br><small>${row.charged_days} charged days currently</small></div>
           <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" /></label>
           <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" /></label>
-        </div>`).join('') : '<p>No leave bids in this round.</p>'}</fieldset>`;
+        </div>`).join('') : '<p>No approved leave bids in this round.</p>'}</fieldset>`;
     }).join('')}
     <div data-editor-review aria-live="polite"></div>
     <div class="bidder-editor-actions"><button type="button" class="secondary-action" data-editor-check>1. Confirm &amp; check changes</button>
@@ -13387,17 +15204,82 @@ document.addEventListener('input', (event) => {
 document.addEventListener('change', (event) => {
   if (event.target.matches('[data-editor-ghost-bidder]')) {
     bidderEditorStatus('Ghost bidding status has not been saved yet. Use the update button in that section.');
+  } else if (event.target.matches('[data-editor-field="line_id"]') && bidderEditor.person?.bid_role === 'GL') {
+    const selectedLine = bidderEditor.record?.lines.find(line => line.id === event.target.value);
+    const category = selectedLine && /DEV/i.test(selectedLine.pattern) ? 'DEV' : bidderEditor.person.area === 'TMU' ? 'TMC' : 'CPC';
+    const form = event.target.closest('[data-bidder-editor-form]');
+    const label = form?.querySelector('[data-editor-gl-line-type-label]');
+    const verification = form?.querySelector('[data-editor-gl-line-type-verification]');
+    if (label) label.textContent = category;
+    if (verification) verification.checked = false;
+    invalidateBidderEditor();
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('click', (event) => {
+  const manualIntakeToggle = event.target.closest('[data-manual-intake-toggle]');
+  if (manualIntakeToggle) {
+    const panelName = manualIntakeToggle.dataset.manualIntakeToggle;
+    const content = document.querySelector(`[data-manual-intake-content="${panelName}"]`);
+    const open = manualIntakeToggle.getAttribute('aria-expanded') !== 'true';
+    manualIntakeToggle.setAttribute('aria-expanded', String(open));
+    if (content) content.hidden = !open;
+    const preferenceKey = manualIntakeToggle.dataset.preferenceKey;
+    if (preferenceKey) {
+      storeJsonValue(preferenceKey, {
+        ...storedJsonValue(preferenceKey, {}),
+        [panelName]: open,
+      });
+    }
+    return;
+  }
   const bidder = event.target.closest('[data-editor-bidder]');
   if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
   if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
   if (event.target.closest('[data-editor-submit]')) void processBidderEditor(false);
   if (event.target.closest('[data-editor-save-ghost]')) void saveBidderGhostStatus();
+
+  const intakeControl = event.target.closest('[data-intake-control]');
+  if (intakeControl) {
+    const controlName = intakeControl.dataset.intakeControl;
+    const shouldOpen = intakeControl.getAttribute('aria-expanded') !== 'true';
+    document.querySelectorAll('[data-intake-control]').forEach((button) => {
+      button.setAttribute('aria-expanded', String(shouldOpen && button.dataset.intakeControl === controlName));
+    });
+    document.querySelectorAll('[data-intake-control-panel]').forEach((panel) => {
+      panel.hidden = !shouldOpen || panel.dataset.intakeControlPanel !== controlName;
+    });
+  }
 });
 
+function renderMemberPageContent(pageName) {
+  return withLeaveReadCache(() => {
+    if (pageName === "rdos") {
+      syncRdoFilterControls();
+      renderRdoLines();
+    }
+    if (pageName === "leave") renderSubmittedLeaveManager();
+    if (pageName === "seniority") renderSeniority();
+    if (pageName === "intake-schedule") renderIntakeSchedule();
+    if (pageName === "history") renderHistory();
+    if (pageName === "intake") {
+      renderRoundRuleSummaryList();
+      renderApprovalRuleSummary();
+      renderIntakeQueue();
+      renderManualBidEntry();
+      ensureIntakeBidderSelection();
+    }
+    if (pageName === "admin") {
+      renderAdminConsole();
+    }
+    if (pageName === "admin-tools") renderAdminToolsPage();
+  });
+}
+
 function renderApp() {
+  return withLeaveReadCache(() => renderAppWithCache());
+}
+
+function renderAppWithCache() {
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
@@ -13409,27 +15291,18 @@ function renderApp() {
   renderCurrentUser();
   renderCalendars({ includePublic: false });
   syncLeaveBuilderInputs();
-  syncRdoFilterControls();
-  renderRdoLines();
   updateSelectedLine();
   renderLeaveRows("dashboard-leave-rows");
   renderLeaveRows("leave-page-rows");
   renderLeaveDraftQueue();
-  renderSubmittedLeaveManager();
   renderLeaveAllowanceSummary();
-  renderRuleEditors();
   renderLeaveDatePicker();
   renderLeaveBucketCards();
   renderLeaveSlotBoard();
-  renderSeniority();
-  renderIntakeSchedule();
-  renderHistory();
-  renderIntakeQueue();
-  renderManualBidEntry();
-  renderAdminConsole();
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
+  renderMemberPageContent(document.querySelector(".page.active")?.dataset.pagePanel);
   updateBidWindow(true);
 }
 
@@ -13446,6 +15319,19 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
+  if (intakeBidderDetailOpen) {
+    intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
+    renderIntakeBidderSummary();
+    document.querySelector("[data-intake-bidder-detail]")?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  if (event.target.closest("[data-intake-bidder-detail-close]")) {
+    intakeBidderSelection.detail = "";
+    renderIntakeBidderSummary();
+    return;
+  }
+
   const manualControllerResult = event.target.closest("[data-manual-controller-result]");
   if (manualControllerResult) {
     const panel = manualControllerResult.closest("[data-manual-bid-panel]");
@@ -13457,8 +15343,18 @@ document.addEventListener("click", async (event) => {
       renderManualBidPanel(panel);
       const person = manualBidSelectedPerson(controllerSelect.value);
       setManualBidStatus(panel, `Selected ${controllerName(person)} (${person.initials}).`);
+      selectIntakeBidder(person.initials, person.profileId);
       controllerSelect.focus();
     }
+    return;
+  }
+
+  const intakeTeamCandidateResult = event.target.closest("[data-intake-team-candidate-result]");
+  if (intakeTeamCandidateResult) {
+    selectedIntakeTeamCandidateInitials = intakeTeamCandidateResult.dataset.intakeTeamCandidateResult || "";
+    intakeTeamCandidateQuery = "";
+    renderIntakeTeamCandidateSearch();
+    document.querySelector("[data-add-intake-team-member]")?.focus();
     return;
   }
 
@@ -13472,6 +15368,10 @@ document.addEventListener("click", async (event) => {
   }
   if (event.target.closest("[data-public-date-close]")) {
     document.querySelector("[data-public-date-sheet]").close();
+    return;
+  }
+  if (event.target.closest("[data-late-bid-close]") || event.target.matches("[data-late-bid-dialog]")) {
+    closeLateBidDialog();
     return;
   }
   const mobileCalendar = event.target.closest("[data-mobile-calendar]");
@@ -13499,6 +15399,16 @@ document.addEventListener("click", async (event) => {
     document.querySelector("[data-public-rdo-sections]").dataset.presentation = publicRdoPresentation;
     document.querySelectorAll("[data-rdo-presentation]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.rdoPresentation === publicRdoPresentation)));
     document.querySelector(".mobile-table-hint").hidden = publicRdoPresentation !== "table";
+    return;
+  }
+  const bidTimePresentation = event.target.closest("[data-bid-time-presentation]");
+  if (bidTimePresentation) {
+    publicBidTimePresentation = bidTimePresentation.dataset.bidTimePresentation === "list" ? "list" : "cards";
+    const results = document.querySelector("[data-public-bid-time-results]");
+    if (results) results.dataset.presentation = publicBidTimePresentation;
+    document.querySelectorAll("[data-bid-time-presentation]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.bidTimePresentation === publicBidTimePresentation));
+    });
     return;
   }
   const memberPresentation = event.target.closest("[data-member-rdo-presentation]");
@@ -13552,6 +15462,11 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-reset-pilot-data]")) {
     await resetPilotData();
+    return;
+  }
+
+  if (event.target.closest("[data-reset-pilot-bidder]")) {
+    await resetPilotBidderRound();
     return;
   }
 
@@ -13706,8 +15621,11 @@ document.addEventListener("click", async (event) => {
     alertMenu?.setAttribute("hidden", "");
     document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
     if (alertItem.dataset.helpThread) {
-      setPage(alertItem.dataset.page);
       openHelpPanel(alertItem.dataset.helpThread);
+      return;
+    }
+    if (alertItem.dataset.intakeItem) {
+      openIntakeItemFromAlert(alertItem.dataset.intakeItem);
       return;
     }
     setPage(alertItem.dataset.page);
@@ -13793,6 +15711,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const weekChoice = event.target.closest('[data-bid-change-select-week]');
+  if (weekChoice) { selectRoundOneBidChangeWeek(weekChoice.dataset.bidChangeSelectWeek); return; }
+  const weekDate = event.target.closest('[data-bid-change-toggle-date]');
+  if (weekDate) { toggleRoundOneBidChangeDate(weekDate.dataset.bidChangeToggleDate); return; }
+
   if (event.target.closest("[data-bid-change-save]")) {
     await saveBidDateChanges();
     return;
@@ -13843,16 +15766,28 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (event.target.closest("[data-admin-add-intake-schedule]")) {
-    await addAdminScheduleFromForm();
-    return;
-  }
-
   const intakeShiftPreset = event.target.closest("[data-intake-shift-preset]");
   if (intakeShiftPreset) {
     applyIntakeShiftPreset(intakeShiftPreset);
     return;
   }
+
+  const editShiftPresetButton = event.target.closest("[data-edit-shift-preset]");
+  if (editShiftPresetButton && hasSystemAdminAccess()) {
+    const preset = intakeShiftPresets.find((item) => item.id === editShiftPresetButton.dataset.editShiftPreset);
+    if (preset) {
+      editingShiftPresetId = preset.id;
+      const form = document.querySelector("[data-shift-builder-form]");
+      form.querySelector("[data-shift-builder-time]").value = preset.startTime;
+      form.querySelector("[data-shift-builder-hours]").value = String(preset.durationHours);
+      renderShiftPresets();
+      form.querySelector("[data-shift-builder-time]").focus();
+    }
+    return;
+  }
+  const deleteShiftPresetButton = event.target.closest("[data-delete-shift-preset]");
+  if (deleteShiftPresetButton) { await deleteShiftPreset(deleteShiftPresetButton.dataset.deleteShiftPreset); return; }
+  if (event.target.closest("[data-cancel-shift-preset]")) { resetShiftPresetEditor(); setShiftBuilderStatus(""); return; }
 
   const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
   if (scheduleViewButton) {
@@ -14012,9 +15947,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const intakeManageLeave = event.target.closest("[data-intake-manage-leave]");
+  if (intakeManageLeave) {
+    revealIntakeLeaveDates(intakeManageLeave.dataset.intakeManageLeave);
+    return;
+  }
+
+  const intakeRemoveLeave = event.target.closest("[data-intake-remove-leave]");
+  if (intakeRemoveLeave) {
+    await removeApprovedLeaveBid(intakeRemoveLeave.dataset.intakeRemoveLeave);
+    return;
+  }
+
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
     return;
@@ -14062,9 +16011,15 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const bidEntryButton = event.target.closest("[data-bid-entry-action]");
+  if (bidEntryButton?.dataset.lateBidContact === "true") {
+    openLateBidDialog();
+    return;
+  }
+
   const selectLineButton = event.target.closest("[data-select-line]");
   if (selectLineButton && !selectLineButton.hidden) {
-    const line = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+    const line = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
       void addOrUpdateRdoSubmission();
     }
@@ -14074,13 +16029,26 @@ document.addEventListener("click", async (event) => {
   const row = event.target.closest("[data-line-id]");
   if (row && !row.classList.contains("occupied-row")) {
     const previousLineId = selectedLineId;
-    selectedLineId = row.dataset.lineId;
-    const selectedLine = rdoLinesForArea(currentUser.area).find((item) => item.line === selectedLineId);
+    const previousRdoWeekdays = selectedRdoWeekdays();
+    const selectedLine = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === row.dataset.lineId);
+    if (!selectedLine || selectedLine.status === "Taken" || !isViewingHomeArea() || pendingCurrentUserRdoRequest()) return;
+    selectedLineId = selectedLine.line;
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
       reconcileUnsubmittedLeaveForRdoLine(selectedLine);
     }
     renderRdoLines();
     updateSelectedLine();
+    refreshMemberCalendarRdoPattern(previousRdoWeekdays);
+    return;
+  }
+
+  // Inspect dashboard dates without updating the leave builder or rerendering calendars.
+  const dashboardDateButton = event.target.closest("#dashboard-calendar [data-calendar-date]");
+  if (dashboardDateButton) {
+    const key = dashboardDateButton.dataset.calendarDate;
+    if (key >= BID_LEAVE_YEAR_START_KEY && key <= BID_LEAVE_YEAR_END_KEY) {
+      openLeaveSlotModal({ key, area: currentViewArea(), inspectOnly: true });
+    }
     return;
   }
 
@@ -14117,6 +16085,16 @@ document.addEventListener("click", async (event) => {
       calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
       renderVisibleCalendars();
     }
+    return;
+  }
+
+  const calendarWorkforceButton = event.target.closest("[data-calendar-workforce]");
+  if (calendarWorkforceButton) {
+    setCalendarWorkforceForScope(
+      calendarWorkforceButton.dataset.calendarScope,
+      calendarWorkforceButton.dataset.calendarWorkforce
+    );
+    renderVisibleCalendars();
     return;
   }
 
@@ -14169,6 +16147,8 @@ document.addEventListener("keydown", async (event) => {
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
     activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
+    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
+    if (item) selectIntakeBidder(item.initials, item.bidderId);
     renderIntakeQueue();
     revealIntakeDetail();
   }
@@ -14228,6 +16208,7 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
+document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -14250,12 +16231,16 @@ document.addEventListener("input", (event) => {
   if (event.target.matches("[data-mobile-bid-search]")) {
     const query = event.target.value.trim().toLowerCase();
     let matches = 0;
-    document.querySelectorAll(".mobile-bid-time-card").forEach((card) => {
+    document.querySelectorAll("[data-public-bid-time-card]").forEach((card) => {
       const name = `${card.querySelector("[data-bidder-name]").textContent} ${card.querySelector("p").textContent}`.toLowerCase();
       card.hidden = !name.includes(query);
       if (!card.hidden) matches += 1;
     });
-    document.querySelector("[data-mobile-bid-empty]").hidden = matches > 0 || !query;
+    document.querySelectorAll("[data-public-bid-time-row]").forEach((row) => {
+      row.hidden = !row.textContent.toLowerCase().includes(query);
+    });
+    const emptyMessage = document.querySelector("[data-mobile-bid-empty]");
+    if (emptyMessage) emptyMessage.hidden = matches > 0 || !query;
     return;
   }
 
@@ -14272,9 +16257,18 @@ document.addEventListener("input", (event) => {
     return;
   }
 
+  const intakeTeamCandidateSearch = event.target.closest("[data-intake-team-candidate-search]");
+  if (intakeTeamCandidateSearch) {
+    intakeTeamCandidateQuery = intakeTeamCandidateSearch.value;
+    selectedIntakeTeamCandidateInitials = "";
+    renderIntakeTeamCandidateSearch();
+    return;
+  }
+
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
+    if (manualLeaveDateField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     return;
   }
@@ -14300,6 +16294,29 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  const overrideLine = event.target.closest("[data-override-line]");
+  if (overrideLine) {
+    const item = intakeReviewItemById(activeOverrideId);
+    const line = item
+      ? rdoLines.find((entry) => entry.line === overrideLine.value && lineForArea(entry, item.area))
+      : null;
+    const category = line && isCpcLine(line) ? (item?.area === "TMU" ? "TMC" : "CPC") : "DEV";
+    const editor = overrideLine.closest("[data-override-editor]");
+    const label = editor?.querySelector("[data-gl-line-type-label]");
+    const verification = editor?.querySelector("[data-gl-line-type-verification]");
+    if (label) label.textContent = category;
+    if (verification) verification.checked = false;
+    return;
+  }
+  if (event.target.matches("[data-pilot-round-toggle]")) {
+    await setPilotRound(Number(event.target.dataset.pilotRoundToggle), event.target.checked);
+    return;
+  }
+  if (event.target.matches("[data-pilot-round-picker]")) {
+    selectedPilotRound = normalizeBidWindowTestRound(event.target.value);
+    renderApp();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;
@@ -14412,7 +16429,12 @@ document.addEventListener("change", async (event) => {
 
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
+    if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
+    if (manualReactiveField.matches("[data-manual-bid-controller]")) {
+      const person = manualBidSelectedPerson(manualReactiveField.value);
+      selectIntakeBidder(person.initials, person.profileId);
+    }
     return;
   }
 
@@ -14436,8 +16458,9 @@ initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
 initializeSupabaseAuth().then(async (restoredSession) => {
-  if (!restoredSession && window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    await loadSupabaseReferenceData();
+  if (!restoredSession) {
+    if (window.NATCA_SUPABASE_CONFIG?.environment === "pilot") await loadPublicPilotCalendar();
+    else await loadSupabaseReferenceData();
   }
   if (isMemberAppVisible()) {
     renderApp();
@@ -14453,3 +16476,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") updateBidWindow(true);
 });
 window.NATCA_BIDDING_READY = true;
+
+setInterval(() => {
+  if (document.visibilityState === "visible") void refreshPilotRounds();
+}, 10000);

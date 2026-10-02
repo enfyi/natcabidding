@@ -535,9 +535,12 @@ select jsonb_build_object(
   'bidder_version', (select b.updated_at from public.bidders b where b.id=target_id),
   'is_ghost_bidder', public.is_ghost_bidder(year_id, target_id),
   'assignment', (select to_jsonb(x) from (
-    select id, line_code, fatigue_group, flex, aws, mid, four_ten, updated_at
-    from public.rdo_lines where bid_year_id=year_id and assigned_bidder_id=target_id
-      and status='taken' order by updated_at desc,id limit 1
+    select line.id, line.line_code, line.fatigue_group, line.flex, line.aws, line.mid,
+      line.four_ten, line.updated_at,
+      (select coalesce(jsonb_agg(day.shift_code order by day.weekday),'[]'::jsonb)
+       from public.rdo_line_days day where day.rdo_line_id=line.id) week
+    from public.rdo_lines line where line.bid_year_id=year_id and line.assigned_bidder_id=target_id
+      and line.status='taken' order by line.updated_at desc,line.id limit 1
   ) x),
   'rdo', (select to_jsonb(x) from (
     select id, rdo_line_id, round_number, status, payload, is_ghost_bid, updated_at
@@ -546,8 +549,18 @@ select jsonb_build_object(
     order by submitted_at desc nulls last,created_at desc,id limit 1
   ) x),
   'leave', coalesce((select jsonb_agg(to_jsonb(x) order by round_number,priority,id) from (
-    select id, round_number, priority, status, requested_start_date, requested_end_date, charged_days, is_ghost_bid, updated_at
-    from public.leave_requests where bid_year_id=year_id and bidder_id=target_id
+    select request.id, request.round_number, request.priority, request.status,
+      request.requested_start_date, request.requested_end_date, request.charged_days,
+      request.is_ghost_bid, request.updated_at,
+      (select coalesce(jsonb_agg(jsonb_build_object(
+        'leave_date', day.leave_date,
+        'charged', day.charged,
+        'is_rdo', day.is_rdo,
+        'is_holiday', day.is_holiday,
+        'is_holiday_in_lieu', day.is_holiday_in_lieu
+      ) order by day.leave_date),'[]'::jsonb)
+       from public.leave_request_dates day where day.leave_request_id=request.id) dates
+    from public.leave_requests request where request.bid_year_id=year_id and request.bidder_id=target_id
   ) x),'[]'::jsonb)
 ) $$;
 revoke all on function private.bidder_editor_snapshot(uuid,uuid) from public, anon, authenticated;
@@ -570,7 +583,20 @@ begin
     ) x;
     return jsonb_build_object('bidders',result);
   end if;
-  return jsonb_build_object('snapshot',private.bidder_editor_snapshot(year_id,target_bidder_id),
+  return jsonb_build_object(
+    'person',(select jsonb_build_object(
+      'id',b.id,
+      'first_name',b.first_name,
+      'last_name',b.last_name,
+      'initials',b.initials,
+      'email',b.email,
+      'phone',b.phone,
+      'bid_role',b.bid_role,
+      'seniority_rank',b.seniority_rank,
+      'leave_slot_allowance',b.leave_slot_allowance,
+      'area',a.name
+    ) from public.bidders b left join public.areas a on a.id=b.area_id where b.id=target_bidder_id),
+    'snapshot',private.bidder_editor_snapshot(year_id,target_bidder_id),
     'lines',(select coalesce(jsonb_agg(to_jsonb(x) order by line_code),'[]'::jsonb) from (
       select l.id,l.line_code,l.pattern,l.fatigue_group,l.mid,l.four_ten,l.status,l.assigned_bidder_id
       from public.rdo_lines l join public.bidders b on b.id=target_bidder_id join public.areas a on a.id=b.area_id
@@ -613,6 +639,10 @@ begin
     raise exception 'Leave records were added or removed. Reload the bidder.';
   end if;
   line_change := changes->'rdo';
+  if target.bid_role = 'GL' and line_change is not null and line_change <> 'null'::jsonb
+     and not coalesce((line_change->>'gl_line_type_verified')::boolean,false) then
+    raise exception 'Verify whether this GL is bidding as CPC/TMC or DEV.';
+  end if;
   if line_change is not null and line_change <> 'null'::jsonb then
     select * into strict line_row from public.rdo_lines where id=(line_change->>'line_id')::uuid
       and bid_year_id=year_id and area_id=target.area_id;
