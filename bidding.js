@@ -13161,7 +13161,8 @@ function moveSchedulePeriod(direction) {
   } else if (scheduleCalendarView === "week") {
     nextDate.setDate(nextDate.getDate() + direction * 7);
   } else {
-    nextDate.setMonth(nextDate.getMonth() + direction * (scheduleCalendarView === "two-month" ? 2 : 1));
+    nextDate.setDate(1);
+    nextDate.setMonth(nextDate.getMonth() + direction);
   }
   scheduleActiveDate = nextDate;
   renderIntakeSchedule();
