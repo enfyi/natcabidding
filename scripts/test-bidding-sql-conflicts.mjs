@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bi
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql','20261002015357_ghost_leave_requires_available_slots.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql','20261002015357_ghost_leave_requires_available_slots.sql','20261002020308_install_ghost_bid_preservation_compatibility.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
@@ -392,7 +392,7 @@ try {
   await db.query("select public.submit_rdo_bid(2027,'GHOST-TEST','A',true,false,'No',1)");
   throw new Error('Ghost RDO unexpectedly accepted a taken line');
 } catch (error) {
-  if (!error.message.includes('already assigned')) throw error;
+  if (!error.message.includes('already assigned') && !error.message.includes('choose an open RDO line')) throw error;
 }
 await db.exec(`update rdo_lines set status='open',assigned_bidder_id=null where id='${ghostLine}';`);
 console.log('PASS Ghost RDO rejects a taken source line');
