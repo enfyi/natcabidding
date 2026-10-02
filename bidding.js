@@ -4985,6 +4985,7 @@ async function denyIntakeItem(id) {
 }
 
 async function saveSupabaseApprovedLeaveEdit(item) {
+  if (!intakeLeaveRoundIsOpen(item)) throw new Error(`Round ${intakeItemRound(item)} is closed. Approved leave dates can no longer be edited.`);
   const client = supabaseClient();
   if (!client) throw new Error("Supabase is not configured on this page.");
   if (!item?.supabaseRequestId) throw new Error("This approved leave request has not been saved to Supabase.");
@@ -5018,6 +5019,13 @@ async function saveSupabaseApprovedLeaveEdit(item) {
 async function removeApprovedLeaveBid(id) {
   const item = intakeReviewItemById(id);
   if (!item || item.type !== "Leave" || item.status !== "Approved" || !hasIntakeAccess()) return;
+  if (!intakeLeaveRoundIsOpen(item)) {
+    const reviewNote = `Round ${intakeItemRound(item)} is closed. This bid can no longer be removed.`;
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderIntakeQueue();
+    return;
+  }
 
   const requests = item.members || [item];
   const requestIds = requests.map((request) => request.supabaseRequestId).filter(Boolean);
@@ -5103,6 +5111,12 @@ async function saveSupabasePendingRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
+  if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
+    item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
+    activeOverrideId = null;
+    renderIntakeQueue();
+    return;
+  }
 
   const original = item.summary;
   const originalLine = item.line;
@@ -6689,7 +6703,12 @@ async function initializeSupabaseAuth() {
 
       restoreSupabaseSession();
     }
-    if (event === "SIGNED_OUT") clearSupabaseAccountState();
+    if (event === "SIGNED_OUT") {
+      clearSupabaseAccountState();
+      currentUser = null;
+      showPublicHome();
+      setAuthStatus("Signed out. Sign in again to manage intake shifts.", "info");
+    }
   });
 
   const pendingToken = pendingSupabaseEmailToken();
@@ -12703,6 +12722,7 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (!client || !supabaseState.connected) {
     throw new Error("The intake schedule could not reach the database. Check the connection and try again.");
   }
+  if (!await ensureIntakeScheduleSession(client)) return false;
   const routine = scheduleId ? "update_intake_schedule" : "create_intake_schedule";
   const parameters = {
     requested_bid_year: BID_YEAR,
@@ -12717,6 +12737,27 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (error) throw error;
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
+  return true;
+}
+
+async function ensureIntakeScheduleSession(client) {
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    currentUser = null;
+    clearSupabaseAccountState();
+    showPublicHome();
+    setAuthStatus("Your sign-in ended. Sign in again to manage intake shifts.", "error");
+    return false;
+  }
+
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError || !userData.user || userData.user.id !== sessionData.session.user.id) {
+    setScheduleFormStatus("Could not verify your sign-in. Check the connection or sign in again.", "error");
+    return false;
+  }
+
+  syncSupabaseAccountStateFromSession(sessionData.session);
+  return true;
 }
 
 function setIntakeScheduleMutationPending(isPending) {
@@ -12743,7 +12784,6 @@ function resetIntakeScheduleEditor(options = {}) {
   editingIntakeScheduleId = "";
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (options.resetValues && form) {
-    form.querySelector("[data-intake-shift-date]").value = "";
     form.querySelector("[data-intake-shift-time]").value = "";
     form.querySelector("[data-intake-shift-duration]").value = "";
     syncIntakeShiftForm(form);
@@ -12792,6 +12832,7 @@ async function deleteIntakeSchedule(scheduleId) {
     setScheduleFormStatus("The intake schedule could not reach the database. Check the connection and try again.", "error");
     return;
   }
+  if (!await ensureIntakeScheduleSession(client)) return;
 
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`Deleting ${schedule.name}'s intake shift...`);
@@ -13100,7 +13141,7 @@ async function addIntakeScheduleFromForm() {
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`${actionLabel} ${name}'s intake shift...`);
   try {
-    await saveIntakeScheduleToSupabase(initials, start, end, scheduleId);
+    if (!await saveIntakeScheduleToSupabase(initials, start, end, scheduleId)) return;
     logHistory(area, scheduleId ? "Intake shift updated" : "Intake shift assigned", `${currentUser.initials} ${scheduleId ? "updated" : "scheduled"} ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
     resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
@@ -13896,6 +13937,17 @@ function intakeItemRound(item) {
   return 1;
 }
 
+function intakeLeaveRoundIsOpen(item) {
+  const round = intakeItemRound(item);
+  if (pilotState.database) return pilotState.enabled && pilotOpenRounds.includes(round);
+  const windows = ZLA_AREAS.flatMap((area) => roundWindows(round, area));
+  if (!windows.length) return false;
+  const startsAt = Math.min(...windows.map((window) => window.start.getTime()));
+  const endsAt = Math.max(...windows.map((window) => window.end.getTime()));
+  const now = Date.now();
+  return now >= startsAt && now < endsAt;
+}
+
 function intakeSearchText(item) {
   return [
     bidTypeLabel(item),
@@ -14395,7 +14447,7 @@ function renderIntakeGroupDates(item, canReview) {
   return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
     <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
     ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
-    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
+    ${canReview && ["Pending", "Approved"].includes(member.status) && intakeLeaveRoundIsOpen(member) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
     </div>`).join("")}</details>`;
 }
 
@@ -14484,9 +14536,10 @@ function renderIntakeQueueWithCache() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
-          ${canReview && item.members && item.status === "Approved" ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
-          ${canReview && item.type === "Leave" && item.status === "Approved" ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
+          ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
+          ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
@@ -14499,9 +14552,11 @@ function renderIntakeQueueWithCache() {
   const panel = document.getElementById("override-panel");
   const editor = document.querySelector("[data-override-editor]");
   const activeItem = intakeQueue.find((item) => item.id === activeOverrideId);
+  const editableItem = activeItem?.type === "Leave" && !intakeLeaveRoundIsOpen(activeItem) ? null : activeItem;
+  if (activeItem && !editableItem) activeOverrideId = null;
   if (panel && editor) {
-    panel.hidden = !activeItem;
-    editor.innerHTML = activeItem ? renderOverrideEditor(activeItem) : "";
+    panel.hidden = !editableItem;
+    editor.innerHTML = editableItem ? renderOverrideEditor(editableItem) : "";
   }
 
   const denialPanel = document.getElementById("denial-panel");
@@ -14512,7 +14567,7 @@ function renderIntakeQueueWithCache() {
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
   }
   const backdrop = document.querySelector("[data-intake-editor-backdrop]");
-  if (backdrop) backdrop.hidden = !(activeItem || denialItem);
+  if (backdrop) backdrop.hidden = !(editableItem || denialItem);
 }
 
 function focusIntakeEditor(panelId) {
@@ -15933,6 +15988,8 @@ document.addEventListener("click", async (event) => {
 
   const intakeEdit = event.target.closest("[data-intake-edit]");
   if (intakeEdit) {
+    const item = intakeReviewItemById(intakeEdit.dataset.intakeEdit);
+    if (item?.type === "Leave" && !intakeLeaveRoundIsOpen(item)) { renderIntakeQueue(); return; }
     intakeEditorReturnFocus = { id: intakeEdit.dataset.intakeEdit, action: "edit" };
     activeOverrideId = intakeEdit.dataset.intakeEdit;
     activeDenialId = null;
