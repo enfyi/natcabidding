@@ -5948,7 +5948,7 @@ tr.occupied-row .rdo-tag {
   align-self: flex-start;
   min-height: auto;
   color: inherit;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 900;
 }
 
@@ -5976,7 +5976,7 @@ tr.occupied-row .rdo-tag {
   min-width: 18px;
   overflow: hidden;
   color: inherit;
-  font-size: 0.52rem;
+  font-size: 0.58rem;
   font-weight: 900;
   line-height: 1;
   text-overflow: ellipsis;
@@ -5986,7 +5986,7 @@ tr.occupied-row .rdo-tag {
   min-width: 0;
   overflow: hidden;
   color: inherit;
-  font-size: 0.5rem;
+  font-size: 0.56rem;
   font-weight: 800;
   line-height: 1;
   text-overflow: ellipsis;
@@ -5996,7 +5996,7 @@ tr.occupied-row .rdo-tag {
 .schedule-day-assignment.mine b,
 .schedule-day-assignment.mine small {
   color: #0f172a;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 900;
 }
 
