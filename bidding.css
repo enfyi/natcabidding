@@ -6277,6 +6277,14 @@ tr.occupied-row .rdo-tag {
   font-size: 0.9rem;
 }
 
+.schedule-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .schedule-list-section article {
   display: grid;
   gap: 3px;

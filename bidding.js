@@ -1629,6 +1629,51 @@ function downloadBidWindowsIcs(rank = null) {
   URL.revokeObjectURL(url);
 }
 
+function buildIntakeScheduleIcs(schedules) {
+  const stamp = icsTimestamp();
+  const owner = currentUser.initials.toLowerCase();
+  const events = schedules.map((schedule) => [
+    "BEGIN:VEVENT",
+    `UID:natca-zla-intake-${BID_YEAR}-${owner}-${schedule.id}@zlabidding.local`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${icsTimestamp(schedule.start)}`,
+    `DTEND:${icsTimestamp(schedule.end)}`,
+    "SUMMARY:NATCA ZLA Intake Shift",
+    `DESCRIPTION:${escapeIcsText(`Intake assignment · ${schedule.area}`)}`,
+    `LOCATION:${escapeIcsText("2555 E. Ave P, Palmdale, Ca 93550")}`,
+    "END:VEVENT",
+  ].join("\r\n"));
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//NATCA ZLA//Intake Schedule//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(`NATCA ZLA ${BID_YEAR} Intake - ${currentUser.initials}`)}`,
+    ...events,
+    "END:VCALENDAR",
+  ].join("\r\n");
+}
+
+function downloadIntakeScheduleIcs(scheduleId = "") {
+  const mySchedules = intakeSchedules.filter((schedule) => schedule.initials === currentUser?.initials);
+  const schedules = scheduleId ? mySchedules.filter((schedule) => schedule.id === scheduleId) : mySchedules;
+  if (!schedules.length) return;
+
+  const blob = new Blob([buildIntakeScheduleIcs(schedules)], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = scheduleId
+    ? `natca-zla-${currentUser.initials.toLowerCase()}-intake-${dateKeyFromDate(schedules[0].start)}.ics`
+    : `natca-zla-${currentUser.initials.toLowerCase()}-${BID_YEAR}-intake-schedule.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function fallbackInitials(firstName, lastName) {
   return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase();
 }
@@ -13224,12 +13269,18 @@ function renderIntakeSchedule() {
   }
   list.innerHTML = `
     <div class="schedule-list-section">
-      <h3>Your Intake Assignments</h3>
+      <div class="schedule-list-heading">
+        <h3>Your Intake Assignments</h3>
+        ${userSchedules.length ? '<button class="secondary-action small" type="button" data-download-intake-schedule aria-label="Download all your intake assignments as a calendar file">Download all .ics</button>' : ""}
+      </div>
       ${userSchedules.length
         ? userSchedules.map((schedule) => `
           <article>
             <strong>${escapeHtml(formatDateRange(schedule.start, schedule.end))}</strong>
             <span>${escapeHtml(schedule.area)}</span>
+            <div class="schedule-list-actions">
+              <button class="secondary-action small" type="button" data-download-intake-schedule="${escapeHtml(schedule.id)}" aria-label="Download intake assignment for ${escapeHtml(formatCalendarDate(dateKeyFromDate(schedule.start)))} as a calendar file">Download .ics</button>
+            </div>
           </article>
         `).join("")
         : '<p class="empty-state small">No intake shifts assigned for this bidding year.</p>'}
@@ -15880,6 +15931,12 @@ document.addEventListener("click", async (event) => {
   const bidWindowDownload = event.target.closest("[data-download-bid-windows]");
   if (bidWindowDownload) {
     downloadBidWindowsIcs(bidWindowDownload.dataset.downloadBidWindows);
+    return;
+  }
+
+  const intakeScheduleDownload = event.target.closest("[data-download-intake-schedule]");
+  if (intakeScheduleDownload) {
+    downloadIntakeScheduleIcs(intakeScheduleDownload.dataset.downloadIntakeSchedule);
     return;
   }
 
