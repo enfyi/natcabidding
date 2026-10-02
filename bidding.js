@@ -5375,6 +5375,11 @@ function openPublicDateSheet(button) {
   const details = visibleLeaveSlotDetails(key, publicState.area);
   const sheet = document.querySelector("[data-public-date-sheet]");
   document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
+  if (!leaveSlotDataIsLoaded(details)) {
+    sheet.querySelector("[data-public-date-content]").innerHTML = `<p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p>`;
+    sheet.showModal();
+    return;
+  }
   const holiday = calendarHolidayKind(key, { area: publicState.area });
   sheet.querySelector("[data-public-date-content]").innerHTML = `
     <p>${escapeHtml(publicState.area)} · Read-only availability</p>
@@ -5589,7 +5594,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
   const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
-  const isClosed = canShowLeaveState && (
+  const slotDataLoaded = leaveSlotDataIsLoaded(baseSlotDetails || leaveSlotsForDate(key, detailArea));
+  const isClosed = canShowLeaveState && slotDataLoaded && (
     baseSlotDetails
       ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
       : isLeaveSlotsFull(key, options.area, availabilityBucket)
@@ -5627,7 +5633,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     : `Group ${fatigueGroup} fatigue week`;
   const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
   const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
-  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
+  const vacationStatus = `${holidayKind?.label || (!slotDataLoaded ? leaveSlotLoadingMessage() : isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5886,6 +5892,19 @@ function leaveSlotsForDate(key, area = currentUser.area) {
   return leaveSlotsForDateFromMap(key, area);
 }
 
+function leaveSlotDataIsLoaded(details) {
+  return ["cpcCapacity", "devCapacity", "cpcOpen", "devOpen"].every((field) => (
+    details?.[field] !== null && details?.[field] !== undefined
+    && Number.isFinite(Number(details[field])) && Number(details[field]) >= 0
+  ));
+}
+
+function leaveSlotLoadingMessage() {
+  return supabaseState.loading || !supabaseState.referenceDataLoaded
+    ? "Loading leave slots…"
+    : "Leave slots could not be loaded. Refresh to try again.";
+}
+
 function leaveSlotCapacityForDetails(details, bucket) {
   const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
   if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
@@ -5913,7 +5932,7 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
 
 function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotDataIsLoaded(details) && (leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key)));
 }
 
 function slotRows(type, initials, capacity) {
@@ -5930,6 +5949,9 @@ function slotRows(type, initials, capacity) {
 
 function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    return `<span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}"><span>${escapeHtml(leaveSlotLoadingMessage())}</span></span>`;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
@@ -5977,6 +5999,10 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
   const details = inspectOnly
     ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
     : leaveSlotsForDate(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    target.innerHTML = `<article class="leave-day-detail"><h3>${escapeHtml(details.label)}</h3><p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p></article>`;
+    return;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -7568,6 +7594,23 @@ async function loadPublishedGlRdoAssignments(client) {
   return client.rpc("read_public_gl_rdo_assignments", { requested_bid_year: BID_YEAR });
 }
 
+async function loadPublicPilotCalendar() {
+  const client = supabaseClient();
+  if (!client) return;
+  supabaseState.loading = true;
+  try {
+    const result = await loadPublishedLeaveSlots(client);
+    if (result.error) throw result.error;
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
+    calendarRenderRevision += 1;
+  } catch (error) {
+    console.warn(`Public leave slots could not load: ${error.message || error}`);
+  } finally {
+    supabaseState.loading = false;
+    supabaseState.referenceDataLoaded = true;
+  }
+}
+
 async function loadRdoLines(client, bidYearId) {
   const orderedResult = await client
     .from("rdo_lines")
@@ -7678,6 +7721,7 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
+    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
@@ -7688,7 +7732,6 @@ async function loadSupabaseReferenceData() {
       && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())
     ));
     if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
-    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!leaveRequestsResult.error) {
       upsertLeaveRequestsFromDatabase(
         attachSubmissionIdsToLeaveRequests(
@@ -7749,6 +7792,7 @@ function formatDuration(milliseconds) {
 }
 
 function formatDateTime(date) {
+  if (!date || !Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -16122,8 +16166,9 @@ initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
 initializeSupabaseAuth().then(async (restoredSession) => {
-  if (!restoredSession && window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    await loadSupabaseReferenceData();
+  if (!restoredSession) {
+    if (window.NATCA_SUPABASE_CONFIG?.environment === "pilot") await loadPublicPilotCalendar();
+    else await loadSupabaseReferenceData();
   }
   if (isMemberAppVisible()) {
     renderApp();
