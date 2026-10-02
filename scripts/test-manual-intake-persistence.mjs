@@ -18,6 +18,24 @@ assert.match(source, /Supabase did not return the saved manual leave submission/
 assert.match(source, /const requestedDates = leaveSlotDateKeys\(dateKeys, person\.initials\)/)
 assert.match(source, /start_date: request\.startDateKey,[\s\S]*end_date: request\.endDateKey/)
 
+const defaultEndDate = source.match(/function defaultManualLeaveEndDate\(panel\) \{[\s\S]*?\n\}/)?.[0]
+assert.ok(defaultEndDate, 'Intake leave should default the end date from the start date')
+const dateContext = vm.createContext({})
+vm.runInContext(defaultEndDate, dateContext)
+const startInput = { value: '2027-01-11' }
+const endInput = { value: '2027-01-15' }
+const panel = { querySelector: (selector) => selector === '[data-manual-leave-start]' ? startInput : endInput }
+dateContext.defaultManualLeaveEndDate(panel)
+assert.equal(endInput.value, startInput.value)
+startInput.value = '2027-01-12'
+dateContext.defaultManualLeaveEndDate(panel)
+assert.equal(endInput.value, '2027-01-12')
+startInput.value = ''
+dateContext.defaultManualLeaveEndDate(panel)
+assert.equal(endInput.value, '2027-01-12')
+assert.match(source, /manualLeaveDateField\.matches\("\[data-manual-leave-start\]"\)\) defaultManualLeaveEndDate\(manualPanel\)/)
+assert.match(source, /manualReactiveField\.matches\("\[data-manual-leave-start\]"\)\) defaultManualLeaveEndDate\(manualPanel\)/)
+
 const helper = source.match(/function contiguousLeaveDateRanges\(keys\) \{[\s\S]*?\n\}/)?.[0]
 assert.ok(helper, 'Manual leave must group non-RDO dates into contiguous requests')
 const context = vm.createContext({
