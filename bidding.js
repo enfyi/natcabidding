@@ -2577,6 +2577,12 @@ function manualLeaveRangeFromDateInputs(panel) {
   return formatLeaveRangeFromKeys(keys);
 }
 
+function defaultManualLeaveEndDate(panel) {
+  const startInput = panel.querySelector("[data-manual-leave-start]");
+  const endInput = panel.querySelector("[data-manual-leave-end]");
+  if (startInput?.value && endInput) endInput.value = startInput.value;
+}
+
 function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
@@ -16008,6 +16014,7 @@ document.addEventListener("input", (event) => {
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
+    if (manualLeaveDateField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     return;
   }
@@ -16168,6 +16175,7 @@ document.addEventListener("change", async (event) => {
 
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
+    if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     if (manualReactiveField.matches("[data-manual-bid-controller]")) {
       const person = manualBidSelectedPerson(manualReactiveField.value);
