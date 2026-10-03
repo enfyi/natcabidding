@@ -4,11 +4,11 @@ import vm from 'node:vm'
 
 const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 const landing = source.slice(source.indexOf('function requestedLandingPage()'), source.indexOf('function supabaseAuthRedirectUrl()'))
-const sync = source.slice(source.indexOf('function syncMemberPageUrl('), source.indexOf('function setPage('))
+const sync = source.slice(source.indexOf('function syncNavigationUrl('), source.indexOf('function setPage('))
 let admin = false
 let intake = false
 function mockWindow(href) {
-  const result = { location: new URL(href) }
+  const result = { location: new URL(href), postMessage() {} }
   result.history = { state: { preserved: true }, replaceState(state, _, url) {
     assert.deepEqual(state, { preserved: true })
     result.location = new URL(url)
@@ -38,7 +38,7 @@ for (const page of ['admin', 'admin-tools', 'intake', 'intake-schedule', 'unknow
   context.page = page
   assert.equal(vm.runInContext('intendedLandingPage(page)', context), 'dashboard')
 }
-window.parent = { get location() { throw new Error('cross-origin') } }
+window.parent = { postMessage() {}, get location() { throw new Error('cross-origin') } }
 assert.doesNotThrow(() => vm.runInContext('syncMemberPageUrl("history")', context))
 assert.equal(vm.runInContext('intendedLandingPage()', context), 'history')
 assert.match(source, /syncMemberPageUrl\(pageName\);/)
