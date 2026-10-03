@@ -6967,44 +6967,65 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
   return supabaseState.authRestorePromise;
 }
 
+let loginLinkRequestPending = false;
+
 async function sendSupabaseLoginLink(email) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
+  if (loginLinkRequestPending) return;
+  loginLinkRequestPending = true;
+  const buttons = document.querySelectorAll("[data-send-login-link], [data-email-login-form] button[type='submit']");
+  buttons.forEach((button) => { button.disabled = true; });
+  setAuthStatus("Sending login link...");
 
-  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    let canRequestLink = false;
-    try {
-      canRequestLink = await canRequestSupabaseLoginEmail(email);
-    } catch (error) {
-      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+  try {
+    const client = supabaseClient();
+    if (!client) {
+      setAuthStatus("Login is not configured yet.", "error");
       return;
     }
-    if (!canRequestLink) {
-      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+
+    if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+      let canRequestLink = false;
+      try {
+        canRequestLink = await canRequestSupabaseLoginEmail(email);
+      } catch (error) {
+        setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+        return;
+      }
+      if (!canRequestLink) {
+        setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+        return;
+      }
+    }
+
+    await client.auth.signOut();
+    clearSupabaseAccountState();
+
+    const { error } = await client.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: supabaseAuthRedirectUrl(),
+        shouldCreateUser: true,
+      },
+    });
+
+    if (error) {
+      setAuthStatus(friendlyAuthFailure(error), "error");
       return;
     }
+
+    setAuthStatus("Login link requested. Check your inbox and spam folder. If you request another link, use the newest email.", "success");
+  } catch (error) {
+    setAuthStatus(friendlyAuthFailure(error), "error");
+  } finally {
+    loginLinkRequestPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+    // Keep the request result visible even if auth initialization closed the menu.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu && !isMemberAppVisible()) {
+      loginMenu.hidden = false;
+      document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+    }
   }
-
-  await client.auth.signOut();
-  clearSupabaseAccountState();
-
-  const { error } = await client.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: supabaseAuthRedirectUrl(),
-      shouldCreateUser: true,
-    },
-  });
-
-  if (error) {
-    setAuthStatus(error.message, "error");
-    return;
-  }
-
-  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
