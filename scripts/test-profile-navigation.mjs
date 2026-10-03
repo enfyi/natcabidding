@@ -14,3 +14,20 @@ assert.equal(title.textContent,'My Profile');
 assert.equal(menu.hidden,true,'Profile opens but Account Settings still covers it');
 assert.equal(toggle.expanded,'false');
 console.log('Profile navigation reveals the page and dismisses Account Settings.');
+
+// Profile navigation is handled before any bidding-data-dependent click work.
+const clickStart = source.indexOf('document.addEventListener("click", async (event) => {');
+const navigationEnd = source.indexOf('  const intakeBidderDetailOpen', clickStart);
+let handler;
+let openedPage;
+vm.runInNewContext(source.slice(clickStart, navigationEnd) + '});', {
+  document: { addEventListener(_type, callback) { handler = callback; } },
+  setPage(page) { openedPage = page; },
+});
+await handler({ target: { closest() { return {
+  dataset: { page: 'profile' },
+  matches(selector) { return selector === 'button'; },
+  closest() { return null; },
+}; } } });
+assert.equal(openedPage, 'profile');
+console.log('Profile click navigation works independently of bidding data.');

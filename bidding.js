@@ -21,6 +21,7 @@ let BID_YEAR = 2027;
 let activeBidYear = null;
 let bidYearCatalog = [];
 let bidYearCatalogLoaded = false;
+let bidYearCatalogError = "";
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
 const LEAVE_SLOT_HOURS_PER_DAY = 8;
 const CWS_LEAVE_HOURS_PER_DAY = 10;
@@ -2200,7 +2201,7 @@ function syncBidWindowTestingControls() {
 }
 
 function selectedBidYearErrorMessage() {
-  if (!bidYearCatalogLoaded) return "Checking the active bid year. Please wait before bidding.";
+  if (!bidYearCatalogLoaded) return bidYearCatalogError || "Checking the active bid year. Please wait before bidding.";
   return BID_YEAR !== activeBidYear
     ? `${BID_YEAR} is view-only. Select the active bid year (${activeBidYear}) to bid or make changes.`
     : "";
@@ -2250,49 +2251,69 @@ function syncBidYearControls() {
 }
 
 async function loadBidYearCatalog(client) {
-  const { data, error } = await client.rpc("read_bid_year_catalog");
-  if (error) throw error;
-  bidYearCatalog = data || [];
-  activeBidYear = bidYearCatalog.find((year) => year.is_active)?.bid_year || null;
-  if (!activeBidYear) throw new Error("No active bid year is configured. Contact a system administrator.");
-  const url = new URL(window.location.href);
-  const requested = url.searchParams.get("bidYear");
-  const year = requested === null ? activeBidYear : Number(requested);
-  if (!bidYearCatalog.some((entry) => entry.bid_year === year)) {
-    throw new Error("The selected bid year is not configured. Remove the bidYear parameter to return to the current year.");
+  bidYearCatalogError = "";
+  try {
+    let { data, error } = await client.rpc("read_bid_year_catalog");
+    if (error && (error.code === "PGRST202" || /Could not find the function.*read_bid_year_catalog/i.test(error.message || ""))) {
+      // Older installations have no catalog RPC. Only a single open year is
+      // unambiguous; never guess the active year in a multi-year database.
+      const result = await client.from("bid_years").select("bid_year,status").limit(2);
+      if (result.error) throw result.error;
+      if (result.data?.length !== 1 || result.data[0].status !== "open") {
+        throw new Error("The active bid year must be configured by a system administrator.");
+      }
+      data = [{ ...result.data[0], is_active: true }];
+      error = null;
+    }
+    if (error) throw error;
+    bidYearCatalog = data || [];
+    activeBidYear = bidYearCatalog.find((year) => year.is_active)?.bid_year || null;
+    if (!activeBidYear) throw new Error("No active bid year is configured. Contact a system administrator.");
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get("bidYear");
+    const year = requested === null ? activeBidYear : Number(requested);
+    if (!bidYearCatalog.some((entry) => entry.bid_year === year)) {
+      throw new Error("The selected bid year is not configured. Remove the bidYear parameter to return to the current year.");
+    }
+    if (year !== BID_YEAR) {
+      BID_YEAR = year;
+      BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
+      BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
+      FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
+      displayedCalendarYear = year;
+      displayedCalendarMonth = 0;
+      leavePickerYear = year;
+      leavePickerMonthIndex = 0;
+      leaveRangeStartKey = BID_LEAVE_YEAR_START_KEY;
+      leaveRangeEndKey = BID_LEAVE_YEAR_START_KEY;
+      selectedLeaveDateKey = BID_LEAVE_YEAR_START_KEY;
+    }
+    // Pin this view so a later refresh cannot silently move an in-progress bid.
+    if (requested === null) {
+      url.searchParams.set("bidYear", String(year));
+      syncNavigationUrl(url);
+    }
+    bidYearCatalogLoaded = true;
+    syncBidYearControls();
+  } catch (error) {
+    bidYearCatalogLoaded = false;
+    bidYearCatalogError = "The active bid year could not be verified. Profile and navigation are still available. Refresh to retry or contact a system administrator.";
+    syncBidYearControls();
+    throw error;
   }
-  if (year !== BID_YEAR) {
-    BID_YEAR = year;
-    BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
-    BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
-    FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
-    displayedCalendarYear = year;
-    displayedCalendarMonth = 0;
-    leavePickerYear = year;
-    leavePickerMonthIndex = 0;
-    leaveRangeStartKey = BID_LEAVE_YEAR_START_KEY;
-    leaveRangeEndKey = BID_LEAVE_YEAR_START_KEY;
-    selectedLeaveDateKey = BID_LEAVE_YEAR_START_KEY;
-  }
-  // Pin this view so a later refresh cannot silently move an in-progress bid.
-  if (requested === null) {
-    url.searchParams.set("bidYear", String(year));
-    syncNavigationUrl(url);
-  }
-  bidYearCatalogLoaded = true;
-  syncBidYearControls();
 }
 
 let bidYearRefreshPending = false;
 async function refreshActiveBidYear() {
-  if (!bidYearCatalogLoaded || bidYearRefreshPending || document.visibilityState !== "visible") return;
+  if (bidYearRefreshPending || document.visibilityState !== "visible") return;
   const client = supabaseClient();
   if (!client) return;
   bidYearRefreshPending = true;
   try {
     const previous = activeBidYear;
+    const wasLoaded = bidYearCatalogLoaded;
     await loadBidYearCatalog(client);
-    if (previous !== activeBidYear) renderApp();
+    if (!wasLoaded || previous !== activeBidYear) renderApp();
   } catch (error) {
     console.warn(`Active bid year could not refresh: ${error.message || error}`);
   } finally {
@@ -15900,6 +15921,12 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  // Navigation must stay available even when bidding data cannot load.
+  const pageNavigation = event.target.closest("[data-page]");
+  if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
+    setPage(pageNavigation.dataset.page);
+    return;
+  }
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
   if (intakeBidderDetailOpen) {
     intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
