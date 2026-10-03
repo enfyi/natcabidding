@@ -6509,7 +6509,7 @@ function friendlyAuthFailure(error) {
 
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -6525,7 +6525,7 @@ function intendedLandingPage(requestedPage = requestedLandingPage()) {
   }
   if (requestedPage === "intake") return canUseIntakeView() ? requestedPage : defaultPage;
   if (requestedPage === "intake-schedule") return canViewIntakeSchedule() ? requestedPage : defaultPage;
-  if (requestedPage === "dashboard") return "dashboard";
+  if (["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile"].includes(requestedPage)) return requestedPage;
   return defaultPage;
 }
 
@@ -14843,6 +14843,23 @@ function openIntakeItemFromAlert(itemId) {
   }));
 }
 
+function syncMemberPageUrl(pageName) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", pageName);
+  window.history.replaceState(window.history.state, "", url.toString());
+
+  // The dashboard embeds this app; keep its address in sync for a full refresh.
+  if (window.parent !== window) {
+    try {
+      const parentUrl = new URL(window.parent.location.href);
+      parentUrl.searchParams.set("page", pageName);
+      window.parent.history.replaceState(window.parent.history.state, "", parentUrl.toString());
+    } catch {
+      // A host on another origin cannot expose its address to this frame.
+    }
+  }
+}
+
 function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
@@ -14853,6 +14870,8 @@ function setPage(pageName) {
   if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
+
+  syncMemberPageUrl(pageName);
 
   const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
 
