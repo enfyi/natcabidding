@@ -12084,6 +12084,18 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 
 @media (max-width: 640px) {
+  .account-menu {
+    top: 118px;
+    z-index: 71;
+  }
+
+  .account-menu .panel {
+    max-height: calc(100dvh - 202px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .help-menu {
     top: auto;
     bottom: calc(76px + env(safe-area-inset-bottom));
