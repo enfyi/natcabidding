@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-print-dialog-orientation-intake-panels" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -161,7 +161,7 @@
               <p data-public-sheet-code>Select a date to view open slots and bidder initials. Read-only calendar.</p>
             </div>
             <div class="segmented" aria-label="Public calendar mode" data-calendar-mode-control>
-              <button type="button" data-calendar-mode="vacation">Vacation</button>
+              <button type="button" data-calendar-mode="vacation">Leave</button>
               <button type="button" data-calendar-mode="fatigue">Fatigue</button>
               <button class="active" type="button" data-calendar-mode="combined">Combined</button>
             </div>
@@ -422,7 +422,7 @@
                   <p>RDO line pattern, leave bids, holidays, and bid windows.</p>
                 </div>
                 <div class="segmented" aria-label="Calendar mode">
-                  <button type="button" data-calendar-mode="vacation">Vacation</button>
+                  <button type="button" data-calendar-mode="vacation">Leave</button>
                   <button type="button" data-calendar-mode="fatigue">Fatigue</button>
                   <button class="active" type="button" data-calendar-mode="combined">Combined</button>
                 </div>
@@ -678,7 +678,7 @@
                   <p>Review RDO pattern, requested leave, holidays, and filled leave slots before adjusting leave bids.</p>
                 </div>
                 <div class="segmented" aria-label="Leave calendar mode">
-                  <button type="button" data-calendar-mode="vacation">Vacation</button>
+                  <button type="button" data-calendar-mode="vacation">Leave</button>
                   <button type="button" data-calendar-mode="fatigue">Fatigue</button>
                   <button class="active" type="button" data-calendar-mode="combined">Combined</button>
                 </div>
@@ -843,7 +843,7 @@
                 <p>Review selected RDO line, leave bids, holidays, and protected weeks.</p>
               </div>
               <div class="segmented" aria-label="Calendar mode">
-                <button type="button" data-calendar-mode="vacation">Vacation</button>
+                <button type="button" data-calendar-mode="vacation">Leave</button>
                 <button type="button" data-calendar-mode="fatigue">Fatigue</button>
                 <button class="active" type="button" data-calendar-mode="combined">Combined</button>
               </div>
@@ -1159,6 +1159,7 @@
                 <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
                   <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Year</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="two-month">2 Months</button>
                     <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Month</button>
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Week</button>
                   </div>
@@ -1168,6 +1169,11 @@
                     <button type="button" data-schedule-period-action="next" aria-label="Next schedule period">›</button>
                   </div>
                 </div>
+              </div>
+              <div class="intake-calendar-legend" aria-label="Calendar day colors">
+                <span class="holiday">Holiday</span>
+                <span class="natca-validation">NATCA Validation</span>
+                <span class="faa-validation">FAA Validation</span>
               </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
               <div class="intake-schedule-list" data-intake-schedule-list></div>
@@ -1187,10 +1193,7 @@
                   </label>
                   <fieldset class="intake-shift-presets">
                     <legend>Base Shift</legend>
-                    <div class="intake-shift-preset-buttons">
-                      <button class="active" type="button" data-intake-shift-preset="06:45" aria-pressed="true">6:45 AM</button>
-                      <button type="button" data-intake-shift-preset="11:15" aria-pressed="false">11:15 AM</button>
-                    </div>
+                    <div class="intake-shift-preset-buttons" data-intake-shift-preset-buttons></div>
                   </fieldset>
                   <div class="intake-shift-fields">
                     <label>
@@ -1220,6 +1223,38 @@
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
+              </section>
+              <section class="panel" data-intake-calendar-mark-editor hidden>
+                <h3>Calendar Days</h3>
+                <form class="schedule-form" data-intake-calendar-mark-form>
+                  <label>Date <input type="date" required data-intake-calendar-mark-date /></label>
+                  <label>Mark As
+                    <select data-intake-calendar-mark-kind>
+                      <option value="holiday">Holiday</option>
+                      <option value="natca_validation">NATCA Validation</option>
+                      <option value="faa_validation">FAA Validation</option>
+                    </select>
+                  </label>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="submit" data-save-intake-calendar-mark>Save Day</button>
+                    <button class="secondary-action small" type="button" data-clear-intake-calendar-mark hidden>Clear</button>
+                  </div>
+                  <p class="form-status" data-intake-calendar-mark-status role="status"></p>
+                </form>
+                <div class="intake-calendar-mark-list" data-intake-calendar-mark-list></div>
+              </section>
+              <section class="panel" data-shift-builder hidden>
+                <h3>Shift Builder</h3>
+                <div class="shift-builder-list" data-shift-builder-list></div>
+                <form class="schedule-form shift-builder-form" data-shift-builder-form>
+                  <label>Start Time <input type="time" step="900" required data-shift-builder-time /></label>
+                  <label>Shift Length <span class="schedule-duration-input"><input type="number" min="0.25" max="24" step="0.25" required data-shift-builder-hours /><span>hours</span></span></label>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="submit" data-save-shift-preset>Add Shift</button>
+                    <button class="secondary-action small" type="button" data-cancel-shift-preset hidden>Cancel</button>
+                  </div>
+                  <p class="form-status" data-shift-builder-status role="status"></p>
+                </form>
               </section>
             </aside>
           </div>
@@ -1784,7 +1819,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus-calendar-loading-timestamps-intake-panels-intake-hour-access"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

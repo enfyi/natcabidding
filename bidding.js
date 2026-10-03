@@ -177,6 +177,12 @@ const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
 const intakeSchedules = [];
+const intakeCalendarMarks = new Map();
+const INTAKE_CALENDAR_MARK_LABELS = {
+  holiday: "Holiday",
+  natca_validation: "NATCA Validation",
+  faa_validation: "FAA Validation",
+};
 
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
@@ -1623,6 +1629,51 @@ function downloadBidWindowsIcs(rank = null) {
   URL.revokeObjectURL(url);
 }
 
+function buildIntakeScheduleIcs(schedules) {
+  const stamp = icsTimestamp();
+  const owner = currentUser.initials.toLowerCase();
+  const events = schedules.map((schedule) => [
+    "BEGIN:VEVENT",
+    `UID:natca-zla-intake-${BID_YEAR}-${owner}-${schedule.id}@zlabidding.local`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${icsTimestamp(schedule.start)}`,
+    `DTEND:${icsTimestamp(schedule.end)}`,
+    "SUMMARY:NATCA ZLA Intake Shift",
+    `DESCRIPTION:${escapeIcsText(`Intake assignment · ${schedule.area}`)}`,
+    `LOCATION:${escapeIcsText("2555 E. Ave P, Palmdale, Ca 93550")}`,
+    "END:VEVENT",
+  ].join("\r\n"));
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//NATCA ZLA//Intake Schedule//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(`NATCA ZLA ${BID_YEAR} Intake - ${currentUser.initials}`)}`,
+    ...events,
+    "END:VCALENDAR",
+  ].join("\r\n");
+}
+
+function downloadIntakeScheduleIcs(scheduleId = "") {
+  const mySchedules = intakeSchedules.filter((schedule) => schedule.initials === currentUser?.initials);
+  const schedules = scheduleId ? mySchedules.filter((schedule) => schedule.id === scheduleId) : mySchedules;
+  if (!schedules.length) return;
+
+  const blob = new Blob([buildIntakeScheduleIcs(schedules)], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = scheduleId
+    ? `natca-zla-${currentUser.initials.toLowerCase()}-intake-${dateKeyFromDate(schedules[0].start)}.ics`
+    : `natca-zla-${currentUser.initials.toLowerCase()}-${BID_YEAR}-intake-schedule.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function fallbackInitials(firstName, lastName) {
   return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase();
 }
@@ -1824,6 +1875,7 @@ let activeDenialId = null;
 let activeIntakeDetailId = null;
 let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
+let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
 const intakeBidderSelection = {
@@ -2617,7 +2669,11 @@ function fatigueGroupPreferenceLabel(group) {
 function rdoBidPreferenceLabel(value) {
   if (value === true) return "Yes";
   if (value === false) return "No";
-  return String(value ?? "").trim() || "—";
+  const normalized = String(value ?? "").trim();
+  if (normalized.toLowerCase() === "true") return "Yes";
+  if (normalized.toLowerCase() === "false") return "No";
+  if (normalized.toUpperCase() === "BID") return "Bid Line";
+  return normalized || "—";
 }
 
 function rdoBidSnapshotFromIntakeItem(item) {
@@ -4980,6 +5036,7 @@ async function denyIntakeItem(id) {
 }
 
 async function saveSupabaseApprovedLeaveEdit(item) {
+  if (!intakeLeaveRoundIsOpen(item)) throw new Error(`Round ${intakeItemRound(item)} is closed. Approved leave dates can no longer be edited.`);
   const client = supabaseClient();
   if (!client) throw new Error("Supabase is not configured on this page.");
   if (!item?.supabaseRequestId) throw new Error("This approved leave request has not been saved to Supabase.");
@@ -5010,6 +5067,76 @@ async function saveSupabaseApprovedLeaveEdit(item) {
   return true;
 }
 
+async function removeApprovedLeaveBid(id) {
+  const item = intakeReviewItemById(id);
+  if (!item || item.type !== "Leave" || item.status !== "Approved" || !hasIntakeAccess()) return;
+  if (!intakeLeaveRoundIsOpen(item)) {
+    const reviewNote = `Round ${intakeItemRound(item)} is closed. This bid can no longer be removed.`;
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderIntakeQueue();
+    return;
+  }
+
+  const requests = item.members || [item];
+  const requestIds = requests.map((request) => request.supabaseRequestId).filter(Boolean);
+  if (requestIds.length !== requests.length) {
+    const reviewNote = "One or more leave dates are not linked to saved database records. Reload the queue before removing this bid.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderIntakeQueue();
+    return;
+  }
+
+  const dateCount = item.dateKeys?.length || requests.reduce((total, request) => total + leaveDateKeysForItem(request).length, 0);
+  const description = item.members
+    ? `${dateCount} selected ${dateCount === 1 ? "date" : "dates"}`
+    : item.range;
+  if (!window.confirm(
+    `Remove ${description} from ${item.initials}'s pre-approved leave slots?\n\n` +
+    "The bid will be marked Cancelled and remain visible in history, but it will no longer reserve leave capacity."
+  )) return;
+
+  intakeLeaveRemovalPendingId = id;
+  renderIntakeQueue();
+  try {
+    const client = supabaseClient();
+    if (!client || !supabaseState.connected) {
+      throw new Error("The leave bid could not reach the database. Check the connection and try again.");
+    }
+    const { error } = await client.rpc("admin_cancel_leave_requests", {
+      requested_leave_request_ids: requestIds,
+    });
+    if (error) {
+      if (isMissingSupabaseRoutine(error)) {
+        throw new Error("Admin leave removal is not installed. Run the latest Supabase migration, then try again.");
+      }
+      throw error;
+    }
+
+    logHistory(
+      item.area,
+      "Approved leave bid removed",
+      `${currentUser.initials} removed ${item.initials}'s ${description} from pre-approved leave slots. The cancelled bid remains in history.`
+    );
+    intakeLeaveRemovalPendingId = null;
+    if (item.members) intakeGroupReviewState.delete(item.id);
+    activeOverrideId = null;
+    activeDenialId = null;
+    supabaseState.placeholdersCleared = false;
+    await loadSupabaseReferenceData();
+    renderApp();
+    setPage("intake");
+  } catch (error) {
+    intakeLeaveRemovalPendingId = null;
+    const reviewNote = error.message || "The approved leave bid could not be removed.";
+    item.reviewNote = reviewNote;
+    if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
+    renderApp();
+    setPage("intake");
+  }
+}
+
 async function saveSupabasePendingRdoEdit(item) {
   const client = supabaseClient();
   if (!client) throw new Error("Supabase is not configured on this page.");
@@ -5035,6 +5162,12 @@ async function saveSupabasePendingRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
+  if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
+    item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
+    activeOverrideId = null;
+    renderIntakeQueue();
+    return;
+  }
 
   const original = item.summary;
   const originalLine = item.line;
@@ -6390,9 +6523,8 @@ function intendedLandingPage(requestedPage = requestedLandingPage()) {
   if (requestedPage === "admin" || requestedPage === "admin-tools") {
     return hasSystemAdminAccess() ? requestedPage : defaultPage;
   }
-  if (requestedPage === "intake" || requestedPage === "intake-schedule") {
-    return canUseIntakeView() ? requestedPage : defaultPage;
-  }
+  if (requestedPage === "intake") return canUseIntakeView() ? requestedPage : defaultPage;
+  if (requestedPage === "intake-schedule") return canViewIntakeSchedule() ? requestedPage : defaultPage;
   if (requestedPage === "dashboard") return "dashboard";
   return defaultPage;
 }
@@ -6621,7 +6753,12 @@ async function initializeSupabaseAuth() {
 
       restoreSupabaseSession();
     }
-    if (event === "SIGNED_OUT") clearSupabaseAccountState();
+    if (event === "SIGNED_OUT") {
+      clearSupabaseAccountState();
+      currentUser = null;
+      showPublicHome();
+      setAuthStatus("Signed out. Sign in again to manage intake shifts.", "info");
+    }
   });
 
   const pendingToken = pendingSupabaseEmailToken();
@@ -7004,6 +7141,7 @@ function applyGlRdoAssignments(rows) {
     line.glBids.push({
       initials,
       status: uiStatusFromDatabase(row.status || "pending"),
+      ghostBid: Boolean(row.ghost_bid),
     });
   });
 
@@ -7218,6 +7356,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
     denialReason: row.denial_reason || "",
     range,
     days,
@@ -7315,6 +7454,7 @@ function resetSupabaseBackedData() {
   publicFaqContent.entries = [];
   publicFaqContent.documents = [];
   intakeSchedules.splice(0, intakeSchedules.length);
+  intakeCalendarMarks.clear();
   intakeTeamInitials.clear();
   holidayOverrides.clear();
   fullLeaveDates.clear();
@@ -7380,6 +7520,9 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
         phone: person.phone,
         area: person.area,
         bidAs: person.bidAs,
+        role: seniorityEntryAppRole(currentEntry),
+        roleLabel: seniorityEntryAppRole(currentEntry) === "admin" ? "Bidding Admin" : seniorityEntryAppRole(currentEntry) === "intake" ? "Bidding Intake" : "BUE Controller",
+        systemAdmin: seniorityEntryAppRole(currentEntry) === "admin",
         seniorityRank: person.rank,
         leaveSlotAllowance: person.leaveSlotAllowance,
       };
@@ -7437,7 +7580,6 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
     const initials = bidder.initials || row.initials || "";
     if (!initials) return;
 
-    intakeTeamInitials.add(initials);
     intakeSchedules.push({
       id: row.id,
       initials,
@@ -7453,7 +7595,7 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
 }
 
 function loadIntakeSchedules(client) {
-  if (!supabaseState.authUserId) return Promise.resolve({ data: [], error: null });
+  if (!supabaseState.authUserId || !canViewIntakeSchedule()) return Promise.resolve({ data: [], error: null });
   return client.rpc("read_intake_schedules", { requested_bid_year: BID_YEAR });
 }
 
@@ -7501,7 +7643,7 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   const { data, error } = await client.rpc("submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
-    requested_fatigue_group: request.fatigueGroup,
+    requested_fatigue_group: request.fatigueGroup || null,
     requested_flex: request.flex === true || request.flex === "Yes",
     requested_aws: request.aws === true || request.aws === "Yes",
     requested_mid: request.mid,
@@ -7690,6 +7832,8 @@ async function loadSupabaseReferenceData() {
       leaveRequestsResult,
       ghostStatusResult,
       intakeSchedulesResult,
+      intakeCalendarMarksResult,
+      shiftPresetsResult,
       bidYearSettingsResult,
       roundRulesResult,
       approvalRulesResult,
@@ -7707,6 +7851,10 @@ async function loadSupabaseReferenceData() {
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
       loadIntakeSchedules(client),
+      supabaseState.authUserId
+        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
+        : Promise.resolve({ data: [], error: null }),
+      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
       client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
       client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
       client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
@@ -7728,6 +7876,8 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      supabaseLoadWarning("intake calendar days", intakeCalendarMarksResult),
+      isMissingSupabaseRoutine(shiftPresetsResult.error) ? null : supabaseLoadWarning("intake shift presets", shiftPresetsResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
       isMissingSupabaseRoutine(approvalRulesResult.error) ? null : supabaseLoadWarning("approval rules", approvalRulesResult),
@@ -7764,6 +7914,11 @@ async function loadSupabaseReferenceData() {
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!intakeCalendarMarksResult.error) {
+      intakeCalendarMarks.clear();
+      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+    }
+    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
@@ -7827,8 +7982,130 @@ function formatDateTimeLocalValue(date) {
   return offsetDate.toISOString().slice(0, 16);
 }
 
-const DEFAULT_INTAKE_SHIFT_START = "06:45";
-const DEFAULT_INTAKE_SHIFT_HOURS = 8;
+const DEFAULT_INTAKE_SHIFT_PRESETS = [
+  { id: "default-0645", startTime: "06:45", durationHours: 8 },
+  { id: "default-1115", startTime: "11:15", durationHours: 8 },
+];
+let intakeShiftPresets = [...DEFAULT_INTAKE_SHIFT_PRESETS];
+let editingShiftPresetId = "";
+let shiftPresetMutationPending = false;
+
+function formatShiftPresetTime(value) {
+  const [hour, minute] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2020, 0, 1, hour, minute)));
+}
+
+function renderShiftPresets() {
+  const buttons = document.querySelector("[data-intake-shift-preset-buttons]");
+  if (buttons) {
+    buttons.innerHTML = intakeShiftPresets.map((preset) => `
+      <button type="button" data-intake-shift-preset="${escapeAttribute(preset.id)}" aria-pressed="false">
+        ${escapeHtml(formatShiftPresetTime(preset.startTime))}<small>${escapeHtml(String(preset.durationHours))}h</small>
+      </button>
+    `).join("") || '<span class="empty-state small">No base shifts yet. Enter a time and length below.</span>';
+  }
+  const builder = document.querySelector("[data-shift-builder]");
+  if (builder) builder.hidden = !hasSystemAdminAccess();
+  const list = document.querySelector("[data-shift-builder-list]");
+  if (list) list.innerHTML = intakeShiftPresets.map((preset) => `
+    <div class="shift-builder-row">
+      <span><strong>${escapeHtml(formatShiftPresetTime(preset.startTime))}</strong><small>${escapeHtml(String(preset.durationHours))} hours</small></span>
+      <div class="shift-builder-actions">
+        <button type="button" class="secondary-action small" data-edit-shift-preset="${escapeAttribute(preset.id)}">Edit</button>
+        <button type="button" class="secondary-action small danger-action" data-delete-shift-preset="${escapeAttribute(preset.id)}">Delete</button>
+      </div>
+    </div>
+  `).join("") || '<p class="empty-state small">No base shifts yet.</p>';
+  const form = document.querySelector("[data-shift-builder-form]");
+  if (form) {
+    form.querySelector("[data-save-shift-preset]").textContent = editingShiftPresetId ? "Save Shift" : "Add Shift";
+    form.querySelector("[data-cancel-shift-preset]").hidden = !editingShiftPresetId;
+    form.querySelectorAll("button, input").forEach((control) => { control.disabled = shiftPresetMutationPending; });
+  }
+  syncIntakeShiftForm(document.querySelector("[data-schedule-start]")?.closest(".schedule-form"));
+}
+
+function setShiftBuilderStatus(message, status = "info") {
+  const target = document.querySelector("[data-shift-builder-status]");
+  if (target) { target.textContent = message; target.dataset.status = status; }
+}
+
+function resetShiftPresetEditor() {
+  editingShiftPresetId = "";
+  document.querySelector("[data-shift-builder-form]")?.reset();
+  renderShiftPresets();
+}
+
+async function saveShiftPreset(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const form = event.currentTarget;
+  const startTime = form.querySelector("[data-shift-builder-time]").value;
+  const durationHours = Number(form.querySelector("[data-shift-builder-hours]").value);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !Number.isFinite(durationHours) || durationHours < 0.25 || durationHours > 24 || durationHours * 4 % 1 !== 0) {
+    setShiftBuilderStatus("Enter a start time and a length in quarter-hour increments, up to 24 hours.", "error");
+    return;
+  }
+  if (intakeShiftPresets.some((preset) => preset.startTime === startTime && preset.id !== editingShiftPresetId)) {
+    setShiftBuilderStatus("A base shift already starts at that time.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to save base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  const wasEditing = Boolean(editingShiftPresetId);
+  try {
+    const { error } = await client.rpc("save_intake_shift_preset", {
+      requested_id: wasEditing ? editingShiftPresetId : null,
+      requested_start_time: startTime,
+      requested_duration_hours: durationHours,
+    });
+    if (error) throw error;
+    const result = await client.rpc("read_intake_shift_presets");
+    if (result.error) throw result.error;
+    applyIntakeShiftPresets(result.data);
+    resetShiftPresetEditor();
+    setShiftBuilderStatus(wasEditing ? "Base shift updated." : "Base shift added.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be saved.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+async function deleteShiftPreset(id) {
+  if (!hasSystemAdminAccess() || shiftPresetMutationPending) return;
+  const preset = intakeShiftPresets.find((item) => item.id === id);
+  if (!preset || !window.confirm(`Delete the ${formatShiftPresetTime(preset.startTime)} base shift? Existing scheduled shifts will stay as they are.`)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) { setShiftBuilderStatus("Connect to the database to delete base shifts.", "error"); return; }
+  shiftPresetMutationPending = true;
+  renderShiftPresets();
+  try {
+    const result = await client.rpc("delete_intake_shift_preset", { requested_id: id });
+    if (result.error) throw result.error;
+    intakeShiftPresets = intakeShiftPresets.filter((item) => item.id !== id);
+    if (editingShiftPresetId === id) resetShiftPresetEditor();
+    setShiftBuilderStatus("Base shift deleted.", "success");
+  } catch (error) {
+    setShiftBuilderStatus(error.message || "The base shift could not be deleted.", "error");
+  } finally {
+    shiftPresetMutationPending = false;
+    renderShiftPresets();
+  }
+}
+
+function applyIntakeShiftPresets(rows) {
+  intakeShiftPresets = (rows || []).map((row) => ({
+    id: row.id,
+    startTime: String(row.start_time).slice(0, 5),
+    durationHours: Number(row.duration_hours),
+  }));
+  renderShiftPresets();
+}
 
 function syncIntakeShiftForm(form, options = {}) {
   if (!form) return;
@@ -7845,8 +8122,8 @@ function syncIntakeShiftForm(form, options = {}) {
     defaultDate.setDate(defaultDate.getDate() + (options.defaultOffsetDays ?? 5));
     dateInput.value = formatDateTimeLocalValue(defaultDate).slice(0, 10);
   }
-  if (!timeInput.value) timeInput.value = DEFAULT_INTAKE_SHIFT_START;
-  if (!durationInput.value) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  if (!timeInput.value && intakeShiftPresets.length) timeInput.value = intakeShiftPresets[0].startTime;
+  if (!durationInput.value && intakeShiftPresets.length) durationInput.value = String(intakeShiftPresets[0].durationHours);
 
   const durationHours = Number(durationInput.value);
   const start = new Date(`${dateInput.value}T${timeInput.value}`);
@@ -7862,7 +8139,8 @@ function syncIntakeShiftForm(form, options = {}) {
   }
 
   form.querySelectorAll("[data-intake-shift-preset]").forEach((button) => {
-    const isActive = button.dataset.intakeShiftPreset === timeInput.value && durationHours === DEFAULT_INTAKE_SHIFT_HOURS;
+    const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+    const isActive = preset?.startTime === timeInput.value && preset?.durationHours === durationHours;
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
@@ -7873,8 +8151,10 @@ function applyIntakeShiftPreset(button) {
   if (!form) return;
   const timeInput = form.querySelector("[data-intake-shift-time]");
   const durationInput = form.querySelector("[data-intake-shift-duration]");
-  if (timeInput) timeInput.value = button.dataset.intakeShiftPreset || DEFAULT_INTAKE_SHIFT_START;
-  if (durationInput) durationInput.value = String(DEFAULT_INTAKE_SHIFT_HOURS);
+  const preset = intakeShiftPresets.find((item) => item.id === button.dataset.intakeShiftPreset);
+  if (!preset) return;
+  if (timeInput) timeInput.value = preset.startTime;
+  if (durationInput) durationInput.value = String(preset.durationHours);
   syncIntakeShiftForm(form);
 }
 
@@ -8326,7 +8606,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
-      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL Bid · visible, but does not occupy the line</p>
+      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL / Ghost Bid · visible, but does not occupy the line</p>
       <div class="mobile-rdo-view" role="group" aria-label="RDO display">
         <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
         <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
@@ -8463,7 +8743,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
 }
 
 function publicRosterArea(area = publicState.area) {
-  return ZLA_AREAS.includes(area) ? area : currentUser.area;
+  return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section) {
@@ -8532,6 +8812,45 @@ function canUseIntakeView() {
   return hasIntakeAccess();
 }
 
+function canViewIntakeSchedule() {
+  return hasSystemAdminAccess()
+    || Boolean(currentUser?.supabaseProfileId && intakeTeamInitials.has(currentUser.initials));
+}
+
+async function refreshIntakeScheduleMembership() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.authUserId) return false;
+
+  const { data, error } = await client.rpc("read_bidding_roster");
+  if (error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyRosterFromDatabase(data || []);
+  if (!canViewIntakeSchedule()) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+
+  const schedulesResult = await loadIntakeSchedules(client);
+  supabaseState.intakeSchedulesError = schedulesResult.error?.message || "";
+  if (schedulesResult.error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyIntakeSchedulesFromDatabase(schedulesResult.data || []);
+  renderApp();
+  return true;
+}
+
+function closeIntakeScheduleAfterFailedCheck() {
+  intakeSchedules.splice(0, intakeSchedules.length);
+  if (document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    setPage("dashboard");
+  }
+  renderApp();
+}
+
 function pageForViewMode(mode) {
   if (mode === "admin") return "admin";
   if (mode === "intake") return "intake";
@@ -8589,6 +8908,7 @@ function userSeniorityLongText() {
 
 function renderCurrentUser() {
   const canOpenIntake = canUseIntakeView();
+  const canOpenIntakeSchedule = canViewIntakeSchedule();
   const displayedSeniorityRank = currentUserSeniorityRank();
   const displayedBidderCount = currentUserBidderCount();
   const hasSeniority = Number.isFinite(displayedSeniorityRank);
@@ -8675,7 +8995,7 @@ function renderCurrentUser() {
   });
 
   document.querySelectorAll("[data-intake-rep-only]").forEach((element) => {
-    element.hidden = !canOpenIntake;
+    element.hidden = !canOpenIntakeSchedule;
   });
 
   document.querySelectorAll("[data-system-admin-only]").forEach((element) => {
@@ -9010,7 +9330,7 @@ function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
   if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
   else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
   glBids.forEach((bid) => {
-    pieces.push(`<span class="gl-line-bidder" title="GL Bid · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+    pieces.push(`<span class="gl-line-bidder" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
   });
   return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
 }
@@ -9063,8 +9383,9 @@ function selectedLineStatus(line) {
 
 function rdoAssignmentValue(assignment, key) {
   const requestValue = assignment?.request?.[key];
-  if (requestValue) return requestValue;
-  if (assignment?.line?.[key]) return assignment.line[key];
+  if (requestValue !== undefined && requestValue !== null && requestValue !== "") return requestValue;
+  const lineValue = assignment?.line?.[key];
+  if (lineValue !== undefined && lineValue !== null && lineValue !== "") return lineValue;
   return "";
 }
 
@@ -9099,15 +9420,25 @@ function renderDashboardSelectedLineCard(assignment) {
     const flex = rdoAssignmentValue(assignment, "flex");
     const aws = rdoAssignmentValue(assignment, "aws");
     const mid = rdoAssignmentValue(assignment, "mid");
-    const values = [
-      ["Group", group],
+    const preferences = [
       ["Flex", flex],
       ["AWS", aws],
       ["Mid", mid],
-    ].filter(([, value]) => value);
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    const fatigueGroup = String(group || "").trim().toUpperCase();
 
-    element.innerHTML = values.length
-      ? values.map(([label, value]) => `<span>${label} <b${label === "Group" ? ` class="group ${groupClass(value)}"` : ""}>${value}</b></span>`).join("")
+    element.innerHTML = fatigueGroup || preferences.length
+      ? `
+          ${fatigueGroup ? `
+            <span class="fatigue-summary-card">
+              <em>Fatigue Group</em>
+              <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
+                ${FATIGUE_GROUPS.map((value) => `<strong class="fatigue-summary-segment ${groupClass(value)} ${fatigueGroup === value ? "active" : ""}" aria-hidden="true">${value}</strong>`).join("")}
+              </span>
+            </span>
+          ` : ""}
+          ${preferences.map(([label, value]) => `<span class="rdo-preference-card"><em>${label}</em><b>${rdoBidPreferenceLabel(value)}</b></span>`).join("")}
+        `
       : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
   });
 
@@ -12493,6 +12824,7 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (!client || !supabaseState.connected) {
     throw new Error("The intake schedule could not reach the database. Check the connection and try again.");
   }
+  if (!await ensureIntakeScheduleSession(client)) return false;
   const routine = scheduleId ? "update_intake_schedule" : "create_intake_schedule";
   const parameters = {
     requested_bid_year: BID_YEAR,
@@ -12507,6 +12839,27 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (error) throw error;
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
+  return true;
+}
+
+async function ensureIntakeScheduleSession(client) {
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    currentUser = null;
+    clearSupabaseAccountState();
+    showPublicHome();
+    setAuthStatus("Your sign-in ended. Sign in again to manage intake shifts.", "error");
+    return false;
+  }
+
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError || !userData.user || userData.user.id !== sessionData.session.user.id) {
+    setScheduleFormStatus("Could not verify your sign-in. Check the connection or sign in again.", "error");
+    return false;
+  }
+
+  syncSupabaseAccountStateFromSession(sessionData.session);
+  return true;
 }
 
 function setIntakeScheduleMutationPending(isPending) {
@@ -12533,7 +12886,6 @@ function resetIntakeScheduleEditor(options = {}) {
   editingIntakeScheduleId = "";
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (options.resetValues && form) {
-    form.querySelector("[data-intake-shift-date]").value = "";
     form.querySelector("[data-intake-shift-time]").value = "";
     form.querySelector("[data-intake-shift-duration]").value = "";
     syncIntakeShiftForm(form);
@@ -12582,6 +12934,7 @@ async function deleteIntakeSchedule(scheduleId) {
     setScheduleFormStatus("The intake schedule could not reach the database. Check the connection and try again.", "error");
     return;
   }
+  if (!await ensureIntakeScheduleSession(client)) return;
 
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`Deleting ${schedule.name}'s intake shift...`);
@@ -12651,7 +13004,7 @@ function renderScheduleDayAssignments(schedules) {
   return `
     <span class="schedule-day-assignments">
       ${schedules.map((schedule) => `
-        <span class="schedule-day-assignment">
+        <span class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}">
           <b>${escapeHtml(schedule.initials)}</b>
           <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
         </span>
@@ -12663,12 +13016,15 @@ function renderScheduleDayAssignments(schedules) {
 function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const key = dateKeyFromDate(date);
   const schedules = schedulesForDateKey(key);
+  const markKind = intakeCalendarMarks.get(key);
+  const markLabel = INTAKE_CALENDAR_MARK_LABELS[markKind] || "";
   const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" type="button" data-intake-calendar-date="${key}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
       <span class="date-number">${label}</span>
+      ${markLabel && showAssignments ? `<span class="intake-day-mark-label">${markLabel}</span>` : ""}
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
     </button>
@@ -12749,9 +13105,104 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+    if (scheduleCalendarView === "two-month") {
+      const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+      label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+      return;
+    }
+
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
   });
+}
+
+function renderIntakeCalendarMarkEditor() {
+  const panel = document.querySelector("[data-intake-calendar-mark-editor]");
+  if (!panel) return;
+  panel.hidden = !hasSystemAdminAccess();
+  if (panel.hidden) return;
+
+  const dateInput = panel.querySelector("[data-intake-calendar-mark-date]");
+  const kindInput = panel.querySelector("[data-intake-calendar-mark-kind]");
+  const currentKind = intakeCalendarMarks.get(dateInput?.value);
+  if (currentKind && kindInput && kindInput.dataset.selectedDate !== dateInput.value) {
+    kindInput.value = currentKind;
+  }
+  if (kindInput) kindInput.dataset.selectedDate = dateInput?.value || "";
+  const clearButton = panel.querySelector("[data-clear-intake-calendar-mark]");
+  if (clearButton) clearButton.hidden = !currentKind;
+
+  const list = panel.querySelector("[data-intake-calendar-mark-list]");
+  if (!list) return;
+  list.innerHTML = [...intakeCalendarMarks.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, kind]) => `<button type="button" class="intake-calendar-mark-item ${kind}" data-edit-intake-calendar-mark="${date}"><span>${escapeHtml(formatCalendarDate(date))}</span><strong>${INTAKE_CALENDAR_MARK_LABELS[kind]}</strong></button>`)
+    .join("");
+}
+
+function selectIntakeCalendarMarkDate(date) {
+  const input = document.querySelector("[data-intake-calendar-mark-date]");
+  if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  input.value = date;
+  const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+  if (kindInput) kindInput.dataset.selectedDate = "";
+  renderIntakeCalendarMarkEditor();
+  input.focus();
+}
+
+function setIntakeCalendarMarkStatus(message, status = "info") {
+  const target = document.querySelector("[data-intake-calendar-mark-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+async function saveIntakeCalendarMark(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  const kind = document.querySelector("[data-intake-calendar-mark-kind]")?.value || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !INTAKE_CALENDAR_MARK_LABELS[kind]) {
+    setIntakeCalendarMarkStatus("Choose a date and day type.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-save-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .upsert({ bid_year: BID_YEAR, marked_date: date, kind }, { onConflict: "bid_year,marked_date" });
+    if (error) throw error;
+    intakeCalendarMarks.set(date, kind);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} marked as ${INTAKE_CALENDAR_MARK_LABELS[kind]}.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be saved.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function clearIntakeCalendarMark() {
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  if (!intakeCalendarMarks.has(date)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-clear-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .delete().eq("bid_year", BID_YEAR).eq("marked_date", date);
+    if (error) throw error;
+    intakeCalendarMarks.delete(date);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} cleared.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be cleared.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function moveSchedulePeriod(direction) {
@@ -12761,6 +13212,7 @@ function moveSchedulePeriod(direction) {
   } else if (scheduleCalendarView === "week") {
     nextDate.setDate(nextDate.getDate() + direction * 7);
   } else {
+    nextDate.setDate(1);
     nextDate.setMonth(nextDate.getMonth() + direction);
   }
   scheduleActiveDate = nextDate;
@@ -12771,11 +13223,12 @@ function renderIntakeSchedule() {
   const calendar = document.getElementById("intake-schedule-calendar");
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
+  renderShiftPresets();
   syncIntakeTeamControls();
   updateScheduleCalendarControls();
 
   if (calendar) {
-    calendar.classList.remove("month-view", "week-view", "year-view");
+    calendar.classList.remove("month-view", "two-month-view", "week-view", "year-view");
     calendar.classList.add(`${scheduleCalendarView}-view`);
     if (scheduleCalendarView === "year") {
       calendar.innerHTML = monthNames
@@ -12784,7 +13237,8 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      const visibleMonths = [0, 1].map((offset) => new Date(
+      const monthCount = scheduleCalendarView === "two-month" ? 2 : 1;
+      const visibleMonths = Array.from({ length: monthCount }, (_, offset) => new Date(
         scheduleActiveDate.getFullYear(),
         scheduleActiveDate.getMonth() + offset,
         1
@@ -12801,6 +13255,7 @@ function renderIntakeSchedule() {
 
   const adminCard = document.querySelector("[data-admin-schedule-card]");
   if (adminCard) adminCard.hidden = !hasIntakeAccess();
+  renderIntakeCalendarMarkEditor();
 
   const sortedSchedules = [...intakeSchedules].sort((a, b) => a.start - b.start);
   const userSchedules = sortedSchedules.filter((schedule) => schedule.initials === currentUser.initials);
@@ -12814,12 +13269,18 @@ function renderIntakeSchedule() {
   }
   list.innerHTML = `
     <div class="schedule-list-section">
-      <h3>Your Intake Assignments</h3>
+      <div class="schedule-list-heading">
+        <h3>Your Intake Assignments</h3>
+        ${userSchedules.length ? '<button class="secondary-action small" type="button" data-download-intake-schedule aria-label="Download all your intake assignments as a calendar file">Download all .ics</button>' : ""}
+      </div>
       ${userSchedules.length
         ? userSchedules.map((schedule) => `
           <article>
             <strong>${escapeHtml(formatDateRange(schedule.start, schedule.end))}</strong>
             <span>${escapeHtml(schedule.area)}</span>
+            <div class="schedule-list-actions">
+              <button class="secondary-action small" type="button" data-download-intake-schedule="${escapeHtml(schedule.id)}" aria-label="Download intake assignment for ${escapeHtml(formatCalendarDate(dateKeyFromDate(schedule.start)))} as a calendar file">Download .ics</button>
+            </div>
           </article>
         `).join("")
         : '<p class="empty-state small">No intake shifts assigned for this bidding year.</p>'}
@@ -12889,7 +13350,7 @@ async function addIntakeScheduleFromForm() {
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`${actionLabel} ${name}'s intake shift...`);
   try {
-    await saveIntakeScheduleToSupabase(initials, start, end, scheduleId);
+    if (!await saveIntakeScheduleToSupabase(initials, start, end, scheduleId)) return;
     logHistory(area, scheduleId ? "Intake shift updated" : "Intake shift assigned", `${currentUser.initials} ${scheduleId ? "updated" : "scheduled"} ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
     resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
@@ -13065,7 +13526,7 @@ function renderHistory() {
         <div>
           <h3>${title}</h3>
           <p>${detail}</p>
-          <small class="audit-actor">Actor: ${actor}</small>
+          <small class="audit-actor">Action by: ${actor}</small>
         </div>
         <span class="pill open">${area}</span>
       </article>
@@ -13685,6 +14146,17 @@ function intakeItemRound(item) {
   return 1;
 }
 
+function intakeLeaveRoundIsOpen(item) {
+  const round = intakeItemRound(item);
+  if (pilotState.database) return pilotState.enabled && pilotOpenRounds.includes(round);
+  const windows = ZLA_AREAS.flatMap((area) => roundWindows(round, area));
+  if (!windows.length) return false;
+  const startsAt = Math.min(...windows.map((window) => window.start.getTime()));
+  const endsAt = Math.max(...windows.map((window) => window.end.getTime()));
+  const now = Date.now();
+  return now >= startsAt && now < endsAt;
+}
+
 function intakeSearchText(item) {
   return [
     bidTypeLabel(item),
@@ -14184,8 +14656,17 @@ function renderIntakeGroupDates(item, canReview) {
   return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
     <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
     ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
-    ${canReview && ["Pending", "Approved"].includes(member.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">Edit / Override date</button>` : ""}
+    ${canReview && ["Pending", "Approved"].includes(member.status) && intakeLeaveRoundIsOpen(member) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
     </div>`).join("")}</details>`;
+}
+
+function revealIntakeLeaveDates(id) {
+  const card = [...document.querySelectorAll("[data-intake-card]")]
+    .find((candidate) => candidate.dataset.intakeCard === id);
+  const details = card?.querySelector("details");
+  if (!details) return;
+  details.open = true;
+  window.requestAnimationFrame(() => details.querySelector("[data-intake-edit]")?.focus());
 }
 
 async function reviewIntakeLeaveGroup(item, decision, reason = "") {
@@ -14264,10 +14745,14 @@ function renderIntakeQueueWithCache() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : "Admin Edit"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
+          ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
+          ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
+          ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
         </div>
       </article>
     `).join("")
@@ -14276,9 +14761,11 @@ function renderIntakeQueueWithCache() {
   const panel = document.getElementById("override-panel");
   const editor = document.querySelector("[data-override-editor]");
   const activeItem = intakeQueue.find((item) => item.id === activeOverrideId);
+  const editableItem = activeItem?.type === "Leave" && !intakeLeaveRoundIsOpen(activeItem) ? null : activeItem;
+  if (activeItem && !editableItem) activeOverrideId = null;
   if (panel && editor) {
-    panel.hidden = !activeItem;
-    editor.innerHTML = activeItem ? renderOverrideEditor(activeItem) : "";
+    panel.hidden = !editableItem;
+    editor.innerHTML = editableItem ? renderOverrideEditor(editableItem) : "";
   }
 
   const denialPanel = document.getElementById("denial-panel");
@@ -14289,7 +14776,7 @@ function renderIntakeQueueWithCache() {
     denialEditor.innerHTML = denialItem ? renderDenialEditor(denialItem) : "";
   }
   const backdrop = document.querySelector("[data-intake-editor-backdrop]");
-  if (backdrop) backdrop.hidden = !(activeItem || denialItem);
+  if (backdrop) backdrop.hidden = !(editableItem || denialItem);
 }
 
 function focusIntakeEditor(panelId) {
@@ -14360,7 +14847,7 @@ function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
   }
-  if (pageName === "intake-schedule" && !canUseIntakeView()) {
+  if (pageName === "intake-schedule" && !canViewIntakeSchedule()) {
     pageName = "dashboard";
   }
   if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
@@ -14433,7 +14920,7 @@ function updateSelectedBidYear(year) {
 
 function biddingExportRows() {
   const rows = [
-    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Actor", "Timestamp"],
+    ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Action by", "Timestamp"],
   ];
 
   intakeQueue.forEach((item) => {
@@ -14784,8 +15271,9 @@ function bidderEditorDraft() {
       gl_line_type_verified: bidderEditor.person?.bid_role !== 'GL'
         || Boolean(form.querySelector('[data-editor-gl-line-type-verification]')?.checked) } : null,
     leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
-      start_date: form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null,
-      end_date: form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null,
+      // Hidden requests must retain their dates in the complete database save payload.
+      start_date: row.status === 'approved' ? form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null : row.requested_start_date,
+      end_date: row.status === 'approved' ? form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null : row.requested_end_date,
     })),
   };
 }
@@ -14853,12 +15341,12 @@ function renderBidderEditorForm() {
       I verified this GL is bidding as <span data-editor-gl-line-type-label>${glLineCategory}</span>. All GL rules still apply.
     </label>` : ''}</fieldset>
     ${[1,2,3,4,5].map(round => {
-      const rows = snapshot.leave.filter(row => row.round_number === round);
+      const rows = snapshot.leave.filter(row => row.round_number === round && row.status === 'approved');
       return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
         <div class="bidder-editor-date-row"><div><strong>Priority ${row.priority}</strong> · ${escapeHtml(row.status)}<br><small>${row.charged_days} charged days currently</small></div>
           <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" /></label>
           <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" /></label>
-        </div>`).join('') : '<p>No leave bids in this round.</p>'}</fieldset>`;
+        </div>`).join('') : '<p>No approved leave bids in this round.</p>'}</fieldset>`;
     }).join('')}
     <div data-editor-review aria-live="polite"></div>
     <div class="bidder-editor-actions"><button type="button" class="secondary-action" data-editor-check>1. Confirm &amp; check changes</button>
@@ -15446,6 +15934,12 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const intakeScheduleDownload = event.target.closest("[data-download-intake-schedule]");
+  if (intakeScheduleDownload) {
+    downloadIntakeScheduleIcs(intakeScheduleDownload.dataset.downloadIntakeSchedule);
+    return;
+  }
+
   if (event.target.closest("[data-add-leave-request]")) {
     addOrUpdateLeaveSubmission();
     return;
@@ -15548,10 +16042,44 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const editShiftPresetButton = event.target.closest("[data-edit-shift-preset]");
+  if (editShiftPresetButton && hasSystemAdminAccess()) {
+    const preset = intakeShiftPresets.find((item) => item.id === editShiftPresetButton.dataset.editShiftPreset);
+    if (preset) {
+      editingShiftPresetId = preset.id;
+      const form = document.querySelector("[data-shift-builder-form]");
+      form.querySelector("[data-shift-builder-time]").value = preset.startTime;
+      form.querySelector("[data-shift-builder-hours]").value = String(preset.durationHours);
+      renderShiftPresets();
+      form.querySelector("[data-shift-builder-time]").focus();
+    }
+    return;
+  }
+  const deleteShiftPresetButton = event.target.closest("[data-delete-shift-preset]");
+  if (deleteShiftPresetButton) { await deleteShiftPreset(deleteShiftPresetButton.dataset.deleteShiftPreset); return; }
+  if (event.target.closest("[data-cancel-shift-preset]")) { resetShiftPresetEditor(); setShiftBuilderStatus(""); return; }
+
   const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
   if (scheduleViewButton) {
     scheduleCalendarView = scheduleViewButton.dataset.scheduleCalendarView || "month";
     renderIntakeSchedule();
+    return;
+  }
+
+  const markedDayButton = event.target.closest("[data-intake-calendar-date]");
+  if (markedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(markedDayButton.dataset.intakeCalendarDate);
+    return;
+  }
+
+  const editMarkedDayButton = event.target.closest("[data-edit-intake-calendar-mark]");
+  if (editMarkedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(editMarkedDayButton.dataset.editIntakeCalendarMark);
+    return;
+  }
+
+  if (event.target.closest("[data-clear-intake-calendar-mark]")) {
+    await clearIntakeCalendarMark();
     return;
   }
 
@@ -15692,6 +16220,8 @@ document.addEventListener("click", async (event) => {
 
   const intakeEdit = event.target.closest("[data-intake-edit]");
   if (intakeEdit) {
+    const item = intakeReviewItemById(intakeEdit.dataset.intakeEdit);
+    if (item?.type === "Leave" && !intakeLeaveRoundIsOpen(item)) { renderIntakeQueue(); return; }
     intakeEditorReturnFocus = { id: intakeEdit.dataset.intakeEdit, action: "edit" };
     activeOverrideId = intakeEdit.dataset.intakeEdit;
     activeDenialId = null;
@@ -15703,6 +16233,18 @@ document.addEventListener("click", async (event) => {
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
     await saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
+    return;
+  }
+
+  const intakeManageLeave = event.target.closest("[data-intake-manage-leave]");
+  if (intakeManageLeave) {
+    revealIntakeLeaveDates(intakeManageLeave.dataset.intakeManageLeave);
+    return;
+  }
+
+  const intakeRemoveLeave = event.target.closest("[data-intake-remove-leave]");
+  if (intakeRemoveLeave) {
+    await removeApprovedLeaveBid(intakeRemoveLeave.dataset.intakeRemoveLeave);
     return;
   }
 
@@ -15862,7 +16404,14 @@ document.addEventListener("click", async (event) => {
 
   const trigger = event.target.closest("[data-page]");
   if (!trigger) return;
+  if (trigger.dataset.page === "intake-schedule" && !await refreshIntakeScheduleMembership()) return;
   setPage(trigger.dataset.page);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    void refreshIntakeScheduleMembership();
+  }
 });
 
 document.addEventListener("keydown", async (event) => {
@@ -15955,6 +16504,8 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
 document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
+document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
+document.querySelector("[data-intake-calendar-mark-form]")?.addEventListener("submit", saveIntakeCalendarMark);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -15969,6 +16520,12 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-intake-calendar-mark-date]")) {
+    const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+    if (kindInput) kindInput.dataset.selectedDate = "";
+    renderIntakeCalendarMarkEditor();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;
