@@ -54,7 +54,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -518,7 +518,7 @@ begin
     and lower(email) = lower(auth.jwt()->>'email') and active;
   if actor.id is null or not (actor.role in ('admin','intake') or exists (
     select 1 from public.intake_schedules s where s.intake_user_id=actor.id
-      and now() between s.starts_at - interval '15 minutes' and s.ends_at
+      and now() between s.starts_at - interval '60 minutes' and s.ends_at
   )) then raise exception 'Active intake or administrator access is required.'; end if;
   if target_id is not null and not exists (
     select 1 from public.bidders b where b.id=target_id and b.active
