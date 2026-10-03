@@ -6507,6 +6507,26 @@ function friendlyAuthFailure(error) {
   return message || "That login did not work.";
 }
 
+function requestedPublicView() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("page") !== "public") return null;
+  const area = params.get("area");
+  const section = params.get("section");
+  return {
+    area: [...ZLA_AREAS, "FAQ", "Previous Years"].includes(area) ? area : DEFAULT_PUBLIC_AREA,
+    section: ["Calendar", "RDO", "Bid Time"].includes(section) ? section : DEFAULT_PUBLIC_SECTION,
+  };
+}
+
+function syncPublicPageUrl(area, section) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", "public");
+  url.searchParams.set("area", area);
+  url.searchParams.set("section", section);
+  url.searchParams.delete("member");
+  syncNavigationUrl(url);
+}
+
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
   return ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
@@ -6717,7 +6737,7 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.documentElement.classList.remove("member-boot-pending");
 }
 
-function showPublicHome() {
+function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
@@ -6731,7 +6751,7 @@ function showPublicHome() {
     loginToggle.setAttribute("aria-expanded", "false");
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  renderPublicPage(DEFAULT_PUBLIC_AREA, DEFAULT_PUBLIC_SECTION);
+  renderPublicPage(area, section, { persistNavigation: true });
   document.documentElement.classList.remove("member-boot-pending");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6788,7 +6808,8 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
       await loadSupabaseReferenceData();
-      showLoggedInApp(page);
+      if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
+      else showLoggedInApp(page);
       return true;
     } catch (error) {
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
@@ -8748,7 +8769,8 @@ function publicRosterArea(area = publicState.area) {
   return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
-function renderPublicPage(area = publicState.area, section = publicState.section) {
+function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false } = {}) {
+  if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
@@ -14937,21 +14959,30 @@ function openIntakeItemFromAlert(itemId) {
   }));
 }
 
-function syncMemberPageUrl(pageName) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("page", pageName);
+function syncNavigationUrl(url) {
   window.history.replaceState(window.history.state, "", url.toString());
-
-  // The dashboard embeds this app; keep its address in sync for a full refresh.
+  // Preserve the visible address when this app is embedded in the dashboard.
   if (window.parent !== window) {
+    window.parent.postMessage({ type: "bidding-navigation", search: url.search }, window.location.origin);
     try {
       const parentUrl = new URL(window.parent.location.href);
-      parentUrl.searchParams.set("page", pageName);
+      for (const key of ["page", "member", "area", "section"]) {
+        if (url.searchParams.has(key)) parentUrl.searchParams.set(key, url.searchParams.get(key));
+        else parentUrl.searchParams.delete(key);
+      }
       window.parent.history.replaceState(window.parent.history.state, "", parentUrl.toString());
     } catch {
       // A host on another origin cannot expose its address to this frame.
     }
   }
+}
+
+function syncMemberPageUrl(pageName) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", pageName);
+  url.searchParams.delete("area");
+  url.searchParams.delete("section");
+  syncNavigationUrl(url);
 }
 
 function setPage(pageName) {
@@ -15692,7 +15723,7 @@ function logOut() {
   document.querySelector(".login-screen")?.removeAttribute("hidden");
   const loginToggle = document.querySelector("[data-public-login-toggle]");
   if (loginToggle) loginToggle.textContent = "Login";
-  renderPublicPage();
+  renderPublicPage(publicState.area, publicState.section, { persistNavigation: true });
 }
 
 document.addEventListener("click", async (event) => {
@@ -15936,7 +15967,7 @@ document.addEventListener("click", async (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar");
+    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
     return;
   }
 
@@ -16751,7 +16782,7 @@ document.addEventListener("change", async (event) => {
   }
 
   if (event.target.matches("[data-mobile-public-area]")) {
-    renderPublicPage(event.target.value, publicState.section);
+    renderPublicPage(event.target.value, publicState.section, { persistNavigation: true });
     return;
   }
   if (event.target.matches("[data-mobile-month]")) {
@@ -16870,6 +16901,7 @@ document.addEventListener("change", async (event) => {
   renderApp();
 });
 
+Object.assign(publicState, requestedPublicView() || {});
 initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
