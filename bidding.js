@@ -8792,7 +8792,7 @@ function activeScheduledIntakeWindow() {
   if (!currentUser?.initials) return null;
   const nowDate = new Date();
   return intakeSchedules.find((schedule) => {
-    const accessStart = new Date(schedule.start.getTime() - 15 * 60 * 1000);
+    const accessStart = new Date(schedule.start.getTime() - 60 * 60 * 1000);
     return schedule.initials === currentUser.initials && nowDate >= accessStart && nowDate <= schedule.end;
   }) || null;
 }
@@ -13355,7 +13355,7 @@ async function addIntakeScheduleFromForm() {
     resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
     setPage("intake-schedule");
-    setScheduleFormStatus(`${name}'s intake shift was ${scheduleId ? "updated" : "scheduled"} in Supabase for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
+    setScheduleFormStatus(`${name}'s intake shift was ${scheduleId ? "updated" : "scheduled"} in Supabase for ${formatDateRange(start, end)}. Access starts 60 minutes before the shift.`, "success");
   } catch (error) {
     setScheduleFormStatus(
       scheduleId && isMissingSupabaseRoutine(error)
