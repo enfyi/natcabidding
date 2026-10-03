@@ -16,7 +16,7 @@ export default function DashboardFrame({ src }: { src: string }) {
       const page = params.get('page')
       if (page !== 'public' && !isBiddingLandingPage(page)) return
       const url = new URL(window.location.href)
-      for (const key of ['page', 'member', 'area', 'section']) {
+      for (const key of ['page', 'member', 'area', 'section', 'bidYear']) {
         const value = params.get(key)
         if (value !== null) url.searchParams.set(key, value)
         else url.searchParams.delete(key)

@@ -16,18 +16,22 @@ const monthNames = [
 ];
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const BID_YEAR = 2027;
+// BID_YEAR is the selected view; the active year is controlled independently by admins.
+let BID_YEAR = 2027;
+let activeBidYear = null;
+let bidYearCatalog = [];
+let bidYearCatalogLoaded = false;
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
 const LEAVE_SLOT_HOURS_PER_DAY = 8;
 const CWS_LEAVE_HOURS_PER_DAY = 10;
 const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const NO_FATIGUE_PREFERENCE = "No preference";
-const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
-const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
+let BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
+let FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
-const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
+let BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
 const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -159,13 +163,13 @@ let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
 let bidWindowCountdownTargets = [];
 let leaveDraftQueue = [];
-let leaveRangeStartKey = "2027-04-08";
-let leaveRangeEndKey = "2027-04-09";
+let leaveRangeStartKey = dateKey(BID_YEAR, 4, 8);
+let leaveRangeEndKey = dateKey(BID_YEAR, 4, 9);
 let leaveRangeSelectionComplete = true;
 let leaveRangePreviewActive = false;
 const selectedLeaveDates = new Set();
 let leavePickerOpen = false;
-let leavePickerYear = 2027;
+let leavePickerYear = BID_YEAR;
 let leavePickerMonthIndex = 3;
 let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
@@ -2050,11 +2054,13 @@ function currentUserBidWindowStatus(date = new Date()) {
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
+    isOpen: Boolean(!selectedBidYearErrorMessage() && inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
   };
 }
 
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
   if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
@@ -2119,6 +2125,8 @@ function syncLeaveBidWindowControls(date = new Date()) {
 }
 
 function rdoChangeWindowErrorMessage(date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
     || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
   if (!hasApprovedRdo) return "";
@@ -2189,6 +2197,129 @@ function syncBidWindowTestingControls() {
     "[data-bid-window-enforcement-copy]",
     pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
+}
+
+function selectedBidYearErrorMessage() {
+  if (!bidYearCatalogLoaded) return "Checking the active bid year. Please wait before bidding.";
+  return BID_YEAR !== activeBidYear
+    ? `${BID_YEAR} is view-only. Select the active bid year (${activeBidYear}) to bid or make changes.`
+    : "";
+}
+
+function navigateToBidYear(year) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("bidYear", String(year));
+  // Reload to discard drafts, selections, and cached records from the previous year.
+  syncNavigationUrl(url);
+  window.location.assign(url.href);
+}
+
+function syncBidYearControls() {
+  const options = bidYearCatalog.map((year) =>
+    `<option value="${year.bid_year}">${year.bid_year}${year.is_active ? " · Current year" : " · View-only"}</option>`
+  ).join("");
+  document.querySelectorAll("[data-bid-year-select]").forEach((select) => {
+    select.innerHTML = options;
+    select.value = String(BID_YEAR);
+    select.disabled = !bidYearCatalogLoaded;
+  });
+  const adminSelect = document.querySelector("[data-active-bid-year-select]");
+  if (adminSelect) {
+    const adminOptions = bidYearCatalog.filter((year) => year.status === "open").map((year) =>
+      `<option value="${year.bid_year}">${year.bid_year}</option>`
+    ).join("");
+    if (adminSelect.innerHTML !== adminOptions || adminSelect.dataset.activeYear !== String(activeBidYear)) {
+      adminSelect.innerHTML = adminOptions;
+      adminSelect.value = String(activeBidYear);
+      adminSelect.dataset.activeYear = String(activeBidYear);
+    }
+    adminSelect.disabled = !bidYearCatalogLoaded;
+  }
+  setText("[data-active-bid-year-label]", activeBidYear || "Checking…");
+  document.querySelectorAll(".round-rule-subheader").forEach((element) => {
+    element.textContent = element.textContent.replace(/\b20\d{2} accrued leave/, `${BID_YEAR} accrued leave`);
+  });
+  setText("#bid-year-label", `${BID_YEAR} Annual Bidding${BID_YEAR !== activeBidYear && bidYearCatalogLoaded ? " · View-only" : ""}`);
+  const banner = document.querySelector("[data-bid-year-notice]");
+  if (banner) {
+    banner.hidden = !selectedBidYearErrorMessage();
+    banner.textContent = selectedBidYearErrorMessage();
+  }
+  const heading = document.querySelector("[data-history-heading]");
+  if (heading) heading.textContent = BID_YEAR !== activeBidYear ? `${BID_YEAR} Historical Bidding` : "Bid History";
+}
+
+async function loadBidYearCatalog(client) {
+  const { data, error } = await client.rpc("read_bid_year_catalog");
+  if (error) throw error;
+  bidYearCatalog = data || [];
+  activeBidYear = bidYearCatalog.find((year) => year.is_active)?.bid_year || null;
+  if (!activeBidYear) throw new Error("No active bid year is configured. Contact a system administrator.");
+  const url = new URL(window.location.href);
+  const requested = url.searchParams.get("bidYear");
+  const year = requested === null ? activeBidYear : Number(requested);
+  if (!bidYearCatalog.some((entry) => entry.bid_year === year)) {
+    throw new Error("The selected bid year is not configured. Remove the bidYear parameter to return to the current year.");
+  }
+  if (year !== BID_YEAR) {
+    BID_YEAR = year;
+    BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
+    BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
+    FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
+    displayedCalendarYear = year;
+    displayedCalendarMonth = 0;
+    leavePickerYear = year;
+    leavePickerMonthIndex = 0;
+    leaveRangeStartKey = BID_LEAVE_YEAR_START_KEY;
+    leaveRangeEndKey = BID_LEAVE_YEAR_START_KEY;
+    selectedLeaveDateKey = BID_LEAVE_YEAR_START_KEY;
+  }
+  // Pin this view so a later refresh cannot silently move an in-progress bid.
+  if (requested === null) {
+    url.searchParams.set("bidYear", String(year));
+    syncNavigationUrl(url);
+  }
+  bidYearCatalogLoaded = true;
+  syncBidYearControls();
+}
+
+let bidYearRefreshPending = false;
+async function refreshActiveBidYear() {
+  if (!bidYearCatalogLoaded || bidYearRefreshPending || document.visibilityState !== "visible") return;
+  const client = supabaseClient();
+  if (!client) return;
+  bidYearRefreshPending = true;
+  try {
+    const previous = activeBidYear;
+    await loadBidYearCatalog(client);
+    if (previous !== activeBidYear) renderApp();
+  } catch (error) {
+    console.warn(`Active bid year could not refresh: ${error.message || error}`);
+  } finally {
+    bidYearRefreshPending = false;
+  }
+}
+
+async function saveActiveBidYear() {
+  if (!hasSystemAdminAccess()) return;
+  const select = document.querySelector("[data-active-bid-year-select]");
+  const button = document.querySelector("[data-save-active-bid-year]");
+  const status = document.querySelector("[data-active-bid-year-status]");
+  if (!select || !button || !status) return;
+  const requestedYear = Number(select.value);
+  button.disabled = true;
+  status.textContent = "Saving active bid year…";
+  try {
+    const { error } = await supabaseClient().rpc("set_active_bid_year", { requested_bid_year: requestedYear });
+    if (error) throw error;
+    await loadBidYearCatalog(supabaseClient());
+    renderApp();
+    status.textContent = `${activeBidYear} is now the active bid year. You are still viewing ${BID_YEAR}.`;
+  } catch (error) {
+    status.textContent = error.message || "The active bid year could not be saved.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function applyBidYearSettings(settings) {
@@ -7652,6 +7783,8 @@ async function ensureSupabaseBidYearId() {
 }
 
 async function saveSupabaseRdoRequest(request, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The RDO bid could not reach the database. Sign in and try again.");
@@ -7673,6 +7806,8 @@ async function saveSupabaseRdoRequest(request, options = {}) {
 }
 
 async function saveSupabaseManualRdoRequest(request, person, area) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
@@ -7695,6 +7830,8 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
 }
 
 async function saveSupabaseManualLeaveRequest(requests, person, area, notes = "") {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
@@ -7726,6 +7863,8 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
 }
 
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
@@ -7798,6 +7937,7 @@ async function loadPublicPilotCalendar() {
   if (!client) return;
   supabaseState.loading = true;
   try {
+    await loadBidYearCatalog(client);
     const result = await loadPublishedLeaveSlots(client);
     if (result.error) throw result.error;
     applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
@@ -7843,6 +7983,7 @@ async function loadSupabaseReferenceData() {
   supabaseState.message = "Loading bidding data from Supabase...";
 
   try {
+    await loadBidYearCatalog(client);
     const [bidYearResult, areasResult, rosterResult] = await Promise.all([
       client
         .from("bid_years")
@@ -9069,6 +9210,7 @@ function closeLateBidDialog() {
 }
 
 function updateBidWindow(force = false) {
+  if (!currentUser || !isMemberAppVisible()) return;
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
 
@@ -9084,7 +9226,7 @@ function updateBidWindowWithCache(force = false) {
   const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
-  const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const canUseBidActions = !selectedBidYearErrorMessage() && viewingHomeArea && (isOpen || isTestingBypass);
   const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -14980,7 +15122,7 @@ function syncNavigationUrl(url) {
     window.parent.postMessage({ type: "bidding-navigation", search: url.search }, window.location.origin);
     try {
       const parentUrl = new URL(window.parent.location.href);
-      for (const key of ["page", "member", "area", "section"]) {
+      for (const key of ["page", "member", "area", "section", "bidYear"]) {
         if (url.searchParams.has(key)) parentUrl.searchParams.set(key, url.searchParams.get(key));
         else parentUrl.searchParams.delete(key);
       }
@@ -15054,26 +15196,9 @@ function setPage(pageName) {
 }
 
 function updateSelectedBidYear(year) {
-  const isHistorical = Number(year) < BID_YEAR;
-  displayedCalendarYear = Number(year);
-  setSelectedDateYear(displayedCalendarYear);
-  const label = document.getElementById("bid-year-label");
-  const historyHeading = document.querySelector("[data-history-heading]");
-  const historySummary = document.querySelector("[data-history-summary]");
-
-  if (label) label.textContent = `${year} Annual Bidding`;
-
-  if (historyHeading) {
-    historyHeading.textContent = isHistorical ? `${year} Historical Bidding` : "Bid History";
+  if (Number(year) !== BID_YEAR && bidYearCatalog.some((entry) => entry.bid_year === Number(year))) {
+    navigateToBidYear(Number(year));
   }
-
-  if (historySummary) {
-    historySummary.textContent = isHistorical
-      ? `Review ${currentUser.area} bidding activity from ${year}. Bidding intake admins can review all areas.`
-      : `${currentUser.area} submission timeline, saved drafts, changes, and verification events.`;
-  }
-
-  setPage(isHistorical ? "history" : "dashboard");
 }
 
 function biddingExportRows() {
@@ -15702,6 +15827,7 @@ function renderApp() {
 }
 
 function renderAppWithCache() {
+  syncBidYearControls();
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
@@ -16608,6 +16734,8 @@ document.addEventListener("keydown", async (event) => {
   }
 });
 
+document.querySelector("[data-save-active-bid-year]")?.addEventListener("click", saveActiveBidYear);
+
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
   updateSelectedBidYear(event.target.value);
 });
@@ -16938,12 +17066,14 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     updateBidWindow(true);
     void refreshLiveAlerts();
+    void refreshActiveBidYear();
   }
 });
+window.addEventListener("focus", () => { void refreshActiveBidYear(); });
 window.addEventListener("focus", scheduleLiveAlertRefresh);
 window.addEventListener("online", scheduleLiveAlertRefresh);
 // Reconcile missed events or unavailable Realtime without frequent polling.
-setInterval(() => { void refreshLiveAlerts(); }, 60000);
+setInterval(() => { void refreshLiveAlerts(); void refreshActiveBidYear(); }, 60000);
 window.NATCA_BIDDING_READY = true;
 
 setInterval(() => {
