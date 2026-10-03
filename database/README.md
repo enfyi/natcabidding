@@ -197,6 +197,21 @@ also supporting the older initials-based payload during deployment rollout.
 When seniority changes, draft and open bid-window times stay with their rank and
 are reassigned to every bidder affected by the move in the same transaction.
 
+For an existing installation using the older roster-save helper, apply
+`supabase/migrations/20260929010000_sync_bid_windows_with_seniority.sql`.
+The browser already calls `admin_save_bidder_roster_rows`; this migration routes
+that call through the atomic window reassignment helper. No browser deployment
+is required to activate the change.
+
+Production deployment verified on October 2, 2026:
+- Applied the seniority/window synchronization migration to ZLA Bidding Website.
+- Corrected Area B ranks 24 and 25 in all four rounds (eight window assignments),
+  preserving window IDs, start/end times, and the current seniority order.
+- Tested a further 24/25 reorder in a rolled-back transaction: all eight windows
+  moved to the new rank holders while preserving the original two-hour slots.
+- Confirmed the restored production roster assigns rank 24 the earlier window
+  and rank 25 the later window in every round.
+
 Run `database/roster_bid_window_sync.sql` after the existing admin roster helpers.
 The roster editor then saves seniority changes and reassigns every affected
 draft/open bid-year time slot to the BUE who occupies that seniority rank in one
