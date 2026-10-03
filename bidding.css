@@ -5687,6 +5687,12 @@ tr.occupied-row .rdo-tag {
   box-shadow: 0 3px 10px rgba(43, 127, 134, 0.2);
 }
 
+.calendar-workforce-description {
+  margin: 0 0 6px !important;
+  color: #64748b !important;
+  font-size: 0.76rem !important;
+}
+
 .calendar-layout-description {
   margin: 0 0 14px !important;
   color: #64748b !important;
