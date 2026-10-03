@@ -6560,6 +6560,12 @@ function setAuthStatus(message, status = "info") {
   if (!target) return;
   target.textContent = message;
   target.dataset.status = status;
+  if (status === "error" && !isMemberAppVisible()) {
+    // Failed sign-in must leave its explanation visible in the login popup.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu) loginMenu.hidden = false;
+    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+  }
 }
 
 const supportedEmailTokenTypes = new Set([
@@ -6646,6 +6652,9 @@ function showPendingSupabaseEmailConfirmation(client, pendingToken) {
 
 function friendlyAuthFailure(error) {
   const message = error?.message || String(error || "");
+  if (error?.code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "The email or password is incorrect. Try again, or use Set or reset password.";
+  }
   if (/load failed|failed to fetch|network/i.test(message)) {
     return "Login could not reach Supabase. Check your connection and try again.";
   }
