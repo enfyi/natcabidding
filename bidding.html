@@ -303,9 +303,8 @@
             </label>
             <label>
               <span>Bid Year</span>
-              <select aria-label="Bid year" data-bid-year-select>
-                <option>2027</option>
-                <option>2026</option>
+              <select id="selected-bid-year" name="selected-bid-year" aria-label="Bid year" data-bid-year-select disabled>
+                <option>Checking…</option>
               </select>
             </label>
             <div class="status-chip" id="bid-window-status">
@@ -338,6 +337,7 @@
             </button>
           </div>
         </header>
+        <p class="status-chip closed" role="status" data-bid-year-notice hidden></p>
         <section class="alerts-menu" aria-label="Alerts" hidden data-alert-menu>
           <div class="panel">
             <div class="panel-header compact">
@@ -1524,12 +1524,26 @@
             <span class="pill open">System Admin</span>
           </header>
           <nav class="admin-section-nav" aria-label="Bidding setup sections">
+            <button type="button" data-admin-section-target="admin-bid-year-section">Bid year</button>
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
           </nav>
           <div class="admin-tools-page-grid">
+              <section class="panel admin-section-target" id="admin-bid-year-section" data-system-admin-only hidden>
+                <div class="panel-header compact"><div>
+                  <h3>Active Bid Year</h3>
+                  <p>New visits open the active year. Other years are view-only for bidders. Changing this setting preserves existing records and your selected view.</p>
+                </div></div>
+                <p>Current active year: <strong data-active-bid-year-label>Checking…</strong></p>
+                <label for="active-bid-year">Active bid year</label>
+                <select id="active-bid-year" name="active-bid-year" data-active-bid-year-select disabled></select>
+                <button class="primary-action" type="button" data-save-active-bid-year>Save Active Year</button>
+                <p role="status" data-active-bid-year-status>Only existing open bid years can be activated. Switching the year reloads the page and clears unsent selections.</p>
+              </section>
+
+
               <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
@@ -1822,7 +1836,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

@@ -86,6 +86,30 @@ environment variables at request time. Set `NEXT_PUBLIC_APP_ENVIRONMENT=pilot`
 on an isolated pilot deployment to show the permanent practice-data banner.
 Never point a pilot deployment at the production Supabase project.
 
+## Active and selected bidding years
+
+Apply `database/active_bid_year.sql` after the existing schema and authorization
+helpers. It restores `read_bid_year_settings`, provides the year catalog and an
+admin-only active-year setter, and makes inactive RDO and leave records view-only
+for bidders. The installer selects the existing year only when there is exactly
+one; installations with multiple years require an explicit initial admin choice.
+The public read functions intentionally expose only year metadata and the
+existing window settings. The settings table itself is inaccessible to clients.
+
+In **Bidding Setup → Active Bid Year**, a system administrator can activate an
+existing open year. The member **Bid Year** dropdown independently chooses which
+year to view. Changing that view reloads the page and clears unsent selections;
+it never changes the administrator's active year. Reads and submissions use the
+selected year explicitly. New bids require the active year and the existing bid
+window rules. Administrators can maintain archived records, but cannot insert
+new RDO or leave bids into an inactive year. No roster or schedule is copied.
+
+Run `node scripts/test-active-bid-year.mjs` for client checks and
+`scripts/test-active-bid-year.sql` through an administrative database connection
+for permission and stale-session checks. The SQL test rolls back all test data.
+Install this upgrade independently in production and in the separate pilot
+database. Each environment keeps its own active-year setting and bidding rules.
+
 ## Isolated bidding pilot
 
 Use a separate Supabase project and a separate Vercel deployment for a
