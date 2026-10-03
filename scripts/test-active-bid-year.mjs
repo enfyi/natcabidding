@@ -12,7 +12,7 @@ let navigation;
 let requestedYears = [];
 const context = vm.createContext({
   URL, console, Date,
-  BID_YEAR: 2027, activeBidYear: null, bidYearCatalog: [], bidYearCatalogLoaded: false,
+  BID_YEAR: 2027, activeBidYear: null, bidYearCatalog: [], bidYearCatalogLoaded: false, bidYearCatalogError: "",
   window: { location: { get href() { return href; }, assign(value) { navigation = value; } },
     history: { state: {}, replaceState(_state, _title, value) { href = value; } } },
   dateKey: (year, month, day) => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
@@ -86,3 +86,24 @@ context.isMemberAppVisible = () => true;
 context.updateBidWindow();
 assert.equal(windowUpdates, 1, 'Signed-in member bidding timers keep working');
 console.log('PASS active-year defaults, selected-year isolation, date boundaries, explicit RDO year, archive blocking, and invalid-year rejection');
+
+// A missing catalog RPC must not strand older single-year installations.
+href = 'https://example.test/bidding';
+const legacyClient = (rows) => ({
+  async rpc() { return { error: { code: 'PGRST202', message: 'Missing catalog routine' } }; },
+  from(table) {
+    assert.equal(table, 'bid_years');
+    return { select() { return { async limit() { return { data: rows, error: null }; } }; } };
+  },
+});
+await context.loadBidYearCatalog(legacyClient([{ bid_year: 2027, status: 'open' }]));
+assert.equal(context.selectedBidYearErrorMessage(), '');
+await assert.rejects(context.loadBidYearCatalog(legacyClient([
+  { bid_year: 2027, status: 'open' }, { bid_year: 2028, status: 'open' },
+])), /must be configured/);
+assert.match(context.selectedBidYearErrorMessage(), /could not be verified/);
+assert.equal(context.bidYearCatalogLoaded, false);
+await assert.rejects(context.saveSupabaseRdoRequest({ line: '1', round: 1 }), /could not be verified/);
+await context.loadBidYearCatalog(client);
+assert.equal(context.selectedBidYearErrorMessage(), '', 'Successful retry clears the error');
+console.log('PASS missing catalog compatibility, ambiguous-year blocking, and recovery');
