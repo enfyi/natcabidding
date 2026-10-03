@@ -12183,6 +12183,9 @@ function renderEmailLog() {
     : '<p class="empty-state small">No notification emails have been queued yet.</p>';
 }
 
+// Rounds 5 and 6 are reserved for a future bidding update.
+const BID_WINDOW_BUILDER_ROUND_COUNT = 4;
+
 function setBidWindowBuilderStatus(message, status = "info") {
   const target = document.querySelector("[data-bid-window-builder-status]");
   if (!target) return;
@@ -12280,7 +12283,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 6; round += 1) {
+  for (let round = 1; round <= BID_WINDOW_BUILDER_ROUND_COUNT; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -12302,7 +12305,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 6) {
+    if (round < BID_WINDOW_BUILDER_ROUND_COUNT) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -12360,7 +12363,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 6;
+  const windowCount = totalBues * BID_WINDOW_BUILDER_ROUND_COUNT;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -12431,7 +12434,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -12500,7 +12503,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 6,
+    requested_round_count: BID_WINDOW_BUILDER_ROUND_COUNT,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -12524,7 +12527,7 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
