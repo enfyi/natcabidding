@@ -6175,7 +6175,7 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
       <div class="leave-slot-summary">
         <span><b>${details.cpc.length}</b> / ${cpcCapacity} CPC slots filled</span>
         <span><b>${details.dev.length}</b> / ${devCapacity} developmental slots filled</span>
-        ${details.holidayInLieu ? "<span><b>Holiday In-Lieu</b> observed for your RDO line</span>" : ""}
+        ${details.holidayInLieu ? `<span><b>Holiday In-Lieu</b> ${holidayInLieuIsProvisional() ? "provisional—pending RDO approval" : "observed for your RDO line"}</span>` : ""}
         ${details.holiday && !details.holidayInLieu ? "<span><b>Holiday</b> Federal holiday</span>" : ""}
       </div>
       <div class="daily-slot-grid">
@@ -6265,13 +6265,13 @@ function isLegalHolidayDate(key) {
 }
 
 function firstRdoWeekdayForInitials(initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   const rdoWeekdays = [...rdoWeekdaysForLine(line)].sort((a, b) => a - b);
   return rdoWeekdays[0];
 }
 
 function isRdoWeekdayForInitials(weekday, initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   return rdoWeekdaysForLine(line).has(weekday);
 }
 
@@ -6342,6 +6342,16 @@ function isHolidayInLieuDate(key, initials = currentUser.initials) {
     holidayInLieuDatesForYear(year - 1, initials).has(key);
 }
 
+function holidayInLieuIsProvisional(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  return request?.status === "Pending" && Boolean(submittedRdoLineForInitials(normalized));
+}
+
 function calendarHolidayKind(key, options = {}) {
   const isPublicCalendar = options.showRdo === false && options.showPersonalLeave === false;
 
@@ -6352,7 +6362,11 @@ function calendarHolidayKind(key, options = {}) {
   }
 
   if (isHolidayInLieuDate(key)) {
-    return { label: "Holiday In-Lieu", className: "holiday-in-lieu-day", badgeClass: "in-lieu" };
+    return {
+      label: holidayInLieuIsProvisional() ? "Holiday In-Lieu (provisional—pending RDO approval)" : "Holiday In-Lieu",
+      className: "holiday-in-lieu-day",
+      badgeClass: "in-lieu",
+    };
   }
 
   return isHolidayDate(key)
