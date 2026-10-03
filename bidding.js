@@ -15175,6 +15175,9 @@ function setPage(pageName) {
 
   syncMemberPageUrl(pageName);
 
+  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
+
   const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
 
   document.querySelectorAll(".page").forEach((page) => {
