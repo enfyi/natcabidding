@@ -47,8 +47,12 @@ base schema, then run `database/fatigue_group_balancing.sql` before running or
 re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
-`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
-preflight migration after either script that replaces the leave submission
+`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`.
+Run `database/fatigue_capacity_sync.sql` after scripts that replace RDO submission
+or review RPCs to upgrade legacy rounded-down fatigue limits without replacing
+their other deployed bidding logic. The browser and database then allow balanced
+remainders (for example, four lines split 2/1/1) using both area and RDO-set limits.
+Keep the preflight migration after either script that replaces the leave submission
 function so its transactional wrapper remains installed. Intake can designate a controller before the
 controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
 their account and audit history without taking the source line. Their ghost
