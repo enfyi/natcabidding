@@ -6551,6 +6551,7 @@ function clearSupabaseAccountState() {
   document.querySelector('[data-bidder-editor-results]')?.replaceChildren();
   supabaseState.authEmail = "";
   supabaseState.authUserId = "";
+  stopLiveAlertUpdates();
   supabaseState.pendingAuthEmail = "";
   syncAccountFields();
 }
@@ -6712,6 +6713,7 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
   setPage(intendedLandingPage(page));
+  startLiveAlertUpdates();
   document.documentElement.classList.remove("member-boot-pending");
 }
 
@@ -13537,6 +13539,95 @@ function renderHistory() {
     .join("");
 }
 
+let alertRefreshPending = false;
+let alertRefreshTimer = null;
+let alertRealtimeChannel = null;
+let alertRealtimeUserId = "";
+let lastAlertDatabaseSnapshot = "";
+
+function stopLiveAlertUpdates() {
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = null;
+  if (alertRealtimeChannel) void supabaseClient()?.removeChannel(alertRealtimeChannel);
+  alertRealtimeChannel = null;
+  alertRealtimeUserId = "";
+  lastAlertDatabaseSnapshot = "";
+}
+
+function scheduleLiveAlertRefresh() {
+  // A submission can change several tables. Fetch once after the burst settles.
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = setTimeout(() => {
+    alertRefreshTimer = null;
+    void refreshLiveAlerts();
+  }, 750);
+}
+
+function startLiveAlertUpdates() {
+  const client = supabaseClient();
+  const userId = supabaseState.authUserId;
+  if (!client || !userId || alertRealtimeUserId === userId) return;
+  stopLiveAlertUpdates();
+  alertRealtimeUserId = userId;
+  alertRealtimeChannel = client.channel(`bidding-alerts-${userId}`);
+  for (const table of ["intake_submissions", "leave_requests", "help_threads", "help_messages"]) {
+    alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleLiveAlertRefresh);
+  }
+  alertRealtimeChannel.subscribe((status) => {
+    if (status === "SUBSCRIBED") scheduleLiveAlertRefresh();
+  });
+}
+
+async function refreshLiveAlerts() {
+  if (alertRefreshPending || document.visibilityState !== "visible" || !isMemberAppVisible()
+    || !supabaseState.authUserId || !supabaseState.connected || supabaseState.loading) return;
+  const client = supabaseClient();
+  if (!client) return;
+  alertRefreshPending = true;
+  const userId = supabaseState.authUserId;
+  const previousData = JSON.stringify([intakeQueue, helpThreads]);
+  try {
+    const requester = currentHelpRequester();
+    const [bidding, leave, help] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
+      client.rpc("live_help_threads", {
+        help_bid_year: BID_YEAR,
+        help_session_id: requester.sessionId || liveHelpSessionId(),
+      }),
+    ]);
+    const snapshot = JSON.stringify([userId, bidding.data, leave.data, help.data]);
+    if (!bidding.error && !leave.error && !help.error && snapshot === lastAlertDatabaseSnapshot) return;
+    const areas = await client.from("areas").select("id,name");
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = !bidding.error && !leave.error && !areas.error
+      ? attachSubmissionIdsToLeaveRequests(
+        await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+      ) : null;
+    // Discard results from an old session or a read overtaken by a local action.
+    if (supabaseState.authUserId !== userId || supabaseState.loading || !isMemberAppVisible()
+      || JSON.stringify([intakeQueue, helpThreads]) !== previousData) return;
+    if (leaveRows) {
+      const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+        && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+        .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+      inferRdoBidChanges(rdoItems);
+      // Replace the database snapshot so removed or superseded alerts also disappear.
+      intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+      intakeQueue.unshift(...rdoItems);
+      upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    }
+    if (!help.error) helpThreads = (help.data || []).map(helpThreadFromRpc);
+    if (!bidding.error && !leave.error && !help.error && !areas.error) lastAlertDatabaseSnapshot = snapshot;
+    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) renderAlerts();
+  } catch (error) {
+    console.warn("Alert refresh unavailable:", error.message || error);
+  } finally {
+    alertRefreshPending = false;
+  }
+}
+
 function alertItems() {
   const isIntake = hasIntakeAccess();
   if (isIntake) {
@@ -16798,8 +16889,15 @@ setInterval(() => {
   if (document.visibilityState === "visible") updateBidWindow();
 }, 1000);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") updateBidWindow(true);
+  if (document.visibilityState === "visible") {
+    updateBidWindow(true);
+    void refreshLiveAlerts();
+  }
 });
+window.addEventListener("focus", scheduleLiveAlertRefresh);
+window.addEventListener("online", scheduleLiveAlertRefresh);
+// Reconcile missed events or unavailable Realtime without frequent polling.
+setInterval(() => { void refreshLiveAlerts(); }, 60000);
 window.NATCA_BIDDING_READY = true;
 
 setInterval(() => {
