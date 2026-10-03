@@ -26,7 +26,7 @@ assert.doesNotMatch(toolsPage, /data-manual-bid-panel|admin-entry-section|admin-
 assert.match(toolsPage, /data-email-log/)
 assert.match(html, /data-page-panel="intake-schedule"[\s\S]*data-schedule-rep/)
 
-assert.match(source, /\["dashboard", "intake", "intake-schedule", "admin", "admin-tools"\]/)
+assert.match(source, /"intake", "intake-schedule", "admin", "admin-tools"\]\.includes\(requestedPage\)/)
 assert.match(source, /pageName === "admin" \|\| pageName === "admin-tools"/)
 assert.match(source, /"admin-tools": "Bidding Setup"/)
 assert.match(source, /if \(pageName === "admin-tools"\) renderAdminToolsPage\(\)/)

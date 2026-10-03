@@ -10,7 +10,7 @@
     <title>NATCA ZLA Bidding</title>
     <script>
       const bootParams = new URLSearchParams(location.search);
-      if (bootParams.get("member") === "1" || ["dashboard", "intake", "intake-schedule", "admin"].includes(bootParams.get("page"))) {
+      if (bootParams.get("member") === "1" || ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(bootParams.get("page"))) {
         document.documentElement.classList.add("member-boot-pending");
       }
     </script>
@@ -1819,7 +1819,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
