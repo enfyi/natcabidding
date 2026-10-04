@@ -6521,6 +6521,18 @@ function formatCalendarDate(key) {
   }).format(new Date(year, month - 1, day));
 }
 
+function replaceBrowserHistory(targetWindow, url) {
+  try {
+    // Keep the receiver attached, including when updating a containing frame.
+    const history = targetWindow.history;
+    history.replaceState.call(history, history.state, "", url);
+    return true;
+  } catch {
+    // URL cleanup/navigation bookkeeping must not interrupt authentication.
+    return false;
+  }
+}
+
 function adoptParentSupabaseAuthHash() {
   if (window.self === window.top || window.location.hash) return;
 
@@ -6536,14 +6548,14 @@ function adoptParentSupabaseAuthHash() {
     || authParams.has("error_description");
   if (!isSupabaseAuthResponse) return;
 
-  window.history.replaceState(
-    null,
-    "",
+  const adopted = replaceBrowserHistory(
+    window,
     `${window.location.pathname}${window.location.search}${parentUrl.hash}`
   );
+  if (!adopted) return;
 
   parentUrl.hash = "";
-  window.top.history.replaceState(null, "", parentUrl.toString());
+  replaceBrowserHistory(window.top, parentUrl.toString());
 }
 
 function supabaseClient() {
@@ -6601,7 +6613,7 @@ function clearSupabaseEmailTokenFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("token_hash");
   url.searchParams.delete("type");
-  window.history.replaceState({}, document.title, url.toString());
+  replaceBrowserHistory(window, url.toString());
 }
 
 function showPendingSupabaseEmailConfirmation(client, pendingToken) {
@@ -15180,7 +15192,7 @@ function openIntakeItemFromAlert(itemId) {
 }
 
 function syncNavigationUrl(url) {
-  window.history.replaceState(window.history.state, "", url.toString());
+  replaceBrowserHistory(window, url.toString());
   // Preserve the visible address when this app is embedded in the dashboard.
   if (window.parent !== window) {
     window.parent.postMessage({ type: "bidding-navigation", search: url.search }, window.location.origin);
@@ -15190,7 +15202,7 @@ function syncNavigationUrl(url) {
         if (url.searchParams.has(key)) parentUrl.searchParams.set(key, url.searchParams.get(key));
         else parentUrl.searchParams.delete(key);
       }
-      window.parent.history.replaceState(window.parent.history.state, "", parentUrl.toString());
+      replaceBrowserHistory(window.parent, parentUrl.toString());
     } catch {
       // A host on another origin cannot expose its address to this frame.
     }
