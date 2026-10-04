@@ -9,7 +9,8 @@ const window = { location: new URL('https://example.com/bidding.html?page=admin&
 window.parent = window
 window.history = { state: null, replaceState(_, __, href) { window.location = new URL(href) } }
 const context = vm.createContext({ window, URL, URLSearchParams, ZLA_AREAS: ['Area A', 'Area B', 'Area C', 'Area D', 'Area E', 'Area F', 'TMU'], DEFAULT_PUBLIC_AREA: 'FAQ', DEFAULT_PUBLIC_SECTION: 'Calendar' })
-vm.runInContext(helpers + sync, context)
+const historyHelper = source.slice(source.indexOf('function replaceBrowserHistory('), source.indexOf('function adoptParentSupabaseAuthHash('))
+vm.runInContext(historyHelper + helpers + sync, context)
 assert.equal(vm.runInContext('requestedPublicView()', context), null)
 for (const area of [...context.ZLA_AREAS, 'FAQ', 'Previous Years']) {
   for (const section of ['Calendar', 'RDO', 'Bid Time']) {
