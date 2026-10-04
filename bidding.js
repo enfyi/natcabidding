@@ -668,6 +668,7 @@ const supabaseState = {
   authUserId: "",
   pendingAuthEmail: "",
   intakeSchedulesError: "",
+  rdoLinesLoadState: "idle",
   placeholdersCleared: false,
   referenceDataLoaded: false,
 };
@@ -1474,24 +1475,9 @@ function roundWindowDate(parsedWindow, time) {
 }
 
 function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
-  const importedWindow = databaseBidWindowForRankRound(area, rank, roundNumber);
-  if (importedWindow) return importedWindow;
-
-  const index = rank - 1;
-  const rowBlock = Math.floor(index / bidStartTimes.length);
-  const dateLabel = roundDateBlocksForArea(area)[rowBlock]?.[roundNumber - 1];
-  const startTime = bidStartTimes[index % bidStartTimes.length];
-  if (!dateLabel || !startTime) return null;
-
-  const parsedWindow = parseRoundWindow(bidWindowLabel(dateLabel, startTime));
-  if (!parsedWindow) return null;
-
-  return {
-    rank,
-    round: roundNumber,
-    start: roundWindowDate(parsedWindow, parsedWindow.start),
-    end: roundWindowDate(parsedWindow, parsedWindow.end),
-  };
+  // Missing or failed database reads must never invent a published bid time
+  // or open a bidding window using the old October 1 prototype schedule.
+  return databaseBidWindowForRankRound(area, rank, roundNumber);
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
@@ -8032,6 +8018,7 @@ async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
     resetSupabaseBackedData();
+    supabaseState.rdoLinesLoadState = "error";
     supabaseState.enabled = false;
     supabaseState.connected = false;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
@@ -8043,6 +8030,7 @@ async function loadSupabaseReferenceData() {
   supabaseState.enabled = true;
   supabaseState.loading = true;
   supabaseState.intakeSchedulesError = "";
+  supabaseState.rdoLinesLoadState = "loading";
   supabaseState.message = "Loading bidding data from Supabase...";
 
   try {
@@ -8133,6 +8121,7 @@ async function loadSupabaseReferenceData() {
     });
 
     if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
+    supabaseState.rdoLinesLoadState = rdoLinesResult.error ? "error" : "loaded";
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
@@ -8167,7 +8156,7 @@ async function loadSupabaseReferenceData() {
       applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
       await refreshPilotRounds();
     }
-    if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
+    applyBidWindowsFromDatabase(supabaseRows(bidWindowsResult));
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
@@ -8179,6 +8168,7 @@ async function loadSupabaseReferenceData() {
     }
   } catch (error) {
     supabaseState.connected = false;
+    supabaseState.rdoLinesLoadState = "error";
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
@@ -8729,7 +8719,18 @@ function rdoFatigueGroupBadge(group) {
     : "";
 }
 
+function rdoLinesLoadMessage() {
+  if (supabaseState.rdoLinesLoadState === "loaded") return "";
+  if (supabaseState.rdoLinesLoadState === "loading"
+      || (supabaseState.rdoLinesLoadState === "idle" && !supabaseState.referenceDataLoaded)) {
+    return "Loading RDO lines…";
+  }
+  return "RDO lines could not be loaded. Please refresh the browser to reload.";
+}
+
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
   if (!lines.length) return `<tr><td colspan="12">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
@@ -8758,6 +8759,8 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
 }
 
 function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<div class="public-rdo-empty" role="status">${escapeHtml(loadMessage)}</div>`;
   if (!lines.length) return `<div class="public-rdo-empty">No RDO lines match those filters for ${area}.</div>`;
 
   return PUBLIC_RDO_LINE_SECTIONS.map((section) => {
@@ -8878,7 +8881,7 @@ function renderPublicBidTimeTable(area) {
           <article class="mobile-bid-time-card" data-public-bid-time-card>
             <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
-            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</dd></div>`).join("")}</dl>
           </article>
         `).join("")}
         ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
@@ -8911,7 +8914,7 @@ function renderPublicBidTimeTable(area) {
                 ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
@@ -9781,6 +9784,16 @@ function isCurrentUserRdoLine(line) {
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
+
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) {
+    setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${currentViewArea()}`);
+    setText("[data-rdo-filter-count]", supabaseState.rdoLinesLoadState === "loading" ? "Loading…" : "Unavailable");
+    target.innerHTML = `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
+    const mobileCards = document.querySelector("[data-member-rdo-cards]");
+    if (mobileCards) mobileCards.innerHTML = `<div class="empty-state" role="status">${escapeHtml(loadMessage)}</div>`;
+    return;
+  }
 
   let lastPattern = "";
   const rows = [];
