@@ -16,7 +16,8 @@ const context = vm.createContext({ URL, window: {
   parent, location: { origin: 'https://example.test' },
   history: { state: {}, replaceState(_state, _title, next) { frameUrl = next; } },
 } });
-vm.runInContext(fn, context);
+const historyHelper = source.slice(source.indexOf('function replaceBrowserHistory('), source.indexOf('function adoptParentSupabaseAuthHash('))
+vm.runInContext(historyHelper + fn, context);
 context.syncNavigationUrl(new URL('https://example.test/bidding.html?page=rdos&bidYear=2026'));
 assert.equal(new URL(frameUrl).searchParams.get('bidYear'), '2026');
 assert.equal(new URL(parentUrl).searchParams.get('bidYear'), '2026');
