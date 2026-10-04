@@ -2971,8 +2971,9 @@ function renderManualBidPanel(panel) {
     fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
     const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
     if (fatigueOverrideInput) {
-      fatigueOverrideInput.checked = resolvedGroup ? values.fatigueOverride : false;
-      fatigueOverrideInput.disabled = !resolvedGroup;
+      const canOverride = ["intake", "admin"].includes(currentUser?.role);
+      fatigueOverrideInput.checked = canOverride && resolvedGroup ? values.fatigueOverride : false;
+      fatigueOverrideInput.disabled = !canOverride || !resolvedGroup;
       fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
     }
   }
@@ -4992,8 +4993,11 @@ function captureIntakeOverrideFields(item) {
   if (!item || !editor) return;
 
   if (item.type === "RDO Line") {
+    const originalLine = item.line;
+    const originalGroup = item.fatigueGroup;
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
     item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
+    if (item.line !== originalLine || item.fatigueGroup !== originalGroup) item.fatigueOverride = false;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
     item.aws = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-aws]")?.value || item.aws);
     item.mid = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-mid]")?.value || item.mid);
@@ -5026,6 +5030,7 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
     ? {
         line: item.line,
         fatigueGroup: item.fatigueGroup,
+        fatigueOverride: Boolean(item.fatigueOverride),
         flex: item.flex === true || item.flex === "Yes",
         aws: item.aws === true || item.aws === "Yes",
         mid: item.mid,
@@ -5080,7 +5085,7 @@ async function approveIntakeItem(id) {
   }
   if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
     const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
-    if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
+    if (!item.fatigueOverride && !fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
       item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
       activeOverrideId = id;
       renderApp();
@@ -7414,6 +7419,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     round,
     line,
     fatigueGroup,
+    fatigueOverride: payload.fatigueOverride === true,
     flex,
     aws,
     mid,
@@ -7857,13 +7863,16 @@ async function saveSupabaseRdoRequest(request, options = {}) {
 }
 
 async function saveSupabaseManualRdoRequest(request, person, area) {
+  if (request.fatigueOverride && !["intake", "admin"].includes(currentUser?.role)) {
+    throw new Error("Only intake and admin users may override fatigue capacity.");
+  }
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
   }
-  const { data, error } = await client.rpc("submit_rdo_bid", {
+  const { data, error } = await client.rpc(request.fatigueOverride ? "submit_manual_rdo_fatigue_override" : "submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
     requested_fatigue_group: request.fatigueGroup || null,
