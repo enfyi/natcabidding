@@ -3181,6 +3181,7 @@ async function submitManualRdoBid(panel, person, area) {
     intakeQueue.unshift(request);
   }
 
+  delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is still required before the line is populated.`);
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
@@ -3391,6 +3392,7 @@ async function submitManualLeaveBid(panel, person, area) {
     weekKeys: item.weekKeys,
   }));
 
+  delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   requests.forEach(queueBidSubmittedEmail);
   manualLeaveBatch = { key: "", entries: [] };
@@ -5107,7 +5109,7 @@ async function supabaseSubmissionIdForIntakeItem(item) {
 
 // Review decisions change bid state and inventory, not FAQs, roster or settings.
 // Keep existing data visible and commit the new snapshot only after all reads pass.
-async function refreshBiddingAfterIntakeDecision() {
+async function refreshBiddingAfterIntakeDecision({ expectedDecisionRevision = null } = {}) {
   const client = supabaseClient();
   if (!client || !supabaseState.bidYearId || supabaseState.loading) {
     await loadSupabaseReferenceData();
@@ -5117,6 +5119,7 @@ async function refreshBiddingAfterIntakeDecision() {
   const year = BID_YEAR;
   supabaseState.loading = true;
   let refreshFailed = false;
+  let refreshError = null;
   try {
     const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
       readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
@@ -5136,6 +5139,8 @@ async function refreshBiddingAfterIntakeDecision() {
       await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
     );
     if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    if (expectedDecisionRevision !== null
+      && (expectedDecisionRevision !== intakeDecisionRevision || intakeDecisionPending || hasActiveIntakeEditing())) return;
     const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
     intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
     for (let index = leaveBids.length - 1; index >= 0; index--) {
@@ -5158,10 +5163,12 @@ async function refreshBiddingAfterIntakeDecision() {
     calendarRenderRevision += 1;
   } catch (error) {
     refreshFailed = true;
+    refreshError = error;
     console.warn("Bid review refresh failed; reloading reference data:", error.message || error);
   } finally {
     supabaseState.loading = false;
   }
+  if (refreshFailed && expectedDecisionRevision !== null) throw refreshError;
   if (refreshFailed && supabaseState.authUserId === userId && BID_YEAR === year) await loadSupabaseReferenceData();
 }
 
@@ -5194,8 +5201,63 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
 }
 
 let intakeDecisionPending = false;
+let intakeDecisionRevision = 0;
+let intakeDecisionRefreshTimer = null;
+let intakeDecisionRefreshRunning = false;
+
+function hasActiveIntakeEditing() {
+  if (activeOverrideId || activeDenialId || bidderEditor.busy) return true;
+  const focused = document.activeElement;
+  if (focused?.matches("input, textarea, select") && focused.closest(".app-shell")
+    && !focused.closest("[hidden]") && focused.closest(".page.active")) return true;
+  return [...document.querySelectorAll("[data-manual-bid-panel], [data-bidder-editor-form]")]
+    .some((panel) => panel.closest(".page.active") && !panel.closest("[hidden]")
+      && (panel.dataset.approvalRefreshDirty === "true" || panel.dataset.manualBidSubmitting === "true"));
+}
+
+function markIntakeEditing(event) {
+  const panel = event.target.closest("[data-manual-bid-panel], [data-bidder-editor-form]");
+  if (panel) panel.dataset.approvalRefreshDirty = "true";
+}
+
+document.addEventListener("input", markIntakeEditing, true);
+document.addEventListener("change", markIntakeEditing, true);
+
+function scheduleIntakeDecisionRefresh(delay = 350) {
+  clearTimeout(intakeDecisionRefreshTimer);
+  intakeDecisionRefreshTimer = setTimeout(() => {
+    intakeDecisionRefreshTimer = null;
+    void refreshIdleIntakeDecisions();
+  }, delay);
+}
+
+async function refreshIdleIntakeDecisions() {
+  if (intakeDecisionRefreshRunning) return;
+  if (intakeDecisionPending || supabaseState.loading || hasActiveIntakeEditing()) {
+    scheduleIntakeDecisionRefresh(1000);
+    return;
+  }
+  const revision = intakeDecisionRevision;
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  intakeDecisionRefreshRunning = true;
+  try {
+    await refreshBiddingAfterIntakeDecision({ expectedDecisionRevision: revision });
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    if (intakeDecisionPending || intakeDecisionRevision !== revision || hasActiveIntakeEditing()) {
+      scheduleIntakeDecisionRefresh(1000);
+      return;
+    }
+    renderApp();
+  } catch (error) {
+    console.warn("Approval saved; background refresh unavailable:", error.message || error);
+  } finally {
+    intakeDecisionRefreshRunning = false;
+  }
+}
 
 function updateConfirmedIntakeDecision(item, decision, reason = "") {
+  intakeDecisionRevision += 1;
   const status = decision === "approved" ? "Approved" : "Denied";
   item.status = status;
   for (const member of item.members || [item]) {
@@ -5283,9 +5345,8 @@ async function approveIntakeItem(id) {
     queueBidVerifiedEmail(item);
     activeOverrideId = null;
     activeDenialId = null;
-    supabaseState.placeholdersCleared = false;
-    await refreshBiddingAfterIntakeDecision();
-    renderApp();
+    scheduleIntakeDecisionRefresh();
+    renderIntakeQueue();
     setPage("intake");
     return;
   }
@@ -5341,9 +5402,8 @@ async function denyIntakeItem(id) {
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
-    supabaseState.placeholdersCleared = false;
-    await refreshBiddingAfterIntakeDecision();
-    renderApp();
+    scheduleIntakeDecisionRefresh();
+    renderIntakeQueue();
     setPage("intake");
     return;
   }
@@ -15487,9 +15547,8 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   intakeGroupReviewState.delete(item.id);
   activeOverrideId = null;
   activeDenialId = null;
-  supabaseState.placeholdersCleared = false;
-  await refreshBiddingAfterIntakeDecision();
-  renderApp();
+  scheduleIntakeDecisionRefresh();
+  renderIntakeQueue();
   setPage("intake");
 }
 
@@ -16189,6 +16248,8 @@ async function searchBidderEditor(query) {
   } catch (error) { if (generation === bidderEditor.generation) bidderEditorStatus(error.message || 'Unable to search bidders.', 'error'); }
 }
 function renderBidderEditorForm() {
+  const editingForm = document.querySelector("[data-bidder-editor-form]");
+  if (editingForm) delete editingForm.dataset.approvalRefreshDirty;
   const { snapshot, lines } = bidderEditor.record;
   const payload = snapshot.rdo?.payload || {};
   const assigned = snapshot.assignment;
