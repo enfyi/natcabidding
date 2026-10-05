@@ -2641,6 +2641,8 @@ async function addOrUpdateRdoSubmission() {
     status: "Pending",
     round,
     submittedAt: formatDateTime(new Date()),
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     approvedBy: "",
     approvedAt: "",
     line: line.line,
@@ -3144,6 +3146,8 @@ async function submitManualRdoBid(panel, person, area) {
     approvedAt: "",
     manualEntry: true,
     enteredBy: currentUser.initials,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     line: line.line,
     fatigueGroup,
     fatigueOverride: usedFatigueOverride,
@@ -3297,6 +3301,8 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     range: selected.map((entry) => entry.range).join(", "),
     days: chargedDays,
     round,
@@ -4628,6 +4634,8 @@ async function submitLeaveDraftBatch() {
     priority: startingPriority + index,
     status: "Pending",
     submittedAt,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     batchId,
     submissionBatchKey: batchId,
     range: draft.range,
@@ -7735,6 +7743,10 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     seniority: bidder.seniority_rank || row.seniority,
     status: uiStatusFromDatabase(row.status),
     submittedAt: row.submittedAt || (row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at))),
+    submittedBy: row.submittedBy || row.payload?.submittedBy || "",
+    submittedByRole: row.submittedByRole || row.payload?.submittedByRole || "",
+    approvedBy: row.reviewedBy || "",
+    deniedBy: row.reviewedBy || "",
     approvedAt: row.reviewedAt && String(row.status).toLowerCase() === "approved" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewedAt && String(row.status).toLowerCase() === "denied" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
     denialReason: row.denialReason || row.denial_reason || "",
@@ -7829,8 +7841,14 @@ function intakeSubmissionIdFromBiddingState(item, submissions = []) {
 function attachSubmissionIdsToLeaveRequests(rows, submissions) {
   return (rows || []).map((row) => {
     const item = supabaseLeaveRequestToIntakeItem(row);
+    const submission = (submissions || []).find((entry) =>
+      String(entry.requestId || entry.leave_request_id || "") === String(row.id)
+    );
     return {
       ...row,
+      reviewedBy: submission?.reviewedBy || row.reviewedBy || "",
+      submittedBy: submission?.payload?.submittedBy || row.submittedBy || "",
+      submittedByRole: submission?.payload?.submittedByRole || row.submittedByRole || "",
       submission_id: intakeSubmissionIdFromBiddingState(item, submissions),
     };
   });
@@ -7901,6 +7919,10 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     priority: Number(row.priority || 0),
     status: uiStatusFromDatabase(row.status),
     submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
+    submittedBy: row.submittedBy || row.payload?.submittedBy || "",
+    submittedByRole: row.submittedByRole || row.payload?.submittedByRole || "",
+    approvedBy: row.reviewedBy || "",
+    deniedBy: row.reviewedBy || "",
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
     cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
@@ -7983,6 +8005,12 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
       ghostBid: item.ghostBid,
       weekBucketStarts: item.weekBucketStarts,
       denialReason: item.denialReason,
+      approvedBy: item.approvedBy,
+      approvedAt: item.approvedAt,
+      deniedBy: item.deniedBy,
+      deniedAt: item.deniedAt,
+      submittedBy: item.submittedBy,
+      submittedAt: item.submittedAt,
     });
   });
 }
@@ -15552,6 +15580,27 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   setPage("intake");
 }
 
+function submissionRoleLabel(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "admin" ? "admin" : ["intake", "intake rep"].includes(normalized) ? "intake rep" : "user";
+}
+
+function intakeSubmissionLabel(item) {
+  const initials = item.submittedBy || item.enteredBy || "";
+  const role = item.submittedByRole ? submissionRoleLabel(item.submittedByRole) : "";
+  const date = new Date(item.submittedAt);
+  const submittedAt = Number.isNaN(date.getTime()) ? item.submittedAt || "Time not recorded" : formatDateTime(date);
+  // Historical bids without saved attribution cannot safely be assigned to the bidder.
+  return `Submitted by ${initials && role ? `${role} (${initials})` : "unknown submitter"} · ${submittedAt}`;
+}
+
+function intakeReviewerLabel(initials) {
+  if (!initials) return "Unknown reviewer";
+  const person = bueRoster().find((entry) => entry.initials === initials);
+  const name = person ? `${person.firstName || ""} ${person.lastName || ""}`.trim() : "";
+  return name ? `${name} · ${initials}` : initials;
+}
+
 let intakeQueueRefreshPending = false;
 
 async function refreshIntakeQueue() {
@@ -15653,8 +15702,7 @@ function renderIntakeQueueWithCache() {
             <span>Bid as ${item.bidAs}</span>
             ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
             ${item.type === "Leave" && isGlLeaveItem(item) ? `<span class="gl-bid-badge">GL Bid · visible, no slot used</span>` : ""}
-            ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
-            <span>Submitted ${item.submittedAt}</span>
+            <span>${escapeHtml(intakeSubmissionLabel(item))}</span>
           </div>
         </div>
         <div class="intake-actions">
@@ -15668,8 +15716,8 @@ function renderIntakeQueueWithCache() {
           ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
           ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
-          ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
-          ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
+          ${item.status === "Approved" ? `<small>Approved by ${escapeHtml(intakeReviewerLabel(item.approvedBy))} · ${item.approvedAt}</small>` : ""}
+          ${item.status === "Denied" ? `<small>Denied by ${escapeHtml(intakeReviewerLabel(item.deniedBy))} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
           ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
         </div>
@@ -15859,6 +15907,12 @@ function updateSelectedBidYear(year) {
   }
 }
 
+function biddingExportActionBy(item) {
+  if (item.status === "Approved") return item.approvedBy || "";
+  if (item.status === "Denied") return item.deniedBy || "";
+  return item.submittedBy || item.enteredBy || "";
+}
+
 function biddingExportRows() {
   const rows = [
     ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Action by", "Timestamp"],
@@ -15873,7 +15927,7 @@ function biddingExportRows() {
       item.bidAs,
       item.status,
       item.summary,
-      item.approvedBy || item.deniedBy || "",
+      biddingExportActionBy(item),
       item.approvedAt || item.deniedAt || item.submittedAt || "",
     ]);
   });
@@ -15901,8 +15955,8 @@ function biddingExportRows() {
       currentUserBidAs(),
       bid.status,
       `${bid.ghostBid ? "Ghost Leave · " : isGlLeaveItem(bid) ? "GL Bid · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
-      "",
-      "",
+      biddingExportActionBy(bid),
+      bid.approvedAt || bid.deniedAt || bid.submittedAt || "",
     ]);
   });
 
