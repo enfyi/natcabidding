@@ -4053,7 +4053,7 @@ function currentUserLeaveAllowanceHours() {
 }
 
 function currentUserBaseLeaveAllowanceDays() {
-  return estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials());
+  return Math.ceil(estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials()));
 }
 
 function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
@@ -4111,7 +4111,7 @@ function leaveAllowanceLimitForRound(round) {
 }
 
 function leaveAllowanceHoursForRound(round) {
-  return currentUserLeaveAllowanceHours()
+  return currentUserBaseLeaveAllowanceDays() * leaveHoursPerDayForInitials()
     + leaveHolidayCreditsForRound(round) * leaveHoursPerDayForInitials();
 }
 
@@ -15426,7 +15426,7 @@ function renderIntakeBidderSummaryWithCache() {
       (line?.line ? "Line " + escapeHtml(line.line) : "Not selected") + "</strong><small>" +
       (rdoDays.length ? escapeHtml(rdoDays.join(" / ")) : "RDOs unavailable") + "</small></div>" +
     '<div class="intake-bidder-metric"><span>' + BID_YEAR + " Accrual</span><strong>" +
-      formatEstimatedLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
+      formatRoundedUpLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
       " hours · " + scheduleLabel + "</small></div>" +
     '<div class="intake-bidder-metric"><span>Days Bid</span>' +
       '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="bids">' +
