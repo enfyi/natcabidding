@@ -29,8 +29,11 @@ async function review(group, groupAvailable = true) {
       return true
     },
     queueBidVerifiedEmail: () => {},
+    updateConfirmedIntakeDecision: (item) => { item.status = 'Approved' },
     supabaseState: {},
-    loadSupabaseReferenceData: async () => {},
+    refreshBiddingAfterIntakeDecision: async () => {
+      assert.equal(item.status, 'Approved', 'Pending notification clears before refresh')
+    },
     renderApp: () => {},
     setPage: () => {},
   })

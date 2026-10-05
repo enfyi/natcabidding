@@ -1523,45 +1523,50 @@ function roundWindowsUncached(roundNumber, area = currentViewArea()) {
     .filter(Boolean);
 }
 
-function areaBidRoundState(date = new Date(), area = currentViewArea()) {
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  for (let round = 1; round <= roundCount; round += 1) {
-    const windows = roundWindows(round, area);
-    const activeWindow = windows.find((window) => date >= window.start && date < window.end);
-    if (activeWindow) {
-      return {
-        phase: "open",
-        round,
-        activeRank: activeWindow.rank,
-        startsAt: activeWindow.start,
-        endsAt: activeWindow.end,
-      };
-    }
+function allAreaRoundWindows(roundNumber) {
+  return cachedLeaveRead(JSON.stringify(["allAreaRoundWindows", roundNumber]), () => (
+    ZLA_AREAS.flatMap((area) => roundWindows(roundNumber, area))
+  ));
+}
 
-    const roundEnd = windows.reduce((latest, window) => (window.end > latest ? window.end : latest), new Date(0));
-    const validationEndsAt = new Date(roundEnd.getTime() + ROUND_VALIDATION_DURATION_MS);
-    if (date >= roundEnd && date < validationEndsAt) {
-      return {
-        phase: "validation",
-        round,
-        validationEndsAt,
-      };
-    }
+function globalBidRoundBounds(round) {
+  const windows = allAreaRoundWindows(round);
+  if (!windows.length) return null;
+  return {
+    round,
+    startsAt: windows.reduce((earliest, window) => window.start < earliest ? window.start : earliest, windows[0].start),
+    endsAt: windows.reduce((latest, window) => window.end > latest ? window.end : latest, windows[0].end),
+  };
+}
+
+function globalBidRoundSchedule() {
+  const roundCount = Math.max(...ZLA_AREAS.map((area) => roundDateBlocksForArea(area)[0]?.length || 0));
+  return Array.from({ length: roundCount }, (_, index) => globalBidRoundBounds(index + 1)).filter(Boolean);
+}
+
+function areaBidRoundState(date = new Date(), area = currentViewArea()) {
+  const schedule = globalBidRoundSchedule();
+  // A round stays open through gaps and overnight until the final ZLA window ends.
+  const openRound = schedule.find(({ startsAt, endsAt }) => date >= startsAt && date < endsAt);
+  if (openRound) {
+    const activeWindow = roundWindows(openRound.round, area)
+      .find((window) => date >= window.start && date < window.end);
+    return { phase: "open", ...openRound, activeRank: activeWindow?.rank ?? null };
   }
 
+  // An earlier round's validation must never hide a newly opened round.
+  for (const { round, endsAt } of schedule) {
+    const validationEndsAt = new Date(endsAt.getTime() + ROUND_VALIDATION_DURATION_MS);
+    if (date >= endsAt && date < validationEndsAt) {
+      return { phase: "validation", round, validationEndsAt };
+    }
+  }
   return null;
 }
 
-function openAreaBidRound(date = new Date(), area = currentViewArea()) {
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  for (let round = 1; round <= roundCount; round += 1) {
-    const windows = roundWindows(round, area);
-    if (!windows.length) continue;
-    const startsAt = windows.reduce((earliest, window) => window.start < earliest ? window.start : earliest, windows[0].start);
-    const endsAt = windows.reduce((latest, window) => window.end > latest ? window.end : latest, windows[0].end);
-    if (date >= startsAt && date < endsAt) return round;
-  }
-  return null;
+function openAreaBidRound(date = new Date(), _area = currentViewArea()) {
+  return globalBidRoundSchedule()
+    .find(({ startsAt, endsAt }) => date >= startsAt && date < endsAt)?.round ?? null;
 }
 
 function downloadBidWindowsIcs(rank = null) {
@@ -1887,6 +1892,7 @@ const intakeFilters = {
   area: "all",
   round: "all",
 };
+let intakeSort = "approved";
 let helpPanelMode = "user";
 let activeHelpThreadId = "help-oc-1";
 let helpThreads = [
@@ -2887,7 +2893,7 @@ function renderManualBidPanel(panel) {
   const submitButton = panel.querySelector("[data-manual-bid-submit]");
   if (submitButton) {
     submitButton.disabled = !openRound;
-    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open for this area.";
+    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open across ZLA.";
   }
 
   const controllerSearch = panel.querySelector("[data-manual-controller-search]");
@@ -3015,7 +3021,7 @@ function renderManualBidPanel(panel) {
     });
     roundSelect.value = openRound ? String(openRound) : "";
     roundSelect.disabled = !openRound;
-    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open for this area.";
+    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open across ZLA.";
   }
   if (daysInput) {
     const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
@@ -3048,7 +3054,7 @@ function renderManualBidEntry() {
 async function submitManualRdoBid(panel, person, area) {
   const openRound = openAreaBidRound(new Date(), area);
   if (!openRound) {
-    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
+    setManualBidStatus(panel, "No bidding round is currently open across ZLA.", "error");
     return;
   }
   const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
@@ -3147,6 +3153,14 @@ async function submitManualRdoBid(panel, person, area) {
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
+  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
+  const leaveController = leavePanel?.querySelector("[data-manual-bid-controller]");
+  if (leaveController) {
+    const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
+    if (leaveSearch) leaveSearch.value = "";
+    leaveController.innerHTML = manualBidControllerOptions(person.initials, "");
+    leaveController.value = person.initials;
+  }
   renderApp();
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
@@ -3207,8 +3221,8 @@ function renderManualLeaveBatch(panel) {
 function prepareManualLeaveEntries(panel, person, area, entries) {
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const openRound = openAreaBidRound(new Date(), area);
-  if (!openRound) throw new Error(`No bidding round is currently open for ${area}.`);
-  if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} can accept bids for ${area}.`);
+  if (!openRound) throw new Error("No bidding round is currently open across ZLA.");
+  if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} is open across ZLA.`);
   if (round > 4) throw new Error("Leave bids are only available in Rounds 1 through 4.");
   const selected = entries.map((entry) => {
     const dateKeys = datesInLeaveRange(entry.range);
@@ -4588,6 +4602,7 @@ async function submitLeaveDraftBatch() {
     status: "Pending",
     submittedAt,
     batchId,
+    submissionBatchKey: batchId,
     range: draft.range,
     days: draft.days,
     round: draft.round,
@@ -4731,7 +4746,7 @@ function bidRound(item) {
 }
 
 function queueBidSubmittedEmail(items) {
-  const submissions = Array.isArray(items) ? items : [items];
+  const submissions = groupedLeaveIntakeItems(Array.isArray(items) ? items : [items]);
   if (!submissions.length) return;
 
   const first = submissions[0];
@@ -5065,6 +5080,66 @@ async function supabaseSubmissionIdForIntakeItem(item) {
   return intakeSubmissionIdFromBiddingState(item, data?.submissions || []);
 }
 
+// Review decisions change bid state and inventory, not FAQs, roster or settings.
+// Keep existing data visible and commit the new snapshot only after all reads pass.
+async function refreshBiddingAfterIntakeDecision() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.bidYearId || supabaseState.loading) {
+    await loadSupabaseReferenceData();
+    return;
+  }
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  supabaseState.loading = true;
+  let refreshFailed = false;
+  try {
+    const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
+      readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
+      readReferenceData("leave requests", () => client.rpc("read_leave_intake_queue", { queue_bid_year: year })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bid windows", () => loadPublishedBidWindows(client, supabaseState.bidYearId)),
+      readReferenceData("areas", () => client.from("areas").select("id,name")),
+    ]);
+    for (const result of [bidding, leave, slots, lines, windows, areas]) {
+      if (result.error) throw result.error;
+    }
+    if (gl.error && !isMissingSupabaseRoutine(gl.error)) throw gl.error;
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    for (let index = leaveBids.length - 1; index >= 0; index--) {
+      if (leaveBids[index].supabaseRequestId) leaveBids.splice(index, 1);
+    }
+    upsertRdoLinesFromDatabase(lines.data || [], areaById);
+    if (!gl.error) applyGlRdoAssignments(gl.data || []);
+    upsertRdoSubmissionsFromDatabase(submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())), areaById);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(slots), areaById);
+    applyBidWindowsFromDatabase(supabaseRows(windows));
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.loading = false;
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+    supabaseState.placeholdersCleared = true;
+    supabaseState.loadedAt = new Date();
+    lastAlertDatabaseSnapshot = "";
+    calendarRenderRevision += 1;
+  } catch (error) {
+    refreshFailed = true;
+    console.warn("Bid review refresh failed; reloading reference data:", error.message || error);
+  } finally {
+    supabaseState.loading = false;
+  }
+  if (refreshFailed && supabaseState.authUserId === userId && BID_YEAR === year) await loadSupabaseReferenceData();
+}
+
 async function persistIntakeDecision(item, decision, denialReason = "") {
   if (!supabaseState.connected) {
     throw new Error("This intake decision could not reach the database. Check the connection and try again.");
@@ -5091,6 +5166,37 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
   if (error) throw error;
   item.supabaseSubmissionId = submissionId;
   return true;
+}
+
+let intakeDecisionPending = false;
+
+function updateConfirmedIntakeDecision(item, decision, reason = "") {
+  const status = decision === "approved" ? "Approved" : "Denied";
+  item.status = status;
+  for (const member of item.members || [item]) {
+    member.status = status;
+    if (reason) member.denialReason = reason;
+    if (member.type === "Leave") {
+      const bid = leaveBidForItem(member);
+      if (bid) bid.status = status;
+    }
+  }
+  // Clear the pending notification before inventory reads or email delivery finish.
+  renderAlerts();
+}
+
+async function runIntakeDecision(action, id) {
+  if (intakeDecisionPending) return;
+  intakeDecisionPending = true;
+  const buttons = [...document.querySelectorAll("[data-intake-approve], [data-intake-deny-confirm]")]
+    .filter((button) => !button.disabled);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await action(id);
+  } finally {
+    intakeDecisionPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 async function approveIntakeItem(id) {
@@ -5148,11 +5254,12 @@ async function approveIntakeItem(id) {
     return;
   }
   if (persisted) {
+    updateConfirmedIntakeDecision(item, "approved");
     queueBidVerifiedEmail(item);
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -5205,11 +5312,12 @@ async function denyIntakeItem(id) {
   }
   if (persisted) {
     item.denialReason = reason;
+    updateConfirmedIntakeDecision(item, "denied", reason);
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -5265,7 +5373,7 @@ async function saveSupabaseApprovedLeaveEdit(item) {
     item.summary = `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
   }
 
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   return true;
 }
 
@@ -5326,7 +5434,7 @@ async function removeApprovedLeaveBid(id) {
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
   } catch (error) {
@@ -5361,6 +5469,49 @@ async function saveSupabasePendingRdoEdit(item) {
   return true;
 }
 
+async function saveSupabaseApprovedRdoEdit(item) {
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) throw new Error("The RDO edit could not reach the database. Check the connection and try again.");
+  let bidderId = item.bidderId;
+  // Older read_bidding_state routines return initials and area without a bidder ID.
+  if (!bidderId) {
+    if (!item.initials || !item.area) throw new Error("The saved bidder could not be identified. Reload the queue before editing.");
+    const { data: results, error: lookupError } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR, search_text: item.initials,
+    });
+    if (lookupError) throw lookupError;
+    const matches = (results?.bidders || []).filter(person =>
+      String(person.initials || "").trim().toUpperCase() === String(item.initials).trim().toUpperCase()
+      && person.area === item.area);
+    if (matches.length !== 1) throw new Error("The saved bidder could not be uniquely identified. Reload the queue before editing.");
+    bidderId = matches[0].id;
+  }
+  const { data: record, error: readError } = await client.rpc("read_admin_bidder_editor", {
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
+  });
+  if (readError) throw readError;
+  const line = record.lines.find(entry => entry.line_code === item.line);
+  if (!line) throw new Error("This RDO line is not eligible for the bidder.");
+  if (record.snapshot.rdo?.id !== item.supabaseSubmissionId || record.snapshot.rdo?.status !== "approved") {
+    throw new Error("This RDO bid has changed. Reload the queue and edit the latest approved bid.");
+  }
+  const { data, error } = await client.rpc("edit_admin_bidder", {
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
+    expected_snapshot: record.snapshot,
+    changes: {
+      rdo: { line_id: line.id, fatigue_group: item.fatigueGroup,
+        flex: item.flex === true || item.flex === "Yes", aws: item.aws === true || item.aws === "Yes",
+        mid: item.mid, gl_line_type_verified: item.bidAs !== "GL"
+          || Boolean(document.querySelector("[data-gl-line-type-verification]")?.checked) },
+      leave: record.snapshot.leave.map(row => ({ id: row.id,
+        start_date: row.requested_start_date, end_date: row.requested_end_date })),
+    },
+    validate_only: false,
+  });
+  if (error) throw error;
+  if (!data?.valid || !data?.saved) throw new Error((data?.errors || ["The database did not confirm the RDO save."]).join("\n"));
+}
+
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
@@ -5393,7 +5544,7 @@ async function saveIntakeOverride(id) {
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
-      await loadSupabaseReferenceData();
+      await refreshBiddingAfterIntakeDecision();
       renderApp();
       setPage("intake");
       return;
@@ -5410,6 +5561,30 @@ async function saveIntakeOverride(id) {
       setPage("intake");
       return;
     }
+  }
+
+  if (item.status === "Approved" && item.type === "RDO Line") {
+    try {
+      await saveSupabaseApprovedRdoEdit(item);
+      activeOverrideId = null;
+      activeDenialId = null;
+      supabaseState.placeholdersCleared = false;
+      await refreshBiddingAfterIntakeDecision();
+      renderApp();
+      setPage("intake");
+    } catch (error) {
+      item.line = originalLine;
+      item.fatigueGroup = originalFatigueGroup;
+      item.flex = originalFlex;
+      item.aws = originalAws;
+      item.mid = originalMid;
+      item.summary = original;
+      item.reviewNote = error.message || "The approved RDO changes could not be saved.";
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+    }
+    return;
   }
 
   if (item.status === "Approved" && item.type === "Leave" && supabaseState.connected && !item.supabaseRequestId) {
@@ -6193,6 +6368,10 @@ function syncMemberCalendarSelection(previousPreviewKeys = []) {
 }
 
 function leaveSlotMap(area = currentUser.area) {
+  return cachedLeaveRead(JSON.stringify(["leaveSlotMap", area]), () => leaveSlotMapUncached(area));
+}
+
+function leaveSlotMapUncached(area = currentUser.area) {
   const entries = {};
 
   leaveSlotWeeks.forEach((week) => {
@@ -9450,7 +9629,8 @@ function updateBidWindowWithCache(force = false) {
   const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
-  const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
+  const currentRound = testRound || latestAreaRound(now, roundState);
+  const personalRound = testRound || personalBidWindow?.round || currentRound;
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
@@ -9459,10 +9639,10 @@ function updateBidWindowWithCache(force = false) {
   const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
-  const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
+  const areaRoundOpen = roundState?.phase === "open";
   const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
-  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen;
-  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen && Boolean(activePerson);
+  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Your Bid Window is Open" : "Your Bid Window is Closed";
   const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
@@ -9471,6 +9651,8 @@ function updateBidWindowWithCache(force = false) {
         ? formatDuration(roundState.validationEndsAt - now)
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
+        : areaRoundOpen
+          ? formatDuration(roundState.endsAt - now)
         : "Closed";
   const countdownLabel = pilotState.database ? "Pilot Bidding" : isOpen
       ? "Window Closes In"
@@ -9480,8 +9662,10 @@ function updateBidWindowWithCache(force = false) {
         ? "Validation Ends In"
       : showCurrentBidder
         ? "Currently Bidding"
+        : areaRoundOpen
+          ? "Round Closes In"
         : "Window Status";
-  const currentRoundRule = roundRuleForRound(currentRound);
+  const currentRoundRule = roundRuleForRound(personalRound);
   const pendingRequest = pendingCurrentUserRdoRequest();
   const hasRdoBid = currentUserHasRdoRequestForLeave();
   const rdoChangeError = rdoChangeWindowErrorMessage(now);
@@ -9506,6 +9690,7 @@ function updateBidWindowWithCache(force = false) {
     currentRound,
     roundState?.phase || "closed",
     roundState?.activeRank || null,
+    personalRound,
     personalBidWindow?.start?.getTime() || null,
     personalBidWindow?.end?.getTime() || null,
     viewingHomeArea,
@@ -9554,15 +9739,15 @@ function updateBidWindowWithCache(force = false) {
   setText("[data-bid-window-countdown-label]", countdownLabel);
   setText("[data-bid-window-close]", personalBidWindow ? "Scheduled" : "Not scheduled");
   setText("[data-bid-window-range]", personalBidWindow ? formatBidWindowStart(personalBidWindow.start) : "Not scheduled");
-  setText("[data-next-bid-window-round]", isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
-  setText("[data-next-bid-window-rule-round]", `Round ${currentRound}`);
+  setText("[data-next-bid-window-round]", personalBidWindow ? `Round ${personalRound}` : isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
+  setText("[data-next-bid-window-rule-round]", `Round ${personalRound}`);
   setText("[data-next-bid-window-rule]", currentRoundRule.label);
   setText("[data-next-bid-window-rule-detail]", currentRoundRule.detail);
   setText(
     "[data-current-bidder]",
     isValidationPeriod
       ? `Round ${currentRound} validation period`
-      : areaRoundOpen && activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : "Closed"
+      : areaRoundOpen ? activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : `Round ${currentRound} open · No current bidder in this area` : "Closed"
   );
   setText("[data-current-round]", `Round ${currentRound}`);
   renderRoundRuleSummary(now, roundState);
@@ -11026,7 +11211,9 @@ function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundStat
     : roundState?.phase === "validation"
     ? "Validation period is active. No bids may be entered."
     : roundState?.phase === "open"
-      ? `Currently bidding: seniority #${roundState.activeRank}.`
+      ? Number.isFinite(roundState.activeRank)
+        ? `Currently bidding in ${currentViewArea()}: seniority #${roundState.activeRank}. The round remains open through the final BUE window across all areas.`
+        : `Round ${roundState.round} is open across all areas through the final BUE window.`
       : "Bidding is closed until the next scheduled round window.";
 
   setText("[data-round-rule-heading]", `Round ${round} Rules`);
@@ -13051,8 +13238,11 @@ function renderAdminConsole() {
   syncIntakeTeamControls();
 }
 
+let biddingBackupBusy = false;
+
 function renderAdminToolsPage() {
   if (!hasSystemAdminAccess()) return;
+  void loadBiddingBackups();
   renderRuleEditors();
   renderEmailLog();
   syncBidWindowTestingControls();
@@ -14095,10 +14285,10 @@ async function refreshLiveAlerts() {
   }
 }
 
-function alertItems() {
+function alertItems(groupedItems = groupedLeaveIntakeItems()) {
   const isIntake = hasIntakeAccess();
   if (isIntake) {
-    const intakeAlerts = pendingIntakeItems().map((item) => ({
+    const intakeAlerts = groupedItems.filter((item) => item.status === "Pending").map((item) => ({
       category: "Intake",
       title: `${item.initials} submitted ${bidTypeLabel(item)}`,
       detail: `${item.summary} · ${item.area}`,
@@ -14119,7 +14309,7 @@ function alertItems() {
     return [...intakeAlerts, ...helpAlerts];
   }
 
-  const bidAlerts = intakeQueue
+  const bidAlerts = groupedItems
     .filter((item) => item.initials === currentUser.initials && ["Pending", "Approved", "Denied"].includes(item.status))
     .map((item) => ({
       category: item.status,
@@ -14142,10 +14332,11 @@ function alertItems() {
 }
 
 function renderAlerts() {
-  const items = alertItems();
+  const groupedItems = groupedLeaveIntakeItems();
+  const items = alertItems(groupedItems);
   const count = items.filter((item) => item.category !== "Approved").length;
   setText("[data-alert-count]", count);
-  setText("[data-intake-count]", pendingIntakeItems().length);
+  setText("[data-intake-count]", groupedItems.filter((item) => item.status === "Pending").length);
 
   if (lastAudibleAlertCount !== null && count > lastAudibleAlertCount) {
     playAlertDing();
@@ -14750,7 +14941,22 @@ function intakeItemMatchesFilters(item) {
   return true;
 }
 
+function intakeSortTimestamp(item, field) {
+  return Math.max(0, ...(item.members || [item]).map((entry) => {
+    const timestamp = Date.parse(entry[field] || "");
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }));
+}
+
+function compareIntakeItems(left, right) {
+  const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
+  if (intakeSort === "entered") return enteredDifference;
+  return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
+}
+
 function syncIntakeSearchControls() {
+  const sort = document.querySelector("[data-intake-sort]");
+  if (sort) sort.value = intakeSort;
   const search = document.querySelector("[data-intake-search]");
   if (search && search.value !== intakeSearchQuery) search.value = intakeSearchQuery;
 
@@ -15026,6 +15232,10 @@ function renderIntakeBidderDetail(person, rows) {
 }
 
 function renderIntakeBidderSummary() {
+  return withLeaveReadCache(() => renderIntakeBidderSummaryWithCache());
+}
+
+function renderIntakeBidderSummaryWithCache() {
   const target = document.querySelector("[data-intake-bidder-summary]");
   const area = document.querySelector("[data-intake-bidder-area]");
   const role = document.querySelector("[data-intake-bidder-role]");
@@ -15118,7 +15328,7 @@ async function loadSelectedIntakeBidder() {
   }
 }
 
-function selectIntakeBidder(initials, profileId = "") {
+function selectIntakeBidder(initials, profileId = "", { deferRender = false } = {}) {
   const normalized = String(initials || "").trim().toUpperCase();
   const person = bueByInitials(normalized);
   if (!normalized || !person) return;
@@ -15131,9 +15341,11 @@ function selectIntakeBidder(initials, profileId = "") {
     intakeBidderSelection.detail = "";
     intakeBidderSelection.error = "";
     intakeBidderSelection.generation += 1;
+    intakeBidderSelection.loading = false;
   }
+  if (deferRender) return;
   renderIntakeBidderSummary();
-  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+  if (!intakeBidderSelection.loading && (changed || !intakeBidderSelection.record)) void loadSelectedIntakeBidder();
 }
 
 function ensureIntakeBidderSelection() {
@@ -15161,8 +15373,8 @@ const intakeGroupReviewState = new Map();
 function groupedLeaveIntakeItems(items = intakeQueue) {
   const weekStartsByBidder = new Map();
   items.forEach((item) => {
-    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved"].includes(item.status)) return;
-    const owner = `${item.area}|${item.initials}`;
+    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved", "Denied"].includes(item.status)) return;
+    const owner = `${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`;
     const dates = weekStartsByBidder.get(owner) || [];
     dates.push(...leaveDateKeysForItem(item));
     weekStartsByBidder.set(owner, dates);
@@ -15175,7 +15387,7 @@ function groupedLeaveIntakeItems(items = intakeQueue) {
     const round = intakeItemRound(item);
     const dates = leaveDateKeysForItem(item).sort();
     if (!dates.length) { result.push(item); return; }
-    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}`) || roundOneWeekKeysForDateKeys(dates);
+    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`) || roundOneWeekKeysForDateKeys(dates);
     const weekStart = round === 1 ? starts.find((start) => dates[0] >= start && dates[0] <= dateKeyFromDate(new Date(dateFromKey(start).getTime() + 6 * 86400000))) : "";
     // Legacy continuous requests spanning two weeks already have one approval;
     // keep their edit/review controls instead of approving half a saved range.
@@ -15244,15 +15456,77 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
     submission_ids: ids, decision, denial_reason_text: reason || null,
   });
   if (error) throw error;
+  updateConfirmedIntakeDecision(item, decision, reason);
   if (decision === "approved") queueBidVerifiedEmail(item);
   else { item.denialReason = reason; queueBidDeniedEmail(item); }
   intakeGroupReviewState.delete(item.id);
   activeOverrideId = null;
   activeDenialId = null;
   supabaseState.placeholdersCleared = false;
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   renderApp();
   setPage("intake");
+}
+
+let intakeQueueRefreshPending = false;
+
+async function refreshIntakeQueue() {
+  if (intakeQueueRefreshPending || !hasIntakeAccess()) return;
+  const button = document.querySelector("[data-intake-refresh]");
+  const status = document.querySelector("[data-intake-refresh-status]");
+  const userId = supabaseState.authUserId;
+  const bidYear = BID_YEAR;
+  const previousQueue = JSON.stringify(intakeQueue);
+  intakeQueueRefreshPending = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+  }
+  if (status) {
+    status.hidden = false;
+    status.textContent = "Loading the latest bids…";
+  }
+  try {
+    const client = supabaseClient();
+    if (!client || !userId || !supabaseState.connected || supabaseState.loading) {
+      throw new Error("Queue unavailable. Check your connection and try again.");
+    }
+    const [bidding, leave, areas] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: bidYear }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: bidYear }),
+      client.from("areas").select("id,name"),
+    ]);
+    for (const result of [bidding, leave, areas]) {
+      if (result.error) throw result.error;
+    }
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== bidYear || supabaseState.loading
+      || !hasIntakeAccess() || JSON.stringify(intakeQueue) !== previousQueue) {
+      throw new Error("The queue changed while refreshing. Please try again.");
+    }
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+      .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+    inferRdoBidChanges(rdoItems);
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    intakeQueue.unshift(...rdoItems);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    renderIntakeQueue();
+    renderAlerts();
+    if (status) status.textContent = "Queue updated.";
+  } catch (error) {
+    if (status) status.textContent = `Could not refresh the queue. ${error.message || "Please try again."}`;
+  } finally {
+    intakeQueueRefreshPending = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Refresh Queue";
+    }
+  }
 }
 
 function renderIntakeQueue() {
@@ -15269,7 +15543,7 @@ function renderIntakeQueueWithCache() {
   const visibleItems = canReview
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
-  const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
   const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
   if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
@@ -15380,6 +15654,10 @@ function revealIntakeDetail() {
 }
 
 function openIntakeItemFromAlert(itemId) {
+  return withLeaveReadCache(() => openIntakeItemFromAlertWithCache(itemId));
+}
+
+function openIntakeItemFromAlertWithCache(itemId) {
   const groupedItem = groupedLeaveIntakeItems().find((item) =>
     item.id === itemId || item.members?.some((member) => member.id === itemId)
   );
@@ -15391,9 +15669,13 @@ function openIntakeItemFromAlert(itemId) {
   activeDenialId = null;
   intakeSearchQuery = "";
   Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
-  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
+  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId, { deferRender: true });
+  const alreadyInIntake = document.querySelector(".page.active")?.dataset.pagePanel === "intake";
   setPage("intake");
-  renderIntakeQueue();
+  if (alreadyInIntake) {
+    renderIntakeQueue();
+    ensureIntakeBidderSelection();
+  }
 
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
     const card = [...document.querySelectorAll("[data-intake-card]")]
@@ -15996,7 +16278,7 @@ async function processBidderEditor(validateOnly) {
       bidderEditor.record.snapshot = data.snapshot;
       renderBidderEditorForm();
       bidderEditorStatus('Changes saved to the database. All bid rounds have been refreshed.', 'success');
-      try { await loadSupabaseReferenceData(); renderApp(); }
+      try { await refreshBiddingAfterIntakeDecision(); renderApp(); }
       catch { bidderEditorStatus('Changes saved. Refresh the page to update other bidding views.', 'success'); }
     }
   } catch (error) { bidderEditorStatus(error.message || 'Unable to complete this operation. Reload before retrying.', 'error'); }
@@ -16096,6 +16378,7 @@ function renderMemberPageContent(pageName) {
       syncRdoFilterControls();
       renderRdoLines();
     }
+    if (["dashboard", "leave", "calendar"].includes(pageName)) renderMemberLeaveContent(pageName);
     if (pageName === "leave") renderSubmittedLeaveManager();
     if (pageName === "seniority") renderSeniority();
     if (pageName === "intake-schedule") renderIntakeSchedule();
@@ -16114,6 +16397,22 @@ function renderMemberPageContent(pageName) {
   });
 }
 
+// Rebuild personal leave controls only when their page is visible. Admin and
+// intake saves must not calculate annual leave budgets for hidden pages.
+function renderMemberLeaveContent(pageName) {
+  if (pageName === "dashboard" || pageName === "leave") {
+    syncLeaveBuilderInputs();
+    renderLeaveRows(pageName === "dashboard" ? "dashboard-leave-rows" : "leave-page-rows");
+    renderLeaveAllowanceSummary();
+    renderLeaveBucketCards();
+  }
+  if (pageName === "leave") {
+    renderLeaveDraftQueue();
+    renderLeaveDatePicker();
+  }
+  if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
+}
+
 function renderApp() {
   return withLeaveReadCache(() => renderAppWithCache());
 }
@@ -16129,16 +16428,10 @@ function renderAppWithCache() {
 
   seniority = buildSeniority();
   renderCurrentUser();
+  // Mark hidden calendars stale so navigation renders the latest saved bids.
+  calendarRenderRevision += 1;
   renderCalendars({ includePublic: false });
-  syncLeaveBuilderInputs();
   updateSelectedLine();
-  renderLeaveRows("dashboard-leave-rows");
-  renderLeaveRows("leave-page-rows");
-  renderLeaveDraftQueue();
-  renderLeaveAllowanceSummary();
-  renderLeaveDatePicker();
-  renderLeaveBucketCards();
-  renderLeaveSlotBoard();
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
@@ -16159,6 +16452,10 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-refresh]")) {
+    await refreshIntakeQueue();
+    return;
+  }
   // Navigation must stay available even when bidding data cannot load.
   const pageNavigation = event.target.closest("[data-page]");
   if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
@@ -16791,7 +17088,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    await approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    await runIntakeDecision(approveIntakeItem, intakeApprove.dataset.intakeApprove);
     return;
   }
 
@@ -16807,7 +17104,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    await denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await runIntakeDecision(denyIntakeItem, intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
@@ -17262,6 +17559,14 @@ document.addEventListener("change", async (event) => {
     return;
   }
 
+  const intakeSortControl = event.target.closest("[data-intake-sort]");
+  if (intakeSortControl) {
+    intakeSort = intakeSortControl.value === "entered" ? "entered" : "approved";
+    alertFocusedIntakeItemId = "";
+    renderIntakeQueue();
+    return;
+  }
+
   const intakeFilter = event.target.closest("[data-intake-filter]");
   if (intakeFilter) {
     const filterName = intakeFilter.dataset.intakeFilter;
@@ -17393,3 +17698,95 @@ window.NATCA_BIDDING_READY = true;
 setInterval(() => {
   if (document.visibilityState === "visible") void refreshPilotRounds();
 }, 10000);
+
+
+function backupStatus(message) {
+  const target = document.querySelector('[data-backup-status]');
+  if (target) target.textContent = message;
+}
+function backupClient() {
+  if (!hasSystemAdminAccess() || !supabaseClient()) throw new Error('Sign in as a system administrator to manage backups.');
+  return supabaseClient();
+}
+async function loadBiddingBackups() {
+  if (biddingBackupBusy) return;
+  try {
+    const client = backupClient();
+    const schedule = await client.from('bidding_backup_schedule').select('*').eq('id', true).maybeSingle();
+    if (schedule.error) throw new Error('Backup setup is unavailable. Install database/bidding_backups.sql and enable Supabase Cron.');
+    const form = document.querySelector('[data-backup-form]');
+    if (schedule.data && form) {
+      for (const key of ['start_date', 'end_date', 'start_time', 'end_time', 'interval_minutes']) form.elements.namedItem(key).value = schedule.data[key];
+      form.elements.namedItem('enabled').checked = schedule.data.enabled;
+      form.elements.namedItem('retention_days').value = schedule.data.retention_days ?? '';
+    }
+    await refreshLatestBiddingBackup();
+  } catch (error) { backupStatus(error.message); }
+}
+async function refreshLatestBiddingBackup() {
+  const result = await backupClient().from('bidding_backups').select('id,created_at,source').order('id', { ascending: false }).limit(1);
+  if (result.error) throw result.error;
+  const latest = result.data?.[0];
+  document.querySelector('[data-backup-latest]').textContent = latest
+    ? `Latest backup: ${new Date(latest.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} Pacific (${latest.source}).`
+    : 'No backups saved yet.';
+  document.querySelector('[data-backup-download]').disabled = !latest;
+}
+async function performBiddingBackupAction(action) {
+  if (biddingBackupBusy) return;
+  biddingBackupBusy = true;
+  const buttons = document.querySelectorAll('[data-backup-form] button, [data-backup-now], [data-backup-download]');
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const client = backupClient();
+    if (action === 'save') {
+      const form = document.querySelector('[data-backup-form]');
+      const values = Object.fromEntries(new FormData(form));
+      if (values.end_date < values.start_date || values.end_time < values.start_time) throw new Error('End date and daily end time must be on or after their start values.');
+      const interval = Number(values.interval_minutes);
+      if (!Number.isInteger(interval) || interval < 1 || interval > 10080) throw new Error('Choose an interval from 1 to 10080 minutes.');
+      const retention = String(values.retention_days || '').trim() === '' ? null : Number(values.retention_days);
+      if (retention !== null && (!Number.isInteger(retention) || retention < 1 || retention > 36500)) throw new Error('Choose a whole number of days from 1 to 36500, or leave blank to keep all backups.');
+      const result = await client.from('bidding_backup_schedule').upsert({
+        id: true, enabled: form.elements.namedItem('enabled').checked,
+        start_date: values.start_date, end_date: values.end_date,
+        start_time: values.start_time, end_time: values.end_time,
+        interval_minutes: interval, retention_days: retention, timezone: 'America/Los_Angeles',
+      });
+      if (result.error) throw result.error;
+      backupStatus('Backup schedule saved.');
+    } else if (action === 'now') {
+      backupStatus('Backing up now… Keep this page open until the backup finishes.');
+      const result = await client.rpc('backup_bidding_now');
+      if (result.error) throw result.error;
+      backupStatus('Backup completed and saved.');
+    } else {
+      backupStatus('Preparing backup download…');
+      const result = await client.from('bidding_backups').select('id,created_at,payload').order('id', { ascending: false }).limit(1);
+      if (result.error) throw result.error;
+      if (!result.data?.length) throw new Error('No backups saved yet.');
+      const backup = result.data[0];
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup.payload, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `zla-bidding-backup-${backup.id}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      backupStatus('Backup downloaded.');
+    }
+  } catch (error) { backupStatus(error.message || 'The backup operation failed.'); }
+  finally {
+    biddingBackupBusy = false;
+    buttons.forEach(button => { button.disabled = false; });
+    try { await refreshLatestBiddingBackup(); } catch (_) { /* Preserve the operation error. */ }
+  }
+}
+document.addEventListener('submit', event => {
+  if (!event.target.matches('[data-backup-form]')) return;
+  event.preventDefault();
+  void performBiddingBackupAction('save');
+});
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-backup-now]')) void performBiddingBackupAction('now');
+  if (event.target.closest('[data-backup-download]')) void performBiddingBackupAction('download');
+});

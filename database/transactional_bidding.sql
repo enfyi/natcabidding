@@ -536,12 +536,15 @@ as $$
   join public.bidders scheduled_bidder on scheduled_bidder.id = bid_window.bidder_id
   where bid_window.bid_year_id = requested_bid_year_id
     and bid_window.round_number = requested_round
-    and scheduled_bidder.area_id = requested_area_id
-    and scheduled_bidder.active;
+    and scheduled_bidder.active
+    and scheduled_bidder.bid_role not in ('ADM', 'NB');
 $$;
 
 revoke all on function public.is_area_bid_round_open(uuid, uuid, integer, timestamptz) from public, anon;
 grant execute on function public.is_area_bid_round_open(uuid, uuid, integer, timestamptz) to authenticated;
+
+comment on function public.is_area_bid_round_open(uuid, uuid, integer, timestamptz) is
+  'Compatibility endpoint that reports the all-area round span, from the first active BUE window through the last; the area argument is retained for existing submission functions.';
 
 create or replace function public.submit_rdo_bid(
   requested_bid_year integer,
@@ -634,7 +637,7 @@ begin
 
   if enforce_bid_windows
      and not public.is_area_bid_round_open(year_row.id, target.area_id, resolved_round) then
-    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', resolved_round;
+    raise exception 'Round % is not currently open across ZLA. Closed rounds cannot accept bids.', resolved_round;
   end if;
 
   ghost_bid := public.is_ghost_bidder(year_row.id, target.id);
@@ -853,7 +856,7 @@ begin
 
   if enforce_bid_windows
      and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
-    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', batch_round;
+    raise exception 'Round % is not currently open across ZLA. Closed rounds cannot accept bids.', batch_round;
   end if;
 
   if not manual_entry and enforce_bid_windows and not exists (
