@@ -2641,6 +2641,8 @@ async function addOrUpdateRdoSubmission() {
     status: "Pending",
     round,
     submittedAt: formatDateTime(new Date()),
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     approvedBy: "",
     approvedAt: "",
     line: line.line,
@@ -3144,6 +3146,8 @@ async function submitManualRdoBid(panel, person, area) {
     approvedAt: "",
     manualEntry: true,
     enteredBy: currentUser.initials,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     line: line.line,
     fatigueGroup,
     fatigueOverride: usedFatigueOverride,
@@ -3181,6 +3185,7 @@ async function submitManualRdoBid(panel, person, area) {
     intakeQueue.unshift(request);
   }
 
+  delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is still required before the line is populated.`);
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
@@ -3296,6 +3301,8 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     range: selected.map((entry) => entry.range).join(", "),
     days: chargedDays,
     round,
@@ -3380,6 +3387,7 @@ async function submitManualLeaveBid(panel, person, area) {
   // applies the approved RDO and supplies the batch key used by week grouping.
   await refreshBiddingAfterIntakeDecision();
 
+  delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   requests.forEach(queueBidSubmittedEmail);
   manualLeaveBatch = { key: "", entries: [] };
@@ -4615,6 +4623,8 @@ async function submitLeaveDraftBatch() {
     priority: startingPriority + index,
     status: "Pending",
     submittedAt,
+    submittedBy: currentUser.initials,
+    submittedByRole: submissionRoleLabel(currentUser.role),
     batchId,
     submissionBatchKey: batchId,
     range: draft.range,
@@ -5096,7 +5106,7 @@ async function supabaseSubmissionIdForIntakeItem(item) {
 
 // Review decisions change bid state and inventory, not FAQs, roster or settings.
 // Keep existing data visible and commit the new snapshot only after all reads pass.
-async function refreshBiddingAfterIntakeDecision() {
+async function refreshBiddingAfterIntakeDecision({ expectedDecisionRevision = null } = {}) {
   const client = supabaseClient();
   if (!client || !supabaseState.bidYearId || supabaseState.loading) {
     await loadSupabaseReferenceData();
@@ -5106,6 +5116,7 @@ async function refreshBiddingAfterIntakeDecision() {
   const year = BID_YEAR;
   supabaseState.loading = true;
   let refreshFailed = false;
+  let refreshError = null;
   try {
     const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
       readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
@@ -5125,6 +5136,8 @@ async function refreshBiddingAfterIntakeDecision() {
       await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
     );
     if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    if (expectedDecisionRevision !== null
+      && (expectedDecisionRevision !== intakeDecisionRevision || intakeDecisionPending || hasActiveIntakeEditing())) return;
     const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
     intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
     for (let index = leaveBids.length - 1; index >= 0; index--) {
@@ -5147,10 +5160,12 @@ async function refreshBiddingAfterIntakeDecision() {
     calendarRenderRevision += 1;
   } catch (error) {
     refreshFailed = true;
+    refreshError = error;
     console.warn("Bid review refresh failed; reloading reference data:", error.message || error);
   } finally {
     supabaseState.loading = false;
   }
+  if (refreshFailed && expectedDecisionRevision !== null) throw refreshError;
   if (refreshFailed && supabaseState.authUserId === userId && BID_YEAR === year) await loadSupabaseReferenceData();
 }
 
@@ -5183,8 +5198,63 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
 }
 
 let intakeDecisionPending = false;
+let intakeDecisionRevision = 0;
+let intakeDecisionRefreshTimer = null;
+let intakeDecisionRefreshRunning = false;
+
+function hasActiveIntakeEditing() {
+  if (activeOverrideId || activeDenialId || bidderEditor.busy) return true;
+  const focused = document.activeElement;
+  if (focused?.matches("input, textarea, select") && focused.closest(".app-shell")
+    && !focused.closest("[hidden]") && focused.closest(".page.active")) return true;
+  return [...document.querySelectorAll("[data-manual-bid-panel], [data-bidder-editor-form]")]
+    .some((panel) => panel.closest(".page.active") && !panel.closest("[hidden]")
+      && (panel.dataset.approvalRefreshDirty === "true" || panel.dataset.manualBidSubmitting === "true"));
+}
+
+function markIntakeEditing(event) {
+  const panel = event.target.closest("[data-manual-bid-panel], [data-bidder-editor-form]");
+  if (panel) panel.dataset.approvalRefreshDirty = "true";
+}
+
+document.addEventListener("input", markIntakeEditing, true);
+document.addEventListener("change", markIntakeEditing, true);
+
+function scheduleIntakeDecisionRefresh(delay = 350) {
+  clearTimeout(intakeDecisionRefreshTimer);
+  intakeDecisionRefreshTimer = setTimeout(() => {
+    intakeDecisionRefreshTimer = null;
+    void refreshIdleIntakeDecisions();
+  }, delay);
+}
+
+async function refreshIdleIntakeDecisions() {
+  if (intakeDecisionRefreshRunning) return;
+  if (intakeDecisionPending || supabaseState.loading || hasActiveIntakeEditing()) {
+    scheduleIntakeDecisionRefresh(1000);
+    return;
+  }
+  const revision = intakeDecisionRevision;
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  intakeDecisionRefreshRunning = true;
+  try {
+    await refreshBiddingAfterIntakeDecision({ expectedDecisionRevision: revision });
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    if (intakeDecisionPending || intakeDecisionRevision !== revision || hasActiveIntakeEditing()) {
+      scheduleIntakeDecisionRefresh(1000);
+      return;
+    }
+    renderApp();
+  } catch (error) {
+    console.warn("Approval saved; background refresh unavailable:", error.message || error);
+  } finally {
+    intakeDecisionRefreshRunning = false;
+  }
+}
 
 function updateConfirmedIntakeDecision(item, decision, reason = "") {
+  intakeDecisionRevision += 1;
   const status = decision === "approved" ? "Approved" : "Denied";
   item.status = status;
   for (const member of item.members || [item]) {
@@ -5272,9 +5342,8 @@ async function approveIntakeItem(id) {
     queueBidVerifiedEmail(item);
     activeOverrideId = null;
     activeDenialId = null;
-    supabaseState.placeholdersCleared = false;
-    await refreshBiddingAfterIntakeDecision();
-    renderApp();
+    scheduleIntakeDecisionRefresh();
+    renderIntakeQueue();
     setPage("intake");
     return;
   }
@@ -5330,9 +5399,8 @@ async function denyIntakeItem(id) {
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
-    supabaseState.placeholdersCleared = false;
-    await refreshBiddingAfterIntakeDecision();
-    renderApp();
+    scheduleIntakeDecisionRefresh();
+    renderIntakeQueue();
     setPage("intake");
     return;
   }
@@ -7664,6 +7732,10 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     seniority: bidder.seniority_rank || row.seniority,
     status: uiStatusFromDatabase(row.status),
     submittedAt: row.submittedAt || (row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at))),
+    submittedBy: row.submittedBy || row.payload?.submittedBy || "",
+    submittedByRole: row.submittedByRole || row.payload?.submittedByRole || "",
+    approvedBy: row.reviewedBy || "",
+    deniedBy: row.reviewedBy || "",
     approvedAt: row.reviewedAt && String(row.status).toLowerCase() === "approved" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewedAt && String(row.status).toLowerCase() === "denied" ? formatDateTime(new Date(row.reviewedAt)) : row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
     denialReason: row.denialReason || row.denial_reason || "",
@@ -7758,8 +7830,14 @@ function intakeSubmissionIdFromBiddingState(item, submissions = []) {
 function attachSubmissionIdsToLeaveRequests(rows, submissions) {
   return (rows || []).map((row) => {
     const item = supabaseLeaveRequestToIntakeItem(row);
+    const submission = (submissions || []).find((entry) =>
+      String(entry.requestId || entry.leave_request_id || "") === String(row.id)
+    );
     return {
       ...row,
+      reviewedBy: submission?.reviewedBy || row.reviewedBy || "",
+      submittedBy: submission?.payload?.submittedBy || row.submittedBy || "",
+      submittedByRole: submission?.payload?.submittedByRole || row.submittedByRole || "",
       submission_id: intakeSubmissionIdFromBiddingState(item, submissions),
     };
   });
@@ -7830,6 +7908,10 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     priority: Number(row.priority || 0),
     status: uiStatusFromDatabase(row.status),
     submittedAt: row.submitted_at ? formatDateTime(new Date(row.submitted_at)) : formatDateTime(new Date(row.created_at)),
+    submittedBy: row.submittedBy || row.payload?.submittedBy || "",
+    submittedByRole: row.submittedByRole || row.payload?.submittedByRole || "",
+    approvedBy: row.reviewedBy || "",
+    deniedBy: row.reviewedBy || "",
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
     cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
@@ -7912,6 +7994,12 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
       ghostBid: item.ghostBid,
       weekBucketStarts: item.weekBucketStarts,
       denialReason: item.denialReason,
+      approvedBy: item.approvedBy,
+      approvedAt: item.approvedAt,
+      deniedBy: item.deniedBy,
+      deniedAt: item.deniedAt,
+      submittedBy: item.submittedBy,
+      submittedAt: item.submittedAt,
     });
   });
 }
@@ -15476,10 +15564,30 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   intakeGroupReviewState.delete(item.id);
   activeOverrideId = null;
   activeDenialId = null;
-  supabaseState.placeholdersCleared = false;
-  await refreshBiddingAfterIntakeDecision();
-  renderApp();
+  scheduleIntakeDecisionRefresh();
+  renderIntakeQueue();
   setPage("intake");
+}
+
+function submissionRoleLabel(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "admin" ? "admin" : ["intake", "intake rep"].includes(normalized) ? "intake rep" : "user";
+}
+
+function intakeSubmissionLabel(item) {
+  const initials = item.submittedBy || item.enteredBy || "";
+  const role = item.submittedByRole ? submissionRoleLabel(item.submittedByRole) : "";
+  const date = new Date(item.submittedAt);
+  const submittedAt = Number.isNaN(date.getTime()) ? item.submittedAt || "Time not recorded" : formatDateTime(date);
+  // Historical bids without saved attribution cannot safely be assigned to the bidder.
+  return `Submitted by ${initials && role ? `${role} (${initials})` : "unknown submitter"} · ${submittedAt}`;
+}
+
+function intakeReviewerLabel(initials) {
+  if (!initials) return "Unknown reviewer";
+  const person = bueRoster().find((entry) => entry.initials === initials);
+  const name = person ? `${person.firstName || ""} ${person.lastName || ""}`.trim() : "";
+  return name ? `${name} · ${initials}` : initials;
 }
 
 let intakeQueueRefreshPending = false;
@@ -15583,8 +15691,7 @@ function renderIntakeQueueWithCache() {
             <span>Bid as ${item.bidAs}</span>
             ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
             ${item.type === "Leave" && isGlLeaveItem(item) ? `<span class="gl-bid-badge">GL Bid · visible, no slot used</span>` : ""}
-            ${item.manualEntry ? `<span>Entered by ${item.enteredBy}</span>` : ""}
-            <span>Submitted ${item.submittedAt}</span>
+            <span>${escapeHtml(intakeSubmissionLabel(item))}</span>
           </div>
         </div>
         <div class="intake-actions">
@@ -15598,8 +15705,8 @@ function renderIntakeQueueWithCache() {
           ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
           ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
-          ${item.status === "Approved" ? `<small>Approved by ${item.approvedBy} · ${item.approvedAt}</small>` : ""}
-          ${item.status === "Denied" ? `<small>Denied by ${item.deniedBy} · ${item.deniedAt}</small>` : ""}
+          ${item.status === "Approved" ? `<small>Approved by ${escapeHtml(intakeReviewerLabel(item.approvedBy))} · ${item.approvedAt}</small>` : ""}
+          ${item.status === "Denied" ? `<small>Denied by ${escapeHtml(intakeReviewerLabel(item.deniedBy))} · ${item.deniedAt}</small>` : ""}
           ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
           ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
         </div>
@@ -15789,6 +15896,12 @@ function updateSelectedBidYear(year) {
   }
 }
 
+function biddingExportActionBy(item) {
+  if (item.status === "Approved") return item.approvedBy || "";
+  if (item.status === "Denied") return item.deniedBy || "";
+  return item.submittedBy || item.enteredBy || "";
+}
+
 function biddingExportRows() {
   const rows = [
     ["Dataset", "Area", "Name", "Initials", "Bid As", "Status", "Detail", "Action by", "Timestamp"],
@@ -15803,7 +15916,7 @@ function biddingExportRows() {
       item.bidAs,
       item.status,
       item.summary,
-      item.approvedBy || item.deniedBy || "",
+      biddingExportActionBy(item),
       item.approvedAt || item.deniedAt || item.submittedAt || "",
     ]);
   });
@@ -15831,8 +15944,8 @@ function biddingExportRows() {
       currentUserBidAs(),
       bid.status,
       `${bid.ghostBid ? "Ghost Leave · " : isGlLeaveItem(bid) ? "GL Bid · " : ""}Priority ${bid.priority} · ${bid.range} · ${bid.days} ${bid.days === 1 ? "day" : "days"}`,
-      "",
-      "",
+      biddingExportActionBy(bid),
+      bid.approvedAt || bid.deniedAt || bid.submittedAt || "",
     ]);
   });
 
@@ -16178,6 +16291,8 @@ async function searchBidderEditor(query) {
   } catch (error) { if (generation === bidderEditor.generation) bidderEditorStatus(error.message || 'Unable to search bidders.', 'error'); }
 }
 function renderBidderEditorForm() {
+  const editingForm = document.querySelector("[data-bidder-editor-form]");
+  if (editingForm) delete editingForm.dataset.approvalRefreshDirty;
   const { snapshot, lines } = bidderEditor.record;
   const payload = snapshot.rdo?.payload || {};
   const assigned = snapshot.assignment;
