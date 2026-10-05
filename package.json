@@ -35,6 +35,7 @@
     "test:round-rules": "node scripts/test-independent-round-rules.mjs",
     "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs",
     "test:leave-hours-usage": "node scripts/test-leave-hours-usage.mjs",
+    "test:reference-loading": "node scripts/test-reference-loading.mjs && node scripts/test-rdo-loading-messages.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build",
     "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs",

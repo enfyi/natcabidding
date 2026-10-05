@@ -671,6 +671,9 @@ const supabaseState = {
   rdoLinesLoadState: "idle",
   placeholdersCleared: false,
   referenceDataLoaded: false,
+  faqLoadState: "idle",
+  bidTimesLoadState: "idle",
+  leaveSlotsLoadState: "idle",
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
@@ -2239,7 +2242,7 @@ function syncBidYearControls() {
 async function loadBidYearCatalog(client) {
   bidYearCatalogError = "";
   try {
-    let { data, error } = await client.rpc("read_bid_year_catalog");
+    let { data, error } = await readReferenceData("bid year catalog", () => client.rpc("read_bid_year_catalog"));
     if (error && (error.code === "PGRST202" || /Could not find the function.*read_bid_year_catalog/i.test(error.message || ""))) {
       // Older installations have no catalog RPC. Only a single open year is
       // unambiguous; never guess the active year in a multi-year database.
@@ -6191,7 +6194,8 @@ function leaveSlotDataIsLoaded(details) {
 }
 
 function leaveSlotLoadingMessage() {
-  return supabaseState.loading || !supabaseState.referenceDataLoaded
+  return supabaseState.leaveSlotsLoadState === "loading"
+    || (supabaseState.leaveSlotsLoadState === "idle" && !supabaseState.referenceDataLoaded)
     ? "Loading leave slots…"
     : "Leave slots could not be loaded. Refresh to try again.";
 }
@@ -7987,7 +7991,7 @@ async function loadPublicPilotCalendar() {
   supabaseState.loading = true;
   try {
     await loadBidYearCatalog(client);
-    const result = await loadPublishedLeaveSlots(client);
+    const result = await readReferenceData("pilot leave slots", () => loadPublishedLeaveSlots(client));
     if (result.error) throw result.error;
     applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
     calendarRenderRevision += 1;
@@ -8014,6 +8018,52 @@ async function loadRdoLines(client, bidYearId) {
     .eq("bid_year_id", bidYearId);
 }
 
+// Only use this helper for reads: mutations must never be replayed automatically.
+const referenceLoadDiagnostics = [];
+async function readReferenceData(label, request) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const started = Date.now();
+    const controller = new AbortController();
+    let timer;
+    let result;
+    try {
+      const pending = request();
+      if (typeof pending?.abortSignal === "function") pending.abortSignal(controller.signal);
+      result = await Promise.race([
+        pending,
+        new Promise((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve({ data: null, error: { code: "READ_TIMEOUT" }, status: 0 });
+          }, 15000);
+        }),
+      ]);
+    } catch (error) {
+      result = { data: null, error, status: 0 };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!result?.error) return result;
+    const status = Number(result.status || 0);
+    const code = String(result.error.code || "");
+    const transient = status === 408 || status === 429 || status >= 500
+      || code === "READ_TIMEOUT" || code === "57014"
+      || (!status && /Failed to fetch|NetworkError|network|timeout|AbortError/i.test(`${result.error.name || ""} ${result.error.message || ""}`));
+    // Deliberately exclude response bodies, URLs, tokens, and bidder details.
+    const diagnostic = { section: label, attempt, status, code, elapsedMs: Date.now() - started, at: new Date().toISOString(), retrying: transient && attempt < 3 };
+    referenceLoadDiagnostics.push(diagnostic);
+    if (referenceLoadDiagnostics.length > 50) referenceLoadDiagnostics.shift();
+    window.NATCA_REFERENCE_LOAD_DIAGNOSTICS = referenceLoadDiagnostics;
+    console.warn("Bidding reference read failed", diagnostic);
+    if (!transient || attempt === 3) return result;
+    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250)));
+  }
+}
+
+function refreshPublicReferenceSection() {
+  if (!isMemberAppVisible()) renderPublicPage();
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
@@ -8021,6 +8071,10 @@ async function loadSupabaseReferenceData() {
     supabaseState.rdoLinesLoadState = "error";
     supabaseState.enabled = false;
     supabaseState.connected = false;
+    supabaseState.faqLoadState = "error";
+    supabaseState.bidTimesLoadState = "error";
+    supabaseState.leaveSlotsLoadState = "error";
+    supabaseState.referenceDataLoaded = true;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
     return;
   }
@@ -8033,24 +8087,42 @@ async function loadSupabaseReferenceData() {
   supabaseState.rdoLinesLoadState = "loading";
   supabaseState.message = "Loading bidding data from Supabase...";
 
+  supabaseState.faqLoadState = "loading";
+  supabaseState.bidTimesLoadState = "loading";
+  supabaseState.leaveSlotsLoadState = "loading";
+  const rosterRequest = readReferenceData("roster", () => client.rpc("read_bidding_roster"));
+  const faqReads = Promise.all([
+    readReferenceData("FAQ entries", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
+    readReferenceData("MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+  ]).then(([entries, documents]) => {
+    if (!entries.error) publicFaqContent.entries = entries.data || [];
+    if (!documents.error) publicFaqContent.documents = documents.data || [];
+    supabaseState.faqLoadState = entries.error || documents.error ? "error" : "loaded";
+    refreshPublicReferenceSection();
+    return [entries, documents];
+  });
   try {
     await loadBidYearCatalog(client);
-    const [bidYearResult, areasResult, rosterResult] = await Promise.all([
-      client
+    const [bidYearResult, areasResult] = await Promise.all([
+      readReferenceData("bid year", () => client
         .from("bid_years")
         .select("id,bid_year,annual_leave_allowance_days")
         .eq("bid_year", BID_YEAR)
-        .single(),
-      client.from("areas").select("id,code,name,display_order").order("display_order"),
-      client.rpc("read_bidding_roster"),
+        .single()),
+      readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order")),
     ]);
-    const requiredError = [bidYearResult, areasResult, rosterResult].find((result) => result.error)?.error;
+    const requiredError = [bidYearResult, areasResult].find((result) => result.error)?.error;
     if (requiredError) throw requiredError;
 
     const bidYear = bidYearResult.data;
     supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-    applyRosterFromDatabase(rosterResult.data || [], areaById);
+    let rosterResult;
+    const rosterReady = rosterRequest.then((result) => {
+      rosterResult = result;
+      if (!result.error) applyRosterFromDatabase(result.data || [], areaById);
+      return result;
+    });
 
     const [
       holidaysResult,
@@ -8071,32 +8143,53 @@ async function loadSupabaseReferenceData() {
       faqEntriesResult,
       mouDocumentsResult,
       _helpThreadsLoaded,
+      _rosterLoaded,
     ] = await Promise.all([
-      client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      loadRdoLines(client, bidYear.id),
-      loadPublishedGlRdoAssignments(client),
-      supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
-      loadPublishedLeaveSlots(client),
-      supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      loadIntakeSchedules(client),
-      supabaseState.authUserId
+      readReferenceData("holidays", () => client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, bidYear.id)).then((result) => {
+        supabaseState.rdoLinesLoadState = result.error ? "error" : "loaded";
+        if (!result.error) upsertRdoLinesFromDatabase(result.data || [], areaById);
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
+        supabaseState.leaveSlotsLoadState = result.error ? "error" : "loaded";
+        if (!result.error) {
+          applyLeaveSlotScheduleFromDatabase(supabaseRows(result), areaById);
+          calendarRenderRevision += 1;
+        }
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("leave requests", () => supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
+      readReferenceData("calendar marks", () => supabaseState.authUserId
         ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
-        : Promise.resolve({ data: [], error: null }),
-      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
-      client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
-      supabaseState.authUserId
+        : Promise.resolve({ data: [], error: null })),
+      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+      readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("pilot settings", () => supabaseState.authUserId
         ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
-        : Promise.resolve({ data: null, error: null }),
-      loadPublishedBidWindows(client, bidYear.id),
-      client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
-      client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
-      loadSupabaseHelpThreads(),
+        : Promise.resolve({ data: null, error: null })),
+      Promise.all([readReferenceData("bid windows", () => loadPublishedBidWindows(client, bidYear.id)), rosterReady]).then(([result]) => {
+        supabaseState.bidTimesLoadState = result.error || rosterResult.error ? "error" : "loaded";
+        if (!result.error) applyBidWindowsFromDatabase(supabaseRows(result));
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      faqReads.then((results) => results[0]),
+      faqReads.then((results) => results[1]),
+      readReferenceData("help threads", () => loadSupabaseHelpThreads().then(() => ({ data: null, error: null }))),
+      rosterReady,
     ]);
 
     const loadWarnings = [
+      supabaseLoadWarning("roster", rosterResult),
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
       isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
@@ -8120,9 +8213,6 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
-    supabaseState.rdoLinesLoadState = rdoLinesResult.error ? "error" : "loaded";
-    if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
@@ -8156,7 +8246,6 @@ async function loadSupabaseReferenceData() {
       applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
       await refreshPilotRounds();
     }
-    applyBidWindowsFromDatabase(supabaseRows(bidWindowsResult));
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
@@ -8168,10 +8257,13 @@ async function loadSupabaseReferenceData() {
     }
   } catch (error) {
     supabaseState.connected = false;
-    supabaseState.rdoLinesLoadState = "error";
+    if (supabaseState.rdoLinesLoadState === "loading") supabaseState.rdoLinesLoadState = "error";
+    if (supabaseState.bidTimesLoadState === "loading") supabaseState.bidTimesLoadState = "error";
+    if (supabaseState.leaveSlotsLoadState === "loading") supabaseState.leaveSlotsLoadState = "error";
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
+    await faqReads;
     supabaseState.loading = false;
     supabaseState.referenceDataLoaded = true;
   }
@@ -8552,9 +8644,9 @@ function renderPublicFaq() {
   const documents = publicFaqContent.documents || [];
 
   if (!entries.length && !documents.length) {
-    const message = !supabaseState.referenceDataLoaded
+    const message = ["idle", "loading"].includes(supabaseState.faqLoadState)
       ? "Loading the current FAQ and bidding references…"
-      : supabaseState.connected
+      : supabaseState.faqLoadState === "loaded"
         ? "No FAQ items or MOU documents are published yet."
         : "The current FAQ could not be loaded. Please refresh to try again.";
     return `
@@ -8864,6 +8956,12 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  if (supabaseState.bidTimesLoadState !== "loaded") {
+    const message = supabaseState.bidTimesLoadState === "error"
+      ? "Bid times could not be loaded. Refresh to try again."
+      : "Loading bid times…";
+    return `<p role="status">${escapeHtml(message)}</p>`;
+  }
   const showBidderNames = Boolean(supabaseState.authUserId);
 
   return `
