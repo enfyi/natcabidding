@@ -62,6 +62,7 @@ const sorted = vm.createContext({
   intakeItemMatchesFilters: () => true,
   renderIntakeDetailPanel: item => assert.equal(item.id, older.id, 'The reviewed bid stays selected'),
   escapeHtml: value => value || '', bidTypeLabel: item => item.type,
+  intakeBidSummary: item => item.summary || '',
   renderIntakeChangeHistory: () => '', renderIntakeGroupDates: () => '', intakeSubmissionLabel: () => '',
   intakeReviewItemById: () => null,
   intakeQueue: [older],
