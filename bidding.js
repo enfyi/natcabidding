@@ -10516,11 +10516,16 @@ function renderFatigueCapacity() {
   });
 }
 
-const bidderLeaveSort = { round: "asc", date: "asc" };
+const bidderLeaveSort = { round: "asc", date: "asc", status: "asc", statusActive: false };
 
 function sortedBidderLeaveBids() {
   return leaveBids.map((bid) => ({ bid, round: leaveRoundForItem(bid), date: leaveDateKeysForItem(bid)[0] || "" }))
     .sort((a, b) => {
+      if (bidderLeaveSort.statusActive) {
+        const statusOrder = String(a.bid.status || "").localeCompare(String(b.bid.status || ""), "en", { sensitivity: "base" })
+          * (bidderLeaveSort.status === "asc" ? 1 : -1);
+        if (statusOrder) return statusOrder;
+      }
       const roundOrder = (a.round - b.round) * (bidderLeaveSort.round === "asc" ? 1 : -1);
       if (roundOrder) return roundOrder;
       if (!a.date || !b.date) return a.date ? -1 : b.date ? 1 : 0;
@@ -10532,10 +10537,13 @@ function syncBidderLeaveSortHeaders() {
   document.querySelectorAll("[data-bidder-leave-sort]").forEach((button) => {
     const column = button.dataset.bidderLeaveSort;
     const ascending = bidderLeaveSort[column] === "asc";
-    const label = column === "round" ? "Round" : "Date Range";
-    button.textContent = `${label} ${ascending ? "↑" : "↓"}`;
-    button.setAttribute("aria-label", `${label}: ${ascending ? "ascending" : "descending"}. Sort ${ascending ? "descending" : "ascending"}${column === "date" ? " within each round" : ""}.`);
-    button.closest("th").setAttribute("aria-sort", column === "round" ? (ascending ? "ascending" : "descending") : "other");
+    const label = column === "round" ? "Round" : column === "date" ? "Date Range" : "Status";
+    const active = column !== "status" || bidderLeaveSort.statusActive;
+    button.textContent = `${label}${active ? (ascending ? " ↑" : " ↓") : " ↕"}`;
+    const nextDirection = !active || !ascending ? "ascending" : "descending";
+    button.setAttribute("aria-label", `${label}: ${active ? (ascending ? "ascending" : "descending") : "unsorted"}. Sort ${nextDirection}${column === "date" ? " within each round" : ""}.`);
+    const primary = bidderLeaveSort.statusActive ? "status" : "round";
+    button.closest("th").setAttribute("aria-sort", !active ? "none" : column === primary ? (ascending ? "ascending" : "descending") : "other");
   });
 }
 
@@ -16701,8 +16709,14 @@ document.addEventListener("click", async (event) => {
   const leaveSortButton = event.target.closest("[data-bidder-leave-sort]");
   if (leaveSortButton) {
     const column = leaveSortButton.dataset.bidderLeaveSort;
-    if (column !== "round" && column !== "date") return;
-    bidderLeaveSort[column] = bidderLeaveSort[column] === "asc" ? "desc" : "asc";
+    if (!["round", "date", "status"].includes(column)) return;
+    if (column === "status" && !bidderLeaveSort.statusActive) {
+      bidderLeaveSort.statusActive = true;
+      bidderLeaveSort.status = "asc";
+    } else {
+      bidderLeaveSort[column] = bidderLeaveSort[column] === "asc" ? "desc" : "asc";
+      if (column === "round") bidderLeaveSort.statusActive = false;
+    }
     renderLeaveRows("dashboard-leave-rows");
     renderLeaveRows("leave-page-rows");
     return;
