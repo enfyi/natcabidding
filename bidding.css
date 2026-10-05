@@ -12261,3 +12261,11 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 .leave-sort-button:hover { text-decoration: underline; }
 .leave-sort-button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+
+/* Make occupied TMU slots distinct from white open slots. */
+.month-grid .leave-date-tooltip.slot-summary.tmu-slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value,
+.week-calendar-grid .leave-date-tooltip.slot-summary.tmu-slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value {
+  border-color: #334155 !important;
+  color: #ffffff !important;
+  background: #334155 !important;
+}
