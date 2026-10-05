@@ -2933,6 +2933,14 @@ async function submitManualRdoBid(panel, person, area) {
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
+  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
+  const leaveController = leavePanel?.querySelector("[data-manual-bid-controller]");
+  if (leaveController) {
+    const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
+    if (leaveSearch) leaveSearch.value = "";
+    leaveController.innerHTML = manualBidControllerOptions(person.initials, "");
+    leaveController.value = person.initials;
+  }
   renderApp();
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
