@@ -1344,6 +1344,25 @@
                   </div>
                   <span class="status open" data-bid-window-builder-summary>Ready to build</span>
                 </div>
+                <form class="bid-time-export-form" data-bid-time-export-form>
+                  <h4>Export Bid Times</h4>
+                  <p>Download the saved schedule for the active bid year, including each bidder’s type (CPC, R-DEV, D-DEV, GL, TMC, or DEV) and annual bid allocation in hours. Round start times use Pacific time; unscheduled rounds are blank.</p>
+                  <label class="toggle-row"><input type="checkbox" data-bid-time-export-all checked />All areas</label>
+                  <fieldset>
+                    <legend>Areas to export</legend>
+                    <div class="bid-time-export-areas">
+                      <label><input type="checkbox" name="export-area" value="Area A" checked />Area A</label>
+                      <label><input type="checkbox" name="export-area" value="Area B" checked />Area B</label>
+                      <label><input type="checkbox" name="export-area" value="Area C" checked />Area C</label>
+                      <label><input type="checkbox" name="export-area" value="Area D" checked />Area D</label>
+                      <label><input type="checkbox" name="export-area" value="Area E" checked />Area E</label>
+                      <label><input type="checkbox" name="export-area" value="Area F" checked />Area F</label>
+                      <label><input type="checkbox" name="export-area" value="TMU" checked />TMU</label>
+                    </div>
+                  </fieldset>
+                  <button class="secondary-action small" type="submit" data-export-bid-times>Export Bid Times to Excel</button>
+                  <p class="form-status" data-bid-time-export-status role="status"></p>
+                </form>
                 <form class="bid-window-builder-form" data-bid-window-builder-form>
                   <label class="toggle-row bid-window-consistency-toggle">
                     <input type="checkbox" data-bid-window-builder-consistent checked />
