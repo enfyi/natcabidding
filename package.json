@@ -16,6 +16,7 @@
     "test:pilot-bid-window": "node scripts/test-pilot-bid-window-bypass.mjs",
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
+    "test:manual-leave-input-performance": "node scripts/test-manual-leave-input-performance.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
     "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
     "test:alert-review-performance": "node scripts/test-alert-review-performance.mjs",
