@@ -169,6 +169,6 @@ const savedLeaveContext = vm.createContext({
   },
 });
 vm.runInContext(submitManualLeave, savedLeaveContext);
-await savedLeaveContext.submitManualLeaveBid({ querySelector: () => ({ value: '1' }) }, { initials: 'ME' }, 'Area A');
+await savedLeaveContext.submitManualLeaveBid({ dataset: {}, querySelector: () => ({ value: '1' }) }, { initials: 'ME' }, 'Area A');
 assert.deepEqual(saveEvents, ['save', 'refresh', 'render']);
 console.log('PASS manual leave save reloads approved-RDO charges and batch metadata before rendering');
