@@ -5313,6 +5313,36 @@ async function saveSupabasePendingRdoEdit(item) {
   return true;
 }
 
+async function saveSupabaseApprovedRdoEdit(item) {
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) throw new Error("The RDO edit could not reach the database. Check the connection and try again.");
+  if (!item.bidderId) throw new Error("The saved bidder could not be found. Reload the queue before editing.");
+  const { data: record, error: readError } = await client.rpc("read_admin_bidder_editor", {
+    requested_bid_year: BID_YEAR, target_bidder_id: item.bidderId,
+  });
+  if (readError) throw readError;
+  const line = record.lines.find(entry => entry.line_code === item.line);
+  if (!line) throw new Error("This RDO line is not eligible for the bidder.");
+  if (record.snapshot.rdo?.id !== item.supabaseSubmissionId || record.snapshot.rdo?.status !== "approved") {
+    throw new Error("This RDO bid has changed. Reload the queue and edit the latest approved bid.");
+  }
+  const { data, error } = await client.rpc("edit_admin_bidder", {
+    requested_bid_year: BID_YEAR, target_bidder_id: item.bidderId,
+    expected_snapshot: record.snapshot,
+    changes: {
+      rdo: { line_id: line.id, fatigue_group: item.fatigueGroup,
+        flex: item.flex === true || item.flex === "Yes", aws: item.aws === true || item.aws === "Yes",
+        mid: item.mid, gl_line_type_verified: item.bidAs !== "GL"
+          || Boolean(document.querySelector("[data-gl-line-type-verification]")?.checked) },
+      leave: record.snapshot.leave.map(row => ({ id: row.id,
+        start_date: row.requested_start_date, end_date: row.requested_end_date })),
+    },
+    validate_only: false,
+  });
+  if (error) throw error;
+  if (!data?.valid || !data?.saved) throw new Error((data?.errors || ["The database did not confirm the RDO save."]).join("\n"));
+}
+
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
@@ -5362,6 +5392,30 @@ async function saveIntakeOverride(id) {
       setPage("intake");
       return;
     }
+  }
+
+  if (item.status === "Approved" && item.type === "RDO Line") {
+    try {
+      await saveSupabaseApprovedRdoEdit(item);
+      activeOverrideId = null;
+      activeDenialId = null;
+      supabaseState.placeholdersCleared = false;
+      await loadSupabaseReferenceData();
+      renderApp();
+      setPage("intake");
+    } catch (error) {
+      item.line = originalLine;
+      item.fatigueGroup = originalFatigueGroup;
+      item.flex = originalFlex;
+      item.aws = originalAws;
+      item.mid = originalMid;
+      item.summary = original;
+      item.reviewNote = error.message || "The approved RDO changes could not be saved.";
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+    }
+    return;
   }
 
   if (item.status === "Approved" && item.type === "Leave" && supabaseState.connected && !item.supabaseRequestId) {
