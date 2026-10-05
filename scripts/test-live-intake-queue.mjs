@@ -73,4 +73,25 @@ sorted.intakeQueue.push(newer);
 sorted.renderIntakeQueueWithCache();
 assert.ok(target.innerHTML.indexOf('data-intake-card="new-pending"') < target.innerHTML.indexOf('data-intake-card="reviewed"'),
   'A new pending bid sorts above the bid currently under review');
+const historyPanel = { hidden: true, innerHTML: '' };
+const history = vm.createContext({
+  intakeSort: 'entered', intakeItemRound: item => item.round,
+  document: { querySelector: () => historyPanel },
+  escapeHtml: value => value || '', bidTypeLabel: item => item.type,
+  renderIntakeChangeHistory: () => '',
+});
+vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'intakeRoundDetailItems', 'renderIntakeDetailPanel'].map(fn).join('\n'), history);
+const approved = { ...older, initials: 'MS', round: 2, status: 'Approved', summary: 'Older approval', approvedAt: '2026-10-05T20:00:00Z' };
+const denied = { ...approved, id: 'denied', status: 'Denied', summary: 'Older denial' };
+const pending = { ...newer, initials: 'MS', round: 2, summary: 'Newest pending request' };
+const historyRows = [approved, denied];
+history.renderIntakeDetailPanel(approved, historyRows);
+historyRows.push(pending, { ...pending, id: 'other-bidder', initials: 'AB' }, { ...pending, id: 'other-round', round: 3 });
+history.renderIntakeDetailPanel(approved, historyRows);
+assert.ok(historyPanel.innerHTML.indexOf('Newest pending request') < historyPanel.innerHTML.indexOf('Older approval'),
+  'New pending requests appear first in the open bidder history');
+assert.deepEqual(Array.from(history.intakeRoundDetailItems(approved, historyRows), item => item.id), ['new-pending', 'reviewed', 'denied']);
+assert.equal(historyRows[0], approved, 'Sorting history does not reorder the source queue');
+history.intakeSort = 'approved';
+assert.equal(history.intakeRoundDetailItems(approved, historyRows)[0].id, approved.id, 'History respects approval-time sorting too');
 console.log('Live intake queue regression checks passed.');
