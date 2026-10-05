@@ -3376,20 +3376,9 @@ async function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
-  intakeQueue.unshift(...requests);
-  requests.forEach((item) => leaveBids.push({
-    priority: nextLeavePriority(),
-    range: item.range,
-    dateKeys: item.dateKeys,
-    days: item.days,
-    status: "Pending",
-    notes: item.notes,
-    initials: person.initials,
-    area,
-    round: item.round,
-    weekUnits: item.weekUnits,
-    weekKeys: item.weekKeys,
-  }));
+  // Read the saved requests rather than displaying client estimates. The database
+  // applies the approved RDO and supplies the batch key used by week grouping.
+  await refreshBiddingAfterIntakeDecision();
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   requests.forEach(queueBidSubmittedEmail);
