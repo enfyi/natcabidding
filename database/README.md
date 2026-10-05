@@ -281,9 +281,11 @@ round, and inactive requests retain their status when their dates are corrected.
 Checks include line eligibility/availability, fatigue capacity, required Mid and
 fatigue settings, date bounds, overlapping leave, RDO conflicts, round limits,
 leave-hour allowance, and daily capacity. Manual intake entry can bypass a BUE's
-personal window only while that same round remains open for the area. After the
-area advances to a later round, closed rounds cannot accept new BUE, intake, or
-administrator bid submissions. Capacity overrides are not accepted by this editor.
+personal window only while that same round remains open across ZLA. A round opens
+with the first active BUE window in any area and closes with the final active BUE
+window in any area. After the all-area round closes, it cannot accept new BUE,
+intake, or administrator bid submissions. Capacity overrides are not accepted by
+this editor.
 
 ## Bid Window Builder
 
