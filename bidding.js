@@ -11624,6 +11624,56 @@ async function exportSeniorityRoster() {
   }
 }
 
+async function exportBidTimes(form) {
+  if (!hasSystemAdminAccess()) return;
+  const button = form.querySelector("[data-export-bid-times]");
+  const status = form.querySelector("[data-bid-time-export-status]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]:checked'), input => input.value);
+  if (!areas.length) {
+    status.textContent = "Choose at least one area to export.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = `Preparing ${BID_YEAR} bid times…`;
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session?.access_token) throw new Error("Sign in with an admin account before exporting.");
+    const params = new URLSearchParams({ year: String(BID_YEAR) });
+    areas.forEach(area => params.append("area", area));
+    const response = await fetch(`/api/admin/bid-times/export?${params}`, {
+      headers: { Authorization: `Bearer ${data.session.access_token}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || "The bid times could not be exported.");
+    }
+    downloadBlob(`zla-bid-times-${BID_YEAR}.xlsx`, await response.blob());
+    status.textContent = `Exported ${BID_YEAR} bid times for ${areas.join(", ")}.`;
+  } catch (error) {
+    status.textContent = error.message || "The bid times could not be exported.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.addEventListener("submit", event => {
+  if (!event.target.matches("[data-bid-time-export-form]")) return;
+  event.preventDefault();
+  void exportBidTimes(event.target);
+});
+
+document.addEventListener("change", event => {
+  const form = event.target.closest("[data-bid-time-export-form]");
+  if (!form) return;
+  const all = form.querySelector("[data-bid-time-export-all]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]'));
+  if (event.target === all) areas.forEach(input => { input.checked = all.checked; });
+  all.checked = areas.every(input => input.checked);
+  all.indeterminate = !all.checked && areas.some(input => input.checked);
+});
+
 function rosterEntryInitials(entry) {
   return entry[3] || "";
 }
