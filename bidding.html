@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -375,6 +375,7 @@
         </section>
 
         <section class="page active" id="dashboard-page" data-page-panel="dashboard">
+          <p class="rdo-denial-notification" data-rdo-denial-reason role="alert" aria-atomic="true" hidden></p>
           <div class="metric-grid">
             <article class="metric-card priority">
               <span>Your Bid Priority</span>
@@ -575,6 +576,7 @@
         </section>
 
         <section class="page" id="rdos-page" data-page-panel="rdos">
+          <p class="rdo-denial-notification" data-rdo-denial-reason role="alert" aria-atomic="true" hidden></p>
           <div class="workspace-grid">
             <section class="panel rdo-table-panel">
               <div class="panel-header">
@@ -970,6 +972,7 @@
                       <option value="Pending">Pending</option>
                       <option value="Approved">Approved</option>
                       <option value="Denied">Denied</option>
+                      <option value="Cancelled">Cancelled</option>
                       <option value="Expired">Expired</option>
                     </select>
                     <select data-intake-filter="type" aria-label="Filter intake by bid type">
@@ -1893,7 +1896,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-manual-leave-input-performance-background-approval-refresh-protect-editing-alert-review-focus-live-sort-detail-sort-pending-first-action-list-only-bue-edit-identity"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-manual-leave-input-performance-background-approval-refresh-protect-editing-alert-review-focus-live-sort-detail-sort-pending-first-action-list-only-bue-edit-identity-change-bid-update-removal-intaker"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
