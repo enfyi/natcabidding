@@ -3383,20 +3383,9 @@ async function submitManualLeaveBid(panel, person, area) {
     return;
   }
 
-  intakeQueue.unshift(...requests);
-  requests.forEach((item) => leaveBids.push({
-    priority: nextLeavePriority(),
-    range: item.range,
-    dateKeys: item.dateKeys,
-    days: item.days,
-    status: "Pending",
-    notes: item.notes,
-    initials: person.initials,
-    area,
-    round: item.round,
-    weekUnits: item.weekUnits,
-    weekKeys: item.weekKeys,
-  }));
+  // Read the saved requests rather than displaying client estimates. The database
+  // applies the approved RDO and supplies the batch key used by week grouping.
+  await refreshBiddingAfterIntakeDecision();
 
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
@@ -14314,8 +14303,27 @@ let alertRefreshTimer = null;
 let alertRealtimeChannel = null;
 let alertRealtimeUserId = "";
 let lastAlertDatabaseSnapshot = "";
+let liveIntakeQueueRenderPending = false;
+let liveIntakeQueueRenderTimer = null;
+
+function renderLiveIntakeQueue() {
+  clearTimeout(liveIntakeQueueRenderTimer);
+  liveIntakeQueueRenderTimer = null;
+  if (!liveIntakeQueueRenderPending) return;
+  if (!hasIntakeAccess() || !document.querySelector('.page.active[data-page-panel="intake"]')) return;
+  if (intakeDecisionPending || hasActiveIntakeEditing()) {
+    liveIntakeQueueRenderTimer = setTimeout(renderLiveIntakeQueue, 350);
+    return;
+  }
+  liveIntakeQueueRenderPending = false;
+  renderIntakeQueue();
+  renderIntakeBidderSummary();
+}
 
 function stopLiveAlertUpdates() {
+  clearTimeout(liveIntakeQueueRenderTimer);
+  liveIntakeQueueRenderTimer = null;
+  liveIntakeQueueRenderPending = false;
   clearTimeout(alertRefreshTimer);
   alertRefreshTimer = null;
   if (alertRealtimeChannel) void supabaseClient()?.removeChannel(alertRealtimeChannel);
@@ -14356,6 +14364,7 @@ async function refreshLiveAlerts() {
   alertRefreshPending = true;
   const userId = supabaseState.authUserId;
   const previousData = JSON.stringify([intakeQueue, helpThreads]);
+  const previousQueue = JSON.stringify(intakeQueue);
   try {
     const requester = currentHelpRequester();
     const [bidding, leave, help] = await Promise.all([
@@ -14390,7 +14399,13 @@ async function refreshLiveAlerts() {
     }
     if (!help.error) helpThreads = (help.data || []).map(helpThreadFromRpc);
     if (!bidding.error && !leave.error && !help.error && !areas.error) lastAlertDatabaseSnapshot = snapshot;
-    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) renderAlerts();
+    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) {
+      renderAlerts();
+      if (JSON.stringify(intakeQueue) !== previousQueue) {
+        liveIntakeQueueRenderPending = true;
+        renderLiveIntakeQueue();
+      }
+    }
   } catch (error) {
     console.warn("Alert refresh unavailable:", error.message || error);
   } finally {
