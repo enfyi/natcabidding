@@ -12273,3 +12273,7 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .public-main .public-rdo-panel .gl-line-bidder {
   color: #334155;
 }
+
+.public-main .public-rdo-panel .ghost-line-bidder {
+  color: #7b8494;
+}
