@@ -48,10 +48,22 @@ re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
 `database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`.
-Run `database/fatigue_capacity_sync.sql` after scripts that replace RDO submission
-or review RPCs to upgrade legacy rounded-down fatigue limits without replacing
-their other deployed bidding logic. The browser and database then allow balanced
+Reusable SQL installers call the shared fatigue helper directly, including the
+submission, review, and admin bidder editor definitions. Install
+`database/fatigue_group_balancing.sql` before running those installers.
+For existing installations or replayed historical migrations, run
+`database/fatigue_capacity_sync.sql` to upgrade legacy submission and review
+checks without replacing their other deployed bidding logic. The sync script also upgrades the legacy admin bidder editor in place. The browser and database then allow balanced
 remainders (for example, four lines split 2/1/1) using both area and RDO-set limits.
+Install `database/manual_fatigue_override.sql` after the fatigue helper and
+capacity sync. This installs the staff-only manual override RPC, its private
+authorization records, and upgrades the deployed review function in place.
+Reusable review installers also require this script's private helper. Only
+active `intake` and `admin` accounts can create overrides. An override bypasses
+fatigue capacity only for the saved submission, line, and group; all other
+submission and approval validation remains enforced. Entry and review are
+audited. Browser-supplied override flags do not authorize a capacity bypass.
+
 Keep the preflight migration after either script that replaces the leave submission
 function so its transactional wrapper remains installed. Intake can designate a controller before the
 controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
@@ -316,3 +328,5 @@ event for the completed schedule.
 Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
 data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed
 `@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
+
+The combined migration `supabase/migrations/20261004224619_fatigue_group_manual_round_down_fix.sql` installs both fatigue fixes while preserving each environment's deployed RPC logic. Run `scripts/test-manual-fatigue-override.sql` for rollback-only database verification.

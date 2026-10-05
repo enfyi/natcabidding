@@ -27,6 +27,7 @@ const saveManualRdo = vm.runInNewContext(`${manualRdoSave}; saveSupabaseManualRd
   }),
   currentUser: { supabaseProfileId: 'reviewer' },
   BID_YEAR: 2027,
+  selectedBidYearErrorMessage: () => '',
   Error,
 })
 const manualRequest = { line: '4', fatigueGroup: '', flex: 'Yes', aws: 'Yes', mid: 'No', round: 1 }
