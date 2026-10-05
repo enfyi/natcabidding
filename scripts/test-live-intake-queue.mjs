@@ -68,7 +68,7 @@ const sorted = vm.createContext({
   intakeReviewItemById: () => null,
   intakeQueue: [older],
 });
-vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'renderIntakeQueueWithCache'].map(fn).join('\n'), sorted);
+vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'compareIntakeActionItems', 'renderIntakeQueueWithCache'].map(fn).join('\n'), sorted);
 sorted.renderIntakeQueueWithCache();
 sorted.intakeQueue.push(newer);
 sorted.renderIntakeQueueWithCache();
@@ -94,7 +94,7 @@ assert.ok(historyPanel.innerHTML.indexOf('Newest pending request') < historyPane
 assert.deepEqual(Array.from(history.intakeRoundDetailItems(approved, historyRows), item => item.id), ['new-pending', 'reviewed', 'denied']);
 assert.equal(historyRows[0], approved, 'Sorting history does not reorder the source queue');
 history.intakeSort = 'approved';
-assert.equal(history.intakeRoundDetailItems(approved, historyRows)[0].id, pending.id, 'Pending requests stay above reviewed history with approval-time sorting');
+assert.equal(history.intakeRoundDetailItems(approved, historyRows)[0].id, approved.id, 'Reviewed history retains its selected approval-time order');
 sorted.intakeSort = 'approved';
 sorted.intakeQueue = [{ ...older, status: 'Approved', approvedAt: '2026-10-05T20:00:00Z' }, newer];
 sorted.renderIntakeQueueWithCache();
