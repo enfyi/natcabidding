@@ -1543,6 +1543,7 @@
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
+            <button type="button" data-admin-section-target="admin-backup-section">Backups</button>
           </nav>
           <div class="admin-tools-page-grid">
               <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
@@ -1649,6 +1650,30 @@
                   <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
                 </div>
+              </section>
+              <section class="panel admin-section-target" id="admin-backup-section" tabindex="-1" data-system-admin-only hidden>
+                <h3>Bidding Backups</h3>
+                <p>Save bidding data automatically during a date range and daily time window. Times are Pacific. Backups run even when this page is closed.</p>
+                <form data-backup-form class="backup-form">
+                  <label><input type="checkbox" name="enabled"> Enable automatic backups</label>
+                  <div class="backup-fields">
+                    <label>Start date<input type="date" name="start_date" required></label>
+                    <label>End date<input type="date" name="end_date" required></label>
+                    <label>Daily start time<input type="time" name="start_time" required value="07:00"></label>
+                    <label>Daily end time<input type="time" name="end_time" required value="17:00"></label>
+                    <label>Interval (minutes)<input type="number" name="interval_minutes" min="1" max="10080" required value="30"></label>
+                  </div>
+                  <label>Auto-delete backups older than (days)<input type="number" name="retention_days" min="1" max="36500" placeholder="Keep all backups"></label>
+                  <p>Leave blank to keep all backups. The newest backup is always kept, even if it is older than this limit. Cleanup runs even when automatic backups are off.</p>
+                  <button class="secondary-action small" type="submit">Save Backup Schedule</button>
+                </form>
+                <div class="export-actions">
+                  <button class="secondary-action small" type="button" data-backup-now>Back Up Now</button>
+                  <button class="secondary-action small" type="button" data-backup-download disabled>Download Latest Backup</button>
+                </div>
+                <p data-backup-status role="status" aria-live="polite"></p>
+                <p data-backup-latest></p>
+                <p>Snapshots include application data. Account credentials and uploaded files are excluded.</p>
               </section>
               <section class="panel admin-section-target" id="admin-email-log-section" tabindex="-1">
                 <h3>Email Log</h3>
