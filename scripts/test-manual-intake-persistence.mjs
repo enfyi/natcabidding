@@ -5,6 +5,8 @@ import vm from 'node:vm'
 const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 
 assert.match(source, /async function submitManualRdoBid\(/)
+assert.match(source, /selectManualLeaveController\(person\.initials\);[\s\S]*renderApp\(\)/)
+assert.match(source, /controller: panel\.querySelector\("\[data-manual-bid-controller\]"\)\?\.value \|\| \(leavePanel && manualLeaveControllerInitials\)/)
 assert.match(source, /async function submitManualLeaveBid\(/)
 assert.match(source, /saveSupabaseManualRdoRequest\(request, person, area\)/)
 assert.match(source, /saveSupabaseManualLeaveRequest\(requests, person, area\)/)
@@ -22,6 +24,21 @@ assert.match(source, /Supabase did not return the saved manual leave submission/
 const manualRdoSave = source.match(/async function saveSupabaseManualRdoRequest\(request, person, area\) \{[\s\S]*?\n\}/)?.[0]
 assert.ok(manualRdoSave, 'Manual RDO submissions must use the database RPC')
 const submitted = []
+const selectLeaveController = source.match(/function selectManualLeaveController\(initials\) \{[\s\S]*?\n\}/)?.[0]
+assert.ok(selectLeaveController, 'RDO submission should preselect the same controller for leave')
+const leaveController = { value: '' }
+const leaveSearch = { value: 'previous search' }
+let leaveRenders = 0
+const leavePanel = { querySelector: (selector) => selector === '[data-manual-bid-controller]' ? leaveController : leaveSearch }
+const handoffContext = vm.createContext({
+  document: { querySelector: () => leavePanel },
+  renderManualBidPanel: () => { leaveRenders += 1 },
+})
+vm.runInContext(`let manualLeaveControllerInitials = ''; ${selectLeaveController}; selectManualLeaveController('TB')`, handoffContext)
+assert.equal(leaveController.value, 'TB')
+assert.equal(leaveSearch.value, '')
+assert.equal(leaveRenders, 1)
+assert.equal(vm.runInContext('manualLeaveControllerInitials', handoffContext), 'TB')
 const saveManualRdo = vm.runInNewContext(`${manualRdoSave}; saveSupabaseManualRdoRequest`, {
   supabaseClient: () => ({
     rpc: async (_name, payload) => {

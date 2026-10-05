@@ -2760,6 +2760,19 @@ function manualBidPerson(panel) {
   return manualBidSelectedPerson(initials);
 }
 
+let manualLeaveControllerInitials = "";
+
+function selectManualLeaveController(initials) {
+  manualLeaveControllerInitials = initials;
+  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
+  if (!leavePanel) return;
+  const leaveController = leavePanel.querySelector("[data-manual-bid-controller]");
+  if (leaveController) leaveController.value = initials;
+  const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
+  if (leaveSearch) leaveSearch.value = "";
+  renderManualBidPanel(leavePanel);
+}
+
 function setManualBidStatus(panel, message, status = "info") {
   const target = panel?.querySelector("[data-manual-bid-status]");
   if (!target) return;
@@ -2868,8 +2881,9 @@ function rdoLineOptionLabel(line) {
 }
 
 function renderManualBidPanel(panel) {
+  const leavePanel = panel.classList.contains("manual-leave-request-card");
   const values = {
-    controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
+    controller: panel.querySelector("[data-manual-bid-controller]")?.value || (leavePanel && manualLeaveControllerInitials) || currentUser.initials,
     type: panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line",
     area: panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(),
     line: panel.querySelector("[data-manual-rdo-line]")?.value || selectedLineId,
@@ -3153,14 +3167,7 @@ async function submitManualRdoBid(panel, person, area) {
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
-  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
-  const leaveController = leavePanel?.querySelector("[data-manual-bid-controller]");
-  if (leaveController) {
-    const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
-    if (leaveSearch) leaveSearch.value = "";
-    leaveController.innerHTML = manualBidControllerOptions(person.initials, "");
-    leaveController.value = person.initials;
-  }
+  selectManualLeaveController(person.initials);
   renderApp();
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
@@ -16442,6 +16449,9 @@ function renderAppWithCache() {
 function logOut() {
   supabaseClient()?.auth.signOut();
   clearSupabaseAccountState();
+  manualLeaveControllerInitials = "";
+  const leaveController = document.querySelector(".manual-leave-request-card [data-manual-bid-controller]");
+  if (leaveController) leaveController.value = "";
   selectedViewArea = null;
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
@@ -16482,6 +16492,7 @@ document.addEventListener("click", async (event) => {
     const controllerSearch = panel?.querySelector("[data-manual-controller-search]");
     if (panel && controllerSelect) {
       controllerSelect.value = manualControllerResult.dataset.manualControllerResult;
+      if (panel.classList.contains("manual-leave-request-card")) manualLeaveControllerInitials = controllerSelect.value;
       if (controllerSearch) controllerSearch.value = "";
       renderManualBidPanel(panel);
       const person = manualBidSelectedPerson(controllerSelect.value);
@@ -17640,6 +17651,7 @@ document.addEventListener("change", async (event) => {
     if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     if (manualReactiveField.matches("[data-manual-bid-controller]")) {
+      if (manualPanel.classList.contains("manual-leave-request-card")) manualLeaveControllerInitials = manualReactiveField.value;
       const person = manualBidSelectedPerson(manualReactiveField.value);
       selectIntakeBidder(person.initials, person.profileId);
     }
