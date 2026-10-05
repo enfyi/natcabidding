@@ -12235,3 +12235,29 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   outline: 2px solid #333;
   outline-offset: -2px;
 }
+
+.rdo-denial-notification {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid #f0a5a5;
+  border-left: 5px solid #b91c1c;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #991b1b;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.leave-sort-button {
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.leave-sort-button:hover { text-decoration: underline; }
+.leave-sort-button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }

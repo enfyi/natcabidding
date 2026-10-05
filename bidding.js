@@ -1951,10 +1951,12 @@ function pendingCurrentUserLeaveRequests(round = null) {
 function latestCurrentUserDeniedRdoRequest() {
   const latestRequest = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
-    item.initials === currentUser.initials
+    item.initials === currentUser.initials &&
+    item.area === currentUser.area
   );
   return latestRequest?.status === "Denied" ? latestRequest : null;
 }
+
 
 function currentUserHasRdoRequestForLeave() {
   return Boolean(currentUserRdoRequest()) ||
@@ -2682,6 +2684,14 @@ async function addOrUpdateRdoSubmission() {
         if ((!item.initials || item.initials === currentUser.initials)
           && leaveRoundForItem(item) === 1
           && item.status === "Approved") item.status = "Expired";
+      });
+    }
+    if (isChange) {
+      rdoLines.forEach((entry) => {
+        if (lineForArea(entry, currentUser.area) && entry.cpc === currentUser.initials) {
+          entry.cpc = "";
+          entry.status = "Open";
+        }
       });
     }
     if (existing) Object.assign(existing, request);
@@ -5567,8 +5577,8 @@ async function saveSupabaseApprovedRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
-  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
-    item.reviewNote = "You do not have permission to edit RDO lines. Contact a system administrator.";
+  if (item.type === "RDO Line" && !hasIntakeAccess()) {
+    item.reviewNote = "Active intake access is required to edit RDO bids.";
     activeOverrideId = null;
     renderIntakeQueue();
     return;
@@ -5576,6 +5586,12 @@ async function saveIntakeOverride(id) {
   if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
     item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
     activeOverrideId = null;
+    renderIntakeQueue();
+    return;
+  }
+
+  if (item.type === "RDO Line" && !supabaseState.connected) {
+    item.reviewNote = "The RDO edit could not reach the database. Check the connection and try again.";
     renderIntakeQueue();
     return;
   }
@@ -5713,12 +5729,25 @@ async function saveIntakeOverride(id) {
   setPage("intake");
 }
 
+function rdoRequestAwaitingApproval() {
+  const latestRequest = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === currentUser.initials &&
+    item.area === currentUser.area &&
+    ["Pending", "Approved", "Denied"].includes(item.status)
+  );
+  return Boolean(latestRequest && latestRequest.status !== "Approved");
+}
+
+
 function selectedRdoWeekdays() {
+  if (rdoRequestAwaitingApproval()) return new Set();
   const submittedLine = submittedRdoLineForInitials(currentUser.initials);
   const eligibleLines = rdoLinesForBidder(currentUserBidAs(), currentUser.area);
   const line = submittedLine || eligibleLines.find((item) => item.line === selectedLineId) || eligibleLines[0] || null;
   return rdoWeekdaysForLine(line);
 }
+
 
 function rdoWeekdaysForLine(line) {
   if (!line) return new Set();
@@ -7684,7 +7713,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
   const isChange = Boolean(row.isChange || row.is_change || payload.isChange);
-  const originalBid = row.originalBid || row.original_bid || null;
+  const originalBid = row.originalBid || row.original_bid || payload.originalBid || null;
   const changeSource = row.changeSource || row.change_source || payload.changeSource || "";
   const changeEnteredBy = row.changeEnteredBy || row.change_entered_by || "";
 
@@ -7739,15 +7768,18 @@ function upsertRdoSubmissionsFromDatabase(rows, areaById) {
 
 function inferRdoBidChanges(items) {
   items.forEach((item, itemIndex) => {
-    if (item.isChange || !["Pending", "Approved"].includes(item.status)) return;
+    if (item.originalBid || (!item.isChange && !["Pending", "Approved"].includes(item.status))) return;
+    const sameBidder = (candidate) => candidate.type === "RDO Line" && (item.bidderId && candidate.bidderId
+      ? item.bidderId === candidate.bidderId
+      : item.initials === candidate.initials && item.area === candidate.area);
+    const linkedOriginal = item.originalSubmissionId
+      ? items.find((candidate) => candidate !== item && sameBidder(candidate)
+        && candidate.supabaseSubmissionId === item.originalSubmissionId)
+      : null;
     const itemTime = Date.parse(item.submittedAt || "");
-    const original = items
+    const original = linkedOriginal || items
       .filter((candidate, candidateIndex) => {
-        if (candidate === item || candidate.status !== "Approved") return false;
-        const sameBidder = item.bidderId && candidate.bidderId
-          ? item.bidderId === candidate.bidderId
-          : item.initials === candidate.initials && item.area === candidate.area;
-        if (!sameBidder) return false;
+        if (candidate === item || candidate.status !== "Approved" || !sameBidder(candidate)) return false;
         const candidateTime = Date.parse(candidate.submittedAt || "");
         const submittedEarlier = Number.isFinite(itemTime) && Number.isFinite(candidateTime)
           ? candidateTime < itemTime
@@ -10069,10 +10101,11 @@ function renderLatestRdoDenialReason() {
   document.querySelectorAll("[data-rdo-denial-reason]").forEach((element) => {
     element.hidden = !deniedRequest;
     element.textContent = deniedRequest
-      ? `Intake denial reason: ${deniedRequest.denialReason || "No reason was provided. Contact the Bidding Office."}`
+      ? `Your RDO ${deniedRequest.isChange ? "change request" : "bid"}${deniedRequest.line ? ` for Line ${deniedRequest.line}` : ""} has been denied. Reason: ${deniedRequest.denialReason || "No reason was provided. Contact the Bidding Office."} Review your request and submit a revised RDO bid while your bid window is open.`
       : "";
   });
 }
+
 
 function renderDashboardSelectedLineCard(assignment) {
   const line = assignment?.line;
@@ -10492,12 +10525,44 @@ function renderFatigueCapacity() {
   });
 }
 
+const bidderLeaveSort = { round: "asc", date: "asc", status: "asc", statusActive: false };
+
+function sortedBidderLeaveBids() {
+  return leaveBids.map((bid) => ({ bid, round: leaveRoundForItem(bid), date: leaveDateKeysForItem(bid)[0] || "" }))
+    .sort((a, b) => {
+      if (bidderLeaveSort.statusActive) {
+        const statusOrder = String(a.bid.status || "").localeCompare(String(b.bid.status || ""), "en", { sensitivity: "base" })
+          * (bidderLeaveSort.status === "asc" ? 1 : -1);
+        if (statusOrder) return statusOrder;
+      }
+      const roundOrder = (a.round - b.round) * (bidderLeaveSort.round === "asc" ? 1 : -1);
+      if (roundOrder) return roundOrder;
+      if (!a.date || !b.date) return a.date ? -1 : b.date ? 1 : 0;
+      return a.date.localeCompare(b.date) * (bidderLeaveSort.date === "asc" ? 1 : -1);
+    }).map(({ bid }) => bid);
+}
+
+function syncBidderLeaveSortHeaders() {
+  document.querySelectorAll("[data-bidder-leave-sort]").forEach((button) => {
+    const column = button.dataset.bidderLeaveSort;
+    const ascending = bidderLeaveSort[column] === "asc";
+    const label = column === "round" ? "Round" : column === "date" ? "Date Range" : "Status";
+    const active = column !== "status" || bidderLeaveSort.statusActive;
+    button.textContent = `${label}${active ? (ascending ? " ↑" : " ↓") : " ↕"}`;
+    const nextDirection = !active || !ascending ? "ascending" : "descending";
+    button.setAttribute("aria-label", `${label}: ${active ? (ascending ? "ascending" : "descending") : "unsorted"}. Sort ${nextDirection}${column === "date" ? " within each round" : ""}.`);
+    const primary = bidderLeaveSort.statusActive ? "status" : "round";
+    button.closest("th").setAttribute("aria-sort", !active ? "none" : column === primary ? (ascending ? "ascending" : "descending") : "other");
+  });
+}
+
 function renderLeaveRows(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
   const compact = false;
 
-  target.innerHTML = leaveBids
+  syncBidderLeaveSortHeaders();
+  target.innerHTML = sortedBidderLeaveBids()
     .map((bid) => {
       const round = leaveRoundForItem(bid);
       return compact
@@ -14903,10 +14968,15 @@ async function resolveHelpThread() {
 
 function renderOverrideEditor(item) {
   if (!item) return "";
-  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
-    return '<p class="override-warning">You do not have permission to edit RDO lines. Contact a system administrator.</p>';
+  if (item.type === "RDO Line" && !hasIntakeAccess()) {
+    return '<p class="override-warning">Active intake access is required to edit RDO bids.</p>';
   }
   const pending = item.status === "Pending";
+  const bidderIdentity = `
+    <label>BUE being edited
+      <input type="text" value="${escapeHtml(item.name)} · ${escapeHtml(item.initials)} · Area ${escapeHtml(item.area)}" readonly data-override-bue />
+    </label>
+  `;
   const approveButton = pending
     ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">Approve With Changes</button>`
     : "";
@@ -14917,6 +14987,7 @@ function renderOverrideEditor(item) {
     const glCategory = selectedLine && isCpcLine(selectedLine) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
     const developmentalBidder = isDevelopmentalBidRole(item.bidAs, item.area);
     return `
+      ${bidderIdentity}
       <label>Line
         <select data-override-line>
           ${eligibleLines.map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
@@ -14965,6 +15036,7 @@ function renderOverrideEditor(item) {
   const approveLabel = rdoConflicts.length ? "Approve After Date Change" : conflicts.length ? "Approve With Override" : "Approve With Changes";
 
   return `
+    ${bidderIdentity}
     ${rdoConflictNote}
     ${conflictNote}
     <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
@@ -15019,10 +15091,26 @@ function intakeLeaveRoundIsOpen(item) {
   return now >= startsAt && now < endsAt;
 }
 
+function intakeDisplayStatus(item) {
+  return item.status === "Expired" && ["RDO Line", "Leave"].includes(item.type)
+    ? "Cancelled"
+    : item.status;
+}
+
+
+function intakeCancellationNote(item) {
+  if (intakeDisplayStatus(item) !== "Cancelled") return "";
+  const removal = item.type === "RDO Line"
+    ? "Previous RDO bid removed. This bid no longer assigns an RDO line."
+    : "Leave dates removed. These dates no longer hold leave slots.";
+  return `${removal}${item.cancelledAt ? ` Cancelled ${item.cancelledAt}.` : ""} Bid history retained.`;
+}
+
+
 function intakeSearchText(item) {
   return [
     bidTypeLabel(item),
-    item.status,
+    intakeDisplayStatus(item),
     item.name,
     item.initials,
     item.area,
@@ -15044,7 +15132,7 @@ function intakeSearchText(item) {
 function intakeItemMatchesFilters(item) {
   const query = intakeSearchQuery.trim().toLowerCase();
   if (query && !intakeSearchText(item).includes(query)) return false;
-  if (intakeFilters.status !== "all" && item.status !== intakeFilters.status) return false;
+  if (intakeFilters.status !== "all" && intakeDisplayStatus(item) !== intakeFilters.status) return false;
   if (intakeFilters.type !== "all" && item.type !== intakeFilters.type) return false;
   if (intakeFilters.area !== "all" && item.area !== intakeFilters.area) return false;
   if (intakeFilters.round !== "all" && String(intakeItemRound(item)) !== intakeFilters.round) return false;
@@ -15059,11 +15147,14 @@ function intakeSortTimestamp(item, field) {
 }
 
 function compareIntakeItems(left, right) {
-  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
-  if (pendingDifference) return pendingDifference;
   const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
   if (intakeSort === "entered") return enteredDifference;
   return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
+}
+
+function compareIntakeActionItems(left, right) {
+  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
+  return pendingDifference || compareIntakeItems(left, right);
 }
 
 function syncIntakeSearchControls() {
@@ -15119,10 +15210,11 @@ function renderIntakeDetailPanel(item, visibleItems) {
     <div class="intake-detail-list">
       ${detailItems.map((entry) => `
         <article>
-          <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
+          <span class="status ${intakeDisplayStatus(entry).toLowerCase()}">${escapeHtml(intakeDisplayStatus(entry))}</span>
           <strong>${escapeHtml(bidTypeLabel(entry))}</strong>
           <p>${escapeHtml(entry.summary)}</p>
           ${renderIntakeChangeHistory(entry)}
+          ${intakeCancellationNote(entry) ? `<small>${escapeHtml(intakeCancellationNote(entry))}</small>` : ""}
           <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
         </article>
       `).join("")}
@@ -15130,8 +15222,23 @@ function renderIntakeDetailPanel(item, visibleItems) {
   `;
 }
 
+function rdoBidChangeDifferences(original, requested) {
+  if (!original) return [];
+  const fields = [
+    ["Line", (bid) => String(bid.line || bid.rdo_line_code || "—")],
+    ["Fatigue", (bid) => fatigueGroupPreferenceLabel(bid.fatigueGroup ?? bid.fatigue_group ?? "")],
+    ["Flex", (bid) => rdoBidPreferenceLabel(bid.flex)],
+    ["AWS", (bid) => rdoBidPreferenceLabel(bid.aws)],
+    ["Mid", (bid) => rdoBidPreferenceLabel(bid.mid)],
+  ];
+  return fields.flatMap(([label, value]) => value(original) === value(requested)
+    ? []
+    : [`${label}: ${value(original)} → ${value(requested)}`]);
+}
+
 function renderIntakeChangeHistory(item) {
   if (!item?.isChange) return "";
+  const differences = rdoBidChangeDifferences(item.originalBid, item);
   const source = item.changeSource === "intake"
     ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
     : item.changeSource === "bidder"
@@ -15141,7 +15248,8 @@ function renderIntakeChangeHistory(item) {
     <div class="intake-change-history">
       <strong>Bid change</strong>
       <span><b>Original:</b> ${escapeHtml(rdoBidSnapshotSummary(item.originalBid))}</span>
-      <span><b>Requested:</b> ${escapeHtml(item.summary || rdoBidSnapshotSummary(item))}</span>
+      <span><b>Requested:</b> ${escapeHtml(rdoBidSnapshotSummary(item))}</span>
+      ${differences.length ? `<span><b>Changed:</b> ${escapeHtml(differences.join(" · "))}</span>` : ""}
       <small>${escapeHtml(source)}</small>
     </div>
   `;
@@ -15691,13 +15799,13 @@ function renderIntakeQueueWithCache() {
   const visibleItems = canReview
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
-  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeActionItems);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
   target.innerHTML = filteredItems.length
     ? filteredItems.map((item) => `
-      <article class="intake-card ${item.status.toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
+      <article class="intake-card ${intakeDisplayStatus(item).toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <div class="intake-card-name-row">
@@ -15720,20 +15828,18 @@ function renderIntakeQueueWithCache() {
         </div>
         <div class="intake-actions">
           ${item.isChange ? '<span class="intake-change-badge">Change Request</span>' : ""}
-          <span class="status ${item.status.toLowerCase()}">${item.status}</span>
+          <span class="status ${intakeDisplayStatus(item).toLowerCase()}">${escapeHtml(intakeDisplayStatus(item))}</span>
           ${item.status === "Pending" && canReview ? `
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "RDO Line" || item.status !== "Approved" || hasSystemAdminAccess()) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
-          ${canReview && item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess() ? '<small>You do not have permission to edit RDO lines. Contact a system administrator.</small>' : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
           ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
           ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${escapeHtml(intakeReviewerLabel(item.approvedBy))} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${escapeHtml(intakeReviewerLabel(item.deniedBy))} · ${item.deniedAt}</small>` : ""}
-          ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
-          ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
+          ${intakeCancellationNote(item) ? `<small>${escapeHtml(intakeCancellationNote(item))}</small>` : ""}
         </div>
       </article>
     `).join("")
@@ -16608,6 +16714,21 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const leaveSortButton = event.target.closest("[data-bidder-leave-sort]");
+  if (leaveSortButton) {
+    const column = leaveSortButton.dataset.bidderLeaveSort;
+    if (!["round", "date", "status"].includes(column)) return;
+    if (column === "status" && !bidderLeaveSort.statusActive) {
+      bidderLeaveSort.statusActive = true;
+      bidderLeaveSort.status = "asc";
+    } else {
+      bidderLeaveSort[column] = bidderLeaveSort[column] === "asc" ? "desc" : "asc";
+      if (column === "round") bidderLeaveSort.statusActive = false;
+    }
+    renderLeaveRows("dashboard-leave-rows");
+    renderLeaveRows("leave-page-rows");
+    return;
+  }
   if (event.target.closest("[data-intake-refresh]")) {
     await refreshIntakeQueue();
     return;

@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -375,6 +375,7 @@
         </section>
 
         <section class="page active" id="dashboard-page" data-page-panel="dashboard">
+          <p class="rdo-denial-notification" data-rdo-denial-reason role="alert" aria-atomic="true" hidden></p>
           <div class="metric-grid">
             <article class="metric-card priority">
               <span>Your Bid Priority</span>
@@ -492,7 +493,7 @@
 
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
-                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
+                <h3 class="round-rule-subheader">Rounds 1-3 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
                   <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
@@ -526,10 +527,10 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Round</th>
-                      <th>Date Range</th>
+                      <th aria-sort="ascending"><button class="leave-sort-button" type="button" data-bidder-leave-sort="round">Round ↑</button></th>
+                      <th aria-sort="other"><button class="leave-sort-button" type="button" data-bidder-leave-sort="date">Date Range ↑</button></th>
                       <th>Days</th>
-                      <th>Status</th>
+                      <th aria-sort="none"><button class="leave-sort-button" type="button" data-bidder-leave-sort="status">Status ↕</button></th>
                       <th>Private Notes</th>
                     </tr>
                   </thead>
@@ -575,6 +576,7 @@
         </section>
 
         <section class="page" id="rdos-page" data-page-panel="rdos">
+          <p class="rdo-denial-notification" data-rdo-denial-reason role="alert" aria-atomic="true" hidden></p>
           <div class="workspace-grid">
             <section class="panel rdo-table-panel">
               <div class="panel-header">
@@ -736,10 +738,10 @@
                   <table>
                     <thead>
                       <tr>
-                        <th>Round</th>
-                        <th>Date Range</th>
+                        <th aria-sort="ascending"><button class="leave-sort-button" type="button" data-bidder-leave-sort="round">Round ↑</button></th>
+                        <th aria-sort="other"><button class="leave-sort-button" type="button" data-bidder-leave-sort="date">Date Range ↑</button></th>
                         <th>Days</th>
-                        <th>Status</th>
+                        <th aria-sort="none"><button class="leave-sort-button" type="button" data-bidder-leave-sort="status">Status ↕</button></th>
                         <th>Private Notes</th>
                       </tr>
                     </thead>
@@ -818,7 +820,7 @@
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
-                <h3 class="round-rule-subheader">Rounds 1-4 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
+                <h3 class="round-rule-subheader">Rounds 1-3 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
                 <div class="current-round-rule">
                   <span data-round-rule-heading>Round 1 Rules</span>
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
@@ -970,6 +972,7 @@
                       <option value="Pending">Pending</option>
                       <option value="Approved">Approved</option>
                       <option value="Denied">Denied</option>
+                      <option value="Cancelled">Cancelled</option>
                       <option value="Expired">Expired</option>
                     </select>
                     <select data-intake-filter="type" aria-label="Filter intake by bid type">
@@ -1893,7 +1896,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-manual-leave-input-performance-background-approval-refresh-protect-editing-alert-review-focus-live-sort-detail-sort-pending-first"></script>
+    <script src="bidding.js?v=20261005-intaker-rdo-edit"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
