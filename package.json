@@ -18,6 +18,7 @@
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
     "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
+    "test:alert-review-performance": "node scripts/test-alert-review-performance.mjs",
     "test:week-alerts-intake-performance": "node scripts/test-week-alerts-intake-performance.mjs",
     "test:intake-bidder-summary": "node scripts/test-intake-bidder-summary.mjs",
     "test:intake-team-search": "node scripts/test-intake-team-search.mjs",

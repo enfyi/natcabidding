@@ -6312,6 +6312,10 @@ function syncMemberCalendarSelection(previousPreviewKeys = []) {
 }
 
 function leaveSlotMap(area = currentUser.area) {
+  return cachedLeaveRead(JSON.stringify(["leaveSlotMap", area]), () => leaveSlotMapUncached(area));
+}
+
+function leaveSlotMapUncached(area = currentUser.area) {
   const entries = {};
 
   leaveSlotWeeks.forEach((week) => {
@@ -15169,6 +15173,10 @@ function renderIntakeBidderDetail(person, rows) {
 }
 
 function renderIntakeBidderSummary() {
+  return withLeaveReadCache(() => renderIntakeBidderSummaryWithCache());
+}
+
+function renderIntakeBidderSummaryWithCache() {
   const target = document.querySelector("[data-intake-bidder-summary]");
   const area = document.querySelector("[data-intake-bidder-area]");
   const role = document.querySelector("[data-intake-bidder-role]");
@@ -15261,7 +15269,7 @@ async function loadSelectedIntakeBidder() {
   }
 }
 
-function selectIntakeBidder(initials, profileId = "") {
+function selectIntakeBidder(initials, profileId = "", { deferRender = false } = {}) {
   const normalized = String(initials || "").trim().toUpperCase();
   const person = bueByInitials(normalized);
   if (!normalized || !person) return;
@@ -15274,9 +15282,11 @@ function selectIntakeBidder(initials, profileId = "") {
     intakeBidderSelection.detail = "";
     intakeBidderSelection.error = "";
     intakeBidderSelection.generation += 1;
+    intakeBidderSelection.loading = false;
   }
+  if (deferRender) return;
   renderIntakeBidderSummary();
-  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+  if (!intakeBidderSelection.loading && (changed || !intakeBidderSelection.record)) void loadSelectedIntakeBidder();
 }
 
 function ensureIntakeBidderSelection() {
@@ -15585,6 +15595,10 @@ function revealIntakeDetail() {
 }
 
 function openIntakeItemFromAlert(itemId) {
+  return withLeaveReadCache(() => openIntakeItemFromAlertWithCache(itemId));
+}
+
+function openIntakeItemFromAlertWithCache(itemId) {
   const groupedItem = groupedLeaveIntakeItems().find((item) =>
     item.id === itemId || item.members?.some((member) => member.id === itemId)
   );
@@ -15596,9 +15610,13 @@ function openIntakeItemFromAlert(itemId) {
   activeDenialId = null;
   intakeSearchQuery = "";
   Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
-  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
+  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId, { deferRender: true });
+  const alreadyInIntake = document.querySelector(".page.active")?.dataset.pagePanel === "intake";
   setPage("intake");
-  renderIntakeQueue();
+  if (alreadyInIntake) {
+    renderIntakeQueue();
+    ensureIntakeBidderSelection();
+  }
 
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
     const card = [...document.querySelectorAll("[data-intake-card]")]
