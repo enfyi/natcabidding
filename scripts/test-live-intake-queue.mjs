@@ -58,6 +58,7 @@ const sorted = vm.createContext({
   intakeSort: 'entered', activeIntakeDetailId: older.id, activeOverrideId: null, activeDenialId: null,
   document: { getElementById: id => id === 'intake-queue' ? target : null, querySelector: () => null },
   syncIntakeSearchControls() {}, hasIntakeAccess: () => true,
+  hasSystemAdminAccess: () => false, intakeReviewerLabel: () => '',
   groupedLeaveIntakeItems: () => sorted.intakeQueue,
   intakeItemMatchesFilters: () => true,
   renderIntakeDetailPanel: item => assert.equal(item.id, older.id, 'The reviewed bid stays selected'),
@@ -93,5 +94,10 @@ assert.ok(historyPanel.innerHTML.indexOf('Newest pending request') < historyPane
 assert.deepEqual(Array.from(history.intakeRoundDetailItems(approved, historyRows), item => item.id), ['new-pending', 'reviewed', 'denied']);
 assert.equal(historyRows[0], approved, 'Sorting history does not reorder the source queue');
 history.intakeSort = 'approved';
-assert.equal(history.intakeRoundDetailItems(approved, historyRows)[0].id, approved.id, 'History respects approval-time sorting too');
+assert.equal(history.intakeRoundDetailItems(approved, historyRows)[0].id, pending.id, 'Pending requests stay above reviewed history with approval-time sorting');
+sorted.intakeSort = 'approved';
+sorted.intakeQueue = [{ ...older, status: 'Approved', approvedAt: '2026-10-05T20:00:00Z' }, newer];
+sorted.renderIntakeQueueWithCache();
+assert.ok(target.innerHTML.indexOf('data-intake-approve="new-pending"') < target.innerHTML.indexOf('data-intake-card="reviewed"'),
+  'The actionable pending row stays first even with the default approval-time sort');
 console.log('Live intake queue regression checks passed.');
