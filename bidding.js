@@ -10513,12 +10513,36 @@ function renderFatigueCapacity() {
   });
 }
 
+const bidderLeaveSort = { round: "asc", date: "asc" };
+
+function sortedBidderLeaveBids() {
+  return leaveBids.map((bid) => ({ bid, round: leaveRoundForItem(bid), date: leaveDateKeysForItem(bid)[0] || "" }))
+    .sort((a, b) => {
+      const roundOrder = (a.round - b.round) * (bidderLeaveSort.round === "asc" ? 1 : -1);
+      if (roundOrder) return roundOrder;
+      if (!a.date || !b.date) return a.date ? -1 : b.date ? 1 : 0;
+      return a.date.localeCompare(b.date) * (bidderLeaveSort.date === "asc" ? 1 : -1);
+    }).map(({ bid }) => bid);
+}
+
+function syncBidderLeaveSortHeaders() {
+  document.querySelectorAll("[data-bidder-leave-sort]").forEach((button) => {
+    const column = button.dataset.bidderLeaveSort;
+    const ascending = bidderLeaveSort[column] === "asc";
+    const label = column === "round" ? "Round" : "Date Range";
+    button.textContent = `${label} ${ascending ? "↑" : "↓"}`;
+    button.setAttribute("aria-label", `${label}: ${ascending ? "ascending" : "descending"}. Sort ${ascending ? "descending" : "ascending"}${column === "date" ? " within each round" : ""}.`);
+    button.closest("th").setAttribute("aria-sort", column === "round" ? (ascending ? "ascending" : "descending") : "other");
+  });
+}
+
 function renderLeaveRows(targetId) {
   const target = document.getElementById(targetId);
   if (!target) return;
   const compact = false;
 
-  target.innerHTML = leaveBids
+  syncBidderLeaveSortHeaders();
+  target.innerHTML = sortedBidderLeaveBids()
     .map((bid) => {
       const round = leaveRoundForItem(bid);
       return compact
@@ -16655,6 +16679,15 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  const leaveSortButton = event.target.closest("[data-bidder-leave-sort]");
+  if (leaveSortButton) {
+    const column = leaveSortButton.dataset.bidderLeaveSort;
+    if (column !== "round" && column !== "date") return;
+    bidderLeaveSort[column] = bidderLeaveSort[column] === "asc" ? "desc" : "asc";
+    renderLeaveRows("dashboard-leave-rows");
+    renderLeaveRows("leave-page-rows");
+    return;
+  }
   if (event.target.closest("[data-intake-refresh]")) {
     await refreshIntakeQueue();
     return;

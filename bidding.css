@@ -12243,3 +12243,16 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   font-weight: 700;
   line-height: 1.5;
 }
+
+.leave-sort-button {
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.leave-sort-button:hover { text-decoration: underline; }
+.leave-sort-button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
