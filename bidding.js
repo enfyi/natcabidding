@@ -2689,7 +2689,6 @@ async function addOrUpdateRdoSubmission() {
   }
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is still required before the line is populated.`);
-  queueBidSubmittedEmail(request);
   renderApp();
 }
 
@@ -3186,7 +3185,6 @@ async function submitManualRdoBid(panel, person, area) {
 
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is still required before the line is populated.`);
-  queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   selectManualLeaveController(person.initials);
@@ -3388,7 +3386,6 @@ async function submitManualLeaveBid(panel, person, area) {
 
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
-  requests.forEach(queueBidSubmittedEmail);
   manualLeaveBatch = { key: "", entries: [] };
   activeOverrideId = null;
   activeDenialId = null;
@@ -4674,7 +4671,6 @@ async function submitLeaveDraftBatch() {
   leaveDraftQueue = [];
   activeOverrideId = null;
   activeDenialId = null;
-  queueBidSubmittedEmail(newRequests);
   renderApp();
   setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
 }
@@ -4768,42 +4764,15 @@ function bidRound(item) {
   return Number.isFinite(round) && round > 0 ? round : currentRoundNumber();
 }
 
-function queueBidSubmittedEmail(items) {
-  const submissions = groupedLeaveIntakeItems(Array.isArray(items) ? items : [items]);
-  if (!submissions.length) return;
-
-  const first = submissions[0];
-  const round = bidRound(first);
-  const detail = submissions.map((item, index) => {
-    const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
-    return `${prefix}${bidTypeLabel(item)} bid details: ${bidEmailDetail(item)}`;
-  }).join("\n");
-  const subjectType = submissions.length > 1
-    ? `${submissions.length} ${first.ghostBid ? "ghost leave" : isGlLeaveItem(first) ? "GL" : "leave"} bids`
-    : `${bidTypeLabel(first)} bid`;
-
-  queueNotificationEmail(
-    bidRecipientEmail(first),
-    `Bid received for ${first.initials} Round ${round} ${BID_YEAR}`,
-    `Your ${subjectType} has been received and sent to Bidding Intake for review.\n\n${detail}\n\nYou will receive another email once Intake approves the bid.\n\n${BID_OFFICE_CONTACT}`,
-    first.area,
-    {
-      kind: "submitted",
-      eventId: first.id || `${first.initials}-${Date.now()}`,
-      initials: first.initials,
-      area: first.area,
-    }
-  );
-}
-
 function queueBidVerifiedEmail(item) {
   const round = bidRound(item);
   const subject = `Bid approved for ${item.initials} Round ${round} ${BID_YEAR}`;
-  const detail = bidEmailDetail(item);
+  const detail = (item.members || [item]).map((member) => `${bidTypeLabel(member)} bid details: ${bidEmailDetail(member)}`).join("\n");
+  const approvedAt = item.approvedAt || formatDateTime(new Date());
   queueNotificationEmail(
     bidRecipientEmail(item),
     subject,
-    `Your submitted bid has been approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
+    `Your submitted bid has been approved for Round ${round}.\n\n${detail}\n\nApproved at: ${approvedAt}\n\n${BID_OFFICE_CONTACT}`,
     item.area,
     {
       kind: "approved",
@@ -4816,12 +4785,12 @@ function queueBidVerifiedEmail(item) {
 
 function queueBidDeniedEmail(item) {
   const round = bidRound(item);
-  const detail = bidEmailDetail(item);
+  const detail = (item.members || [item]).map((member) => `${bidTypeLabel(member)} bid details: ${bidEmailDetail(member)}`).join("\n");
   const reason = item.denialReason ? `\n\nReason: ${item.denialReason}` : "";
   queueNotificationEmail(
     bidRecipientEmail(item),
     `Bid denied for ${item.initials} Round ${round} ${BID_YEAR}`,
-    `Your submitted bid was not approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
+    `Your submitted bid was not approved for Round ${round}.\n\n${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
     item.area,
     {
       kind: "denied",
@@ -5256,8 +5225,10 @@ function updateConfirmedIntakeDecision(item, decision, reason = "") {
   intakeDecisionRevision += 1;
   const status = decision === "approved" ? "Approved" : "Denied";
   item.status = status;
+  if (decision === "approved") item.approvedAt = formatDateTime(new Date());
   for (const member of item.members || [item]) {
     member.status = status;
+    if (decision === "approved") member.approvedAt = item.approvedAt;
     if (reason) member.denialReason = reason;
     if (member.type === "Leave") {
       const bid = leaveBidForItem(member);
@@ -7704,8 +7675,8 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const line = payload.rdo_line_code || payload.line || row.line || "";
   const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
   const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
-  const flex = payload.flex || "";
-  const aws = payload.aws || "";
+  const flex = payload.flex ?? "";
+  const aws = payload.aws ?? "";
   const mid = payload.mid || "";
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
@@ -15604,8 +15575,13 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
 }
 
 function intakeBidSummary(item) {
-  const summary = item.summary || "";
+  let summary = item.summary || "";
   if (item.type !== "RDO Line") return summary;
+  summary = summary.replace(/\b(Flex|AWS)(?:\s+([^·]*?))?(?=\s*·|$)/g, (match, preference, displayed) => {
+    const value = item[preference.toLowerCase()] ?? displayed ?? "";
+    const enabled = value === true || ["yes", "true"].includes(String(value).trim().toLowerCase());
+    return `${preference} ${enabled ? "Yes" : "No"}${/\s$/.test(match) ? " " : ""}`;
+  });
   const line = rdoLines.find((entry) => String(entry.line) === String(item.line) && lineForArea(entry, item.area));
   const pattern = String(line?.pattern || "").trim();
   if (!pattern) return summary;
@@ -15630,9 +15606,9 @@ function intakeSubmissionLabel(item) {
 
 function intakeReviewerLabel(initials) {
   if (!initials) return "Unknown reviewer";
-  const person = bueRoster().find((entry) => entry.initials === initials);
-  const name = person ? `${person.firstName || ""} ${person.lastName || ""}`.trim() : "";
-  return name ? `${name} · ${initials}` : initials;
+  const entry = senioritySource.find((person) => person[3] === initials);
+  const role = entry ? seniorityEntryAppRole(entry) : currentUser?.initials === initials ? currentUser.role : "";
+  return `${role === "admin" ? "Admin" : "Intake Rep"} ${initials}`;
 }
 
 let intakeQueueRefreshPending = false;
