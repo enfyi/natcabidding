@@ -1951,10 +1951,12 @@ function pendingCurrentUserLeaveRequests(round = null) {
 function latestCurrentUserDeniedRdoRequest() {
   const latestRequest = intakeQueue.find((item) =>
     item.type === "RDO Line" &&
-    item.initials === currentUser.initials
+    item.initials === currentUser.initials &&
+    item.area === currentUser.area
   );
   return latestRequest?.status === "Denied" ? latestRequest : null;
 }
+
 
 function currentUserHasRdoRequestForLeave() {
   return Boolean(currentUserRdoRequest()) ||
@@ -2682,6 +2684,14 @@ async function addOrUpdateRdoSubmission() {
         if ((!item.initials || item.initials === currentUser.initials)
           && leaveRoundForItem(item) === 1
           && item.status === "Approved") item.status = "Expired";
+      });
+    }
+    if (isChange) {
+      rdoLines.forEach((entry) => {
+        if (lineForArea(entry, currentUser.area) && entry.cpc === currentUser.initials) {
+          entry.cpc = "";
+          entry.status = "Open";
+        }
       });
     }
     if (existing) Object.assign(existing, request);
@@ -5713,12 +5723,25 @@ async function saveIntakeOverride(id) {
   setPage("intake");
 }
 
+function rdoRequestAwaitingApproval() {
+  const latestRequest = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === currentUser.initials &&
+    item.area === currentUser.area &&
+    ["Pending", "Approved", "Denied"].includes(item.status)
+  );
+  return Boolean(latestRequest && latestRequest.status !== "Approved");
+}
+
+
 function selectedRdoWeekdays() {
+  if (rdoRequestAwaitingApproval()) return new Set();
   const submittedLine = submittedRdoLineForInitials(currentUser.initials);
   const eligibleLines = rdoLinesForBidder(currentUserBidAs(), currentUser.area);
   const line = submittedLine || eligibleLines.find((item) => item.line === selectedLineId) || eligibleLines[0] || null;
   return rdoWeekdaysForLine(line);
 }
+
 
 function rdoWeekdaysForLine(line) {
   if (!line) return new Set();
@@ -7681,7 +7704,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
   const isChange = Boolean(row.isChange || row.is_change || payload.isChange);
-  const originalBid = row.originalBid || row.original_bid || null;
+  const originalBid = row.originalBid || row.original_bid || payload.originalBid || null;
   const changeSource = row.changeSource || row.change_source || payload.changeSource || "";
   const changeEnteredBy = row.changeEnteredBy || row.change_entered_by || "";
 
@@ -10066,10 +10089,11 @@ function renderLatestRdoDenialReason() {
   document.querySelectorAll("[data-rdo-denial-reason]").forEach((element) => {
     element.hidden = !deniedRequest;
     element.textContent = deniedRequest
-      ? `Intake denial reason: ${deniedRequest.denialReason || "No reason was provided. Contact the Bidding Office."}`
+      ? `Your RDO ${deniedRequest.isChange ? "change request" : "bid"}${deniedRequest.line ? ` for Line ${deniedRequest.line}` : ""} has been denied. Reason: ${deniedRequest.denialReason || "No reason was provided. Contact the Bidding Office."} Review your request and submit a revised RDO bid while your bid window is open.`
       : "";
   });
 }
+
 
 function renderDashboardSelectedLineCard(assignment) {
   const line = assignment?.line;
@@ -15023,10 +15047,26 @@ function intakeLeaveRoundIsOpen(item) {
   return now >= startsAt && now < endsAt;
 }
 
+function intakeDisplayStatus(item) {
+  return item.status === "Expired" && ["RDO Line", "Leave"].includes(item.type)
+    ? "Cancelled"
+    : item.status;
+}
+
+
+function intakeCancellationNote(item) {
+  if (intakeDisplayStatus(item) !== "Cancelled") return "";
+  const removal = item.type === "RDO Line"
+    ? "Previous RDO bid removed. This bid no longer assigns an RDO line."
+    : "Leave dates removed. These dates no longer hold leave slots.";
+  return `${removal}${item.cancelledAt ? ` Cancelled ${item.cancelledAt}.` : ""} Bid history retained.`;
+}
+
+
 function intakeSearchText(item) {
   return [
     bidTypeLabel(item),
-    item.status,
+    intakeDisplayStatus(item),
     item.name,
     item.initials,
     item.area,
@@ -15048,7 +15088,7 @@ function intakeSearchText(item) {
 function intakeItemMatchesFilters(item) {
   const query = intakeSearchQuery.trim().toLowerCase();
   if (query && !intakeSearchText(item).includes(query)) return false;
-  if (intakeFilters.status !== "all" && item.status !== intakeFilters.status) return false;
+  if (intakeFilters.status !== "all" && intakeDisplayStatus(item) !== intakeFilters.status) return false;
   if (intakeFilters.type !== "all" && item.type !== intakeFilters.type) return false;
   if (intakeFilters.area !== "all" && item.area !== intakeFilters.area) return false;
   if (intakeFilters.round !== "all" && String(intakeItemRound(item)) !== intakeFilters.round) return false;
@@ -15126,10 +15166,11 @@ function renderIntakeDetailPanel(item, visibleItems) {
     <div class="intake-detail-list">
       ${detailItems.map((entry) => `
         <article>
-          <span class="status ${entry.status.toLowerCase()}">${escapeHtml(entry.status)}</span>
+          <span class="status ${intakeDisplayStatus(entry).toLowerCase()}">${escapeHtml(intakeDisplayStatus(entry))}</span>
           <strong>${escapeHtml(bidTypeLabel(entry))}</strong>
           <p>${escapeHtml(entry.summary)}</p>
           ${renderIntakeChangeHistory(entry)}
+          ${intakeCancellationNote(entry) ? `<small>${escapeHtml(intakeCancellationNote(entry))}</small>` : ""}
           <small>Submitted ${escapeHtml(entry.submittedAt || "not recorded")}</small>
         </article>
       `).join("")}
@@ -15704,7 +15745,7 @@ function renderIntakeQueueWithCache() {
 
   target.innerHTML = filteredItems.length
     ? filteredItems.map((item) => `
-      <article class="intake-card ${item.status.toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
+      <article class="intake-card ${intakeDisplayStatus(item).toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <div class="intake-card-name-row">
@@ -15727,7 +15768,7 @@ function renderIntakeQueueWithCache() {
         </div>
         <div class="intake-actions">
           ${item.isChange ? '<span class="intake-change-badge">Change Request</span>' : ""}
-          <span class="status ${item.status.toLowerCase()}">${item.status}</span>
+          <span class="status ${intakeDisplayStatus(item).toLowerCase()}">${escapeHtml(intakeDisplayStatus(item))}</span>
           ${item.status === "Pending" && canReview ? `
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
@@ -15739,8 +15780,7 @@ function renderIntakeQueueWithCache() {
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
           ${item.status === "Approved" ? `<small>Approved by ${escapeHtml(intakeReviewerLabel(item.approvedBy))} · ${item.approvedAt}</small>` : ""}
           ${item.status === "Denied" ? `<small>Denied by ${escapeHtml(intakeReviewerLabel(item.deniedBy))} · ${item.deniedAt}</small>` : ""}
-          ${item.status === "Expired" ? `<small>Expired after the bidder changed their approved RDO. These dates no longer hold leave slots.</small>` : ""}
-          ${item.status === "Cancelled" ? `<small>Removed from pre-approved slots${item.cancelledAt ? ` · ${escapeHtml(item.cancelledAt)}` : ""}. Bid history retained.</small>` : ""}
+          ${intakeCancellationNote(item) ? `<small>${escapeHtml(intakeCancellationNote(item))}</small>` : ""}
         </div>
       </article>
     `).join("")
