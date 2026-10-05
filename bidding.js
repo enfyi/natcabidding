@@ -5316,9 +5316,22 @@ async function saveSupabasePendingRdoEdit(item) {
 async function saveSupabaseApprovedRdoEdit(item) {
   const client = supabaseClient();
   if (!client || !supabaseState.connected) throw new Error("The RDO edit could not reach the database. Check the connection and try again.");
-  if (!item.bidderId) throw new Error("The saved bidder could not be found. Reload the queue before editing.");
+  let bidderId = item.bidderId;
+  // Older read_bidding_state routines return initials and area without a bidder ID.
+  if (!bidderId) {
+    if (!item.initials || !item.area) throw new Error("The saved bidder could not be identified. Reload the queue before editing.");
+    const { data: results, error: lookupError } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR, search_text: item.initials,
+    });
+    if (lookupError) throw lookupError;
+    const matches = (results?.bidders || []).filter(person =>
+      String(person.initials || "").trim().toUpperCase() === String(item.initials).trim().toUpperCase()
+      && person.area === item.area);
+    if (matches.length !== 1) throw new Error("The saved bidder could not be uniquely identified. Reload the queue before editing.");
+    bidderId = matches[0].id;
+  }
   const { data: record, error: readError } = await client.rpc("read_admin_bidder_editor", {
-    requested_bid_year: BID_YEAR, target_bidder_id: item.bidderId,
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
   });
   if (readError) throw readError;
   const line = record.lines.find(entry => entry.line_code === item.line);
@@ -5327,7 +5340,7 @@ async function saveSupabaseApprovedRdoEdit(item) {
     throw new Error("This RDO bid has changed. Reload the queue and edit the latest approved bid.");
   }
   const { data, error } = await client.rpc("edit_admin_bidder", {
-    requested_bid_year: BID_YEAR, target_bidder_id: item.bidderId,
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
     expected_snapshot: record.snapshot,
     changes: {
       rdo: { line_id: line.id, fatigue_group: item.fatigueGroup,
