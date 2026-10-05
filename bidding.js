@@ -3146,6 +3146,14 @@ async function submitManualRdoBid(panel, person, area) {
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
+  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
+  const leaveController = leavePanel?.querySelector("[data-manual-bid-controller]");
+  if (leaveController) {
+    const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
+    if (leaveSearch) leaveSearch.value = "";
+    leaveController.innerHTML = manualBidControllerOptions(person.initials, "");
+    leaveController.value = person.initials;
+  }
   renderApp();
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
@@ -5065,14 +5073,14 @@ async function approveIntakeItem(id) {
     }
     item.glLineTypeVerified = true;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
-    item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup && !["A", "B", "C"].includes(item.fatigueGroup)) {
+    item.reviewNote = "Choose fatigue group A, B, C, or No preference before approving this bid.";
     activeOverrideId = id;
     renderApp();
     setPage("intake");
     return;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup) {
     const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
     if (!item.fatigueOverride && !fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
       item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
