@@ -6594,7 +6594,7 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   };
 
   return `
-    <span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}" role="${persistent ? "group" : "tooltip"}"${persistent ? ` aria-label="Leave slots for ${formatCalendarDate(key)}"` : ""}>
+    <span class="leave-date-tooltip slot-summary${details.area === "TMU" || area === "TMU" ? " tmu-slot-summary" : ""}${persistent ? " permanent-slot-summary" : ""}" role="${persistent ? "group" : "tooltip"}"${persistent ? ` aria-label="Leave slots for ${formatCalendarDate(key)}"` : ""}>
       ${persistent ? "" : `<strong>${formatCalendarDate(key)}</strong>`}
       ${holidayKind && !persistent ? `<span class="tooltip-date-kind ${holidayKind.badgeClass}">${holidayKind.label}</span>` : ""}
       <span class="tooltip-slot-rows">
