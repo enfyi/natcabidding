@@ -58,7 +58,7 @@ Object.assign(context, {
   userFullName: () => 'Ryan Johnson',
   currentUserBidAs: () => 'CPC',
 });
-for (const name of ['biddingExportActionBy', 'biddingExportRows']) vm.runInContext(extract(name), context);
+for (const name of ['intakeBidSummary', 'biddingExportActionBy', 'biddingExportRows']) vm.runInContext(extract(name), context);
 const exported = context.biddingExportRows();
 assert.equal(exported[0][7], 'Action by');
 assert.equal(exported[1][7], 'OC');
@@ -67,3 +67,14 @@ assert.equal(exported[2][7], 'MS');
 assert.equal(exported[3][7], 'OC');
 assert.equal(context.biddingExportActionBy({ status: 'Denied', approvedBy: 'OLD', deniedBy: 'MS' }), 'MS');
 console.log('Export Action by column checks passed for RDO and leave approvals.');
+
+context.lineForArea = (line, area) => line.area === area;
+context.rdoLines = [
+  { line: '1', area: 'Area A', pattern: 'S/S' },
+  { line: '1', area: 'Area D', pattern: 'F/S' },
+];
+assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area A', line: '1', summary: 'Round 1 · Line 1 · Group A' }), 'Round 1 · Line 1 S/S · Group A');
+assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area D', line: '1', summary: 'Ghost Line 1 · Group B' }), 'Ghost Line 1 F/S · Group B');
+assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area E', line: '1', summary: 'Line 1 · Group A' }), 'Line 1 · Group A');
+assert.equal(context.intakeBidSummary({ type: 'Leave', summary: 'July 8 · 1 day' }), 'July 8 · 1 day');
+console.log('RDO summaries show the correct area-specific days off.');

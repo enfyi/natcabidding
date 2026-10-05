@@ -1872,7 +1872,6 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
-let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
 let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
@@ -4050,7 +4049,7 @@ function currentUserLeaveAllowanceHours() {
 }
 
 function currentUserBaseLeaveAllowanceDays() {
-  return estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials());
+  return Math.ceil(estimatedLeaveDaysFromHours(currentUserLeaveAllowanceHours(), leaveHoursPerDayForInitials()));
 }
 
 function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
@@ -4108,7 +4107,7 @@ function leaveAllowanceLimitForRound(round) {
 }
 
 function leaveAllowanceHoursForRound(round) {
-  return currentUserLeaveAllowanceHours()
+  return currentUserBaseLeaveAllowanceDays() * leaveHoursPerDayForInitials()
     + leaveHolidayCreditsForRound(round) * leaveHoursPerDayForInitials();
 }
 
@@ -5568,6 +5567,12 @@ async function saveSupabaseApprovedRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
+  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
+    item.reviewNote = "You do not have permission to edit RDO lines. Contact a system administrator.";
+    activeOverrideId = null;
+    renderIntakeQueue();
+    return;
+  }
   if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
     item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
     activeOverrideId = null;
@@ -14895,6 +14900,9 @@ async function resolveHelpThread() {
 
 function renderOverrideEditor(item) {
   if (!item) return "";
+  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
+    return '<p class="override-warning">You do not have permission to edit RDO lines. Contact a system administrator.</p>';
+  }
   const pending = item.status === "Pending";
   const approveButton = pending
     ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">Approve With Changes</button>`
@@ -15388,7 +15396,7 @@ function renderIntakeBidderSummaryWithCache() {
       (line?.line ? "Line " + escapeHtml(line.line) : "Not selected") + "</strong><small>" +
       (rdoDays.length ? escapeHtml(rdoDays.join(" / ")) : "RDOs unavailable") + "</small></div>" +
     '<div class="intake-bidder-metric"><span>' + BID_YEAR + " Accrual</span><strong>" +
-      formatEstimatedLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
+      formatRoundedUpLeaveDays(allowanceDays) + " days</strong><small>" + allowanceHours +
       " hours · " + scheduleLabel + "</small></div>" +
     '<div class="intake-bidder-metric"><span>Days Bid</span>' +
       '<button class="intake-bidder-link" type="button" data-intake-bidder-detail-open="bids">' +
@@ -15566,6 +15574,17 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   setPage("intake");
 }
 
+function intakeBidSummary(item) {
+  const summary = item.summary || "";
+  if (item.type !== "RDO Line") return summary;
+  const line = rdoLines.find((entry) => String(entry.line) === String(item.line) && lineForArea(entry, item.area));
+  const pattern = String(line?.pattern || "").trim();
+  if (!pattern) return summary;
+  const label = `Line ${item.line}`;
+  if (summary.endsWith(label)) return `${summary} ${pattern}`;
+  return summary.replace(`${label} ·`, `${label} ${pattern} ·`);
+}
+
 function submissionRoleLabel(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "admin" ? "admin" : ["intake", "intake rep"].includes(normalized) ? "intake rep" : "user";
@@ -15663,8 +15682,6 @@ function renderIntakeQueueWithCache() {
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
-  const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
-  if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
@@ -15676,7 +15693,7 @@ function renderIntakeQueueWithCache() {
           <div class="intake-card-name-row">
             <h3>${item.name} · ${item.initials}</h3>
           </div>
-          <p>${escapeHtml(item.summary)}</p>
+          <p>${escapeHtml(intakeBidSummary(item))}</p>
           ${renderIntakeChangeHistory(item)}
           ${renderIntakeGroupDates(item, canReview)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
@@ -15698,7 +15715,8 @@ function renderIntakeQueueWithCache() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "RDO Line" || item.status !== "Approved" || hasSystemAdminAccess()) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
+          ${canReview && item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess() ? '<small>You do not have permission to edit RDO lines. Contact a system administrator.</small>' : ""}
           ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
           ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
@@ -15782,7 +15800,6 @@ function openIntakeItemFromAlertWithCache(itemId) {
   if (!groupedItem) return;
 
   activeIntakeDetailId = groupedItem.id;
-  alertFocusedIntakeItemId = groupedItem.id;
   activeOverrideId = null;
   activeDenialId = null;
   intakeSearchQuery = "";
@@ -15912,7 +15929,7 @@ function biddingExportRows() {
       item.initials,
       item.bidAs,
       item.status,
-      item.summary,
+      intakeBidSummary(item),
       biddingExportActionBy(item),
       item.approvedAt || item.deniedAt || item.submittedAt || "",
     ]);
@@ -17692,7 +17709,6 @@ document.addEventListener("change", async (event) => {
   const intakeSortControl = event.target.closest("[data-intake-sort]");
   if (intakeSortControl) {
     intakeSort = intakeSortControl.value === "entered" ? "entered" : "approved";
-    alertFocusedIntakeItemId = "";
     renderIntakeQueue();
     return;
   }
