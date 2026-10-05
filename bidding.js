@@ -4919,14 +4919,14 @@ async function approveIntakeItem(id) {
     }
     item.glLineTypeVerified = true;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
-    item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup && !["A", "B", "C"].includes(item.fatigueGroup)) {
+    item.reviewNote = "Choose fatigue group A, B, C, or No preference before approving this bid.";
     activeOverrideId = id;
     renderApp();
     setPage("intake");
     return;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup) {
     const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
     if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
       item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;

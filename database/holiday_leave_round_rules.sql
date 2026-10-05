@@ -1214,10 +1214,10 @@ begin
       if line_row.status <> 'open' and line_row.assigned_bidder_id is distinct from target.id then
         raise exception 'RDO line % is already assigned to another bidder.', line_row.line_code;
       end if;
-      requested_group := coalesce(override_payload->>'fatigueGroup', submission.payload->>'fatigueGroup');
-      if requested_group not in ('A', 'B', 'C') then raise exception 'A valid fatigue group is required.'; end if;
+      requested_group := nullif(trim(coalesce(override_payload->>'fatigueGroup', submission.payload->>'fatigueGroup', '')), '');
+      if requested_group is not null and requested_group not in ('A', 'B', 'C') then raise exception 'Fatigue group must be A, B, or C.'; end if;
 
-      if line_row.line_type = 'CPC' then
+      if requested_group is not null and line_row.line_type = 'CPC' then
         select greatest(1, floor(count(*)::numeric / 3)::integer) into area_max
         from public.rdo_lines rl where rl.bid_year_id = submission.bid_year_id
           and rl.area_id = target.area_id and rl.line_type = 'CPC';
