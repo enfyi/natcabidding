@@ -1522,45 +1522,50 @@ function roundWindowsUncached(roundNumber, area = currentViewArea()) {
     .filter(Boolean);
 }
 
-function areaBidRoundState(date = new Date(), area = currentViewArea()) {
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  for (let round = 1; round <= roundCount; round += 1) {
-    const windows = roundWindows(round, area);
-    const activeWindow = windows.find((window) => date >= window.start && date < window.end);
-    if (activeWindow) {
-      return {
-        phase: "open",
-        round,
-        activeRank: activeWindow.rank,
-        startsAt: activeWindow.start,
-        endsAt: activeWindow.end,
-      };
-    }
+function allAreaRoundWindows(roundNumber) {
+  return cachedLeaveRead(JSON.stringify(["allAreaRoundWindows", roundNumber]), () => (
+    ZLA_AREAS.flatMap((area) => roundWindows(roundNumber, area))
+  ));
+}
 
-    const roundEnd = windows.reduce((latest, window) => (window.end > latest ? window.end : latest), new Date(0));
-    const validationEndsAt = new Date(roundEnd.getTime() + ROUND_VALIDATION_DURATION_MS);
-    if (date >= roundEnd && date < validationEndsAt) {
-      return {
-        phase: "validation",
-        round,
-        validationEndsAt,
-      };
-    }
+function globalBidRoundBounds(round) {
+  const windows = allAreaRoundWindows(round);
+  if (!windows.length) return null;
+  return {
+    round,
+    startsAt: windows.reduce((earliest, window) => window.start < earliest ? window.start : earliest, windows[0].start),
+    endsAt: windows.reduce((latest, window) => window.end > latest ? window.end : latest, windows[0].end),
+  };
+}
+
+function globalBidRoundSchedule() {
+  const roundCount = Math.max(...ZLA_AREAS.map((area) => roundDateBlocksForArea(area)[0]?.length || 0));
+  return Array.from({ length: roundCount }, (_, index) => globalBidRoundBounds(index + 1)).filter(Boolean);
+}
+
+function areaBidRoundState(date = new Date(), area = currentViewArea()) {
+  const schedule = globalBidRoundSchedule();
+  // A round stays open through gaps and overnight until the final ZLA window ends.
+  const openRound = schedule.find(({ startsAt, endsAt }) => date >= startsAt && date < endsAt);
+  if (openRound) {
+    const activeWindow = roundWindows(openRound.round, area)
+      .find((window) => date >= window.start && date < window.end);
+    return { phase: "open", ...openRound, activeRank: activeWindow?.rank ?? null };
   }
 
+  // An earlier round's validation must never hide a newly opened round.
+  for (const { round, endsAt } of schedule) {
+    const validationEndsAt = new Date(endsAt.getTime() + ROUND_VALIDATION_DURATION_MS);
+    if (date >= endsAt && date < validationEndsAt) {
+      return { phase: "validation", round, validationEndsAt };
+    }
+  }
   return null;
 }
 
-function openAreaBidRound(date = new Date(), area = currentViewArea()) {
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  for (let round = 1; round <= roundCount; round += 1) {
-    const windows = roundWindows(round, area);
-    if (!windows.length) continue;
-    const startsAt = windows.reduce((earliest, window) => window.start < earliest ? window.start : earliest, windows[0].start);
-    const endsAt = windows.reduce((latest, window) => window.end > latest ? window.end : latest, windows[0].end);
-    if (date >= startsAt && date < endsAt) return round;
-  }
-  return null;
+function openAreaBidRound(date = new Date(), _area = currentViewArea()) {
+  return globalBidRoundSchedule()
+    .find(({ startsAt, endsAt }) => date >= startsAt && date < endsAt)?.round ?? null;
 }
 
 function downloadBidWindowsIcs(rank = null) {
@@ -2688,7 +2693,7 @@ function renderManualBidPanel(panel) {
   const submitButton = panel.querySelector("[data-manual-bid-submit]");
   if (submitButton) {
     submitButton.disabled = !openRound;
-    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open for this area.";
+    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open across ZLA.";
   }
 
   const controllerSearch = panel.querySelector("[data-manual-controller-search]");
@@ -2815,7 +2820,7 @@ function renderManualBidPanel(panel) {
     });
     roundSelect.value = openRound ? String(openRound) : "";
     roundSelect.disabled = !openRound;
-    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open for this area.";
+    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open across ZLA.";
   }
   if (daysInput) {
     const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
@@ -2834,7 +2839,7 @@ function renderManualBidEntry() {
 async function submitManualRdoBid(panel, person, area) {
   const openRound = openAreaBidRound(new Date(), area);
   if (!openRound) {
-    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
+    setManualBidStatus(panel, "No bidding round is currently open across ZLA.", "error");
     return;
   }
   const lineId = panel.querySelector("[data-manual-rdo-line]")?.value;
@@ -2974,11 +2979,11 @@ async function submitManualLeaveBid(panel, person, area) {
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const openRound = openAreaBidRound(new Date(), area);
   if (!openRound) {
-    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
+    setManualBidStatus(panel, "No bidding round is currently open across ZLA.", "error");
     return;
   }
   if (round !== openRound) {
-    setManualBidStatus(panel, `Round ${round} is closed. Only Round ${openRound} can accept bids for ${area}.`, "error");
+    setManualBidStatus(panel, `Round ${round} is closed. Only Round ${openRound} is open across ZLA.`, "error");
     return;
   }
   const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
@@ -8821,7 +8826,8 @@ function updateBidWindowWithCache(force = false) {
   const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
   const testRound = activeTestBidRound();
-  const currentRound = testRound || personalBidWindow?.round || latestAreaRound(now, roundState);
+  const currentRound = testRound || latestAreaRound(now, roundState);
+  const personalRound = testRound || personalBidWindow?.round || currentRound;
   const viewingHomeArea = isViewingHomeArea();
   const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
@@ -8830,9 +8836,9 @@ function updateBidWindowWithCache(force = false) {
   const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
-  const areaRoundOpen = Boolean(activePerson) && !isValidationPeriod;
+  const areaRoundOpen = roundState?.phase === "open";
   const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
-  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen;
+  const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen && Boolean(activePerson);
   const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
   const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
@@ -8842,6 +8848,8 @@ function updateBidWindowWithCache(force = false) {
         ? formatDuration(roundState.validationEndsAt - now)
       : showCurrentBidder
         ? `#${activePerson.rank} / ${currentUserBidderCount(currentViewArea())}`
+        : areaRoundOpen
+          ? formatDuration(roundState.endsAt - now)
         : "Closed";
   const countdownLabel = pilotState.database ? "Pilot Bidding" : isOpen
       ? "Window Closes In"
@@ -8851,8 +8859,10 @@ function updateBidWindowWithCache(force = false) {
         ? "Validation Ends In"
       : showCurrentBidder
         ? "Currently Bidding"
+        : areaRoundOpen
+          ? "Round Closes In"
         : "Window Status";
-  const currentRoundRule = roundRuleForRound(currentRound);
+  const currentRoundRule = roundRuleForRound(personalRound);
   const pendingRequest = pendingCurrentUserRdoRequest();
   const hasRdoBid = currentUserHasRdoRequestForLeave();
   const rdoChangeError = rdoChangeWindowErrorMessage(now);
@@ -8877,6 +8887,7 @@ function updateBidWindowWithCache(force = false) {
     currentRound,
     roundState?.phase || "closed",
     roundState?.activeRank || null,
+    personalRound,
     personalBidWindow?.start?.getTime() || null,
     personalBidWindow?.end?.getTime() || null,
     viewingHomeArea,
@@ -8925,15 +8936,15 @@ function updateBidWindowWithCache(force = false) {
   setText("[data-bid-window-countdown-label]", countdownLabel);
   setText("[data-bid-window-close]", personalBidWindow ? "Scheduled" : "Not scheduled");
   setText("[data-bid-window-range]", personalBidWindow ? formatBidWindowStart(personalBidWindow.start) : "Not scheduled");
-  setText("[data-next-bid-window-round]", isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
-  setText("[data-next-bid-window-rule-round]", `Round ${currentRound}`);
+  setText("[data-next-bid-window-round]", personalBidWindow ? `Round ${personalRound}` : isValidationPeriod ? `Round ${currentRound} Validation` : `Round ${currentRound}`);
+  setText("[data-next-bid-window-rule-round]", `Round ${personalRound}`);
   setText("[data-next-bid-window-rule]", currentRoundRule.label);
   setText("[data-next-bid-window-rule-detail]", currentRoundRule.detail);
   setText(
     "[data-current-bidder]",
     isValidationPeriod
       ? `Round ${currentRound} validation period`
-      : areaRoundOpen && activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : "Closed"
+      : areaRoundOpen ? activePerson ? `Currently Bidding: Seniority #${activePerson.rank} (${activePerson.initials})` : `Round ${currentRound} open · No current bidder in this area` : "Closed"
   );
   setText("[data-current-round]", `Round ${currentRound}`);
   renderRoundRuleSummary(now, roundState);
@@ -10365,7 +10376,9 @@ function renderRoundRuleSummary(date = new Date(), roundState = areaBidRoundStat
     : roundState?.phase === "validation"
     ? "Validation period is active. No bids may be entered."
     : roundState?.phase === "open"
-      ? `Currently bidding: seniority #${roundState.activeRank}.`
+      ? Number.isFinite(roundState.activeRank)
+        ? `Currently bidding in ${currentViewArea()}: seniority #${roundState.activeRank}. The round remains open through the final BUE window across all areas.`
+        : `Round ${roundState.round} is open across all areas through the final BUE window.`
       : "Bidding is closed until the next scheduled round window.";
 
   setText("[data-round-rule-heading]", `Round ${round} Rules`);

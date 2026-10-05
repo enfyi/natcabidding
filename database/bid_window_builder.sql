@@ -205,6 +205,15 @@ begin
       slot_start_time := slot_start_time + make_interval(mins => requested_window_minutes);
     end loop;
 
+    select min(bw.opens_at), max(bw.closes_at)
+    into round_first_window_at, round_last_window_at
+    from public.bid_windows bw
+    join public.bidders b on b.id = bw.bidder_id
+    where bw.bid_year_id = target_bid_year_id
+      and bw.round_number = round_number_value
+      and b.active
+      and b.bid_role not in ('ADM', 'NB');
+
     insert into public.bid_rounds (
       bid_year_id,
       round_number,

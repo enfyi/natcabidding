@@ -226,7 +226,7 @@ begin
      and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
     error_messages := array_append(
       error_messages,
-      format('Round %s is not currently open for this area. Closed rounds cannot accept bids.', batch_round)
+      format('Round %s is not currently open across ZLA. Closed rounds cannot accept bids.', batch_round)
     );
   end if;
 
