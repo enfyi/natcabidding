@@ -169,7 +169,11 @@ Log, but cannot call the protected email endpoint.
 live `bid_windows` rows:
 
 - 15 minutes before a bidder's window opens.
-- 30 minutes before a bidder's window closes.
+- 30 minutes before a bidder's window closes, unless they already have approved
+  leave for that bid year and round (also checked for queued retries).
+
+For existing installations, apply `database/skip_approved_leave_reminders.sql`
+to update this rule.
 
 Supabase Cron invokes `/api/cron/bid-window-reminders` once per minute. Store the
 same random value (at least 32 characters) as `BID_REMINDER_CRON_SECRET` in Vercel
