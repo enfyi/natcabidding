@@ -5577,8 +5577,8 @@ async function saveSupabaseApprovedRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
-  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
-    item.reviewNote = "You do not have permission to edit RDO lines. Contact a system administrator.";
+  if (item.type === "RDO Line" && !hasIntakeAccess()) {
+    item.reviewNote = "Active intake access is required to edit RDO bids.";
     activeOverrideId = null;
     renderIntakeQueue();
     return;
@@ -5586,6 +5586,12 @@ async function saveIntakeOverride(id) {
   if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
     item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
     activeOverrideId = null;
+    renderIntakeQueue();
+    return;
+  }
+
+  if (item.type === "RDO Line" && !supabaseState.connected) {
+    item.reviewNote = "The RDO edit could not reach the database. Check the connection and try again.";
     renderIntakeQueue();
     return;
   }
@@ -14951,8 +14957,8 @@ async function resolveHelpThread() {
 
 function renderOverrideEditor(item) {
   if (!item) return "";
-  if (item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess()) {
-    return '<p class="override-warning">You do not have permission to edit RDO lines. Contact a system administrator.</p>';
+  if (item.type === "RDO Line" && !hasIntakeAccess()) {
+    return '<p class="override-warning">Active intake access is required to edit RDO bids.</p>';
   }
   const pending = item.status === "Pending";
   const bidderIdentity = `
@@ -15816,8 +15822,7 @@ function renderIntakeQueueWithCache() {
             <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
-          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "RDO Line" || item.status !== "Approved" || hasSystemAdminAccess()) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
-          ${canReview && item.type === "RDO Line" && item.status === "Approved" && !hasSystemAdminAccess() ? '<small>You do not have permission to edit RDO lines. Contact a system administrator.</small>' : ""}
+          ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
           ${canReview && item.members && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small" type="button" data-intake-manage-leave="${item.id}">Edit Dates</button>` : ""}
           ${canReview && item.type === "Leave" && item.status === "Approved" && intakeLeaveRoundIsOpen(item) ? `<button class="secondary-action small danger" type="button" data-intake-remove-leave="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>${intakeLeaveRemovalPendingId === item.id ? "Removing…" : "Remove Bid"}</button>` : ""}
           ${item.type === "Leave" && item.status === "Approved" && !intakeLeaveRoundIsOpen(item) ? `<small>Round ${intakeItemRound(item)} closed · dates and removal locked</small>` : ""}
