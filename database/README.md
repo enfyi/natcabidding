@@ -47,8 +47,24 @@ base schema, then run `database/fatigue_group_balancing.sql` before running or
 re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
-`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
-preflight migration after either script that replaces the leave submission
+`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`.
+Reusable SQL installers call the shared fatigue helper directly, including the
+submission, review, and admin bidder editor definitions. Install
+`database/fatigue_group_balancing.sql` before running those installers.
+For existing installations or replayed historical migrations, run
+`database/fatigue_capacity_sync.sql` to upgrade legacy submission and review
+checks without replacing their other deployed bidding logic. The sync script also upgrades the legacy admin bidder editor in place. The browser and database then allow balanced
+remainders (for example, four lines split 2/1/1) using both area and RDO-set limits.
+Install `database/manual_fatigue_override.sql` after the fatigue helper and
+capacity sync. This installs the staff-only manual override RPC, its private
+authorization records, and upgrades the deployed review function in place.
+Reusable review installers also require this script's private helper. Only
+active `intake` and `admin` accounts can create overrides. An override bypasses
+fatigue capacity only for the saved submission, line, and group; all other
+submission and approval validation remains enforced. Entry and review are
+audited. Browser-supplied override flags do not authorize a capacity bypass.
+
+Keep the preflight migration after either script that replaces the leave submission
 function so its transactional wrapper remains installed. Intake can designate a controller before the
 controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
 their account and audit history without taking the source line. Their ghost
@@ -197,6 +213,21 @@ also supporting the older initials-based payload during deployment rollout.
 When seniority changes, draft and open bid-window times stay with their rank and
 are reassigned to every bidder affected by the move in the same transaction.
 
+For an existing installation using the older roster-save helper, apply
+`supabase/migrations/20260929010000_sync_bid_windows_with_seniority.sql`.
+The browser already calls `admin_save_bidder_roster_rows`; this migration routes
+that call through the atomic window reassignment helper. No browser deployment
+is required to activate the change.
+
+Production deployment verified on October 2, 2026:
+- Applied the seniority/window synchronization migration to ZLA Bidding Website.
+- Corrected Area B ranks 24 and 25 in all four rounds (eight window assignments),
+  preserving window IDs, start/end times, and the current seniority order.
+- Tested a further 24/25 reorder in a rolled-back transaction: all eight windows
+  moved to the new rank holders while preserving the original two-hour slots.
+- Confirmed the restored production roster assigns rank 24 the earlier window
+  and rank 25 the later window in every round.
+
 Run `database/roster_bid_window_sync.sql` after the existing admin roster helpers.
 The roster editor then saves seniority changes and reassigns every affected
 draft/open bid-year time slot to the BUE who occupies that seniority rank in one
@@ -297,3 +328,5 @@ event for the completed schedule.
 Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
 data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed
 `@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
+
+The combined migration `supabase/migrations/20261004224619_fatigue_group_manual_round_down_fix.sql` installs both fatigue fixes while preserving each environment's deployed RPC logic. Run `scripts/test-manual-fatigue-override.sql` for rollback-only database verification.

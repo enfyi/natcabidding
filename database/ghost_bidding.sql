@@ -64,7 +64,7 @@ using (
             or exists (
               select 1 from public.intake_schedules schedule
               where schedule.intake_user_id = actor.id
-                and now() between schedule.starts_at - interval '15 minutes' and schedule.ends_at
+                and now() between schedule.starts_at - interval '60 minutes' and schedule.ends_at
             )
           )
       )
@@ -155,7 +155,7 @@ as $$
                 or exists (
                   select 1 from public.intake_schedules schedule
                   where schedule.intake_user_id = actor.id
-                    and now() between schedule.starts_at - interval '15 minutes' and schedule.ends_at
+                    and now() between schedule.starts_at - interval '60 minutes' and schedule.ends_at
                 )
               )
             )
@@ -193,7 +193,7 @@ begin
     or exists (
       select 1 from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() between schedule.starts_at - interval '15 minutes' and schedule.ends_at
+        and now() between schedule.starts_at - interval '60 minutes' and schedule.ends_at
     )
   ) then
     raise exception 'Bidding reviewer access is required.';

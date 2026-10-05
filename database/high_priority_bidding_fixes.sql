@@ -510,7 +510,7 @@ begin
 
       if line_row.line_type in ('CPC', 'DEV') and not private.fatigue_group_is_available(
         submission.bid_year_id, target.area_id, line_row.id, requested_group, target.id
-      ) then
+      ) and not private.rdo_fatigue_override_authorized(submission.id, line_row.id, requested_group) then
         raise exception 'Fatigue group % is full for this area or RDO set.', requested_group;
       end if;
 
