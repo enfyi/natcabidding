@@ -15056,11 +15056,14 @@ function intakeSortTimestamp(item, field) {
 }
 
 function compareIntakeItems(left, right) {
-  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
-  if (pendingDifference) return pendingDifference;
   const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
   if (intakeSort === "entered") return enteredDifference;
   return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
+}
+
+function compareIntakeActionItems(left, right) {
+  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
+  return pendingDifference || compareIntakeItems(left, right);
 }
 
 function syncIntakeSearchControls() {
@@ -15688,7 +15691,7 @@ function renderIntakeQueueWithCache() {
   const visibleItems = canReview
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
-  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeActionItems);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
