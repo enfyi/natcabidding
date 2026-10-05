@@ -16115,6 +16115,7 @@ function renderMemberPageContent(pageName) {
       syncRdoFilterControls();
       renderRdoLines();
     }
+    if (["dashboard", "leave", "calendar"].includes(pageName)) renderMemberLeaveContent(pageName);
     if (pageName === "leave") renderSubmittedLeaveManager();
     if (pageName === "seniority") renderSeniority();
     if (pageName === "intake-schedule") renderIntakeSchedule();
@@ -16133,6 +16134,22 @@ function renderMemberPageContent(pageName) {
   });
 }
 
+// Rebuild personal leave controls only when their page is visible. Admin and
+// intake saves must not calculate annual leave budgets for hidden pages.
+function renderMemberLeaveContent(pageName) {
+  if (pageName === "dashboard" || pageName === "leave") {
+    syncLeaveBuilderInputs();
+    renderLeaveRows(pageName === "dashboard" ? "dashboard-leave-rows" : "leave-page-rows");
+    renderLeaveAllowanceSummary();
+    renderLeaveBucketCards();
+  }
+  if (pageName === "leave") {
+    renderLeaveDraftQueue();
+    renderLeaveDatePicker();
+  }
+  if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
+}
+
 function renderApp() {
   return withLeaveReadCache(() => renderAppWithCache());
 }
@@ -16148,16 +16165,10 @@ function renderAppWithCache() {
 
   seniority = buildSeniority();
   renderCurrentUser();
+  // Mark hidden calendars stale so navigation renders the latest saved bids.
+  calendarRenderRevision += 1;
   renderCalendars({ includePublic: false });
-  syncLeaveBuilderInputs();
   updateSelectedLine();
-  renderLeaveRows("dashboard-leave-rows");
-  renderLeaveRows("leave-page-rows");
-  renderLeaveDraftQueue();
-  renderLeaveAllowanceSummary();
-  renderLeaveDatePicker();
-  renderLeaveBucketCards();
-  renderLeaveSlotBoard();
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
