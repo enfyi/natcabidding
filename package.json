@@ -17,7 +17,7 @@
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs",
     "test:manual-leave-input-performance": "node scripts/test-manual-leave-input-performance.mjs",
-    "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs",
+    "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs && node scripts/test-live-intake-queue.mjs",
     "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
     "test:alert-review-performance": "node scripts/test-alert-review-performance.mjs",
     "test:approval-background-refresh": "node scripts/test-approval-background-refresh.mjs",

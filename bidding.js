@@ -14286,8 +14286,27 @@ let alertRefreshTimer = null;
 let alertRealtimeChannel = null;
 let alertRealtimeUserId = "";
 let lastAlertDatabaseSnapshot = "";
+let liveIntakeQueueRenderPending = false;
+let liveIntakeQueueRenderTimer = null;
+
+function renderLiveIntakeQueue() {
+  clearTimeout(liveIntakeQueueRenderTimer);
+  liveIntakeQueueRenderTimer = null;
+  if (!liveIntakeQueueRenderPending) return;
+  if (!hasIntakeAccess() || !document.querySelector('.page.active[data-page-panel="intake"]')) return;
+  if (intakeDecisionPending || hasActiveIntakeEditing()) {
+    liveIntakeQueueRenderTimer = setTimeout(renderLiveIntakeQueue, 350);
+    return;
+  }
+  liveIntakeQueueRenderPending = false;
+  renderIntakeQueue();
+  renderIntakeBidderSummary();
+}
 
 function stopLiveAlertUpdates() {
+  clearTimeout(liveIntakeQueueRenderTimer);
+  liveIntakeQueueRenderTimer = null;
+  liveIntakeQueueRenderPending = false;
   clearTimeout(alertRefreshTimer);
   alertRefreshTimer = null;
   if (alertRealtimeChannel) void supabaseClient()?.removeChannel(alertRealtimeChannel);
@@ -14328,6 +14347,7 @@ async function refreshLiveAlerts() {
   alertRefreshPending = true;
   const userId = supabaseState.authUserId;
   const previousData = JSON.stringify([intakeQueue, helpThreads]);
+  const previousQueue = JSON.stringify(intakeQueue);
   try {
     const requester = currentHelpRequester();
     const [bidding, leave, help] = await Promise.all([
@@ -14362,7 +14382,13 @@ async function refreshLiveAlerts() {
     }
     if (!help.error) helpThreads = (help.data || []).map(helpThreadFromRpc);
     if (!bidding.error && !leave.error && !help.error && !areas.error) lastAlertDatabaseSnapshot = snapshot;
-    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) renderAlerts();
+    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) {
+      renderAlerts();
+      if (JSON.stringify(intakeQueue) !== previousQueue) {
+        liveIntakeQueueRenderPending = true;
+        renderLiveIntakeQueue();
+      }
+    }
   } catch (error) {
     console.warn("Alert refresh unavailable:", error.message || error);
   } finally {
