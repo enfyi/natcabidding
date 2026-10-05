@@ -1892,6 +1892,7 @@ const intakeFilters = {
   area: "all",
   round: "all",
 };
+let intakeSort = "approved";
 let helpPanelMode = "user";
 let activeHelpThreadId = "help-oc-1";
 let helpThreads = [
@@ -14782,7 +14783,22 @@ function intakeItemMatchesFilters(item) {
   return true;
 }
 
+function intakeSortTimestamp(item, field) {
+  return Math.max(0, ...(item.members || [item]).map((entry) => {
+    const timestamp = Date.parse(entry[field] || "");
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }));
+}
+
+function compareIntakeItems(left, right) {
+  const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
+  if (intakeSort === "entered") return enteredDifference;
+  return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
+}
+
 function syncIntakeSearchControls() {
+  const sort = document.querySelector("[data-intake-sort]");
+  if (sort) sort.value = intakeSort;
   const search = document.querySelector("[data-intake-search]");
   if (search && search.value !== intakeSearchQuery) search.value = intakeSearchQuery;
 
@@ -15287,6 +15303,67 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   setPage("intake");
 }
 
+let intakeQueueRefreshPending = false;
+
+async function refreshIntakeQueue() {
+  if (intakeQueueRefreshPending || !hasIntakeAccess()) return;
+  const button = document.querySelector("[data-intake-refresh]");
+  const status = document.querySelector("[data-intake-refresh-status]");
+  const userId = supabaseState.authUserId;
+  const bidYear = BID_YEAR;
+  const previousQueue = JSON.stringify(intakeQueue);
+  intakeQueueRefreshPending = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+  }
+  if (status) {
+    status.hidden = false;
+    status.textContent = "Loading the latest bids…";
+  }
+  try {
+    const client = supabaseClient();
+    if (!client || !userId || !supabaseState.connected || supabaseState.loading) {
+      throw new Error("Queue unavailable. Check your connection and try again.");
+    }
+    const [bidding, leave, areas] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: bidYear }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: bidYear }),
+      client.from("areas").select("id,name"),
+    ]);
+    for (const result of [bidding, leave, areas]) {
+      if (result.error) throw result.error;
+    }
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== bidYear || supabaseState.loading
+      || !hasIntakeAccess() || JSON.stringify(intakeQueue) !== previousQueue) {
+      throw new Error("The queue changed while refreshing. Please try again.");
+    }
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+      .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+    inferRdoBidChanges(rdoItems);
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    intakeQueue.unshift(...rdoItems);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    renderIntakeQueue();
+    renderAlerts();
+    if (status) status.textContent = "Queue updated.";
+  } catch (error) {
+    if (status) status.textContent = `Could not refresh the queue. ${error.message || "Please try again."}`;
+  } finally {
+    intakeQueueRefreshPending = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Refresh Queue";
+    }
+  }
+}
+
 function renderIntakeQueue() {
   return withLeaveReadCache(() => renderIntakeQueueWithCache());
 }
@@ -15301,7 +15378,7 @@ function renderIntakeQueueWithCache() {
   const visibleItems = canReview
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
-  const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
   const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
   if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
@@ -16202,6 +16279,10 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-refresh]")) {
+    await refreshIntakeQueue();
+    return;
+  }
   // Navigation must stay available even when bidding data cannot load.
   const pageNavigation = event.target.closest("[data-page]");
   if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
@@ -17286,6 +17367,14 @@ document.addEventListener("change", async (event) => {
     syncBidWindowBuilder();
     renderBidWindowBuilderPreview();
     setBidWindowBuilderStatus("Settings changed. Build a new preview.");
+    return;
+  }
+
+  const intakeSortControl = event.target.closest("[data-intake-sort]");
+  if (intakeSortControl) {
+    intakeSort = intakeSortControl.value === "entered" ? "entered" : "approved";
+    alertFocusedIntakeItemId = "";
+    renderIntakeQueue();
     return;
   }
 
