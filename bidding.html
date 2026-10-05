@@ -960,6 +960,10 @@
                 </div>
                 <div class="intake-search-tools" aria-label="Search intake queue">
                   <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
+                  <select data-intake-sort aria-label="Sort intake queue">
+                    <option value="approved">Time approved — newest first</option>
+                    <option value="entered">Time entered — newest first</option>
+                  </select>
                   <div class="intake-filter-row">
                     <select data-intake-filter="status" aria-label="Filter intake by status">
                       <option value="all">All Statuses</option>
