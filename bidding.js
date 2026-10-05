@@ -13182,8 +13182,11 @@ function renderAdminConsole() {
   syncIntakeTeamControls();
 }
 
+let biddingBackupBusy = false;
+
 function renderAdminToolsPage() {
   if (!hasSystemAdminAccess()) return;
+  void loadBiddingBackups();
   renderRuleEditors();
   renderEmailLog();
   syncBidWindowTestingControls();
@@ -17623,3 +17626,95 @@ window.NATCA_BIDDING_READY = true;
 setInterval(() => {
   if (document.visibilityState === "visible") void refreshPilotRounds();
 }, 10000);
+
+
+function backupStatus(message) {
+  const target = document.querySelector('[data-backup-status]');
+  if (target) target.textContent = message;
+}
+function backupClient() {
+  if (!hasSystemAdminAccess() || !supabaseClient()) throw new Error('Sign in as a system administrator to manage backups.');
+  return supabaseClient();
+}
+async function loadBiddingBackups() {
+  if (biddingBackupBusy) return;
+  try {
+    const client = backupClient();
+    const schedule = await client.from('bidding_backup_schedule').select('*').eq('id', true).maybeSingle();
+    if (schedule.error) throw new Error('Backup setup is unavailable. Install database/bidding_backups.sql and enable Supabase Cron.');
+    const form = document.querySelector('[data-backup-form]');
+    if (schedule.data && form) {
+      for (const key of ['start_date', 'end_date', 'start_time', 'end_time', 'interval_minutes']) form.elements.namedItem(key).value = schedule.data[key];
+      form.elements.namedItem('enabled').checked = schedule.data.enabled;
+      form.elements.namedItem('retention_days').value = schedule.data.retention_days ?? '';
+    }
+    await refreshLatestBiddingBackup();
+  } catch (error) { backupStatus(error.message); }
+}
+async function refreshLatestBiddingBackup() {
+  const result = await backupClient().from('bidding_backups').select('id,created_at,source').order('id', { ascending: false }).limit(1);
+  if (result.error) throw result.error;
+  const latest = result.data?.[0];
+  document.querySelector('[data-backup-latest]').textContent = latest
+    ? `Latest backup: ${new Date(latest.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} Pacific (${latest.source}).`
+    : 'No backups saved yet.';
+  document.querySelector('[data-backup-download]').disabled = !latest;
+}
+async function performBiddingBackupAction(action) {
+  if (biddingBackupBusy) return;
+  biddingBackupBusy = true;
+  const buttons = document.querySelectorAll('[data-backup-form] button, [data-backup-now], [data-backup-download]');
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const client = backupClient();
+    if (action === 'save') {
+      const form = document.querySelector('[data-backup-form]');
+      const values = Object.fromEntries(new FormData(form));
+      if (values.end_date < values.start_date || values.end_time < values.start_time) throw new Error('End date and daily end time must be on or after their start values.');
+      const interval = Number(values.interval_minutes);
+      if (!Number.isInteger(interval) || interval < 1 || interval > 10080) throw new Error('Choose an interval from 1 to 10080 minutes.');
+      const retention = String(values.retention_days || '').trim() === '' ? null : Number(values.retention_days);
+      if (retention !== null && (!Number.isInteger(retention) || retention < 1 || retention > 36500)) throw new Error('Choose a whole number of days from 1 to 36500, or leave blank to keep all backups.');
+      const result = await client.from('bidding_backup_schedule').upsert({
+        id: true, enabled: form.elements.namedItem('enabled').checked,
+        start_date: values.start_date, end_date: values.end_date,
+        start_time: values.start_time, end_time: values.end_time,
+        interval_minutes: interval, retention_days: retention, timezone: 'America/Los_Angeles',
+      });
+      if (result.error) throw result.error;
+      backupStatus('Backup schedule saved.');
+    } else if (action === 'now') {
+      backupStatus('Backing up now… Keep this page open until the backup finishes.');
+      const result = await client.rpc('backup_bidding_now');
+      if (result.error) throw result.error;
+      backupStatus('Backup completed and saved.');
+    } else {
+      backupStatus('Preparing backup download…');
+      const result = await client.from('bidding_backups').select('id,created_at,payload').order('id', { ascending: false }).limit(1);
+      if (result.error) throw result.error;
+      if (!result.data?.length) throw new Error('No backups saved yet.');
+      const backup = result.data[0];
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup.payload, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `zla-bidding-backup-${backup.id}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      backupStatus('Backup downloaded.');
+    }
+  } catch (error) { backupStatus(error.message || 'The backup operation failed.'); }
+  finally {
+    biddingBackupBusy = false;
+    buttons.forEach(button => { button.disabled = false; });
+    try { await refreshLatestBiddingBackup(); } catch (_) { /* Preserve the operation error. */ }
+  }
+}
+document.addEventListener('submit', event => {
+  if (!event.target.matches('[data-backup-form]')) return;
+  event.preventDefault();
+  void performBiddingBackupAction('save');
+});
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-backup-now]')) void performBiddingBackupAction('now');
+  if (event.target.closest('[data-backup-download]')) void performBiddingBackupAction('download');
+});
