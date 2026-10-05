@@ -143,3 +143,32 @@ assert.throws(() => batchContext.prepareManualLeaveEntries(batchPanel, batchPers
 ]), /up to 2 bid weeks/)
 
 console.log('Manual intake persistence regression checks passed.')
+
+// A manual save must render the authoritative charges and grouping immediately.
+const submitManualLeave = source.match(/async function submitManualLeaveBid\(panel, person, area\) \{[\s\S]*?\n\}/)?.[0]
+const saveEvents = []
+const savedLeaveContext = vm.createContext({
+  manualLeaveBatch: { key: '', entries: [] },
+  manualLeaveBatchKey: () => 'bidder-round-one',
+  manualLeaveRangeValue: () => 'June 7–11',
+  prepareManualLeaveEntries: () => ({ request: { range: 'June 7–11' }, requests: [{ days: 5 }] }),
+  setManualBidStatus: () => {},
+  saveSupabaseManualLeaveRequest: async () => { saveEvents.push('save'); return { submission_ids: ['saved'] } },
+  refreshBiddingAfterIntakeDecision: async () => {
+    saveEvents.push('refresh');
+    savedLeaveContext.intakeQueue = [{ days: 3, submissionBatchKey: 'saved-batch' }];
+  },
+  intakeQueue: [],
+  currentUser: { initials: 'ADMIN' },
+  logHistory: () => {}, queueBidSubmittedEmail: () => {},
+  renderApp: () => {
+    saveEvents.push('render');
+    assert.equal(savedLeaveContext.intakeQueue[0].days, 3);
+    assert.equal(savedLeaveContext.intakeQueue[0].submissionBatchKey, 'saved-batch');
+    assert.equal(savedLeaveContext.intakeQueue.length, 1);
+  },
+});
+vm.runInContext(submitManualLeave, savedLeaveContext);
+await savedLeaveContext.submitManualLeaveBid({ dataset: {}, querySelector: () => ({ value: '1' }) }, { initials: 'ME' }, 'Area A');
+assert.deepEqual(saveEvents, ['save', 'refresh', 'render']);
+console.log('PASS manual leave save reloads approved-RDO charges and batch metadata before rendering');
