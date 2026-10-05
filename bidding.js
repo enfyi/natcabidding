@@ -7759,15 +7759,18 @@ function upsertRdoSubmissionsFromDatabase(rows, areaById) {
 
 function inferRdoBidChanges(items) {
   items.forEach((item, itemIndex) => {
-    if (item.isChange || !["Pending", "Approved"].includes(item.status)) return;
+    if (item.originalBid || (!item.isChange && !["Pending", "Approved"].includes(item.status))) return;
+    const sameBidder = (candidate) => candidate.type === "RDO Line" && (item.bidderId && candidate.bidderId
+      ? item.bidderId === candidate.bidderId
+      : item.initials === candidate.initials && item.area === candidate.area);
+    const linkedOriginal = item.originalSubmissionId
+      ? items.find((candidate) => candidate !== item && sameBidder(candidate)
+        && candidate.supabaseSubmissionId === item.originalSubmissionId)
+      : null;
     const itemTime = Date.parse(item.submittedAt || "");
-    const original = items
+    const original = linkedOriginal || items
       .filter((candidate, candidateIndex) => {
-        if (candidate === item || candidate.status !== "Approved") return false;
-        const sameBidder = item.bidderId && candidate.bidderId
-          ? item.bidderId === candidate.bidderId
-          : item.initials === candidate.initials && item.area === candidate.area;
-        if (!sameBidder) return false;
+        if (candidate === item || candidate.status !== "Approved" || !sameBidder(candidate)) return false;
         const candidateTime = Date.parse(candidate.submittedAt || "");
         const submittedEarlier = Number.isFinite(itemTime) && Number.isFinite(candidateTime)
           ? candidateTime < itemTime
@@ -15178,8 +15181,23 @@ function renderIntakeDetailPanel(item, visibleItems) {
   `;
 }
 
+function rdoBidChangeDifferences(original, requested) {
+  if (!original) return [];
+  const fields = [
+    ["Line", (bid) => String(bid.line || bid.rdo_line_code || "—")],
+    ["Fatigue", (bid) => fatigueGroupPreferenceLabel(bid.fatigueGroup ?? bid.fatigue_group ?? "")],
+    ["Flex", (bid) => rdoBidPreferenceLabel(bid.flex)],
+    ["AWS", (bid) => rdoBidPreferenceLabel(bid.aws)],
+    ["Mid", (bid) => rdoBidPreferenceLabel(bid.mid)],
+  ];
+  return fields.flatMap(([label, value]) => value(original) === value(requested)
+    ? []
+    : [`${label}: ${value(original)} → ${value(requested)}`]);
+}
+
 function renderIntakeChangeHistory(item) {
   if (!item?.isChange) return "";
+  const differences = rdoBidChangeDifferences(item.originalBid, item);
   const source = item.changeSource === "intake"
     ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
     : item.changeSource === "bidder"
@@ -15189,7 +15207,8 @@ function renderIntakeChangeHistory(item) {
     <div class="intake-change-history">
       <strong>Bid change</strong>
       <span><b>Original:</b> ${escapeHtml(rdoBidSnapshotSummary(item.originalBid))}</span>
-      <span><b>Requested:</b> ${escapeHtml(item.summary || rdoBidSnapshotSummary(item))}</span>
+      <span><b>Requested:</b> ${escapeHtml(rdoBidSnapshotSummary(item))}</span>
+      ${differences.length ? `<span><b>Changed:</b> ${escapeHtml(differences.join(" · "))}</span>` : ""}
       <small>${escapeHtml(source)}</small>
     </div>
   `;
