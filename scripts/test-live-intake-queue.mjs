@@ -51,4 +51,25 @@ active = false;
 vm.runInContext('liveIntakeQueueRenderPending = true', context);
 context.renderLiveIntakeQueue();
 assert.equal(queueRenders, 2, 'Other pages are not redrawn');
+const target = { innerHTML: '' };
+const older = { id: 'reviewed', type: 'RDO Line', status: 'Pending', submittedAt: '2026-10-05T18:00:00Z' };
+const newer = { ...older, id: 'new-pending', submittedAt: '2026-10-05T19:00:00Z' };
+const sorted = vm.createContext({
+  intakeSort: 'entered', activeIntakeDetailId: older.id, activeOverrideId: null, activeDenialId: null,
+  document: { getElementById: id => id === 'intake-queue' ? target : null, querySelector: () => null },
+  syncIntakeSearchControls() {}, hasIntakeAccess: () => true,
+  groupedLeaveIntakeItems: () => sorted.intakeQueue,
+  intakeItemMatchesFilters: () => true,
+  renderIntakeDetailPanel: item => assert.equal(item.id, older.id, 'The reviewed bid stays selected'),
+  escapeHtml: value => value || '', bidTypeLabel: item => item.type,
+  renderIntakeChangeHistory: () => '', renderIntakeGroupDates: () => '', intakeSubmissionLabel: () => '',
+  intakeReviewItemById: () => null,
+  intakeQueue: [older],
+});
+vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'renderIntakeQueueWithCache'].map(fn).join('\n'), sorted);
+sorted.renderIntakeQueueWithCache();
+sorted.intakeQueue.push(newer);
+sorted.renderIntakeQueueWithCache();
+assert.ok(target.innerHTML.indexOf('data-intake-card="new-pending"') < target.innerHTML.indexOf('data-intake-card="reviewed"'),
+  'A new pending bid sorts above the bid currently under review');
 console.log('Live intake queue regression checks passed.');

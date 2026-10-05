@@ -1872,7 +1872,6 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
-let alertFocusedIntakeItemId = null;
 let intakeEditorReturnFocus = null;
 let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
@@ -15692,8 +15691,6 @@ function renderIntakeQueueWithCache() {
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
-  const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
-  if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
@@ -15811,7 +15808,6 @@ function openIntakeItemFromAlertWithCache(itemId) {
   if (!groupedItem) return;
 
   activeIntakeDetailId = groupedItem.id;
-  alertFocusedIntakeItemId = groupedItem.id;
   activeOverrideId = null;
   activeDenialId = null;
   intakeSearchQuery = "";
@@ -17721,7 +17717,6 @@ document.addEventListener("change", async (event) => {
   const intakeSortControl = event.target.closest("[data-intake-sort]");
   if (intakeSortControl) {
     intakeSort = intakeSortControl.value === "entered" ? "entered" : "approved";
-    alertFocusedIntakeItemId = "";
     renderIntakeQueue();
     return;
   }
