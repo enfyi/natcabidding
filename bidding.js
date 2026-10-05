@@ -7705,8 +7705,8 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const line = payload.rdo_line_code || payload.line || row.line || "";
   const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
   const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
-  const flex = payload.flex || "";
-  const aws = payload.aws || "";
+  const flex = payload.flex ?? "";
+  const aws = payload.aws ?? "";
   const mid = payload.mid || "";
   const round = Number(row.round_number || row.round || currentRoundNumber());
   const ghostBid = Boolean(row.is_ghost_bid || payload.ghostBid);
@@ -15605,8 +15605,13 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
 }
 
 function intakeBidSummary(item) {
-  const summary = item.summary || "";
+  let summary = item.summary || "";
   if (item.type !== "RDO Line") return summary;
+  summary = summary.replace(/\b(Flex|AWS)(?:\s+([^·]*?))?(?=\s*·|$)/g, (match, preference, displayed) => {
+    const value = item[preference.toLowerCase()] ?? displayed ?? "";
+    const enabled = value === true || ["yes", "true"].includes(String(value).trim().toLowerCase());
+    return `${preference} ${enabled ? "Yes" : "No"}${/\s$/.test(match) ? " " : ""}`;
+  });
   const line = rdoLines.find((entry) => String(entry.line) === String(item.line) && lineForArea(entry, item.area));
   const pattern = String(line?.pattern || "").trim();
   if (!pattern) return summary;
@@ -15631,9 +15636,9 @@ function intakeSubmissionLabel(item) {
 
 function intakeReviewerLabel(initials) {
   if (!initials) return "Unknown reviewer";
-  const person = bueRoster().find((entry) => entry.initials === initials);
-  const name = person ? `${person.firstName || ""} ${person.lastName || ""}`.trim() : "";
-  return name ? `${name} · ${initials}` : initials;
+  const entry = senioritySource.find((person) => person[3] === initials);
+  const role = entry ? seniorityEntryAppRole(entry) : currentUser?.initials === initials ? currentUser.role : "";
+  return `${role === "admin" ? "Admin" : "Intake Rep"} ${initials}`;
 }
 
 let intakeQueueRefreshPending = false;
