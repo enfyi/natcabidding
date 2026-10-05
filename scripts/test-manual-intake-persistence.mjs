@@ -5,9 +5,15 @@ import vm from 'node:vm'
 const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 
 assert.match(source, /async function submitManualRdoBid\(/)
+assert.match(source, /selectManualLeaveController\(person\.initials\);[\s\S]*renderApp\(\)/)
+assert.match(source, /controller: panel\.querySelector\("\[data-manual-bid-controller\]"\)\?\.value \|\| \(leavePanel && manualLeaveControllerInitials\)/)
 assert.match(source, /async function submitManualLeaveBid\(/)
 assert.match(source, /saveSupabaseManualRdoRequest\(request, person, area\)/)
-assert.match(source, /saveSupabaseManualLeaveRequest\(requests, person, area, notes\)/)
+assert.match(source, /saveSupabaseManualLeaveRequest\(requests, person, area\)/)
+assert.match(source, /const entries = manualLeaveBatch\.entries\.length/)
+assert.match(source, /prepareManualLeaveEntries\(panel, person, area, entries\)/)
+assert.match(source, /new Set\(rawDateKeys\)\.size !== rawDateKeys\.length/)
+assert.match(source, /requested_items: requestedItems/)
 assert.match(source, /target_initials: person\.initials,[\s\S]*target_area_name: area,[\s\S]*manual_entry: true/)
 assert.match(source, /request\.supabaseSubmissionId = savedSubmission\.submission_id/)
 assert.match(source, /item\.supabaseSubmissionId = savedBatch\.submission_ids\[index\]/)
@@ -18,6 +24,21 @@ assert.match(source, /Supabase did not return the saved manual leave submission/
 const manualRdoSave = source.match(/async function saveSupabaseManualRdoRequest\(request, person, area\) \{[\s\S]*?\n\}/)?.[0]
 assert.ok(manualRdoSave, 'Manual RDO submissions must use the database RPC')
 const submitted = []
+const selectLeaveController = source.match(/function selectManualLeaveController\(initials\) \{[\s\S]*?\n\}/)?.[0]
+assert.ok(selectLeaveController, 'RDO submission should preselect the same controller for leave')
+const leaveController = { value: '' }
+const leaveSearch = { value: 'previous search' }
+let leaveRenders = 0
+const leavePanel = { querySelector: (selector) => selector === '[data-manual-bid-controller]' ? leaveController : leaveSearch }
+const handoffContext = vm.createContext({
+  document: { querySelector: () => leavePanel },
+  renderManualBidPanel: () => { leaveRenders += 1 },
+})
+vm.runInContext(`let manualLeaveControllerInitials = ''; ${selectLeaveController}; selectManualLeaveController('TB')`, handoffContext)
+assert.equal(leaveController.value, 'TB')
+assert.equal(leaveSearch.value, '')
+assert.equal(leaveRenders, 1)
+assert.equal(vm.runInContext('manualLeaveControllerInitials', handoffContext), 'TB')
 const saveManualRdo = vm.runInNewContext(`${manualRdoSave}; saveSupabaseManualRdoRequest`, {
   supabaseClient: () => ({
     rpc: async (_name, payload) => {
@@ -73,5 +94,50 @@ assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
   ['2027-01-20', '2027-01-21'],
   ['2027-01-23', '2027-01-24'],
 ])
+
+const validationSource = source.match(/function manualLeaveValidationMessage\([^]*?\n\}/)?.[0]
+const prepareSource = source.match(/function prepareManualLeaveEntries\([^]*?\n\}/)?.[0]
+assert.ok(validationSource && prepareSource, 'Batch validation must remain available')
+const batchContext = vm.createContext({
+  BID_YEAR: 2027,
+  currentUser: { initials: 'IN' },
+  openAreaBidRound: () => batchContext.activeRound,
+  datesInLeaveRange: (range) => range.split(','),
+  invalidLeaveYearDateKeys: () => [],
+  leaveSlotDateKeys: (keys) => keys,
+  chargeableLeaveDatesForInitials: (range) => range.split(','),
+  contiguousLeaveDateRanges: (keys) => keys.map((key) => [key]),
+  roundOneWeekKeysForDateKeys: (keys) => [...new Set(keys.map((key) => key.slice(-2)))],
+  roundOneWeekKeySetForItems: (items) => new Set(items.flatMap((item) => item.dateKeys || [])),
+  roundOneWeekLimit: () => 2,
+  leaveRoundUsageForInitials: () => [],
+  leaveDayLimitForRound: () => 3,
+  leaveItemChargedDays: () => 0,
+  leaveAreaCapacityMessage: () => '',
+  formatDateTime: () => 'now',
+  controllerName: () => 'Test Bidder',
+  formatLeaveRangeFromKeys: (keys) => keys.join(','),
+  chargeableLeaveDateKeys: (keys) => keys,
+})
+vm.runInContext(`${validationSource}\n${prepareSource}`, batchContext)
+const batchPanel = { querySelector: () => ({ value: String(batchContext.activeRound) }) }
+const batchPerson = { initials: 'TB', bidAs: 'CPC', rank: 1 }
+batchContext.activeRound = 2
+const validBatch = batchContext.prepareManualLeaveEntries(batchPanel, batchPerson, 'Area A', [
+  { range: '2027-01-11', notes: 'first' },
+  { range: '2027-01-12', notes: 'second' },
+])
+assert.equal(validBatch.requests.length, 2)
+assert.deepEqual(validBatch.requests.map((item) => item.notes), ['first', 'second'])
+assert.throws(() => batchContext.prepareManualLeaveEntries(batchPanel, batchPerson, 'Area A', [
+  { range: '2027-01-11' }, { range: '2027-01-11' },
+]), /overlap/)
+assert.throws(() => batchContext.prepareManualLeaveEntries(batchPanel, batchPerson, 'Area A', [
+  { range: '2027-01-11,2027-01-12' }, { range: '2027-01-13,2027-01-14' },
+]), /up to 3 charged days/)
+batchContext.activeRound = 1
+assert.throws(() => batchContext.prepareManualLeaveEntries(batchPanel, batchPerson, 'Area A', [
+  { range: '2027-01-11' }, { range: '2027-01-12' }, { range: '2027-01-13' },
+]), /up to 2 bid weeks/)
 
 console.log('Manual intake persistence regression checks passed.')

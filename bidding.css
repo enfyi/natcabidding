@@ -6538,6 +6538,44 @@ tr.occupied-row .rdo-tag {
   width: 100%;
 }
 
+.manual-leave-batch-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.manual-leave-batch-actions button {
+  flex: 1;
+}
+
+.manual-leave-batch[hidden] {
+  display: none;
+}
+
+.manual-leave-batch {
+  margin-top: 16px;
+  border-top: 1px solid #d6e2ed;
+  padding-top: 12px;
+}
+
+.manual-leave-batch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #d6e2ed;
+  padding: 8px 0;
+}
+
+.manual-leave-batch-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .manual-leave-batch-actions { flex-direction: column; }
+}
+
 .manual-intake-toggle {
   display: flex;
   align-items: center;
@@ -12178,6 +12216,11 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 .bid-change-week-calendar button:disabled { opacity: .55; cursor: default; }
 .bid-change-week-calendar button:focus-visible { outline: 3px solid #235aa6; outline-offset: 3px; }
+
+.backup-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+.backup-fields label { display: grid; gap: 6px; }
+.backup-fields input { width: 100%; min-width: 0; }
+.backup-form { margin-bottom: 16px; }
 /* Admin bid-time workbook export */
 .bid-time-export-form {
   padding: 16px 0;

@@ -2760,6 +2760,19 @@ function manualBidPerson(panel) {
   return manualBidSelectedPerson(initials);
 }
 
+let manualLeaveControllerInitials = "";
+
+function selectManualLeaveController(initials) {
+  manualLeaveControllerInitials = initials;
+  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
+  if (!leavePanel) return;
+  const leaveController = leavePanel.querySelector("[data-manual-bid-controller]");
+  if (leaveController) leaveController.value = initials;
+  const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
+  if (leaveSearch) leaveSearch.value = "";
+  renderManualBidPanel(leavePanel);
+}
+
 function setManualBidStatus(panel, message, status = "info") {
   const target = panel?.querySelector("[data-manual-bid-status]");
   if (!target) return;
@@ -2883,8 +2896,9 @@ function updateManualLeaveDays(panel) {
 }
 
 function renderManualBidPanelWithCache(panel) {
+  const leavePanel = panel.classList.contains("manual-leave-request-card");
   const values = {
-    controller: panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials,
+    controller: panel.querySelector("[data-manual-bid-controller]")?.value || (leavePanel && manualLeaveControllerInitials) || currentUser.initials,
     type: panel.querySelector("[data-manual-bid-type]")?.value || "RDO Line",
     area: panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(),
     line: panel.querySelector("[data-manual-rdo-line]")?.value || selectedLineId,
@@ -3049,6 +3063,7 @@ function renderManualBidPanelWithCache(panel) {
   }
   const notesInput = panel.querySelector("[data-manual-leave-notes]");
   if (notesInput) notesInput.value = values.notes;
+  renderManualLeaveBatch(panel);
 }
 
 function renderManualBidEntry() {
@@ -3170,14 +3185,7 @@ async function submitManualRdoBid(panel, person, area) {
   queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
-  const leavePanel = document.querySelector(".manual-leave-request-card[data-manual-bid-panel]");
-  const leaveController = leavePanel?.querySelector("[data-manual-bid-controller]");
-  if (leaveController) {
-    const leaveSearch = leavePanel.querySelector("[data-manual-controller-search]");
-    if (leaveSearch) leaveSearch.value = "";
-    leaveController.innerHTML = manualBidControllerOptions(person.initials, "");
-    leaveController.value = person.initials;
-  }
+  selectManualLeaveController(person.initials);
   renderApp();
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
@@ -3206,41 +3214,57 @@ function manualLeaveValidationMessage({ person, round, days, weekKeys, requested
   return "";
 }
 
-async function submitManualLeaveBid(panel, person, area) {
-  const range = manualLeaveRangeValue(panel);
+let manualLeaveBatch = { key: "", entries: [] };
+
+function manualLeaveBatchKey(person, area, round) {
+  return `${BID_YEAR}:${person.initials}:${area}:${round}`;
+}
+
+function renderManualLeaveBatch(panel) {
+  const batch = panel.querySelector("[data-manual-leave-batch]");
+  if (!batch) return;
+  const person = manualBidPerson(panel);
+  const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== manualLeaveBatchKey(person, area, round)) {
+    manualLeaveBatch = { key: "", entries: [] };
+  }
+  batch.hidden = !manualLeaveBatch.entries.length;
+  const summary = batch.querySelector("[data-manual-leave-batch-summary]");
+  if (summary) summary.textContent = `${manualLeaveBatch.entries.length} selections · ${manualLeaveBatch.entries.reduce((total, entry) => total + entry.days, 0)} charged days`;
+  const list = batch.querySelector("[data-manual-leave-batch-list]");
+  if (list) list.innerHTML = manualLeaveBatch.entries.map((entry, index) => `
+    <div class="manual-leave-batch-row">
+      <span>${escapeHtml(entry.range)} · ${entry.days} ${entry.days === 1 ? "day" : "days"}${entry.notes ? ` · ${escapeHtml(entry.notes)}` : ""}</span>
+      <button class="secondary-action small" type="button" data-manual-leave-remove="${index}" aria-label="Remove ${escapeHtml(entry.range)} from batch">Remove</button>
+    </div>
+  `).join("");
+  const submit = panel.querySelector("[data-manual-bid-submit]");
+  if (submit) submit.textContent = manualLeaveBatch.entries.length ? `Submit batch (${manualLeaveBatch.entries.length})` : "Submit Requested Leave Dates";
+}
+
+function prepareManualLeaveEntries(panel, person, area, entries) {
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const openRound = openAreaBidRound(new Date(), area);
-  if (!openRound) {
-    setManualBidStatus(panel, "No bidding round is currently open across ZLA.", "error");
-    return;
-  }
-  if (round !== openRound) {
-    setManualBidStatus(panel, `Round ${round} is closed. Only Round ${openRound} is open across ZLA.`, "error");
-    return;
-  }
-  const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
-  const dateKeys = datesInLeaveRange(range);
-  if (!dateKeys.length) {
-    setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
-    return;
-  }
-  if (invalidLeaveYearDateKeys(dateKeys).length) {
-    setManualBidStatus(panel, "Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
-    return;
-  }
-
-  const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
-  const chargedDays = chargeableDates.length;
-  const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
-  if (manualDaysInput) manualDaysInput.value = String(chargedDays);
-  if (chargedDays < 1) {
-    setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
-    return;
-  }
-  const requestedRanges = contiguousLeaveDateRanges(requestedDates);
-
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(requestedDates) : [];
+  if (!openRound) throw new Error("No bidding round is currently open across ZLA.");
+  if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} is open across ZLA.`);
+  if (round > 4) throw new Error("Leave bids are only available in Rounds 1 through 4.");
+  const selected = entries.map((entry) => {
+    const dateKeys = datesInLeaveRange(entry.range);
+    if (!dateKeys.length) throw new Error("Select a start and end date before adding to the batch.");
+    if (invalidLeaveYearDateKeys(dateKeys).length) throw new Error(`Leave bids must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`);
+    const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
+    const days = chargeableLeaveDatesForInitials(entry.range, person.initials, round).length;
+    if (!days) throw new Error("A selection must include a chargeable leave day after RDOs are removed.");
+    return { ...entry, dateKeys, requestedDates, days };
+  });
+  const rawDateKeys = selected.flatMap((entry) => entry.dateKeys);
+  if (new Set(rawDateKeys).size !== rawDateKeys.length) throw new Error("Batch selections cannot overlap. Remove the repeated dates first.");
+  const allDateKeys = selected.flatMap((entry) => entry.requestedDates);
+  if (new Set(allDateKeys).size !== allDateKeys.length) throw new Error("Batch selections cannot overlap. Remove the repeated dates first.");
+  const requestedRanges = selected.flatMap((entry) => contiguousLeaveDateRanges(entry.requestedDates));
+  const chargedDays = selected.reduce((total, entry) => total + entry.days, 0);
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(allDateKeys) : [];
   const weekUnits = weekKeys.length;
   const validationMessage = manualLeaveValidationMessage({
     person,
@@ -3249,20 +3273,14 @@ async function submitManualLeaveBid(panel, person, area) {
     weekKeys,
     requestedRanges,
   });
-  if (validationMessage) {
-    setManualBidStatus(panel, validationMessage, "error");
-    return;
-  }
+  if (validationMessage) throw new Error(validationMessage);
 
   const capacityMessage = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{
     area,
     bidAs: person.bidAs,
     initials: person.initials,
   }]);
-  if (capacityMessage) {
-    setManualBidStatus(panel, capacityMessage, "error");
-    return;
-  }
+  if (capacityMessage) throw new Error(capacityMessage);
 
   const submittedAt = formatDateTime(new Date());
   const request = {
@@ -3278,20 +3296,20 @@ async function submitManualLeaveBid(panel, person, area) {
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
-    range,
+    range: selected.map((entry) => entry.range).join(", "),
     days: chargedDays,
     round,
     weekUnits,
     weekKeys,
-    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${selected.map((entry) => entry.range).join(", ")} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
-  const requests = requestedRanges.map((keys, index) => {
+  const requests = selected.flatMap((entry) => contiguousLeaveDateRanges(entry.requestedDates).map((keys) => {
     const segmentRange = formatLeaveRangeFromKeys(keys);
     const segmentDays = chargeableLeaveDateKeys(keys, person.initials, round).length;
     const segmentWeekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
     return {
       ...request,
-      id: `${request.id}-${index + 1}`,
+      id: request.id,
       range: segmentRange,
       dateKeys: keys,
       startDateKey: keys[0],
@@ -3300,12 +3318,56 @@ async function submitManualLeaveBid(panel, person, area) {
       weekUnits: segmentWeekKeys.length,
       weekKeys: segmentWeekKeys,
       summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${segmentRange} · ${segmentDays} ${segmentDays === 1 ? "day" : "days"}`,
+      notes: entry.notes,
     };
-  });
+  }));
+  requests.forEach((item, index) => { item.id = `${request.id}-${index + 1}`; });
+  return { request, requests, chargedDays, round };
+}
+
+function addManualLeaveToBatch(panel) {
+  const person = manualBidPerson(panel);
+  const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  const key = manualLeaveBatchKey(person, area, round);
+  const entry = { range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" };
+  try {
+    if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== key) throw new Error("The controller, area, year, or round changed. Start a new batch.");
+    const prepared = prepareManualLeaveEntries(panel, person, area, [...manualLeaveBatch.entries, entry]);
+    manualLeaveBatch = { key, entries: [...manualLeaveBatch.entries, { ...entry, days: prepared.chargedDays - manualLeaveBatch.entries.reduce((total, item) => total + item.days, 0) }] };
+    panel.querySelector("[data-manual-leave-start]").value = "";
+    panel.querySelector("[data-manual-leave-end]").value = "";
+    panel.querySelector("[data-manual-leave-days]").value = "";
+    panel.querySelector("[data-manual-leave-notes]").value = "";
+    renderManualLeaveBatch(panel);
+    setManualBidStatus(panel, "Date selection added to batch.", "success");
+  } catch (error) {
+    setManualBidStatus(panel, error.message, "error");
+  }
+}
+
+async function submitManualLeaveBid(panel, person, area) {
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  const key = manualLeaveBatchKey(person, area, round);
+  if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== key) {
+    setManualBidStatus(panel, "The controller, area, year, or round changed. Start a new batch.", "error");
+    return;
+  }
+  const entries = manualLeaveBatch.entries.length
+    ? manualLeaveBatch.entries
+    : [{ range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" }];
+  let prepared;
+  try {
+    prepared = prepareManualLeaveEntries(panel, person, area, entries);
+  } catch (error) {
+    setManualBidStatus(panel, error.message, "error");
+    return;
+  }
+  const { request, requests } = prepared;
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
-    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area, notes);
+    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area);
     requests.forEach((item, index) => {
       item.supabaseSubmissionId = savedBatch.submission_ids[index];
     });
@@ -3321,16 +3383,17 @@ async function submitManualLeaveBid(panel, person, area) {
     dateKeys: item.dateKeys,
     days: item.days,
     status: "Pending",
-    notes,
+    notes: item.notes,
     initials: person.initials,
     area,
-    round,
+    round: item.round,
     weekUnits: item.weekUnits,
     weekKeys: item.weekKeys,
   }));
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   requests.forEach(queueBidSubmittedEmail);
+  manualLeaveBatch = { key: "", entries: [] };
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -8105,7 +8168,7 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
     flex: targetRdoLine?.flex || null,
     aws: targetRdoLine?.aws || null,
     mid: targetRdoLine?.mid || null,
-    notes,
+    notes: request.notes || notes,
   }));
   const { data, error } = await client.rpc("submit_leave_bid_batch", {
     requested_bid_year: BID_YEAR,
@@ -13200,8 +13263,11 @@ function renderAdminConsole() {
   syncIntakeTeamControls();
 }
 
+let biddingBackupBusy = false;
+
 function renderAdminToolsPage() {
   if (!hasSystemAdminAccess()) return;
+  void loadBiddingBackups();
   renderRuleEditors();
   renderEmailLog();
   syncBidWindowTestingControls();
@@ -16401,6 +16467,9 @@ function renderAppWithCache() {
 function logOut() {
   supabaseClient()?.auth.signOut();
   clearSupabaseAccountState();
+  manualLeaveControllerInitials = "";
+  const leaveController = document.querySelector(".manual-leave-request-card [data-manual-bid-controller]");
+  if (leaveController) leaveController.value = "";
   selectedViewArea = null;
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
@@ -16441,6 +16510,7 @@ document.addEventListener("click", async (event) => {
     const controllerSearch = panel?.querySelector("[data-manual-controller-search]");
     if (panel && controllerSelect) {
       controllerSelect.value = manualControllerResult.dataset.manualControllerResult;
+      if (panel.classList.contains("manual-leave-request-card")) manualLeaveControllerInitials = controllerSelect.value;
       if (controllerSearch) controllerSearch.value = "";
       renderManualBidPanel(panel);
       const person = manualBidSelectedPerson(controllerSelect.value);
@@ -17023,6 +17093,22 @@ document.addEventListener("click", async (event) => {
   }
 
   const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
+  const manualLeaveAdd = event.target.closest("[data-manual-leave-add]");
+  if (manualLeaveAdd) {
+    const panel = manualLeaveAdd.closest("[data-manual-bid-panel]");
+    if (panel && (hasIntakeAccess() || hasSystemAdminAccess()) && panel.dataset.manualBidSubmitting !== "true") addManualLeaveToBatch(panel);
+    return;
+  }
+  const manualLeaveRemove = event.target.closest("[data-manual-leave-remove]");
+  if (manualLeaveRemove) {
+    const panel = manualLeaveRemove.closest("[data-manual-bid-panel]");
+    if (panel && panel.dataset.manualBidSubmitting !== "true") {
+      manualLeaveBatch.entries.splice(Number(manualLeaveRemove.dataset.manualLeaveRemove), 1);
+      if (!manualLeaveBatch.entries.length) manualLeaveBatch.key = "";
+      renderManualLeaveBatch(panel);
+    }
+    return;
+  }
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
     if (panel) await submitManualBidEntry(panel);
@@ -17587,6 +17673,7 @@ document.addEventListener("change", async (event) => {
     }
     renderManualBidPanel(manualPanel);
     if (manualReactiveField.matches("[data-manual-bid-controller]")) {
+      if (manualPanel.classList.contains("manual-leave-request-card")) manualLeaveControllerInitials = manualReactiveField.value;
       const person = manualBidSelectedPerson(manualReactiveField.value);
       selectIntakeBidder(person.initials, person.profileId);
     }
@@ -17645,3 +17732,95 @@ window.NATCA_BIDDING_READY = true;
 setInterval(() => {
   if (document.visibilityState === "visible") void refreshPilotRounds();
 }, 10000);
+
+
+function backupStatus(message) {
+  const target = document.querySelector('[data-backup-status]');
+  if (target) target.textContent = message;
+}
+function backupClient() {
+  if (!hasSystemAdminAccess() || !supabaseClient()) throw new Error('Sign in as a system administrator to manage backups.');
+  return supabaseClient();
+}
+async function loadBiddingBackups() {
+  if (biddingBackupBusy) return;
+  try {
+    const client = backupClient();
+    const schedule = await client.from('bidding_backup_schedule').select('*').eq('id', true).maybeSingle();
+    if (schedule.error) throw new Error('Backup setup is unavailable. Install database/bidding_backups.sql and enable Supabase Cron.');
+    const form = document.querySelector('[data-backup-form]');
+    if (schedule.data && form) {
+      for (const key of ['start_date', 'end_date', 'start_time', 'end_time', 'interval_minutes']) form.elements.namedItem(key).value = schedule.data[key];
+      form.elements.namedItem('enabled').checked = schedule.data.enabled;
+      form.elements.namedItem('retention_days').value = schedule.data.retention_days ?? '';
+    }
+    await refreshLatestBiddingBackup();
+  } catch (error) { backupStatus(error.message); }
+}
+async function refreshLatestBiddingBackup() {
+  const result = await backupClient().from('bidding_backups').select('id,created_at,source').order('id', { ascending: false }).limit(1);
+  if (result.error) throw result.error;
+  const latest = result.data?.[0];
+  document.querySelector('[data-backup-latest]').textContent = latest
+    ? `Latest backup: ${new Date(latest.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} Pacific (${latest.source}).`
+    : 'No backups saved yet.';
+  document.querySelector('[data-backup-download]').disabled = !latest;
+}
+async function performBiddingBackupAction(action) {
+  if (biddingBackupBusy) return;
+  biddingBackupBusy = true;
+  const buttons = document.querySelectorAll('[data-backup-form] button, [data-backup-now], [data-backup-download]');
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const client = backupClient();
+    if (action === 'save') {
+      const form = document.querySelector('[data-backup-form]');
+      const values = Object.fromEntries(new FormData(form));
+      if (values.end_date < values.start_date || values.end_time < values.start_time) throw new Error('End date and daily end time must be on or after their start values.');
+      const interval = Number(values.interval_minutes);
+      if (!Number.isInteger(interval) || interval < 1 || interval > 10080) throw new Error('Choose an interval from 1 to 10080 minutes.');
+      const retention = String(values.retention_days || '').trim() === '' ? null : Number(values.retention_days);
+      if (retention !== null && (!Number.isInteger(retention) || retention < 1 || retention > 36500)) throw new Error('Choose a whole number of days from 1 to 36500, or leave blank to keep all backups.');
+      const result = await client.from('bidding_backup_schedule').upsert({
+        id: true, enabled: form.elements.namedItem('enabled').checked,
+        start_date: values.start_date, end_date: values.end_date,
+        start_time: values.start_time, end_time: values.end_time,
+        interval_minutes: interval, retention_days: retention, timezone: 'America/Los_Angeles',
+      });
+      if (result.error) throw result.error;
+      backupStatus('Backup schedule saved.');
+    } else if (action === 'now') {
+      backupStatus('Backing up now… Keep this page open until the backup finishes.');
+      const result = await client.rpc('backup_bidding_now');
+      if (result.error) throw result.error;
+      backupStatus('Backup completed and saved.');
+    } else {
+      backupStatus('Preparing backup download…');
+      const result = await client.from('bidding_backups').select('id,created_at,payload').order('id', { ascending: false }).limit(1);
+      if (result.error) throw result.error;
+      if (!result.data?.length) throw new Error('No backups saved yet.');
+      const backup = result.data[0];
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup.payload, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `zla-bidding-backup-${backup.id}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      backupStatus('Backup downloaded.');
+    }
+  } catch (error) { backupStatus(error.message || 'The backup operation failed.'); }
+  finally {
+    biddingBackupBusy = false;
+    buttons.forEach(button => { button.disabled = false; });
+    try { await refreshLatestBiddingBackup(); } catch (_) { /* Preserve the operation error. */ }
+  }
+}
+document.addEventListener('submit', event => {
+  if (!event.target.matches('[data-backup-form]')) return;
+  event.preventDefault();
+  void performBiddingBackupAction('save');
+});
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-backup-now]')) void performBiddingBackupAction('now');
+  if (event.target.closest('[data-backup-download]')) void performBiddingBackupAction('download');
+});
