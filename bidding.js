@@ -1892,6 +1892,7 @@ const intakeFilters = {
   area: "all",
   round: "all",
 };
+let intakeSort = "approved";
 let helpPanelMode = "user";
 let activeHelpThreadId = "help-oc-1";
 let helpThreads = [
@@ -14782,7 +14783,22 @@ function intakeItemMatchesFilters(item) {
   return true;
 }
 
+function intakeSortTimestamp(item, field) {
+  return Math.max(0, ...(item.members || [item]).map((entry) => {
+    const timestamp = Date.parse(entry[field] || "");
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }));
+}
+
+function compareIntakeItems(left, right) {
+  const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
+  if (intakeSort === "entered") return enteredDifference;
+  return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
+}
+
 function syncIntakeSearchControls() {
+  const sort = document.querySelector("[data-intake-sort]");
+  if (sort) sort.value = intakeSort;
   const search = document.querySelector("[data-intake-search]");
   if (search && search.value !== intakeSearchQuery) search.value = intakeSearchQuery;
 
@@ -15362,7 +15378,7 @@ function renderIntakeQueueWithCache() {
   const visibleItems = canReview
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
-  const filteredItems = visibleItems.filter(intakeItemMatchesFilters);
+  const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeItems);
   const focusedIndex = filteredItems.findIndex((item) => item.id === alertFocusedIntakeItemId);
   if (focusedIndex > 0) filteredItems.unshift(filteredItems.splice(focusedIndex, 1)[0]);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
@@ -17351,6 +17367,14 @@ document.addEventListener("change", async (event) => {
     syncBidWindowBuilder();
     renderBidWindowBuilderPreview();
     setBidWindowBuilderStatus("Settings changed. Build a new preview.");
+    return;
+  }
+
+  const intakeSortControl = event.target.closest("[data-intake-sort]");
+  if (intakeSortControl) {
+    intakeSort = intakeSortControl.value === "entered" ? "entered" : "approved";
+    alertFocusedIntakeItemId = "";
+    renderIntakeQueue();
     return;
   }
 
