@@ -12232,7 +12232,7 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .bid-time-export-areas label { display: flex; align-items: center; gap: 6px; }
 .month-grid > button.tmu-one-slot-left,
 .week-calendar-grid > button.tmu-one-slot-left {
-  outline: 2px solid #333;
+  outline: 2px dashed #333;
   outline-offset: -2px;
 }
 
