@@ -2690,7 +2690,6 @@ async function addOrUpdateRdoSubmission() {
   }
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is still required before the line is populated.`);
-  queueBidSubmittedEmail(request);
   renderApp();
 }
 
@@ -3187,7 +3186,6 @@ async function submitManualRdoBid(panel, person, area) {
 
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual RDO bid entered", `${currentUser.initials} entered ${request.summary} for ${person.initials}. Intake approval is still required before the line is populated.`);
-  queueBidSubmittedEmail(request);
   activeOverrideId = null;
   activeDenialId = null;
   selectManualLeaveController(person.initials);
@@ -3389,7 +3387,6 @@ async function submitManualLeaveBid(panel, person, area) {
 
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
-  requests.forEach(queueBidSubmittedEmail);
   manualLeaveBatch = { key: "", entries: [] };
   activeOverrideId = null;
   activeDenialId = null;
@@ -4675,7 +4672,6 @@ async function submitLeaveDraftBatch() {
   leaveDraftQueue = [];
   activeOverrideId = null;
   activeDenialId = null;
-  queueBidSubmittedEmail(newRequests);
   renderApp();
   setLeaveBuilderStatus(savedToSupabase ? "Leave batch saved to Supabase and sent to intake review." : "Leave batch sent to intake review.", "success");
 }
@@ -4769,42 +4765,15 @@ function bidRound(item) {
   return Number.isFinite(round) && round > 0 ? round : currentRoundNumber();
 }
 
-function queueBidSubmittedEmail(items) {
-  const submissions = groupedLeaveIntakeItems(Array.isArray(items) ? items : [items]);
-  if (!submissions.length) return;
-
-  const first = submissions[0];
-  const round = bidRound(first);
-  const detail = submissions.map((item, index) => {
-    const prefix = submissions.length > 1 ? `${index + 1}. ` : "";
-    return `${prefix}${bidTypeLabel(item)} bid details: ${bidEmailDetail(item)}`;
-  }).join("\n");
-  const subjectType = submissions.length > 1
-    ? `${submissions.length} ${first.ghostBid ? "ghost leave" : isGlLeaveItem(first) ? "GL" : "leave"} bids`
-    : `${bidTypeLabel(first)} bid`;
-
-  queueNotificationEmail(
-    bidRecipientEmail(first),
-    `Bid received for ${first.initials} Round ${round} ${BID_YEAR}`,
-    `Your ${subjectType} has been received and sent to Bidding Intake for review.\n\n${detail}\n\nYou will receive another email once Intake approves the bid.\n\n${BID_OFFICE_CONTACT}`,
-    first.area,
-    {
-      kind: "submitted",
-      eventId: first.id || `${first.initials}-${Date.now()}`,
-      initials: first.initials,
-      area: first.area,
-    }
-  );
-}
-
 function queueBidVerifiedEmail(item) {
   const round = bidRound(item);
   const subject = `Bid approved for ${item.initials} Round ${round} ${BID_YEAR}`;
-  const detail = bidEmailDetail(item);
+  const detail = (item.members || [item]).map((member) => `${bidTypeLabel(member)} bid details: ${bidEmailDetail(member)}`).join("\n");
+  const approvedAt = item.approvedAt || formatDateTime(new Date());
   queueNotificationEmail(
     bidRecipientEmail(item),
     subject,
-    `Your submitted bid has been approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}\n\n${BID_OFFICE_CONTACT}`,
+    `Your submitted bid has been approved for Round ${round}.\n\n${detail}\n\nApproved at: ${approvedAt}\n\n${BID_OFFICE_CONTACT}`,
     item.area,
     {
       kind: "approved",
@@ -4817,12 +4786,12 @@ function queueBidVerifiedEmail(item) {
 
 function queueBidDeniedEmail(item) {
   const round = bidRound(item);
-  const detail = bidEmailDetail(item);
+  const detail = (item.members || [item]).map((member) => `${bidTypeLabel(member)} bid details: ${bidEmailDetail(member)}`).join("\n");
   const reason = item.denialReason ? `\n\nReason: ${item.denialReason}` : "";
   queueNotificationEmail(
     bidRecipientEmail(item),
     `Bid denied for ${item.initials} Round ${round} ${BID_YEAR}`,
-    `Your submitted bid was not approved for Round ${round}.\n\n${bidTypeLabel(item)} bid details: ${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
+    `Your submitted bid was not approved for Round ${round}.\n\n${detail}${reason}\n\nPlease use the messaging system on the website, or text the Bidding Office at (661) 434-1004.`,
     item.area,
     {
       kind: "denied",
@@ -5257,8 +5226,10 @@ function updateConfirmedIntakeDecision(item, decision, reason = "") {
   intakeDecisionRevision += 1;
   const status = decision === "approved" ? "Approved" : "Denied";
   item.status = status;
+  if (decision === "approved") item.approvedAt = formatDateTime(new Date());
   for (const member of item.members || [item]) {
     member.status = status;
+    if (decision === "approved") member.approvedAt = item.approvedAt;
     if (reason) member.denialReason = reason;
     if (member.type === "Leave") {
       const bid = leaveBidForItem(member);
