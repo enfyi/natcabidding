@@ -3025,6 +3025,7 @@ function renderManualBidPanel(panel) {
   }
   const notesInput = panel.querySelector("[data-manual-leave-notes]");
   if (notesInput) notesInput.value = values.notes;
+  renderManualLeaveBatch(panel);
 }
 
 function renderManualBidEntry() {
@@ -3174,41 +3175,57 @@ function manualLeaveValidationMessage({ person, round, days, weekKeys, requested
   return "";
 }
 
-async function submitManualLeaveBid(panel, person, area) {
-  const range = manualLeaveRangeValue(panel);
+let manualLeaveBatch = { key: "", entries: [] };
+
+function manualLeaveBatchKey(person, area, round) {
+  return `${BID_YEAR}:${person.initials}:${area}:${round}`;
+}
+
+function renderManualLeaveBatch(panel) {
+  const batch = panel.querySelector("[data-manual-leave-batch]");
+  if (!batch) return;
+  const person = manualBidPerson(panel);
+  const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== manualLeaveBatchKey(person, area, round)) {
+    manualLeaveBatch = { key: "", entries: [] };
+  }
+  batch.hidden = !manualLeaveBatch.entries.length;
+  const summary = batch.querySelector("[data-manual-leave-batch-summary]");
+  if (summary) summary.textContent = `${manualLeaveBatch.entries.length} selections · ${manualLeaveBatch.entries.reduce((total, entry) => total + entry.days, 0)} charged days`;
+  const list = batch.querySelector("[data-manual-leave-batch-list]");
+  if (list) list.innerHTML = manualLeaveBatch.entries.map((entry, index) => `
+    <div class="manual-leave-batch-row">
+      <span>${escapeHtml(entry.range)} · ${entry.days} ${entry.days === 1 ? "day" : "days"}${entry.notes ? ` · ${escapeHtml(entry.notes)}` : ""}</span>
+      <button class="secondary-action small" type="button" data-manual-leave-remove="${index}" aria-label="Remove ${escapeHtml(entry.range)} from batch">Remove</button>
+    </div>
+  `).join("");
+  const submit = panel.querySelector("[data-manual-bid-submit]");
+  if (submit) submit.textContent = manualLeaveBatch.entries.length ? `Submit batch (${manualLeaveBatch.entries.length})` : "Submit Requested Leave Dates";
+}
+
+function prepareManualLeaveEntries(panel, person, area, entries) {
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const openRound = openAreaBidRound(new Date(), area);
-  if (!openRound) {
-    setManualBidStatus(panel, `No bidding round is currently open for ${area}.`, "error");
-    return;
-  }
-  if (round !== openRound) {
-    setManualBidStatus(panel, `Round ${round} is closed. Only Round ${openRound} can accept bids for ${area}.`, "error");
-    return;
-  }
-  const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
-  const dateKeys = datesInLeaveRange(range);
-  if (!dateKeys.length) {
-    setManualBidStatus(panel, "Use a range like Jan 10 - Jan 16, 2027.", "error");
-    return;
-  }
-  if (invalidLeaveYearDateKeys(dateKeys).length) {
-    setManualBidStatus(panel, "Leave bids must stay between Jan 10, 2027 and Jan 8, 2028.", "error");
-    return;
-  }
-
-  const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
-  const chargedDays = chargeableDates.length;
-  const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
-  if (manualDaysInput) manualDaysInput.value = String(chargedDays);
-  if (chargedDays < 1) {
-    setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
-    return;
-  }
-  const requestedRanges = contiguousLeaveDateRanges(requestedDates);
-
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(requestedDates) : [];
+  if (!openRound) throw new Error(`No bidding round is currently open for ${area}.`);
+  if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} can accept bids for ${area}.`);
+  if (round > 4) throw new Error("Leave bids are only available in Rounds 1 through 4.");
+  const selected = entries.map((entry) => {
+    const dateKeys = datesInLeaveRange(entry.range);
+    if (!dateKeys.length) throw new Error("Select a start and end date before adding to the batch.");
+    if (invalidLeaveYearDateKeys(dateKeys).length) throw new Error(`Leave bids must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`);
+    const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
+    const days = chargeableLeaveDatesForInitials(entry.range, person.initials, round).length;
+    if (!days) throw new Error("A selection must include a chargeable leave day after RDOs are removed.");
+    return { ...entry, dateKeys, requestedDates, days };
+  });
+  const rawDateKeys = selected.flatMap((entry) => entry.dateKeys);
+  if (new Set(rawDateKeys).size !== rawDateKeys.length) throw new Error("Batch selections cannot overlap. Remove the repeated dates first.");
+  const allDateKeys = selected.flatMap((entry) => entry.requestedDates);
+  if (new Set(allDateKeys).size !== allDateKeys.length) throw new Error("Batch selections cannot overlap. Remove the repeated dates first.");
+  const requestedRanges = selected.flatMap((entry) => contiguousLeaveDateRanges(entry.requestedDates));
+  const chargedDays = selected.reduce((total, entry) => total + entry.days, 0);
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(allDateKeys) : [];
   const weekUnits = weekKeys.length;
   const validationMessage = manualLeaveValidationMessage({
     person,
@@ -3217,20 +3234,14 @@ async function submitManualLeaveBid(panel, person, area) {
     weekKeys,
     requestedRanges,
   });
-  if (validationMessage) {
-    setManualBidStatus(panel, validationMessage, "error");
-    return;
-  }
+  if (validationMessage) throw new Error(validationMessage);
 
   const capacityMessage = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{
     area,
     bidAs: person.bidAs,
     initials: person.initials,
   }]);
-  if (capacityMessage) {
-    setManualBidStatus(panel, capacityMessage, "error");
-    return;
-  }
+  if (capacityMessage) throw new Error(capacityMessage);
 
   const submittedAt = formatDateTime(new Date());
   const request = {
@@ -3246,20 +3257,20 @@ async function submitManualLeaveBid(panel, person, area) {
     submittedAt,
     manualEntry: true,
     enteredBy: currentUser.initials,
-    range,
+    range: selected.map((entry) => entry.range).join(", "),
     days: chargedDays,
     round,
     weekUnits,
     weekKeys,
-    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
+    summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${selected.map((entry) => entry.range).join(", ")} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
-  const requests = requestedRanges.map((keys, index) => {
+  const requests = selected.flatMap((entry) => contiguousLeaveDateRanges(entry.requestedDates).map((keys) => {
     const segmentRange = formatLeaveRangeFromKeys(keys);
     const segmentDays = chargeableLeaveDateKeys(keys, person.initials, round).length;
     const segmentWeekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
     return {
       ...request,
-      id: `${request.id}-${index + 1}`,
+      id: request.id,
       range: segmentRange,
       dateKeys: keys,
       startDateKey: keys[0],
@@ -3268,12 +3279,56 @@ async function submitManualLeaveBid(panel, person, area) {
       weekUnits: segmentWeekKeys.length,
       weekKeys: segmentWeekKeys,
       summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${segmentRange} · ${segmentDays} ${segmentDays === 1 ? "day" : "days"}`,
+      notes: entry.notes,
     };
-  });
+  }));
+  requests.forEach((item, index) => { item.id = `${request.id}-${index + 1}`; });
+  return { request, requests, chargedDays, round };
+}
+
+function addManualLeaveToBatch(panel) {
+  const person = manualBidPerson(panel);
+  const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  const key = manualLeaveBatchKey(person, area, round);
+  const entry = { range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" };
+  try {
+    if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== key) throw new Error("The controller, area, year, or round changed. Start a new batch.");
+    const prepared = prepareManualLeaveEntries(panel, person, area, [...manualLeaveBatch.entries, entry]);
+    manualLeaveBatch = { key, entries: [...manualLeaveBatch.entries, { ...entry, days: prepared.chargedDays - manualLeaveBatch.entries.reduce((total, item) => total + item.days, 0) }] };
+    panel.querySelector("[data-manual-leave-start]").value = "";
+    panel.querySelector("[data-manual-leave-end]").value = "";
+    panel.querySelector("[data-manual-leave-days]").value = "";
+    panel.querySelector("[data-manual-leave-notes]").value = "";
+    renderManualLeaveBatch(panel);
+    setManualBidStatus(panel, "Date selection added to batch.", "success");
+  } catch (error) {
+    setManualBidStatus(panel, error.message, "error");
+  }
+}
+
+async function submitManualLeaveBid(panel, person, area) {
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+  const key = manualLeaveBatchKey(person, area, round);
+  if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== key) {
+    setManualBidStatus(panel, "The controller, area, year, or round changed. Start a new batch.", "error");
+    return;
+  }
+  const entries = manualLeaveBatch.entries.length
+    ? manualLeaveBatch.entries
+    : [{ range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" }];
+  let prepared;
+  try {
+    prepared = prepareManualLeaveEntries(panel, person, area, entries);
+  } catch (error) {
+    setManualBidStatus(panel, error.message, "error");
+    return;
+  }
+  const { request, requests } = prepared;
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
-    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area, notes);
+    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area);
     requests.forEach((item, index) => {
       item.supabaseSubmissionId = savedBatch.submission_ids[index];
     });
@@ -3289,16 +3344,17 @@ async function submitManualLeaveBid(panel, person, area) {
     dateKeys: item.dateKeys,
     days: item.days,
     status: "Pending",
-    notes,
+    notes: item.notes,
     initials: person.initials,
     area,
-    round,
+    round: item.round,
     weekUnits: item.weekUnits,
     weekKeys: item.weekKeys,
   }));
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   requests.forEach(queueBidSubmittedEmail);
+  manualLeaveBatch = { key: "", entries: [] };
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -7908,7 +7964,7 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
     flex: targetRdoLine?.flex || null,
     aws: targetRdoLine?.aws || null,
     mid: targetRdoLine?.mid || null,
-    notes,
+    notes: request.notes || notes,
   }));
   const { data, error } = await client.rpc("submit_leave_bid_batch", {
     requested_bid_year: BID_YEAR,
@@ -16711,6 +16767,22 @@ document.addEventListener("click", async (event) => {
   }
 
   const manualBidSubmit = event.target.closest("[data-manual-bid-submit]");
+  const manualLeaveAdd = event.target.closest("[data-manual-leave-add]");
+  if (manualLeaveAdd) {
+    const panel = manualLeaveAdd.closest("[data-manual-bid-panel]");
+    if (panel && (hasIntakeAccess() || hasSystemAdminAccess()) && panel.dataset.manualBidSubmitting !== "true") addManualLeaveToBatch(panel);
+    return;
+  }
+  const manualLeaveRemove = event.target.closest("[data-manual-leave-remove]");
+  if (manualLeaveRemove) {
+    const panel = manualLeaveRemove.closest("[data-manual-bid-panel]");
+    if (panel && panel.dataset.manualBidSubmitting !== "true") {
+      manualLeaveBatch.entries.splice(Number(manualLeaveRemove.dataset.manualLeaveRemove), 1);
+      if (!manualLeaveBatch.entries.length) manualLeaveBatch.key = "";
+      renderManualLeaveBatch(panel);
+    }
+    return;
+  }
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
     if (panel) await submitManualBidEntry(panel);

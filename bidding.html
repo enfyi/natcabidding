@@ -1135,7 +1135,14 @@
                       <input type="text" placeholder="Optional note" data-manual-leave-notes />
                     </label>
                   </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  <div class="manual-leave-batch" data-manual-leave-batch hidden>
+                    <strong data-manual-leave-batch-summary></strong>
+                    <div data-manual-leave-batch-list></div>
+                  </div>
+                  <div class="manual-leave-batch-actions">
+                    <button class="secondary-action small" type="button" data-manual-leave-add>Add to batch</button>
+                    <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  </div>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
