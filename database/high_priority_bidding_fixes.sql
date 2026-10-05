@@ -308,7 +308,7 @@ begin
 
   if enforce_bid_windows
      and not public.is_area_bid_round_open(year_row.id, target.area_id, batch_round) then
-    raise exception 'Round % is not currently open for this area. Closed rounds cannot accept bids.', batch_round;
+    raise exception 'Round % is not currently open across ZLA. Closed rounds cannot accept bids.', batch_round;
   end if;
 
   if not manual_entry and enforce_bid_windows and not exists (
