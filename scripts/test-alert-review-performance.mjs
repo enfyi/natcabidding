@@ -59,7 +59,7 @@ for (const activePage of ['dashboard', 'intake']) {
   const frames = [];
   const nav = vm.createContext({
     withLeaveReadCache: read => read(), groupedLeaveIntakeItems: () => [{ id: 'week', initials: 'ME', bidderId: 'bidder', members: [{ id: 'day' }] }],
-    activeIntakeDetailId: null, alertFocusedIntakeItemId: null, activeOverrideId: 'old', activeDenialId: 'old',
+    activeIntakeDetailId: null, activeOverrideId: 'old', activeDenialId: 'old',
     intakeSearchQuery: 'other', intakeFilters: { status: 'Denied', area: 'Area B' },
     document: { querySelector: () => ({ dataset: { pagePanel: activePage } }), querySelectorAll: () => [card] },
     window: { requestAnimationFrame: read => frames.push(read) },
