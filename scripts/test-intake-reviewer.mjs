@@ -9,6 +9,8 @@ function extract(name) {
 }
 const context = vm.createContext({
   currentUser: { initials: 'VIEWER', area: 'Area A' },
+  senioritySource: [['', '', '', 'MS', '', '', '', '', '', '', 'admin'], ['', '', '', 'VM', '', '', '', '', '', '', 'intake']],
+  seniorityEntryAppRole: entry => entry[10],
   currentRoundNumber: () => 1,
   controllerName: person => `${person.firstName} ${person.lastName}`,
   normalizeBidRoleForArea: role => role,
@@ -27,8 +29,9 @@ assert.equal(item.approvedBy, 'MS');
 assert.equal(item.approvedAt, '2026-10-05T18:23:00.000Z');
 const rows = context.attachSubmissionIdsToLeaveRequests([{ id: 'leave' }], [{ id: 'submission', requestId: 'leave', status: 'approved', reviewedBy: 'MS' }]);
 assert.equal(rows[0].reviewedBy, 'MS');
-assert.equal(context.intakeReviewerLabel('MS'), 'Michael Schoelen · MS');
-assert.equal(context.intakeReviewerLabel('OC'), 'OC');
+assert.equal(context.intakeReviewerLabel('MS'), 'Admin MS');
+assert.equal(context.intakeReviewerLabel('OC'), 'Intake Rep OC');
+assert.equal(context.intakeReviewerLabel('VM'), 'Intake Rep VM');
 assert.equal(context.intakeReviewerLabel(undefined), 'Unknown reviewer');
 assert.match(extract('supabaseLeaveRequestToIntakeItem'), /approvedBy: row.reviewedBy \|\| ""/);
 console.log('Intake reviewer identity checks passed.');
@@ -78,3 +81,9 @@ assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area D', line: 
 assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area E', line: '1', summary: 'Line 1 · Group A' }), 'Line 1 · Group A');
 assert.equal(context.intakeBidSummary({ type: 'Leave', summary: 'July 8 · 1 day' }), 'July 8 · 1 day');
 console.log('RDO summaries show the correct area-specific days off.');
+
+for (const [flex, aws, expected] of [[true, false, 'Flex Yes · AWS No'], [false, true, 'Flex No · AWS Yes'], ['Yes', 'No', 'Flex Yes · AWS No']]) {
+  assert.equal(context.intakeBidSummary({ type: 'RDO Line', area: 'Area A', line: '1', flex, aws, summary: 'Line 1 · Flex true · AWS · Mid BID' }), `Line 1 S/S · ${expected} · Mid BID`);
+}
+assert.equal(context.intakeBidSummary({ type: 'RDO Line', summary: 'Line 9 · Flex false · AWS true · Mid Yes' }), 'Line 9 · Flex No · AWS Yes · Mid Yes');
+console.log('Flex and AWS display Yes/No while preserving Mid.');
