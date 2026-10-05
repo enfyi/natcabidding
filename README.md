@@ -184,3 +184,24 @@ reminder only once after successful delivery.
 the verified claim check before rendering. Add another private route by including
 it in the protected-route predicate in `lib/supabase/proxy.ts` and validating the
 user again in server-side data access or Server Actions.
+
+## Reference loading diagnostics
+
+FAQ and MOU reads run independently of the bid-year lookup. RDO and calendar
+reads require a verified year and area mapping, but do not wait for the roster
+or optional intake data. Bid times require both roster and window reads.
+Temporary network errors, timeouts, HTTP 408/429/5xx responses, and PostgreSQL
+statement timeouts receive up to three attempts, with staggered backoff. Each
+attempt has a 15-second limit. Permission and schema errors are not retried.
+This policy applies only to reference reads, never bid submissions or mutations.
+
+Browser console warnings identify the failed section, HTTP status, error code,
+attempt, duration, and time. The latest 50 failures are also available through
+`window.NATCA_REFERENCE_LOAD_DIAGNOSTICS`. These records exclude response bodies,
+credentials, URLs, and bidder details; they remain in memory in that browser tab
+and are not sent to a central logging service.
+
+Run `pnpm test:reference-loading` to verify retry limits, timeout recovery,
+permission failures, section independence, and 100 simulated concurrent readers.
+The simulated concurrency check does not measure production server capacity;
+a separate approved staging load test is needed for that.
