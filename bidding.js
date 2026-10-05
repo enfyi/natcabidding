@@ -10037,7 +10037,7 @@ function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
   if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
   else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
   glBids.forEach((bid) => {
-    pieces.push(`<span class="gl-line-bidder" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+    pieces.push(`<span class="gl-line-bidder${bid.ghostBid ? " ghost-line-bidder" : ""}" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
   });
   return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
 }
