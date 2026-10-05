@@ -6212,6 +6212,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const detailArea = context?.area || options.area || currentUser.area;
   const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
   const slotDataLoaded = leaveSlotDataIsLoaded(baseSlotDetails || leaveSlotsForDate(key, detailArea));
+  const hasOneTmuSlotLeft = showVacationLayer && isInsideLeaveYear && detailArea === "TMU" && slotDataLoaded
+    && leaveSlotOpenCountForDetails(baseSlotDetails || leaveSlotsForDate(key, detailArea), availabilityBucket) === 1;
   const isClosed = canShowLeaveState && slotDataLoaded && (
     baseSlotDetails
       ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
@@ -6238,6 +6240,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     isApprovedLeave ? "leave-day" : "",
     isRdo ? "rdo-day" : "",
     isClosed ? "closed-day" : "",
+    hasOneTmuSlotLeft ? "tmu-one-slot-left" : "",
     hasGlBid ? "has-gl-bid" : "",
     fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
     nextFatigueClass ? `fatigue-split fatigue-to-${nextFatigueClass}` : "",
