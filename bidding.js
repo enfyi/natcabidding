@@ -15056,6 +15056,8 @@ function intakeSortTimestamp(item, field) {
 }
 
 function compareIntakeItems(left, right) {
+  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
+  if (pendingDifference) return pendingDifference;
   const enteredDifference = intakeSortTimestamp(right, "submittedAt") - intakeSortTimestamp(left, "submittedAt");
   if (intakeSort === "entered") return enteredDifference;
   return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
