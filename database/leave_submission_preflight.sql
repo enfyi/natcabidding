@@ -330,7 +330,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif not ghost_bid and exists (
+    elsif target.bid_role <> 'GL' and not ghost_bid and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id
@@ -391,9 +391,7 @@ begin
     );
   end loop;
 
-  -- Ghost leave remains visible to the bidder and intake, but never reserves
-  -- or consumes an area slot.
-  if not ghost_bid then
+  -- Ghost bids require availability at submission, but never reserve or consume a slot.
     -- A configured row is one daily slot. Approved/held slots are already removed
     -- from the open count; pending requests are subtracted as reservations.
     with requested_dates as (
@@ -470,7 +468,6 @@ begin
         format('No %s leave slot is available in %s on: %s.', upper(target_bucket), target_area, conflict_date_labels)
       );
     end if;
-  end if;
 
   -- A date already submitted in this or an earlier round cannot consume
   -- another slot.

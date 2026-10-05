@@ -505,12 +505,12 @@ begin
       if line_row.status <> 'open' and line_row.assigned_bidder_id is distinct from target.id then
         raise exception 'RDO line % is already assigned to another bidder.', line_row.line_code;
       end if;
-      requested_group := coalesce(override_payload->>'fatigueGroup', submission.payload->>'fatigueGroup');
-      if requested_group not in ('A', 'B', 'C') then raise exception 'A valid fatigue group is required.'; end if;
+      requested_group := nullif(trim(coalesce(override_payload->>'fatigueGroup', submission.payload->>'fatigueGroup', '')), '');
+      if requested_group is not null and requested_group not in ('A', 'B', 'C') then raise exception 'Fatigue group must be A, B, or C.'; end if;
 
-      if line_row.line_type in ('CPC', 'DEV') and not private.fatigue_group_is_available(
+      if requested_group is not null and line_row.line_type in ('CPC', 'DEV') and not private.fatigue_group_is_available(
         submission.bid_year_id, target.area_id, line_row.id, requested_group, target.id
-      ) then
+      ) and not private.rdo_fatigue_override_authorized(submission.id, line_row.id, requested_group) then
         raise exception 'Fatigue group % is full for this area or RDO set.', requested_group;
       end if;
 

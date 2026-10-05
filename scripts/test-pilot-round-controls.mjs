@@ -16,10 +16,11 @@ function extract(name) {
 const context = vm.createContext({
   pilotState: { database: true, enabled: true, allowed: true },
   pilotOpenRounds: [], selectedPilotRound: null,
+  BID_YEAR: 2027, activeBidYear: 2027, bidYearCatalogLoaded: true,
   isViewingHomeArea: () => true,
   currentUserBidWindow: () => ({ round: 1, start: new Date(0), end: new Date('2099-01-01') }),
 });
-vm.runInContext(['isAuthorizedPilotBidder', 'activeTestBidRound', 'bidWindowLockIsBypassed', 'currentUserBidWindowStatus', 'editableLeaveRound'].map(extract).join('\n'), context);
+vm.runInContext(['selectedBidYearErrorMessage', 'isAuthorizedPilotBidder', 'activeTestBidRound', 'bidWindowLockIsBypassed', 'currentUserBidWindowStatus', 'editableLeaveRound'].map(extract).join('\n'), context);
 assert.equal(context.currentUserBidWindowStatus().isOpen, false, 'A scheduled window cannot open a closed pilot round');
 for (const round of [1, 2, 3, 4]) {
   context.pilotOpenRounds = [round];
@@ -38,4 +39,6 @@ context.pilotState.allowed = false;
 assert.equal(context.currentUserBidWindowStatus().isOpen, false);
 context.pilotState.database = false;
 assert.equal(context.currentUserBidWindowStatus().isOpen, true, 'Production still uses the scheduled window');
+context.activeBidYear = 2028;
+assert.equal(context.currentUserBidWindowStatus().isOpen, false, 'Inactive years stay view-only even with an open window');
 console.log('PASS pilot round selection, time bypass, closure, authorization, and production windows');
