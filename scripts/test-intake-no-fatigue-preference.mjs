@@ -31,7 +31,8 @@ async function review(group, groupAvailable = true) {
     queueBidVerifiedEmail: () => {},
     updateConfirmedIntakeDecision: (item) => { item.status = 'Approved' },
     supabaseState: {},
-    refreshBiddingAfterIntakeDecision: async () => {
+    renderIntakeQueue: () => {},
+    scheduleIntakeDecisionRefresh: () => {
       assert.equal(item.status, 'Approved', 'Pending notification clears before refresh')
     },
     renderApp: () => {},
