@@ -16,18 +16,23 @@ const monthNames = [
 ];
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const BID_YEAR = 2027;
+// BID_YEAR is the selected view; the active year is controlled independently by admins.
+let BID_YEAR = 2027;
+let activeBidYear = null;
+let bidYearCatalog = [];
+let bidYearCatalogLoaded = false;
+let bidYearCatalogError = "";
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
 const LEAVE_SLOT_HOURS_PER_DAY = 8;
 const CWS_LEAVE_HOURS_PER_DAY = 10;
 const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const NO_FATIGUE_PREFERENCE = "No preference";
-const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
-const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
+let BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
+let FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
-const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
+let BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
 const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -159,13 +164,13 @@ let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
 let bidWindowCountdownTargets = [];
 let leaveDraftQueue = [];
-let leaveRangeStartKey = "2027-04-08";
-let leaveRangeEndKey = "2027-04-09";
+let leaveRangeStartKey = dateKey(BID_YEAR, 4, 8);
+let leaveRangeEndKey = dateKey(BID_YEAR, 4, 9);
 let leaveRangeSelectionComplete = true;
 let leaveRangePreviewActive = false;
 const selectedLeaveDates = new Set();
 let leavePickerOpen = false;
-let leavePickerYear = 2027;
+let leavePickerYear = BID_YEAR;
 let leavePickerMonthIndex = 3;
 let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
@@ -663,8 +668,12 @@ const supabaseState = {
   authUserId: "",
   pendingAuthEmail: "",
   intakeSchedulesError: "",
+  rdoLinesLoadState: "idle",
   placeholdersCleared: false,
   referenceDataLoaded: false,
+  faqLoadState: "idle",
+  bidTimesLoadState: "idle",
+  leaveSlotsLoadState: "idle",
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
@@ -1469,24 +1478,9 @@ function roundWindowDate(parsedWindow, time) {
 }
 
 function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
-  const importedWindow = databaseBidWindowForRankRound(area, rank, roundNumber);
-  if (importedWindow) return importedWindow;
-
-  const index = rank - 1;
-  const rowBlock = Math.floor(index / bidStartTimes.length);
-  const dateLabel = roundDateBlocksForArea(area)[rowBlock]?.[roundNumber - 1];
-  const startTime = bidStartTimes[index % bidStartTimes.length];
-  if (!dateLabel || !startTime) return null;
-
-  const parsedWindow = parseRoundWindow(bidWindowLabel(dateLabel, startTime));
-  if (!parsedWindow) return null;
-
-  return {
-    rank,
-    round: roundNumber,
-    start: roundWindowDate(parsedWindow, parsedWindow.start),
-    end: roundWindowDate(parsedWindow, parsedWindow.end),
-  };
+  // Missing or failed database reads must never invent a published bid time
+  // or open a bidding window using the old October 1 prototype schedule.
+  return databaseBidWindowForRankRound(area, rank, roundNumber);
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
@@ -2050,11 +2044,13 @@ function currentUserBidWindowStatus(date = new Date()) {
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
+    isOpen: Boolean(!selectedBidYearErrorMessage() && inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
   };
 }
 
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
   if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
@@ -2119,6 +2115,8 @@ function syncLeaveBidWindowControls(date = new Date()) {
 }
 
 function rdoChangeWindowErrorMessage(date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
     || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
   if (!hasApprovedRdo) return "";
@@ -2189,6 +2187,149 @@ function syncBidWindowTestingControls() {
     "[data-bid-window-enforcement-copy]",
     pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
+}
+
+function selectedBidYearErrorMessage() {
+  if (!bidYearCatalogLoaded) return bidYearCatalogError || "Checking the active bid year. Please wait before bidding.";
+  return BID_YEAR !== activeBidYear
+    ? `${BID_YEAR} is view-only. Select the active bid year (${activeBidYear}) to bid or make changes.`
+    : "";
+}
+
+function navigateToBidYear(year) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("bidYear", String(year));
+  // Reload to discard drafts, selections, and cached records from the previous year.
+  syncNavigationUrl(url);
+  window.location.assign(url.href);
+}
+
+function syncBidYearControls() {
+  const options = bidYearCatalog.map((year) =>
+    `<option value="${year.bid_year}">${year.bid_year}${year.is_active ? " · Current year" : " · View-only"}</option>`
+  ).join("");
+  document.querySelectorAll("[data-bid-year-select]").forEach((select) => {
+    select.innerHTML = options;
+    select.value = String(BID_YEAR);
+    select.disabled = !bidYearCatalogLoaded;
+  });
+  const adminSelect = document.querySelector("[data-active-bid-year-select]");
+  if (adminSelect) {
+    const adminOptions = bidYearCatalog.filter((year) => year.status === "open").map((year) =>
+      `<option value="${year.bid_year}">${year.bid_year}</option>`
+    ).join("");
+    if (adminSelect.innerHTML !== adminOptions || adminSelect.dataset.activeYear !== String(activeBidYear)) {
+      adminSelect.innerHTML = adminOptions;
+      adminSelect.value = String(activeBidYear);
+      adminSelect.dataset.activeYear = String(activeBidYear);
+    }
+    adminSelect.disabled = !bidYearCatalogLoaded;
+  }
+  setText("[data-active-bid-year-label]", activeBidYear || "Checking…");
+  document.querySelectorAll(".round-rule-subheader").forEach((element) => {
+    element.textContent = element.textContent.replace(/\b20\d{2} accrued leave/, `${BID_YEAR} accrued leave`);
+  });
+  setText("#bid-year-label", `${BID_YEAR} Annual Bidding${BID_YEAR !== activeBidYear && bidYearCatalogLoaded ? " · View-only" : ""}`);
+  const banner = document.querySelector("[data-bid-year-notice]");
+  if (banner) {
+    banner.hidden = !selectedBidYearErrorMessage();
+    banner.textContent = selectedBidYearErrorMessage();
+  }
+  const heading = document.querySelector("[data-history-heading]");
+  if (heading) heading.textContent = BID_YEAR !== activeBidYear ? `${BID_YEAR} Historical Bidding` : "Bid History";
+}
+
+async function loadBidYearCatalog(client) {
+  bidYearCatalogError = "";
+  try {
+    let { data, error } = await readReferenceData("bid year catalog", () => client.rpc("read_bid_year_catalog"));
+    if (error && (error.code === "PGRST202" || /Could not find the function.*read_bid_year_catalog/i.test(error.message || ""))) {
+      // Older installations have no catalog RPC. Only a single open year is
+      // unambiguous; never guess the active year in a multi-year database.
+      const result = await client.from("bid_years").select("bid_year,status").limit(2);
+      if (result.error) throw result.error;
+      if (result.data?.length !== 1 || result.data[0].status !== "open") {
+        throw new Error("The active bid year must be configured by a system administrator.");
+      }
+      data = [{ ...result.data[0], is_active: true }];
+      error = null;
+    }
+    if (error) throw error;
+    bidYearCatalog = data || [];
+    activeBidYear = bidYearCatalog.find((year) => year.is_active)?.bid_year || null;
+    if (!activeBidYear) throw new Error("No active bid year is configured. Contact a system administrator.");
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get("bidYear");
+    const year = requested === null ? activeBidYear : Number(requested);
+    if (!bidYearCatalog.some((entry) => entry.bid_year === year)) {
+      throw new Error("The selected bid year is not configured. Remove the bidYear parameter to return to the current year.");
+    }
+    if (year !== BID_YEAR) {
+      BID_YEAR = year;
+      BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
+      BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
+      FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
+      displayedCalendarYear = year;
+      displayedCalendarMonth = 0;
+      leavePickerYear = year;
+      leavePickerMonthIndex = 0;
+      leaveRangeStartKey = BID_LEAVE_YEAR_START_KEY;
+      leaveRangeEndKey = BID_LEAVE_YEAR_START_KEY;
+      selectedLeaveDateKey = BID_LEAVE_YEAR_START_KEY;
+    }
+    // Pin this view so a later refresh cannot silently move an in-progress bid.
+    if (requested === null) {
+      url.searchParams.set("bidYear", String(year));
+      syncNavigationUrl(url);
+    }
+    bidYearCatalogLoaded = true;
+    syncBidYearControls();
+  } catch (error) {
+    bidYearCatalogLoaded = false;
+    bidYearCatalogError = "The active bid year could not be verified. Profile and navigation are still available. Refresh to retry or contact a system administrator.";
+    syncBidYearControls();
+    throw error;
+  }
+}
+
+let bidYearRefreshPending = false;
+async function refreshActiveBidYear() {
+  if (bidYearRefreshPending || document.visibilityState !== "visible") return;
+  const client = supabaseClient();
+  if (!client) return;
+  bidYearRefreshPending = true;
+  try {
+    const previous = activeBidYear;
+    const wasLoaded = bidYearCatalogLoaded;
+    await loadBidYearCatalog(client);
+    if (!wasLoaded || previous !== activeBidYear) renderApp();
+  } catch (error) {
+    console.warn(`Active bid year could not refresh: ${error.message || error}`);
+  } finally {
+    bidYearRefreshPending = false;
+  }
+}
+
+async function saveActiveBidYear() {
+  if (!hasSystemAdminAccess()) return;
+  const select = document.querySelector("[data-active-bid-year-select]");
+  const button = document.querySelector("[data-save-active-bid-year]");
+  const status = document.querySelector("[data-active-bid-year-status]");
+  if (!select || !button || !status) return;
+  const requestedYear = Number(select.value);
+  button.disabled = true;
+  status.textContent = "Saving active bid year…";
+  try {
+    const { error } = await supabaseClient().rpc("set_active_bid_year", { requested_bid_year: requestedYear });
+    if (error) throw error;
+    await loadBidYearCatalog(supabaseClient());
+    renderApp();
+    status.textContent = `${activeBidYear} is now the active bid year. You are still viewing ${BID_YEAR}.`;
+  } catch (error) {
+    status.textContent = error.message || "The active bid year could not be saved.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function applyBidYearSettings(settings) {
@@ -2819,8 +2960,9 @@ function renderManualBidPanel(panel) {
     fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
     const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
     if (fatigueOverrideInput) {
-      fatigueOverrideInput.checked = resolvedGroup ? values.fatigueOverride : false;
-      fatigueOverrideInput.disabled = !resolvedGroup;
+      const canOverride = ["intake", "admin"].includes(currentUser?.role);
+      fatigueOverrideInput.checked = canOverride && resolvedGroup ? values.fatigueOverride : false;
+      fatigueOverrideInput.disabled = !canOverride || !resolvedGroup;
       fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
     }
   }
@@ -4840,8 +4982,11 @@ function captureIntakeOverrideFields(item) {
   if (!item || !editor) return;
 
   if (item.type === "RDO Line") {
+    const originalLine = item.line;
+    const originalGroup = item.fatigueGroup;
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
     item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
+    if (item.line !== originalLine || item.fatigueGroup !== originalGroup) item.fatigueOverride = false;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
     item.aws = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-aws]")?.value || item.aws);
     item.mid = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-mid]")?.value || item.mid);
@@ -4874,6 +5019,7 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
     ? {
         line: item.line,
         fatigueGroup: item.fatigueGroup,
+        fatigueOverride: Boolean(item.fatigueOverride),
         flex: item.flex === true || item.flex === "Yes",
         aws: item.aws === true || item.aws === "Yes",
         mid: item.mid,
@@ -4928,7 +5074,7 @@ async function approveIntakeItem(id) {
   }
   if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup) {
     const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
-    if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
+    if (!item.fatigueOverride && !fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
       item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
       activeOverrideId = id;
       renderApp();
@@ -6053,7 +6199,8 @@ function leaveSlotDataIsLoaded(details) {
 }
 
 function leaveSlotLoadingMessage() {
-  return supabaseState.loading || !supabaseState.referenceDataLoaded
+  return supabaseState.leaveSlotsLoadState === "loading"
+    || (supabaseState.leaveSlotsLoadState === "idle" && !supabaseState.referenceDataLoaded)
     ? "Loading leave slots…"
     : "Leave slots could not be loaded. Refresh to try again.";
 }
@@ -6175,7 +6322,7 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
       <div class="leave-slot-summary">
         <span><b>${details.cpc.length}</b> / ${cpcCapacity} CPC slots filled</span>
         <span><b>${details.dev.length}</b> / ${devCapacity} developmental slots filled</span>
-        ${details.holidayInLieu ? "<span><b>Holiday In-Lieu</b> observed for your RDO line</span>" : ""}
+        ${details.holidayInLieu ? `<span><b>Holiday In-Lieu</b> ${holidayInLieuIsProvisional() ? "provisional—pending RDO approval" : "observed for your RDO line"}</span>` : ""}
         ${details.holiday && !details.holidayInLieu ? "<span><b>Holiday</b> Federal holiday</span>" : ""}
       </div>
       <div class="daily-slot-grid">
@@ -6265,13 +6412,13 @@ function isLegalHolidayDate(key) {
 }
 
 function firstRdoWeekdayForInitials(initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   const rdoWeekdays = [...rdoWeekdaysForLine(line)].sort((a, b) => a - b);
   return rdoWeekdays[0];
 }
 
 function isRdoWeekdayForInitials(weekday, initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   return rdoWeekdaysForLine(line).has(weekday);
 }
 
@@ -6342,6 +6489,16 @@ function isHolidayInLieuDate(key, initials = currentUser.initials) {
     holidayInLieuDatesForYear(year - 1, initials).has(key);
 }
 
+function holidayInLieuIsProvisional(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  return request?.status === "Pending" && Boolean(submittedRdoLineForInitials(normalized));
+}
+
 function calendarHolidayKind(key, options = {}) {
   const isPublicCalendar = options.showRdo === false && options.showPersonalLeave === false;
 
@@ -6352,7 +6509,11 @@ function calendarHolidayKind(key, options = {}) {
   }
 
   if (isHolidayInLieuDate(key)) {
-    return { label: "Holiday In-Lieu", className: "holiday-in-lieu-day", badgeClass: "in-lieu" };
+    return {
+      label: holidayInLieuIsProvisional() ? "Holiday In-Lieu (provisional—pending RDO approval)" : "Holiday In-Lieu",
+      className: "holiday-in-lieu-day",
+      badgeClass: "in-lieu",
+    };
   }
 
   return isHolidayDate(key)
@@ -6367,6 +6528,18 @@ function formatCalendarDate(key) {
     month: "short",
     day: "numeric",
   }).format(new Date(year, month - 1, day));
+}
+
+function replaceBrowserHistory(targetWindow, url) {
+  try {
+    // Keep the receiver attached, including when updating a containing frame.
+    const history = targetWindow.history;
+    history.replaceState.call(history, history.state, "", url);
+    return true;
+  } catch {
+    // URL cleanup/navigation bookkeeping must not interrupt authentication.
+    return false;
+  }
 }
 
 function adoptParentSupabaseAuthHash() {
@@ -6384,14 +6557,14 @@ function adoptParentSupabaseAuthHash() {
     || authParams.has("error_description");
   if (!isSupabaseAuthResponse) return;
 
-  window.history.replaceState(
-    null,
-    "",
+  const adopted = replaceBrowserHistory(
+    window,
     `${window.location.pathname}${window.location.search}${parentUrl.hash}`
   );
+  if (!adopted) return;
 
   parentUrl.hash = "";
-  window.top.history.replaceState(null, "", parentUrl.toString());
+  replaceBrowserHistory(window.top, parentUrl.toString());
 }
 
 function supabaseClient() {
@@ -6415,6 +6588,12 @@ function setAuthStatus(message, status = "info") {
   if (!target) return;
   target.textContent = message;
   target.dataset.status = status;
+  if (status === "error" && !isMemberAppVisible()) {
+    // Failed sign-in must leave its explanation visible in the login popup.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu) loginMenu.hidden = false;
+    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+  }
 }
 
 const supportedEmailTokenTypes = new Set([
@@ -6443,7 +6622,7 @@ function clearSupabaseEmailTokenFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("token_hash");
   url.searchParams.delete("type");
-  window.history.replaceState({}, document.title, url.toString());
+  replaceBrowserHistory(window, url.toString());
 }
 
 function showPendingSupabaseEmailConfirmation(client, pendingToken) {
@@ -6501,15 +6680,38 @@ function showPendingSupabaseEmailConfirmation(client, pendingToken) {
 
 function friendlyAuthFailure(error) {
   const message = error?.message || String(error || "");
+  if (error?.code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "The email or password is incorrect. Try again, or use Set or reset password.";
+  }
   if (/load failed|failed to fetch|network/i.test(message)) {
     return "Login could not reach Supabase. Check your connection and try again.";
   }
   return message || "That login did not work.";
 }
 
+function requestedPublicView() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("page") !== "public") return null;
+  const area = params.get("area");
+  const section = params.get("section");
+  return {
+    area: [...ZLA_AREAS, "FAQ", "Previous Years"].includes(area) ? area : DEFAULT_PUBLIC_AREA,
+    section: ["Calendar", "RDO", "Bid Time"].includes(section) ? section : DEFAULT_PUBLIC_SECTION,
+  };
+}
+
+function syncPublicPageUrl(area, section) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", "public");
+  url.searchParams.set("area", area);
+  url.searchParams.set("section", section);
+  url.searchParams.delete("member");
+  syncNavigationUrl(url);
+}
+
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -6525,7 +6727,7 @@ function intendedLandingPage(requestedPage = requestedLandingPage()) {
   }
   if (requestedPage === "intake") return canUseIntakeView() ? requestedPage : defaultPage;
   if (requestedPage === "intake-schedule") return canViewIntakeSchedule() ? requestedPage : defaultPage;
-  if (requestedPage === "dashboard") return "dashboard";
+  if (["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile"].includes(requestedPage)) return requestedPage;
   return defaultPage;
 }
 
@@ -6551,6 +6753,7 @@ function clearSupabaseAccountState() {
   document.querySelector('[data-bidder-editor-results]')?.replaceChildren();
   supabaseState.authEmail = "";
   supabaseState.authUserId = "";
+  stopLiveAlertUpdates();
   supabaseState.pendingAuthEmail = "";
   syncAccountFields();
 }
@@ -6712,10 +6915,11 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
   setPage(intendedLandingPage(page));
+  startLiveAlertUpdates();
   document.documentElement.classList.remove("member-boot-pending");
 }
 
-function showPublicHome() {
+function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
@@ -6729,7 +6933,7 @@ function showPublicHome() {
     loginToggle.setAttribute("aria-expanded", "false");
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  renderPublicPage(DEFAULT_PUBLIC_AREA, DEFAULT_PUBLIC_SECTION);
+  renderPublicPage(area, section, { persistNavigation: true });
   document.documentElement.classList.remove("member-boot-pending");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6786,7 +6990,8 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
       await loadSupabaseReferenceData();
-      showLoggedInApp(page);
+      if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
+      else showLoggedInApp(page);
       return true;
     } catch (error) {
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
@@ -6799,44 +7004,65 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
   return supabaseState.authRestorePromise;
 }
 
+let loginLinkRequestPending = false;
+
 async function sendSupabaseLoginLink(email) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
+  if (loginLinkRequestPending) return;
+  loginLinkRequestPending = true;
+  const buttons = document.querySelectorAll("[data-send-login-link], [data-email-login-form] button[type='submit']");
+  buttons.forEach((button) => { button.disabled = true; });
+  setAuthStatus("Sending login link...");
 
-  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    let canRequestLink = false;
-    try {
-      canRequestLink = await canRequestSupabaseLoginEmail(email);
-    } catch (error) {
-      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+  try {
+    const client = supabaseClient();
+    if (!client) {
+      setAuthStatus("Login is not configured yet.", "error");
       return;
     }
-    if (!canRequestLink) {
-      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+
+    if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+      let canRequestLink = false;
+      try {
+        canRequestLink = await canRequestSupabaseLoginEmail(email);
+      } catch (error) {
+        setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+        return;
+      }
+      if (!canRequestLink) {
+        setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+        return;
+      }
+    }
+
+    await client.auth.signOut();
+    clearSupabaseAccountState();
+
+    const { error } = await client.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: supabaseAuthRedirectUrl(),
+        shouldCreateUser: true,
+      },
+    });
+
+    if (error) {
+      setAuthStatus(friendlyAuthFailure(error), "error");
       return;
     }
+
+    setAuthStatus("Login link requested. Check your inbox and spam folder. If you request another link, use the newest email.", "success");
+  } catch (error) {
+    setAuthStatus(friendlyAuthFailure(error), "error");
+  } finally {
+    loginLinkRequestPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+    // Keep the request result visible even if auth initialization closed the menu.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu && !isMemberAppVisible()) {
+      loginMenu.hidden = false;
+      document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+    }
   }
-
-  await client.auth.signOut();
-  clearSupabaseAccountState();
-
-  const { error } = await client.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: supabaseAuthRedirectUrl(),
-      shouldCreateUser: true,
-    },
-  });
-
-  if (error) {
-    setAuthStatus(error.message, "error");
-    return;
-  }
-
-  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
@@ -7195,6 +7421,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     round,
     line,
     fatigueGroup,
+    fatigueOverride: payload.fatigueOverride === true,
     flex,
     aws,
     mid,
@@ -7615,6 +7842,8 @@ async function ensureSupabaseBidYearId() {
 }
 
 async function saveSupabaseRdoRequest(request, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The RDO bid could not reach the database. Sign in and try again.");
@@ -7636,11 +7865,16 @@ async function saveSupabaseRdoRequest(request, options = {}) {
 }
 
 async function saveSupabaseManualRdoRequest(request, person, area) {
+  if (request.fatigueOverride && !["intake", "admin"].includes(currentUser?.role)) {
+    throw new Error("Only intake and admin users may override fatigue capacity.");
+  }
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
   }
-  const { data, error } = await client.rpc("submit_rdo_bid", {
+  const { data, error } = await client.rpc(request.fatigueOverride ? "submit_manual_rdo_fatigue_override" : "submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
     requested_fatigue_group: request.fatigueGroup || null,
@@ -7658,6 +7892,8 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
 }
 
 async function saveSupabaseManualLeaveRequest(requests, person, area, notes = "") {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
@@ -7689,6 +7925,8 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
 }
 
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
@@ -7761,7 +7999,8 @@ async function loadPublicPilotCalendar() {
   if (!client) return;
   supabaseState.loading = true;
   try {
-    const result = await loadPublishedLeaveSlots(client);
+    await loadBidYearCatalog(client);
+    const result = await readReferenceData("pilot leave slots", () => loadPublishedLeaveSlots(client));
     if (result.error) throw result.error;
     applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
     calendarRenderRevision += 1;
@@ -7788,12 +8027,63 @@ async function loadRdoLines(client, bidYearId) {
     .eq("bid_year_id", bidYearId);
 }
 
+// Only use this helper for reads: mutations must never be replayed automatically.
+const referenceLoadDiagnostics = [];
+async function readReferenceData(label, request) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const started = Date.now();
+    const controller = new AbortController();
+    let timer;
+    let result;
+    try {
+      const pending = request();
+      if (typeof pending?.abortSignal === "function") pending.abortSignal(controller.signal);
+      result = await Promise.race([
+        pending,
+        new Promise((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve({ data: null, error: { code: "READ_TIMEOUT" }, status: 0 });
+          }, 15000);
+        }),
+      ]);
+    } catch (error) {
+      result = { data: null, error, status: 0 };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!result?.error) return result;
+    const status = Number(result.status || 0);
+    const code = String(result.error.code || "");
+    const transient = status === 408 || status === 429 || status >= 500
+      || code === "READ_TIMEOUT" || code === "57014"
+      || (!status && /Failed to fetch|NetworkError|network|timeout|AbortError/i.test(`${result.error.name || ""} ${result.error.message || ""}`));
+    // Deliberately exclude response bodies, URLs, tokens, and bidder details.
+    const diagnostic = { section: label, attempt, status, code, elapsedMs: Date.now() - started, at: new Date().toISOString(), retrying: transient && attempt < 3 };
+    referenceLoadDiagnostics.push(diagnostic);
+    if (referenceLoadDiagnostics.length > 50) referenceLoadDiagnostics.shift();
+    window.NATCA_REFERENCE_LOAD_DIAGNOSTICS = referenceLoadDiagnostics;
+    console.warn("Bidding reference read failed", diagnostic);
+    if (!transient || attempt === 3) return result;
+    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250)));
+  }
+}
+
+function refreshPublicReferenceSection() {
+  if (!isMemberAppVisible()) renderPublicPage();
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
     resetSupabaseBackedData();
+    supabaseState.rdoLinesLoadState = "error";
     supabaseState.enabled = false;
     supabaseState.connected = false;
+    supabaseState.faqLoadState = "error";
+    supabaseState.bidTimesLoadState = "error";
+    supabaseState.leaveSlotsLoadState = "error";
+    supabaseState.referenceDataLoaded = true;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
     return;
   }
@@ -7803,25 +8093,45 @@ async function loadSupabaseReferenceData() {
   supabaseState.enabled = true;
   supabaseState.loading = true;
   supabaseState.intakeSchedulesError = "";
+  supabaseState.rdoLinesLoadState = "loading";
   supabaseState.message = "Loading bidding data from Supabase...";
 
+  supabaseState.faqLoadState = "loading";
+  supabaseState.bidTimesLoadState = "loading";
+  supabaseState.leaveSlotsLoadState = "loading";
+  const rosterRequest = readReferenceData("roster", () => client.rpc("read_bidding_roster"));
+  const faqReads = Promise.all([
+    readReferenceData("FAQ entries", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
+    readReferenceData("MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+  ]).then(([entries, documents]) => {
+    if (!entries.error) publicFaqContent.entries = entries.data || [];
+    if (!documents.error) publicFaqContent.documents = documents.data || [];
+    supabaseState.faqLoadState = entries.error || documents.error ? "error" : "loaded";
+    refreshPublicReferenceSection();
+    return [entries, documents];
+  });
   try {
-    const [bidYearResult, areasResult, rosterResult] = await Promise.all([
-      client
+    await loadBidYearCatalog(client);
+    const [bidYearResult, areasResult] = await Promise.all([
+      readReferenceData("bid year", () => client
         .from("bid_years")
         .select("id,bid_year,annual_leave_allowance_days")
         .eq("bid_year", BID_YEAR)
-        .single(),
-      client.from("areas").select("id,code,name,display_order").order("display_order"),
-      client.rpc("read_bidding_roster"),
+        .single()),
+      readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order")),
     ]);
-    const requiredError = [bidYearResult, areasResult, rosterResult].find((result) => result.error)?.error;
+    const requiredError = [bidYearResult, areasResult].find((result) => result.error)?.error;
     if (requiredError) throw requiredError;
 
     const bidYear = bidYearResult.data;
     supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-    applyRosterFromDatabase(rosterResult.data || [], areaById);
+    let rosterResult;
+    const rosterReady = rosterRequest.then((result) => {
+      rosterResult = result;
+      if (!result.error) applyRosterFromDatabase(result.data || [], areaById);
+      return result;
+    });
 
     const [
       holidaysResult,
@@ -7842,32 +8152,53 @@ async function loadSupabaseReferenceData() {
       faqEntriesResult,
       mouDocumentsResult,
       _helpThreadsLoaded,
+      _rosterLoaded,
     ] = await Promise.all([
-      client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      loadRdoLines(client, bidYear.id),
-      loadPublishedGlRdoAssignments(client),
-      supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
-      loadPublishedLeaveSlots(client),
-      supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      loadIntakeSchedules(client),
-      supabaseState.authUserId
+      readReferenceData("holidays", () => client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, bidYear.id)).then((result) => {
+        supabaseState.rdoLinesLoadState = result.error ? "error" : "loaded";
+        if (!result.error) upsertRdoLinesFromDatabase(result.data || [], areaById);
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
+        supabaseState.leaveSlotsLoadState = result.error ? "error" : "loaded";
+        if (!result.error) {
+          applyLeaveSlotScheduleFromDatabase(supabaseRows(result), areaById);
+          calendarRenderRevision += 1;
+        }
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("leave requests", () => supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
+      readReferenceData("calendar marks", () => supabaseState.authUserId
         ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
-        : Promise.resolve({ data: [], error: null }),
-      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
-      client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
-      supabaseState.authUserId
+        : Promise.resolve({ data: [], error: null })),
+      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+      readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("pilot settings", () => supabaseState.authUserId
         ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
-        : Promise.resolve({ data: null, error: null }),
-      loadPublishedBidWindows(client, bidYear.id),
-      client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
-      client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
-      loadSupabaseHelpThreads(),
+        : Promise.resolve({ data: null, error: null })),
+      Promise.all([readReferenceData("bid windows", () => loadPublishedBidWindows(client, bidYear.id)), rosterReady]).then(([result]) => {
+        supabaseState.bidTimesLoadState = result.error || rosterResult.error ? "error" : "loaded";
+        if (!result.error) applyBidWindowsFromDatabase(supabaseRows(result));
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      faqReads.then((results) => results[0]),
+      faqReads.then((results) => results[1]),
+      readReferenceData("help threads", () => loadSupabaseHelpThreads().then(() => ({ data: null, error: null }))),
+      rosterReady,
     ]);
 
     const loadWarnings = [
+      supabaseLoadWarning("roster", rosterResult),
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
       isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
@@ -7891,8 +8222,6 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
-    if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
@@ -7926,7 +8255,6 @@ async function loadSupabaseReferenceData() {
       applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
       await refreshPilotRounds();
     }
-    if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
@@ -7938,9 +8266,13 @@ async function loadSupabaseReferenceData() {
     }
   } catch (error) {
     supabaseState.connected = false;
+    if (supabaseState.rdoLinesLoadState === "loading") supabaseState.rdoLinesLoadState = "error";
+    if (supabaseState.bidTimesLoadState === "loading") supabaseState.bidTimesLoadState = "error";
+    if (supabaseState.leaveSlotsLoadState === "loading") supabaseState.leaveSlotsLoadState = "error";
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
+    await faqReads;
     supabaseState.loading = false;
     supabaseState.referenceDataLoaded = true;
   }
@@ -8321,9 +8653,9 @@ function renderPublicFaq() {
   const documents = publicFaqContent.documents || [];
 
   if (!entries.length && !documents.length) {
-    const message = !supabaseState.referenceDataLoaded
+    const message = ["idle", "loading"].includes(supabaseState.faqLoadState)
       ? "Loading the current FAQ and bidding references…"
-      : supabaseState.connected
+      : supabaseState.faqLoadState === "loaded"
         ? "No FAQ items or MOU documents are published yet."
         : "The current FAQ could not be loaded. Please refresh to try again.";
     return `
@@ -8488,7 +8820,18 @@ function rdoFatigueGroupBadge(group) {
     : "";
 }
 
+function rdoLinesLoadMessage() {
+  if (supabaseState.rdoLinesLoadState === "loaded") return "";
+  if (supabaseState.rdoLinesLoadState === "loading"
+      || (supabaseState.rdoLinesLoadState === "idle" && !supabaseState.referenceDataLoaded)) {
+    return "Loading RDO lines…";
+  }
+  return "RDO lines could not be loaded. Please refresh the browser to reload.";
+}
+
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
   if (!lines.length) return `<tr><td colspan="12">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
@@ -8517,6 +8860,8 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
 }
 
 function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<div class="public-rdo-empty" role="status">${escapeHtml(loadMessage)}</div>`;
   if (!lines.length) return `<div class="public-rdo-empty">No RDO lines match those filters for ${area}.</div>`;
 
   return PUBLIC_RDO_LINE_SECTIONS.map((section) => {
@@ -8620,6 +8965,12 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  if (supabaseState.bidTimesLoadState !== "loaded") {
+    const message = supabaseState.bidTimesLoadState === "error"
+      ? "Bid times could not be loaded. Refresh to try again."
+      : "Loading bid times…";
+    return `<p role="status">${escapeHtml(message)}</p>`;
+  }
   const showBidderNames = Boolean(supabaseState.authUserId);
 
   return `
@@ -8637,7 +8988,7 @@ function renderPublicBidTimeTable(area) {
           <article class="mobile-bid-time-card" data-public-bid-time-card>
             <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
-            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</dd></div>`).join("")}</dl>
           </article>
         `).join("")}
         ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
@@ -8670,7 +9021,7 @@ function renderPublicBidTimeTable(area) {
                 ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
@@ -8746,7 +9097,8 @@ function publicRosterArea(area = publicState.area) {
   return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
-function renderPublicPage(area = publicState.area, section = publicState.section) {
+function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false } = {}) {
+  if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
@@ -9031,6 +9383,7 @@ function closeLateBidDialog() {
 }
 
 function updateBidWindow(force = false) {
+  if (!currentUser || !isMemberAppVisible()) return;
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
 
@@ -9046,7 +9399,7 @@ function updateBidWindowWithCache(force = false) {
   const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
-  const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const canUseBidActions = !selectedBidYearErrorMessage() && viewingHomeArea && (isOpen || isTestingBypass);
   const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -9538,6 +9891,16 @@ function isCurrentUserRdoLine(line) {
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
+
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) {
+    setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${currentViewArea()}`);
+    setText("[data-rdo-filter-count]", supabaseState.rdoLinesLoadState === "loading" ? "Loading…" : "Unavailable");
+    target.innerHTML = `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
+    const mobileCards = document.querySelector("[data-member-rdo-cards]");
+    if (mobileCards) mobileCards.innerHTML = `<div class="empty-state" role="status">${escapeHtml(loadMessage)}</div>`;
+    return;
+  }
 
   let lastPattern = "";
   const rows = [];
@@ -11261,6 +11624,56 @@ async function exportSeniorityRoster() {
   }
 }
 
+async function exportBidTimes(form) {
+  if (!hasSystemAdminAccess()) return;
+  const button = form.querySelector("[data-export-bid-times]");
+  const status = form.querySelector("[data-bid-time-export-status]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]:checked'), input => input.value);
+  if (!areas.length) {
+    status.textContent = "Choose at least one area to export.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = `Preparing ${BID_YEAR} bid times…`;
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session?.access_token) throw new Error("Sign in with an admin account before exporting.");
+    const params = new URLSearchParams({ year: String(BID_YEAR) });
+    areas.forEach(area => params.append("area", area));
+    const response = await fetch(`/api/admin/bid-times/export?${params}`, {
+      headers: { Authorization: `Bearer ${data.session.access_token}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || "The bid times could not be exported.");
+    }
+    downloadBlob(`zla-bid-times-${BID_YEAR}.xlsx`, await response.blob());
+    status.textContent = `Exported ${BID_YEAR} bid times for ${areas.join(", ")}.`;
+  } catch (error) {
+    status.textContent = error.message || "The bid times could not be exported.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.addEventListener("submit", event => {
+  if (!event.target.matches("[data-bid-time-export-form]")) return;
+  event.preventDefault();
+  void exportBidTimes(event.target);
+});
+
+document.addEventListener("change", event => {
+  const form = event.target.closest("[data-bid-time-export-form]");
+  if (!form) return;
+  const all = form.querySelector("[data-bid-time-export-all]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]'));
+  if (event.target === all) areas.forEach(input => { input.checked = all.checked; });
+  all.checked = areas.every(input => input.checked);
+  all.indeterminate = !all.checked && areas.some(input => input.checked);
+});
+
 function rosterEntryInitials(entry) {
   return entry[3] || "";
 }
@@ -12183,6 +12596,9 @@ function renderEmailLog() {
     : '<p class="empty-state small">No notification emails have been queued yet.</p>';
 }
 
+// Rounds 5 and 6 are reserved for a future bidding update.
+const BID_WINDOW_BUILDER_ROUND_COUNT = 4;
+
 function setBidWindowBuilderStatus(message, status = "info") {
   const target = document.querySelector("[data-bid-window-builder-status]");
   if (!target) return;
@@ -12280,7 +12696,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 6; round += 1) {
+  for (let round = 1; round <= BID_WINDOW_BUILDER_ROUND_COUNT; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -12302,7 +12718,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 6) {
+    if (round < BID_WINDOW_BUILDER_ROUND_COUNT) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -12360,7 +12776,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 6;
+  const windowCount = totalBues * BID_WINDOW_BUILDER_ROUND_COUNT;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -12431,7 +12847,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -12500,7 +12916,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 6,
+    requested_round_count: BID_WINDOW_BUILDER_ROUND_COUNT,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -12524,7 +12940,7 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
@@ -13532,6 +13948,95 @@ function renderHistory() {
       </article>
     `)
     .join("");
+}
+
+let alertRefreshPending = false;
+let alertRefreshTimer = null;
+let alertRealtimeChannel = null;
+let alertRealtimeUserId = "";
+let lastAlertDatabaseSnapshot = "";
+
+function stopLiveAlertUpdates() {
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = null;
+  if (alertRealtimeChannel) void supabaseClient()?.removeChannel(alertRealtimeChannel);
+  alertRealtimeChannel = null;
+  alertRealtimeUserId = "";
+  lastAlertDatabaseSnapshot = "";
+}
+
+function scheduleLiveAlertRefresh() {
+  // A submission can change several tables. Fetch once after the burst settles.
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = setTimeout(() => {
+    alertRefreshTimer = null;
+    void refreshLiveAlerts();
+  }, 750);
+}
+
+function startLiveAlertUpdates() {
+  const client = supabaseClient();
+  const userId = supabaseState.authUserId;
+  if (!client || !userId || alertRealtimeUserId === userId) return;
+  stopLiveAlertUpdates();
+  alertRealtimeUserId = userId;
+  alertRealtimeChannel = client.channel(`bidding-alerts-${userId}`);
+  for (const table of ["intake_submissions", "leave_requests", "help_threads", "help_messages"]) {
+    alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleLiveAlertRefresh);
+  }
+  alertRealtimeChannel.subscribe((status) => {
+    if (status === "SUBSCRIBED") scheduleLiveAlertRefresh();
+  });
+}
+
+async function refreshLiveAlerts() {
+  if (alertRefreshPending || document.visibilityState !== "visible" || !isMemberAppVisible()
+    || !supabaseState.authUserId || !supabaseState.connected || supabaseState.loading) return;
+  const client = supabaseClient();
+  if (!client) return;
+  alertRefreshPending = true;
+  const userId = supabaseState.authUserId;
+  const previousData = JSON.stringify([intakeQueue, helpThreads]);
+  try {
+    const requester = currentHelpRequester();
+    const [bidding, leave, help] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
+      client.rpc("live_help_threads", {
+        help_bid_year: BID_YEAR,
+        help_session_id: requester.sessionId || liveHelpSessionId(),
+      }),
+    ]);
+    const snapshot = JSON.stringify([userId, bidding.data, leave.data, help.data]);
+    if (!bidding.error && !leave.error && !help.error && snapshot === lastAlertDatabaseSnapshot) return;
+    const areas = await client.from("areas").select("id,name");
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = !bidding.error && !leave.error && !areas.error
+      ? attachSubmissionIdsToLeaveRequests(
+        await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+      ) : null;
+    // Discard results from an old session or a read overtaken by a local action.
+    if (supabaseState.authUserId !== userId || supabaseState.loading || !isMemberAppVisible()
+      || JSON.stringify([intakeQueue, helpThreads]) !== previousData) return;
+    if (leaveRows) {
+      const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+        && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+        .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+      inferRdoBidChanges(rdoItems);
+      // Replace the database snapshot so removed or superseded alerts also disappear.
+      intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+      intakeQueue.unshift(...rdoItems);
+      upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    }
+    if (!help.error) helpThreads = (help.data || []).map(helpThreadFromRpc);
+    if (!bidding.error && !leave.error && !help.error && !areas.error) lastAlertDatabaseSnapshot = snapshot;
+    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) renderAlerts();
+  } catch (error) {
+    console.warn("Alert refresh unavailable:", error.message || error);
+  } finally {
+    alertRefreshPending = false;
+  }
 }
 
 function alertItems() {
@@ -14843,6 +15348,32 @@ function openIntakeItemFromAlert(itemId) {
   }));
 }
 
+function syncNavigationUrl(url) {
+  replaceBrowserHistory(window, url.toString());
+  // Preserve the visible address when this app is embedded in the dashboard.
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "bidding-navigation", search: url.search }, window.location.origin);
+    try {
+      const parentUrl = new URL(window.parent.location.href);
+      for (const key of ["page", "member", "area", "section", "bidYear"]) {
+        if (url.searchParams.has(key)) parentUrl.searchParams.set(key, url.searchParams.get(key));
+        else parentUrl.searchParams.delete(key);
+      }
+      replaceBrowserHistory(window.parent, parentUrl.toString());
+    } catch {
+      // A host on another origin cannot expose its address to this frame.
+    }
+  }
+}
+
+function syncMemberPageUrl(pageName) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", pageName);
+  url.searchParams.delete("area");
+  url.searchParams.delete("section");
+  syncNavigationUrl(url);
+}
+
 function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
@@ -14853,6 +15384,11 @@ function setPage(pageName) {
   if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
+
+  syncMemberPageUrl(pageName);
+
+  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
 
   const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
 
@@ -14896,26 +15432,9 @@ function setPage(pageName) {
 }
 
 function updateSelectedBidYear(year) {
-  const isHistorical = Number(year) < BID_YEAR;
-  displayedCalendarYear = Number(year);
-  setSelectedDateYear(displayedCalendarYear);
-  const label = document.getElementById("bid-year-label");
-  const historyHeading = document.querySelector("[data-history-heading]");
-  const historySummary = document.querySelector("[data-history-summary]");
-
-  if (label) label.textContent = `${year} Annual Bidding`;
-
-  if (historyHeading) {
-    historyHeading.textContent = isHistorical ? `${year} Historical Bidding` : "Bid History";
+  if (Number(year) !== BID_YEAR && bidYearCatalog.some((entry) => entry.bid_year === Number(year))) {
+    navigateToBidYear(Number(year));
   }
-
-  if (historySummary) {
-    historySummary.textContent = isHistorical
-      ? `Review ${currentUser.area} bidding activity from ${year}. Bidding intake admins can review all areas.`
-      : `${currentUser.area} submission timeline, saved drafts, changes, and verification events.`;
-  }
-
-  setPage(isHistorical ? "history" : "dashboard");
 }
 
 function biddingExportRows() {
@@ -15544,6 +16063,7 @@ function renderApp() {
 }
 
 function renderAppWithCache() {
+  syncBidYearControls();
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
@@ -15579,10 +16099,16 @@ function logOut() {
   document.querySelector(".login-screen")?.removeAttribute("hidden");
   const loginToggle = document.querySelector("[data-public-login-toggle]");
   if (loginToggle) loginToggle.textContent = "Login";
-  renderPublicPage();
+  renderPublicPage(publicState.area, publicState.section, { persistNavigation: true });
 }
 
 document.addEventListener("click", async (event) => {
+  // Navigation must stay available even when bidding data cannot load.
+  const pageNavigation = event.target.closest("[data-page]");
+  if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
+    setPage(pageNavigation.dataset.page);
+    return;
+  }
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
   if (intakeBidderDetailOpen) {
     intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
@@ -15823,7 +16349,7 @@ document.addEventListener("click", async (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar");
+    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
     return;
   }
 
@@ -16450,6 +16976,8 @@ document.addEventListener("keydown", async (event) => {
   }
 });
 
+document.querySelector("[data-save-active-bid-year]")?.addEventListener("click", saveActiveBidYear);
+
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
   updateSelectedBidYear(event.target.value);
 });
@@ -16638,7 +17166,7 @@ document.addEventListener("change", async (event) => {
   }
 
   if (event.target.matches("[data-mobile-public-area]")) {
-    renderPublicPage(event.target.value, publicState.section);
+    renderPublicPage(event.target.value, publicState.section, { persistNavigation: true });
     return;
   }
   if (event.target.matches("[data-mobile-month]")) {
@@ -16757,6 +17285,7 @@ document.addEventListener("change", async (event) => {
   renderApp();
 });
 
+Object.assign(publicState, requestedPublicView() || {});
 initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
@@ -16776,8 +17305,17 @@ setInterval(() => {
   if (document.visibilityState === "visible") updateBidWindow();
 }, 1000);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") updateBidWindow(true);
+  if (document.visibilityState === "visible") {
+    updateBidWindow(true);
+    void refreshLiveAlerts();
+    void refreshActiveBidYear();
+  }
 });
+window.addEventListener("focus", () => { void refreshActiveBidYear(); });
+window.addEventListener("focus", scheduleLiveAlertRefresh);
+window.addEventListener("online", scheduleLiveAlertRefresh);
+// Reconcile missed events or unavailable Realtime without frequent polling.
+setInterval(() => { void refreshLiveAlerts(); void refreshActiveBidYear(); }, 60000);
 window.NATCA_BIDDING_READY = true;
 
 setInterval(() => {

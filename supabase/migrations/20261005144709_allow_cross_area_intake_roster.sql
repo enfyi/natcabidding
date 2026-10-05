@@ -1,33 +1,11 @@
--- Supabase-backed roster read model for the bidding UI.
--- Anonymous visitors can load names, initials, bid roles, and area order.
--- Signed-in users can see contact fields for their own area; intake/admins can see all active areas.
-
-alter table bidders
-  add column if not exists leave_slot_allowance integer not null default 4 check (leave_slot_allowance >= 0);
-
-create or replace function public.read_bidding_roster(include_inactive boolean default false)
-returns table (
-  profile_id uuid,
-  first_name text,
-  last_name text,
-  initials text,
-  initials_verified boolean,
-  email text,
-  phone text,
-  role text,
-  bid_role text,
-  seniority_rank integer,
-  area_id uuid,
-  area_name text,
-  leave_slot_allowance integer,
-  active boolean,
-  bidder_count bigint
-)
-language sql
-stable
-security definer
-set search_path = public
-as $$
+-- Intake staff need the active roster across all areas for manual bid entry.
+-- Preserve controller area scope, public contact masking, and admin-only inactive access.
+CREATE OR REPLACE FUNCTION public.read_bidding_roster(include_inactive boolean DEFAULT false)
+ RETURNS TABLE(profile_id uuid, first_name text, last_name text, initials text, initials_verified boolean, email text, phone text, role text, bid_role text, seniority_rank integer, area_id uuid, area_name text, leave_slot_allowance integer, active boolean, bidder_count bigint)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
   with access_context as (
     select
       auth.uid() is not null as signed_in,
@@ -40,7 +18,6 @@ as $$
     from bidders b
     cross join access_context ac
     where (b.active or (include_inactive and ac.is_admin))
-      and b.bid_role <> 'ADM'
       and (
         ac.is_admin
         or ac.is_reviewer
@@ -58,7 +35,6 @@ as $$
       count(*) over (partition by b.area_id) as area_bidder_count
     from bidders b
     where b.active
-      and b.bid_role not in ('ADM', 'NB')
   )
   select
     b.id as profile_id,
@@ -81,6 +57,4 @@ as $$
   join areas a on a.id = b.area_id
   left join ranked_bidders rb on rb.id = b.id
   order by a.display_order, rb.area_seniority_rank nulls last, b.last_name, b.first_name, b.id;
-$$;
-
-grant execute on function public.read_bidding_roster(boolean) to anon, authenticated;
+$function$;

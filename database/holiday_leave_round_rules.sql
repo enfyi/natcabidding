@@ -1,3 +1,4 @@
+-- Requires database/fatigue_group_balancing.sql.
 -- Rounds 1-3 charge bid holidays and holiday-in-lieu dates against the
 -- bidder's leave allowance and round day limit. Round 4 restores one day of
 -- allowance per distinct charged holiday/in-lieu date from Rounds 1-3.
@@ -155,10 +156,6 @@ declare
   line_row public.rdo_lines%rowtype;
   resolved_round integer;
   submission_id uuid;
-  area_max integer;
-  crew_max integer;
-  area_used integer;
-  crew_used integer;
   enforce_bid_windows boolean := true;
   configured_test_round integer;
   ghost_bid boolean;
@@ -225,32 +222,17 @@ begin
     raise exception 'RDO line % is already assigned.', requested_line_code;
   end if;
 
-  if line_row.line_type = 'CPC' and target.bid_role <> 'GL' then
+  if line_row.line_type in ('CPC', 'DEV') and target.bid_role <> 'GL' then
     requested_fatigue_group := nullif(trim(requested_fatigue_group), '');
     if requested_fatigue_group is not null and requested_fatigue_group not in ('A', 'B', 'C') then
       raise exception 'Choose fatigue group A, B, or C.';
     end if;
 
     if requested_fatigue_group is not null then
-      select greatest(1, floor(count(*)::numeric / 3)::integer) into area_max
-      from public.rdo_lines rl
-      where rl.bid_year_id = year_row.id and rl.area_id = target.area_id and rl.line_type = 'CPC';
-      select greatest(1, floor(count(*)::numeric / 3)::integer) into crew_max
-      from public.rdo_lines rl
-      where rl.bid_year_id = year_row.id and rl.area_id = target.area_id
-        and rl.line_type = 'CPC' and rl.pattern = line_row.pattern;
-      select count(*) into area_used from public.rdo_lines rl
-      where rl.bid_year_id = year_row.id and rl.area_id = target.area_id
-        and rl.line_type = 'CPC' and rl.status = 'taken'
-        and rl.fatigue_group = requested_fatigue_group
-        and rl.assigned_bidder_id is distinct from target.id;
-      select count(*) into crew_used from public.rdo_lines rl
-      where rl.bid_year_id = year_row.id and rl.area_id = target.area_id
-        and rl.line_type = 'CPC' and rl.pattern = line_row.pattern and rl.status = 'taken'
-        and rl.fatigue_group = requested_fatigue_group
-        and rl.assigned_bidder_id is distinct from target.id;
-      if area_used >= area_max or crew_used >= crew_max then
-        raise exception 'Fatigue group % is full for this area or crew.', requested_fatigue_group;
+      if not private.fatigue_group_is_available(
+        year_row.id, target.area_id, line_row.id, requested_fatigue_group, target.id
+      ) then
+        raise exception 'Fatigue group % is full for this area or RDO set.', requested_fatigue_group;
       end if;
     end if;
   end if;
@@ -1160,10 +1142,6 @@ declare
   bucket text;
   slot_row public.leave_slots%rowtype;
   date_row record;
-  area_max integer;
-  crew_max integer;
-  area_used integer;
-  crew_used integer;
   target_area_name text;
   capacity_override boolean := coalesce((override_payload->>'leaveCapacityOverride')::boolean, false);
   ghost_bid boolean;
@@ -1217,24 +1195,10 @@ begin
       requested_group := nullif(trim(coalesce(override_payload->>'fatigueGroup', submission.payload->>'fatigueGroup', '')), '');
       if requested_group is not null and requested_group not in ('A', 'B', 'C') then raise exception 'Fatigue group must be A, B, or C.'; end if;
 
-      if requested_group is not null and line_row.line_type = 'CPC' then
-        select greatest(1, floor(count(*)::numeric / 3)::integer) into area_max
-        from public.rdo_lines rl where rl.bid_year_id = submission.bid_year_id
-          and rl.area_id = target.area_id and rl.line_type = 'CPC';
-        select greatest(1, floor(count(*)::numeric / 3)::integer) into crew_max
-        from public.rdo_lines rl where rl.bid_year_id = submission.bid_year_id
-          and rl.area_id = target.area_id and rl.line_type = 'CPC' and rl.pattern = line_row.pattern;
-        select count(*) into area_used from public.rdo_lines rl
-        where rl.bid_year_id = submission.bid_year_id and rl.area_id = target.area_id
-          and rl.line_type = 'CPC' and rl.status = 'taken' and rl.fatigue_group = requested_group
-          and rl.assigned_bidder_id is distinct from target.id;
-        select count(*) into crew_used from public.rdo_lines rl
-        where rl.bid_year_id = submission.bid_year_id and rl.area_id = target.area_id
-          and rl.line_type = 'CPC' and rl.pattern = line_row.pattern and rl.status = 'taken'
-          and rl.fatigue_group = requested_group and rl.assigned_bidder_id is distinct from target.id;
-        if area_used >= area_max or crew_used >= crew_max then
-          raise exception 'Fatigue group % is full for this area or crew.', requested_group;
-        end if;
+      if requested_group is not null and line_row.line_type in ('CPC', 'DEV') and not private.fatigue_group_is_available(
+        submission.bid_year_id, target.area_id, line_row.id, requested_group, target.id
+      ) and not private.rdo_fatigue_override_authorized(submission.id, line_row.id, requested_group) then
+        raise exception 'Fatigue group % is full for this area or RDO set.', requested_group;
       end if;
 
       update public.rdo_lines

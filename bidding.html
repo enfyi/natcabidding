@@ -10,7 +10,7 @@
     <title>NATCA ZLA Bidding</title>
     <script>
       const bootParams = new URLSearchParams(location.search);
-      if (bootParams.get("member") === "1" || ["dashboard", "intake", "intake-schedule", "admin"].includes(bootParams.get("page"))) {
+      if (bootParams.get("member") === "1" || ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(bootParams.get("page"))) {
         document.documentElement.classList.add("member-boot-pending");
       }
     </script>
@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -174,10 +174,11 @@
                 <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="public">Full</button>
               </div>
               <div class="segmented calendar-workforce-tabs" aria-label="Public calendar workforce">
-                <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="public">CPC</button>
-                <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="public">DEV</button>
+                <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="public-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="public">CPC</button>
+                <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="public-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="public">DEV</button>
               </div>
             </div>
+            <p class="calendar-workforce-description" id="public-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
             <p class="calendar-layout-description" data-calendar-layout-description="public">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -302,9 +303,8 @@
             </label>
             <label>
               <span>Bid Year</span>
-              <select aria-label="Bid year" data-bid-year-select>
-                <option>2027</option>
-                <option>2026</option>
+              <select id="selected-bid-year" name="selected-bid-year" aria-label="Bid year" data-bid-year-select disabled>
+                <option>Checking…</option>
               </select>
             </label>
             <div class="status-chip" id="bid-window-status">
@@ -337,6 +337,7 @@
             </button>
           </div>
         </header>
+        <p class="status-chip closed" role="status" data-bid-year-notice hidden></p>
         <section class="alerts-menu" aria-label="Alerts" hidden data-alert-menu>
           <div class="panel">
             <div class="panel-header compact">
@@ -433,10 +434,11 @@
                   <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="dashboard">Full</button>
                 </div>
                 <div class="segmented calendar-workforce-tabs" aria-label="Dashboard calendar workforce">
-                  <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="dashboard">CPC</button>
-                  <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="dashboard">DEV</button>
+                  <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="dashboard-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="dashboard">CPC</button>
+                  <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="dashboard-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="dashboard">DEV</button>
                 </div>
               </div>
+              <p class="calendar-workforce-description" id="dashboard-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
               <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -689,10 +691,11 @@
                   <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
                 </div>
                 <div class="segmented calendar-workforce-tabs" aria-label="Leave calendar workforce">
-                  <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="leave">CPC</button>
-                  <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
+                  <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="leave-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="leave">CPC</button>
+                  <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="leave-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
                 </div>
               </div>
+              <p class="calendar-workforce-description" id="leave-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
               <p class="calendar-layout-description" data-calendar-layout-description="leave">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -1341,6 +1344,25 @@
                   </div>
                   <span class="status open" data-bid-window-builder-summary>Ready to build</span>
                 </div>
+                <form class="bid-time-export-form" data-bid-time-export-form>
+                  <h4>Export Bid Times</h4>
+                  <p>Download the saved schedule for the active bid year, including each bidder’s type (CPC, R-DEV, D-DEV, GL, TMC, or DEV) and annual bid allocation in hours. Round start times use Pacific time; unscheduled rounds are blank.</p>
+                  <label class="toggle-row"><input type="checkbox" data-bid-time-export-all checked />All areas</label>
+                  <fieldset>
+                    <legend>Areas to export</legend>
+                    <div class="bid-time-export-areas">
+                      <label><input type="checkbox" name="export-area" value="Area A" checked />Area A</label>
+                      <label><input type="checkbox" name="export-area" value="Area B" checked />Area B</label>
+                      <label><input type="checkbox" name="export-area" value="Area C" checked />Area C</label>
+                      <label><input type="checkbox" name="export-area" value="Area D" checked />Area D</label>
+                      <label><input type="checkbox" name="export-area" value="Area E" checked />Area E</label>
+                      <label><input type="checkbox" name="export-area" value="Area F" checked />Area F</label>
+                      <label><input type="checkbox" name="export-area" value="TMU" checked />TMU</label>
+                    </div>
+                  </fieldset>
+                  <button class="secondary-action small" type="submit" data-export-bid-times>Export Bid Times to Excel</button>
+                  <p class="form-status" data-bid-time-export-status role="status"></p>
+                </form>
                 <form class="bid-window-builder-form" data-bid-window-builder-form>
                   <label class="toggle-row bid-window-consistency-toggle">
                     <input type="checkbox" data-bid-window-builder-consistent checked />
@@ -1521,12 +1543,26 @@
             <span class="pill open">System Admin</span>
           </header>
           <nav class="admin-section-nav" aria-label="Bidding setup sections">
+            <button type="button" data-admin-section-target="admin-bid-year-section">Bid year</button>
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
           </nav>
           <div class="admin-tools-page-grid">
+              <section class="panel admin-section-target" id="admin-bid-year-section" data-system-admin-only hidden>
+                <div class="panel-header compact"><div>
+                  <h3>Active Bid Year</h3>
+                  <p>New visits open the active year. Other years are view-only for bidders. Changing this setting preserves existing records and your selected view.</p>
+                </div></div>
+                <p>Current active year: <strong data-active-bid-year-label>Checking…</strong></p>
+                <label for="active-bid-year">Active bid year</label>
+                <select id="active-bid-year" name="active-bid-year" data-active-bid-year-select disabled></select>
+                <button class="primary-action" type="button" data-save-active-bid-year>Save Active Year</button>
+                <p role="status" data-active-bid-year-status>Only existing open bid years can be activated. Switching the year reloads the page and clears unsent selections.</p>
+              </section>
+
+
               <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
@@ -1819,7 +1855,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-no-fatigue-preference-20261005"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

@@ -6,7 +6,8 @@ declare
   definition text;
   old_assignment constant text := 'requested_group := coalesce(override_payload->>''fatigueGroup'', submission.payload->>''fatigueGroup'');';
   old_validation constant text := 'if requested_group not in (''A'', ''B'', ''C'') then raise exception ''A valid fatigue group is required.''; end if;';
-  old_capacity constant text := 'if line_row.line_type in (''CPC'', ''DEV'') then';
+  old_capacity_block constant text := 'if line_row.line_type in (''CPC'', ''DEV'') then';
+  old_capacity_inline constant text := 'if line_row.line_type in (''CPC'', ''DEV'') and not private.fatigue_group_is_available(';
 begin
   if routine_oid is null then
     raise exception 'review_bidding_submission is not installed';
@@ -15,7 +16,7 @@ begin
   definition := pg_get_functiondef(routine_oid);
   if position(old_assignment in definition) = 0
     or position(old_validation in definition) = 0
-    or position(old_capacity in definition) = 0 then
+    or (position(old_capacity_block in definition) = 0 and position(old_capacity_inline in definition) = 0) then
     raise exception 'review_bidding_submission changed; review its fatigue-group validation before applying this migration';
   end if;
 
@@ -23,8 +24,13 @@ begin
     'requested_group := nullif(trim(coalesce(override_payload->>''fatigueGroup'', submission.payload->>''fatigueGroup'', '''')), '''');');
   definition := replace(definition, old_validation,
     'if requested_group is not null and requested_group not in (''A'', ''B'', ''C'') then raise exception ''Fatigue group must be A, B, or C.''; end if;');
-  definition := replace(definition, old_capacity,
-    'if requested_group is not null and line_row.line_type in (''CPC'', ''DEV'') then');
+  if position(old_capacity_block in definition) > 0 then
+    definition := replace(definition, old_capacity_block,
+      'if requested_group is not null and line_row.line_type in (''CPC'', ''DEV'') then');
+  else
+    definition := replace(definition, old_capacity_inline,
+      'if requested_group is not null and line_row.line_type in (''CPC'', ''DEV'') and not private.fatigue_group_is_available(');
+  end if;
 
   execute definition;
 end;

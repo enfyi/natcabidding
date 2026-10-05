@@ -5687,6 +5687,12 @@ tr.occupied-row .rdo-tag {
   box-shadow: 0 3px 10px rgba(43, 127, 134, 0.2);
 }
 
+.calendar-workforce-description {
+  margin: 0 0 6px !important;
+  color: #64748b !important;
+  font-size: 0.76rem !important;
+}
+
 .calendar-layout-description {
   margin: 0 0 14px !important;
   color: #64748b !important;
@@ -12078,6 +12084,18 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 
 @media (max-width: 640px) {
+  .account-menu {
+    top: 118px;
+    z-index: 71;
+  }
+
+  .account-menu .panel {
+    max-height: calc(100dvh - 202px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .help-menu {
     top: auto;
     bottom: calc(76px + env(safe-area-inset-bottom));
@@ -12160,3 +12178,12 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 }
 .bid-change-week-calendar button:disabled { opacity: .55; cursor: default; }
 .bid-change-week-calendar button:focus-visible { outline: 3px solid #235aa6; outline-offset: 3px; }
+/* Admin bid-time workbook export */
+.bid-time-export-form {
+  padding: 16px 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bid-time-export-form fieldset { margin: 12px 0; border: 0; padding: 0; }
+.bid-time-export-areas { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 8px; }
+.bid-time-export-areas label { display: flex; align-items: center; gap: 6px; }

@@ -40,7 +40,8 @@ export async function updateSession(request: NextRequest) {
     || path.startsWith('/auth/')
 
   if (request.method === 'GET' && path === '/' && data?.claims) {
-    const dashboardUrl = new URL('/dashboard', request.url)
+    const dashboardUrl = new URL(withBasePath('/dashboard'), request.url)
+    dashboardUrl.search = request.nextUrl.search
     const redirectResponse = NextResponse.redirect(dashboardUrl)
 
     response.cookies.getAll().forEach(({ name, value, ...options }) => {
