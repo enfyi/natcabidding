@@ -15119,7 +15119,7 @@ function intakeRoundDetailItems(item, visibleItems) {
   return visibleItems.filter((entry) =>
     entry.initials === item.initials &&
     intakeItemRound(entry) === round
-  );
+  ).sort(compareIntakeItems);
 }
 
 function renderIntakeDetailPanel(item, visibleItems) {
