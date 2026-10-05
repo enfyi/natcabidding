@@ -2881,6 +2881,21 @@ function rdoLineOptionLabel(line) {
 }
 
 function renderManualBidPanel(panel) {
+  return withLeaveReadCache(() => renderManualBidPanelWithCache(panel));
+}
+
+function updateManualLeaveDays(panel) {
+  return withLeaveReadCache(() => {
+    const daysInput = panel.querySelector("[data-manual-leave-days]");
+    if (!daysInput?.hasAttribute("data-manual-leave-days-auto")) return;
+    const range = manualLeaveRangeFromDateInputs(panel);
+    const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+    const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
+    daysInput.value = range ? chargeableLeaveDatesForInitials(range, initials, round).length : "";
+  });
+}
+
+function renderManualBidPanelWithCache(panel) {
   const leavePanel = panel.classList.contains("manual-leave-request-card");
   const values = {
     controller: panel.querySelector("[data-manual-bid-controller]")?.value || (leavePanel && manualLeaveControllerInitials) || currentUser.initials,
@@ -2948,77 +2963,80 @@ function renderManualBidPanel(panel) {
   if (rdoFields) rdoFields.hidden = isLeave;
   if (leaveFields) leaveFields.hidden = !isLeave;
 
-  const lineSelect = panel.querySelector("[data-manual-rdo-line]");
-  const area = areaSelect?.value || lockedArea;
-  const areaLines = rdoLinesForBidder(selectedPerson.bidAs, area);
-  if (lineSelect) {
-    const openLines = areaLines.filter((line) => line.status !== "Taken");
-    lineSelect.innerHTML = areaLines.map((line) => {
-      const isTaken = line.status === "Taken";
-      const selected = !isTaken && line.line === values.line ? " selected" : "";
-      return `<option class="${isTaken ? "manual-rdo-line-taken" : ""}" value="${line.line}"${selected}${isTaken ? " disabled" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`;
-    }).join("");
-    lineSelect.value = openLines.some((line) => line.line === values.line) ? values.line : openLines[0]?.line || "";
-    lineSelect.disabled = !openLines.length;
-    lineSelect.title = openLines.length ? "" : "No open RDO lines are available for this controller's area.";
-  }
+  if (!isLeave) {
+    const lineSelect = panel.querySelector("[data-manual-rdo-line]");
+    const area = areaSelect?.value || lockedArea;
+    const areaLines = rdoLinesForBidder(selectedPerson.bidAs, area);
+    if (lineSelect) {
+      const openLines = areaLines.filter((line) => line.status !== "Taken");
+      lineSelect.innerHTML = areaLines.map((line) => {
+        const isTaken = line.status === "Taken";
+        const selected = !isTaken && line.line === values.line ? " selected" : "";
+        return `<option class="${isTaken ? "manual-rdo-line-taken" : ""}" value="${line.line}"${selected}${isTaken ? " disabled" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`;
+      }).join("");
+      lineSelect.value = openLines.some((line) => line.line === values.line) ? values.line : openLines[0]?.line || "";
+      lineSelect.disabled = !openLines.length;
+      lineSelect.title = openLines.length ? "" : "No open RDO lines are available for this controller's area.";
+    }
 
-  const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
-  const developmentalBidder = isDevelopmentalBidRole(selectedPerson.bidAs, area);
-  const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
-  if (fatigueSelect) {
-    const requestedGroup = ["", "A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
-    const availableGroups = selectedLine
-      ? fatigueCapacityForLine(selectedLine, null, "")
-        .filter((item) => values.fatigueOverride || isGroupAvailable(item))
-        .map((item) => item.group)
-      : [];
-    const resolvedGroup = requestedGroup === "" ? "" : availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
-    fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride);
-    fatigueSelect.value = resolvedGroup;
-    fatigueSelect.disabled = !selectedLine;
-    fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
-    const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
-    if (fatigueOverrideInput) {
-      const canOverride = ["intake", "admin"].includes(currentUser?.role);
-      fatigueOverrideInput.checked = canOverride && resolvedGroup ? values.fatigueOverride : false;
-      fatigueOverrideInput.disabled = !canOverride || !resolvedGroup;
-      fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
+    const selectedLine = areaLines.find((line) => line.line === lineSelect?.value);
+    const developmentalBidder = isDevelopmentalBidRole(selectedPerson.bidAs, area);
+    const fatigueSelect = panel.querySelector("[data-manual-fatigue-group]");
+    if (fatigueSelect) {
+      const requestedGroup = ["", "A", "B", "C"].includes(values.fatigueGroup) ? values.fatigueGroup : "A";
+      const availableGroups = selectedLine
+        ? fatigueCapacityForLine(selectedLine, null, "")
+          .filter((item) => values.fatigueOverride || isGroupAvailable(item))
+          .map((item) => item.group)
+        : [];
+      const resolvedGroup = requestedGroup === "" ? "" : availableGroups.includes(requestedGroup) ? requestedGroup : availableGroups[0] || "";
+      fatigueSelect.innerHTML = manualFatigueGroupOptions(selectedLine, resolvedGroup, values.fatigueOverride);
+      fatigueSelect.value = resolvedGroup;
+      fatigueSelect.disabled = !selectedLine;
+      fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
+      const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
+      if (fatigueOverrideInput) {
+        const canOverride = ["intake", "admin"].includes(currentUser?.role);
+        fatigueOverrideInput.checked = canOverride && resolvedGroup ? values.fatigueOverride : false;
+        fatigueOverrideInput.disabled = !canOverride || !resolvedGroup;
+        fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
+      }
     }
-  }
-  const midSelect = panel.querySelector("[data-manual-mid]");
-  if (midSelect) {
-    if (developmentalBidder) {
-      midSelect.innerHTML = '<option value="No">No — DEV does not work Mid</option>';
-      midSelect.value = "No";
-      midSelect.disabled = true;
-    } else if (selectedLine && isMidLineByDesign(selectedLine)) {
-      midSelect.innerHTML = '<option value="BID">Bid Line</option>';
-      midSelect.value = "BID";
-      midSelect.disabled = true;
-    } else {
-      midSelect.innerHTML = `
-        <option value="Yes">Yes</option>
-        <option value="No">No</option>
-      `;
-      midSelect.value = values.mid === "Yes" ? "Yes" : "No";
-      midSelect.disabled = false;
+    const midSelect = panel.querySelector("[data-manual-mid]");
+    if (midSelect) {
+      if (developmentalBidder) {
+        midSelect.innerHTML = '<option value="No">No — DEV does not work Mid</option>';
+        midSelect.value = "No";
+        midSelect.disabled = true;
+      } else if (selectedLine && isMidLineByDesign(selectedLine)) {
+        midSelect.innerHTML = '<option value="BID">Bid Line</option>';
+        midSelect.value = "BID";
+        midSelect.disabled = true;
+      } else {
+        midSelect.innerHTML = `
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+        `;
+        midSelect.value = values.mid === "Yes" ? "Yes" : "No";
+        midSelect.disabled = false;
+      }
     }
-  }
 
-  const flexSelect = panel.querySelector("[data-manual-flex]");
-  if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
-  const awsSelect = panel.querySelector("[data-manual-aws]");
-  if (awsSelect) {
-    if (developmentalBidder) {
-      awsSelect.innerHTML = '<option value="No">No — DEV does not work AWS</option>';
-      awsSelect.value = "No";
-      awsSelect.disabled = true;
-    } else {
-      awsSelect.innerHTML = '<option value="Yes">Yes</option><option value="No">No</option>';
-      awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
-      awsSelect.disabled = false;
+    const flexSelect = panel.querySelector("[data-manual-flex]");
+    if (flexSelect) flexSelect.value = values.flex === "No" ? "No" : "Yes";
+    const awsSelect = panel.querySelector("[data-manual-aws]");
+    if (awsSelect) {
+      if (developmentalBidder) {
+        awsSelect.innerHTML = '<option value="No">No — DEV does not work AWS</option>';
+        awsSelect.value = "No";
+        awsSelect.disabled = true;
+      } else {
+        awsSelect.innerHTML = '<option value="Yes">Yes</option><option value="No">No</option>';
+        awsSelect.value = values.aws === "Yes" ? "Yes" : "No";
+        awsSelect.disabled = false;
+      }
     }
+
   }
 
   const rangeInput = panel.querySelector("[data-manual-leave-range]");
@@ -17480,7 +17498,7 @@ document.addEventListener("input", (event) => {
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
     if (manualLeaveDateField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
-    renderManualBidPanel(manualPanel);
+    updateManualLeaveDays(manualPanel);
     return;
   }
 
@@ -17649,6 +17667,10 @@ document.addEventListener("change", async (event) => {
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
     if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
+    if (manualReactiveField.matches("[data-manual-leave-start], [data-manual-leave-end]")) {
+      updateManualLeaveDays(manualPanel);
+      return;
+    }
     renderManualBidPanel(manualPanel);
     if (manualReactiveField.matches("[data-manual-bid-controller]")) {
       if (manualPanel.classList.contains("manual-leave-request-card")) manualLeaveControllerInitials = manualReactiveField.value;
