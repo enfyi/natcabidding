@@ -89,7 +89,11 @@ admin-managed FAQ rows, a public MOU document list, and the public Supabase
 storage bucket used by the `/admin/faq` editor.
 
 For durable intake/admin replacement of dates on an approved leave request, also
-run `database/admin_leave_request_edit.sql` after the leave submission preflight.
+run `database/admin_leave_request_edit.sql` after the current round-rule installers
+and `database/closed_round_leave_management.sql`. For existing installations, apply
+`supabase/migrations/20261005155249_install_approved_leave_date_replacement.sql`.
+The replacement API retains the closed-round restriction and excludes ghost/GL
+requests from area slot consumption.
 The operation releases the request's old slots, validates and reserves its new
 dates, rebuilds Round 1 buckets and charged-date details, and writes an audit
 event in one transaction.
