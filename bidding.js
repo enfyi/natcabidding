@@ -4545,6 +4545,7 @@ async function submitLeaveDraftBatch() {
     status: "Pending",
     submittedAt,
     batchId,
+    submissionBatchKey: batchId,
     range: draft.range,
     days: draft.days,
     round: draft.round,
@@ -4688,7 +4689,7 @@ function bidRound(item) {
 }
 
 function queueBidSubmittedEmail(items) {
-  const submissions = Array.isArray(items) ? items : [items];
+  const submissions = groupedLeaveIntakeItems(Array.isArray(items) ? items : [items]);
   if (!submissions.length) return;
 
   const first = submissions[0];
@@ -5022,6 +5023,66 @@ async function supabaseSubmissionIdForIntakeItem(item) {
   return intakeSubmissionIdFromBiddingState(item, data?.submissions || []);
 }
 
+// Review decisions change bid state and inventory, not FAQs, roster or settings.
+// Keep existing data visible and commit the new snapshot only after all reads pass.
+async function refreshBiddingAfterIntakeDecision() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.bidYearId || supabaseState.loading) {
+    await loadSupabaseReferenceData();
+    return;
+  }
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  supabaseState.loading = true;
+  let refreshFailed = false;
+  try {
+    const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
+      readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
+      readReferenceData("leave requests", () => client.rpc("read_leave_intake_queue", { queue_bid_year: year })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bid windows", () => loadPublishedBidWindows(client, supabaseState.bidYearId)),
+      readReferenceData("areas", () => client.from("areas").select("id,name")),
+    ]);
+    for (const result of [bidding, leave, slots, lines, windows, areas]) {
+      if (result.error) throw result.error;
+    }
+    if (gl.error && !isMissingSupabaseRoutine(gl.error)) throw gl.error;
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    for (let index = leaveBids.length - 1; index >= 0; index--) {
+      if (leaveBids[index].supabaseRequestId) leaveBids.splice(index, 1);
+    }
+    upsertRdoLinesFromDatabase(lines.data || [], areaById);
+    if (!gl.error) applyGlRdoAssignments(gl.data || []);
+    upsertRdoSubmissionsFromDatabase(submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())), areaById);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(slots), areaById);
+    applyBidWindowsFromDatabase(supabaseRows(windows));
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.loading = false;
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+    supabaseState.placeholdersCleared = true;
+    supabaseState.loadedAt = new Date();
+    lastAlertDatabaseSnapshot = "";
+    calendarRenderRevision += 1;
+  } catch (error) {
+    refreshFailed = true;
+    console.warn("Bid review refresh failed; reloading reference data:", error.message || error);
+  } finally {
+    supabaseState.loading = false;
+  }
+  if (refreshFailed && supabaseState.authUserId === userId && BID_YEAR === year) await loadSupabaseReferenceData();
+}
+
 async function persistIntakeDecision(item, decision, denialReason = "") {
   if (!supabaseState.connected) {
     throw new Error("This intake decision could not reach the database. Check the connection and try again.");
@@ -5048,6 +5109,37 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
   if (error) throw error;
   item.supabaseSubmissionId = submissionId;
   return true;
+}
+
+let intakeDecisionPending = false;
+
+function updateConfirmedIntakeDecision(item, decision, reason = "") {
+  const status = decision === "approved" ? "Approved" : "Denied";
+  item.status = status;
+  for (const member of item.members || [item]) {
+    member.status = status;
+    if (reason) member.denialReason = reason;
+    if (member.type === "Leave") {
+      const bid = leaveBidForItem(member);
+      if (bid) bid.status = status;
+    }
+  }
+  // Clear the pending notification before inventory reads or email delivery finish.
+  renderAlerts();
+}
+
+async function runIntakeDecision(action, id) {
+  if (intakeDecisionPending) return;
+  intakeDecisionPending = true;
+  const buttons = [...document.querySelectorAll("[data-intake-approve], [data-intake-deny-confirm]")]
+    .filter((button) => !button.disabled);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await action(id);
+  } finally {
+    intakeDecisionPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 async function approveIntakeItem(id) {
@@ -5105,11 +5197,12 @@ async function approveIntakeItem(id) {
     return;
   }
   if (persisted) {
+    updateConfirmedIntakeDecision(item, "approved");
     queueBidVerifiedEmail(item);
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -5162,11 +5255,12 @@ async function denyIntakeItem(id) {
   }
   if (persisted) {
     item.denialReason = reason;
+    updateConfirmedIntakeDecision(item, "denied", reason);
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -5222,7 +5316,7 @@ async function saveSupabaseApprovedLeaveEdit(item) {
     item.summary = `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
   }
 
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   return true;
 }
 
@@ -5283,7 +5377,7 @@ async function removeApprovedLeaveBid(id) {
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
   } catch (error) {
@@ -5393,7 +5487,7 @@ async function saveIntakeOverride(id) {
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
-      await loadSupabaseReferenceData();
+      await refreshBiddingAfterIntakeDecision();
       renderApp();
       setPage("intake");
       return;
@@ -5418,7 +5512,7 @@ async function saveIntakeOverride(id) {
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
-      await loadSupabaseReferenceData();
+      await refreshBiddingAfterIntakeDecision();
       renderApp();
       setPage("intake");
     } catch (error) {
@@ -14127,10 +14221,10 @@ async function refreshLiveAlerts() {
   }
 }
 
-function alertItems() {
+function alertItems(groupedItems = groupedLeaveIntakeItems()) {
   const isIntake = hasIntakeAccess();
   if (isIntake) {
-    const intakeAlerts = pendingIntakeItems().map((item) => ({
+    const intakeAlerts = groupedItems.filter((item) => item.status === "Pending").map((item) => ({
       category: "Intake",
       title: `${item.initials} submitted ${bidTypeLabel(item)}`,
       detail: `${item.summary} · ${item.area}`,
@@ -14151,7 +14245,7 @@ function alertItems() {
     return [...intakeAlerts, ...helpAlerts];
   }
 
-  const bidAlerts = intakeQueue
+  const bidAlerts = groupedItems
     .filter((item) => item.initials === currentUser.initials && ["Pending", "Approved", "Denied"].includes(item.status))
     .map((item) => ({
       category: item.status,
@@ -14174,10 +14268,11 @@ function alertItems() {
 }
 
 function renderAlerts() {
-  const items = alertItems();
+  const groupedItems = groupedLeaveIntakeItems();
+  const items = alertItems(groupedItems);
   const count = items.filter((item) => item.category !== "Approved").length;
   setText("[data-alert-count]", count);
-  setText("[data-intake-count]", pendingIntakeItems().length);
+  setText("[data-intake-count]", groupedItems.filter((item) => item.status === "Pending").length);
 
   if (lastAudibleAlertCount !== null && count > lastAudibleAlertCount) {
     playAlertDing();
@@ -15193,8 +15288,8 @@ const intakeGroupReviewState = new Map();
 function groupedLeaveIntakeItems(items = intakeQueue) {
   const weekStartsByBidder = new Map();
   items.forEach((item) => {
-    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved"].includes(item.status)) return;
-    const owner = `${item.area}|${item.initials}`;
+    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved", "Denied"].includes(item.status)) return;
+    const owner = `${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`;
     const dates = weekStartsByBidder.get(owner) || [];
     dates.push(...leaveDateKeysForItem(item));
     weekStartsByBidder.set(owner, dates);
@@ -15207,7 +15302,7 @@ function groupedLeaveIntakeItems(items = intakeQueue) {
     const round = intakeItemRound(item);
     const dates = leaveDateKeysForItem(item).sort();
     if (!dates.length) { result.push(item); return; }
-    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}`) || roundOneWeekKeysForDateKeys(dates);
+    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`) || roundOneWeekKeysForDateKeys(dates);
     const weekStart = round === 1 ? starts.find((start) => dates[0] >= start && dates[0] <= dateKeyFromDate(new Date(dateFromKey(start).getTime() + 6 * 86400000))) : "";
     // Legacy continuous requests spanning two weeks already have one approval;
     // keep their edit/review controls instead of approving half a saved range.
@@ -15276,13 +15371,14 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
     submission_ids: ids, decision, denial_reason_text: reason || null,
   });
   if (error) throw error;
+  updateConfirmedIntakeDecision(item, decision, reason);
   if (decision === "approved") queueBidVerifiedEmail(item);
   else { item.denialReason = reason; queueBidDeniedEmail(item); }
   intakeGroupReviewState.delete(item.id);
   activeOverrideId = null;
   activeDenialId = null;
   supabaseState.placeholdersCleared = false;
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   renderApp();
   setPage("intake");
 }
@@ -16089,7 +16185,7 @@ async function processBidderEditor(validateOnly) {
       bidderEditor.record.snapshot = data.snapshot;
       renderBidderEditorForm();
       bidderEditorStatus('Changes saved to the database. All bid rounds have been refreshed.', 'success');
-      try { await loadSupabaseReferenceData(); renderApp(); }
+      try { await refreshBiddingAfterIntakeDecision(); renderApp(); }
       catch { bidderEditorStatus('Changes saved. Refresh the page to update other bidding views.', 'success'); }
     }
   } catch (error) { bidderEditorStatus(error.message || 'Unable to complete this operation. Reload before retrying.', 'error'); }
@@ -16883,7 +16979,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    await approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    await runIntakeDecision(approveIntakeItem, intakeApprove.dataset.intakeApprove);
     return;
   }
 
@@ -16899,7 +16995,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    await denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await runIntakeDecision(denyIntakeItem, intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
