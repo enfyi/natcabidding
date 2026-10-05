@@ -14383,6 +14383,17 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
   setPage("intake");
 }
 
+function intakeBidSummary(item) {
+  const summary = item.summary || "";
+  if (item.type !== "RDO Line") return summary;
+  const line = rdoLines.find((entry) => String(entry.line) === String(item.line) && lineForArea(entry, item.area));
+  const pattern = String(line?.pattern || "").trim();
+  if (!pattern) return summary;
+  const label = `Line ${item.line}`;
+  if (summary.endsWith(label)) return `${summary} ${pattern}`;
+  return summary.replace(`${label} ·`, `${label} ${pattern} ·`);
+}
+
 function submissionRoleLabel(role) {
   const normalized = String(role || "").toLowerCase();
   return normalized === "admin" ? "admin" : ["intake", "intake rep"].includes(normalized) ? "intake rep" : "user";
@@ -14432,7 +14443,7 @@ function renderIntakeQueueWithCache() {
           <div class="intake-card-name-row">
             <h3>${item.name} · ${item.initials}</h3>
           </div>
-          <p>${escapeHtml(item.summary)}</p>
+          <p>${escapeHtml(intakeBidSummary(item))}</p>
           ${renderIntakeChangeHistory(item)}
           ${renderIntakeGroupDates(item, canReview)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
@@ -14646,7 +14657,7 @@ function biddingExportRows() {
       item.initials,
       item.bidAs,
       item.status,
-      item.summary,
+      intakeBidSummary(item),
       biddingExportActionBy(item),
       item.approvedAt || item.deniedAt || item.submittedAt || "",
     ]);
