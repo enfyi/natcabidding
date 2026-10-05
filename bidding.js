@@ -14904,6 +14904,11 @@ function renderOverrideEditor(item) {
     return '<p class="override-warning">You do not have permission to edit RDO lines. Contact a system administrator.</p>';
   }
   const pending = item.status === "Pending";
+  const bidderIdentity = `
+    <label>BUE being edited
+      <input type="text" value="${escapeHtml(item.name)} · ${escapeHtml(item.initials)} · Area ${escapeHtml(item.area)}" readonly data-override-bue />
+    </label>
+  `;
   const approveButton = pending
     ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">Approve With Changes</button>`
     : "";
@@ -14914,6 +14919,7 @@ function renderOverrideEditor(item) {
     const glCategory = selectedLine && isCpcLine(selectedLine) ? (item.area === "TMU" ? "TMC" : "CPC") : "DEV";
     const developmentalBidder = isDevelopmentalBidRole(item.bidAs, item.area);
     return `
+      ${bidderIdentity}
       <label>Line
         <select data-override-line>
           ${eligibleLines.map((line) => `<option value="${escapeHtml(line.line)}" ${line.line === item.line ? "selected" : ""}>${escapeHtml(rdoLineOptionLabel(line))}</option>`).join("")}
@@ -14962,6 +14968,7 @@ function renderOverrideEditor(item) {
   const approveLabel = rdoConflicts.length ? "Approve After Date Change" : conflicts.length ? "Approve With Override" : "Approve With Changes";
 
   return `
+    ${bidderIdentity}
     ${rdoConflictNote}
     ${conflictNote}
     <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
