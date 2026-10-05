@@ -16,18 +16,23 @@ const monthNames = [
 ];
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const BID_YEAR = 2027;
+// BID_YEAR is the selected view; the active year is controlled independently by admins.
+let BID_YEAR = 2027;
+let activeBidYear = null;
+let bidYearCatalog = [];
+let bidYearCatalogLoaded = false;
+let bidYearCatalogError = "";
 const ANNUAL_LEAVE_ALLOWANCE_DAYS = 36;
 const LEAVE_SLOT_HOURS_PER_DAY = 8;
 const CWS_LEAVE_HOURS_PER_DAY = 10;
 const DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE = ANNUAL_LEAVE_ALLOWANCE_DAYS * LEAVE_SLOT_HOURS_PER_DAY;
 const FATIGUE_GROUP_ROTATION = ["C", "A", "B"];
 const NO_FATIGUE_PREFERENCE = "No preference";
-const BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
-const FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
+let BID_LEAVE_YEAR_START_KEY = dateKey(BID_YEAR, 1, 10);
+let FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(BID_YEAR, 0, 10);
 const WEEK_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const ROUND_VALIDATION_DURATION_MS = 60 * 60 * 60 * 1000;
-const BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
+let BID_LEAVE_YEAR_END_KEY = dateKey(BID_YEAR + 1, 1, 8);
 const DEFAULT_ROUND_RULES = {
   1: {
     label: "1 or 2 weeks",
@@ -71,6 +76,7 @@ const DEFAULT_APPROVAL_RULES = [
 ];
 const APPROVAL_RULES_STORAGE_KEY = "natca-zla-approval-rules";
 const ROUND_RULES_STORAGE_KEY = "natca-zla-round-rules";
+const MANUAL_INTAKE_PANEL_STORAGE_KEY = "natca-zla-manual-intake-panels";
 const CALENDAR_WORKFORCE_SESSION_KEY_PREFIX = "natca-zla-calendar-workforce";
 
 function storedJsonValue(key, fallback) {
@@ -158,13 +164,13 @@ let lastAudibleAlertCount = null;
 let bidWindowUiStateKey = "";
 let bidWindowCountdownTargets = [];
 let leaveDraftQueue = [];
-let leaveRangeStartKey = "2027-04-08";
-let leaveRangeEndKey = "2027-04-09";
+let leaveRangeStartKey = dateKey(BID_YEAR, 4, 8);
+let leaveRangeEndKey = dateKey(BID_YEAR, 4, 9);
 let leaveRangeSelectionComplete = true;
 let leaveRangePreviewActive = false;
 const selectedLeaveDates = new Set();
 let leavePickerOpen = false;
-let leavePickerYear = 2027;
+let leavePickerYear = BID_YEAR;
 let leavePickerMonthIndex = 3;
 let leaveManagementPendingId = "";
 let leaveReplacementRequestId = "";
@@ -176,6 +182,12 @@ const prototypeEmails = [];
 const INTAKE_SCHEDULE_AREA = "All Areas";
 const intakeTeamInitials = new Set(["OC"]);
 const intakeSchedules = [];
+const intakeCalendarMarks = new Map();
+const INTAKE_CALENDAR_MARK_LABELS = {
+  holiday: "Holiday",
+  natca_validation: "NATCA Validation",
+  faa_validation: "FAA Validation",
+};
 
 function activeBidderRank(date = new Date(), area = currentViewArea()) {
   const roundState = areaBidRoundState(date, area);
@@ -656,8 +668,12 @@ const supabaseState = {
   authUserId: "",
   pendingAuthEmail: "",
   intakeSchedulesError: "",
+  rdoLinesLoadState: "idle",
   placeholdersCleared: false,
   referenceDataLoaded: false,
+  faqLoadState: "idle",
+  bidTimesLoadState: "idle",
+  leaveSlotsLoadState: "idle",
 };
 
 const LIVE_HELP_SESSION_KEY = "natca-zla-live-help-session-id";
@@ -1462,24 +1478,9 @@ function roundWindowDate(parsedWindow, time) {
 }
 
 function bidWindowForRankRound(rank, roundNumber, area = currentViewArea()) {
-  const importedWindow = databaseBidWindowForRankRound(area, rank, roundNumber);
-  if (importedWindow) return importedWindow;
-
-  const index = rank - 1;
-  const rowBlock = Math.floor(index / bidStartTimes.length);
-  const dateLabel = roundDateBlocksForArea(area)[rowBlock]?.[roundNumber - 1];
-  const startTime = bidStartTimes[index % bidStartTimes.length];
-  if (!dateLabel || !startTime) return null;
-
-  const parsedWindow = parseRoundWindow(bidWindowLabel(dateLabel, startTime));
-  if (!parsedWindow) return null;
-
-  return {
-    rank,
-    round: roundNumber,
-    start: roundWindowDate(parsedWindow, parsedWindow.start),
-    end: roundWindowDate(parsedWindow, parsedWindow.end),
-  };
+  // Missing or failed database reads must never invent a published bid time
+  // or open a bidding window using the old October 1 prototype schedule.
+  return databaseBidWindowForRankRound(area, rank, roundNumber);
 }
 
 function currentUserSeniorityRank(area = currentUser.area) {
@@ -1621,6 +1622,51 @@ function downloadBidWindowsIcs(rank = null) {
   const link = document.createElement("a");
   link.href = url;
   link.download = `natca-zla-${owner.toLowerCase()}-${BID_YEAR}-bid-windows.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildIntakeScheduleIcs(schedules) {
+  const stamp = icsTimestamp();
+  const owner = currentUser.initials.toLowerCase();
+  const events = schedules.map((schedule) => [
+    "BEGIN:VEVENT",
+    `UID:natca-zla-intake-${BID_YEAR}-${owner}-${schedule.id}@zlabidding.local`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${icsTimestamp(schedule.start)}`,
+    `DTEND:${icsTimestamp(schedule.end)}`,
+    "SUMMARY:NATCA ZLA Intake Shift",
+    `DESCRIPTION:${escapeIcsText(`Intake assignment · ${schedule.area}`)}`,
+    `LOCATION:${escapeIcsText("2555 E. Ave P, Palmdale, Ca 93550")}`,
+    "END:VEVENT",
+  ].join("\r\n"));
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//NATCA ZLA//Intake Schedule//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(`NATCA ZLA ${BID_YEAR} Intake - ${currentUser.initials}`)}`,
+    ...events,
+    "END:VCALENDAR",
+  ].join("\r\n");
+}
+
+function downloadIntakeScheduleIcs(scheduleId = "") {
+  const mySchedules = intakeSchedules.filter((schedule) => schedule.initials === currentUser?.initials);
+  const schedules = scheduleId ? mySchedules.filter((schedule) => schedule.id === scheduleId) : mySchedules;
+  if (!schedules.length) return;
+
+  const blob = new Blob([buildIntakeScheduleIcs(schedules)], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = scheduleId
+    ? `natca-zla-${currentUser.initials.toLowerCase()}-intake-${dateKeyFromDate(schedules[0].start)}.ics`
+    : `natca-zla-${currentUser.initials.toLowerCase()}-${BID_YEAR}-intake-schedule.ics`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -2004,11 +2050,13 @@ function currentUserBidWindowStatus(date = new Date()) {
   const inHomeArea = isViewingHomeArea();
   return {
     window,
-    isOpen: Boolean(inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
+    isOpen: Boolean(!selectedBidYearErrorMessage() && inHomeArea && (bidWindowLockIsBypassed() || (window && date >= window.start && date < window.end))),
   };
 }
 
 function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const pilotError = pilotSubmissionErrorMessage();
   if (pilotError) return pilotError;
   if (pilotState.database && !activeTestBidRound()) return "All pilot bidding rounds are turned off by an administrator.";
@@ -2073,6 +2121,8 @@ function syncLeaveBidWindowControls(date = new Date()) {
 }
 
 function rdoChangeWindowErrorMessage(date = new Date()) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) return yearError;
   const hasApprovedRdo = currentUserRdoRequest()?.status === "Approved"
     || rdoLines.some((line) => line.status === "Taken" && line.cpc === currentUser.initials && lineForArea(line, currentUser.area));
   if (!hasApprovedRdo) return "";
@@ -2143,6 +2193,149 @@ function syncBidWindowTestingControls() {
     "[data-bid-window-enforcement-copy]",
     pilotState.database ? "Pilot rounds are controlled below. Enabled rounds accept authorized practice bids without scheduled hours." : bidWindowSettingsFallbackMessage || "BUEs can submit only during their assigned bid window. This cannot be bypassed."
   );
+}
+
+function selectedBidYearErrorMessage() {
+  if (!bidYearCatalogLoaded) return bidYearCatalogError || "Checking the active bid year. Please wait before bidding.";
+  return BID_YEAR !== activeBidYear
+    ? `${BID_YEAR} is view-only. Select the active bid year (${activeBidYear}) to bid or make changes.`
+    : "";
+}
+
+function navigateToBidYear(year) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("bidYear", String(year));
+  // Reload to discard drafts, selections, and cached records from the previous year.
+  syncNavigationUrl(url);
+  window.location.assign(url.href);
+}
+
+function syncBidYearControls() {
+  const options = bidYearCatalog.map((year) =>
+    `<option value="${year.bid_year}">${year.bid_year}${year.is_active ? " · Current year" : " · View-only"}</option>`
+  ).join("");
+  document.querySelectorAll("[data-bid-year-select]").forEach((select) => {
+    select.innerHTML = options;
+    select.value = String(BID_YEAR);
+    select.disabled = !bidYearCatalogLoaded;
+  });
+  const adminSelect = document.querySelector("[data-active-bid-year-select]");
+  if (adminSelect) {
+    const adminOptions = bidYearCatalog.filter((year) => year.status === "open").map((year) =>
+      `<option value="${year.bid_year}">${year.bid_year}</option>`
+    ).join("");
+    if (adminSelect.innerHTML !== adminOptions || adminSelect.dataset.activeYear !== String(activeBidYear)) {
+      adminSelect.innerHTML = adminOptions;
+      adminSelect.value = String(activeBidYear);
+      adminSelect.dataset.activeYear = String(activeBidYear);
+    }
+    adminSelect.disabled = !bidYearCatalogLoaded;
+  }
+  setText("[data-active-bid-year-label]", activeBidYear || "Checking…");
+  document.querySelectorAll(".round-rule-subheader").forEach((element) => {
+    element.textContent = element.textContent.replace(/\b20\d{2} accrued leave/, `${BID_YEAR} accrued leave`);
+  });
+  setText("#bid-year-label", `${BID_YEAR} Annual Bidding${BID_YEAR !== activeBidYear && bidYearCatalogLoaded ? " · View-only" : ""}`);
+  const banner = document.querySelector("[data-bid-year-notice]");
+  if (banner) {
+    banner.hidden = !selectedBidYearErrorMessage();
+    banner.textContent = selectedBidYearErrorMessage();
+  }
+  const heading = document.querySelector("[data-history-heading]");
+  if (heading) heading.textContent = BID_YEAR !== activeBidYear ? `${BID_YEAR} Historical Bidding` : "Bid History";
+}
+
+async function loadBidYearCatalog(client) {
+  bidYearCatalogError = "";
+  try {
+    let { data, error } = await readReferenceData("bid year catalog", () => client.rpc("read_bid_year_catalog"));
+    if (error && (error.code === "PGRST202" || /Could not find the function.*read_bid_year_catalog/i.test(error.message || ""))) {
+      // Older installations have no catalog RPC. Only a single open year is
+      // unambiguous; never guess the active year in a multi-year database.
+      const result = await client.from("bid_years").select("bid_year,status").limit(2);
+      if (result.error) throw result.error;
+      if (result.data?.length !== 1 || result.data[0].status !== "open") {
+        throw new Error("The active bid year must be configured by a system administrator.");
+      }
+      data = [{ ...result.data[0], is_active: true }];
+      error = null;
+    }
+    if (error) throw error;
+    bidYearCatalog = data || [];
+    activeBidYear = bidYearCatalog.find((year) => year.is_active)?.bid_year || null;
+    if (!activeBidYear) throw new Error("No active bid year is configured. Contact a system administrator.");
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get("bidYear");
+    const year = requested === null ? activeBidYear : Number(requested);
+    if (!bidYearCatalog.some((entry) => entry.bid_year === year)) {
+      throw new Error("The selected bid year is not configured. Remove the bidYear parameter to return to the current year.");
+    }
+    if (year !== BID_YEAR) {
+      BID_YEAR = year;
+      BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
+      BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
+      FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
+      displayedCalendarYear = year;
+      displayedCalendarMonth = 0;
+      leavePickerYear = year;
+      leavePickerMonthIndex = 0;
+      leaveRangeStartKey = BID_LEAVE_YEAR_START_KEY;
+      leaveRangeEndKey = BID_LEAVE_YEAR_START_KEY;
+      selectedLeaveDateKey = BID_LEAVE_YEAR_START_KEY;
+    }
+    // Pin this view so a later refresh cannot silently move an in-progress bid.
+    if (requested === null) {
+      url.searchParams.set("bidYear", String(year));
+      syncNavigationUrl(url);
+    }
+    bidYearCatalogLoaded = true;
+    syncBidYearControls();
+  } catch (error) {
+    bidYearCatalogLoaded = false;
+    bidYearCatalogError = "The active bid year could not be verified. Profile and navigation are still available. Refresh to retry or contact a system administrator.";
+    syncBidYearControls();
+    throw error;
+  }
+}
+
+let bidYearRefreshPending = false;
+async function refreshActiveBidYear() {
+  if (bidYearRefreshPending || document.visibilityState !== "visible") return;
+  const client = supabaseClient();
+  if (!client) return;
+  bidYearRefreshPending = true;
+  try {
+    const previous = activeBidYear;
+    const wasLoaded = bidYearCatalogLoaded;
+    await loadBidYearCatalog(client);
+    if (!wasLoaded || previous !== activeBidYear) renderApp();
+  } catch (error) {
+    console.warn(`Active bid year could not refresh: ${error.message || error}`);
+  } finally {
+    bidYearRefreshPending = false;
+  }
+}
+
+async function saveActiveBidYear() {
+  if (!hasSystemAdminAccess()) return;
+  const select = document.querySelector("[data-active-bid-year-select]");
+  const button = document.querySelector("[data-save-active-bid-year]");
+  const status = document.querySelector("[data-active-bid-year-status]");
+  if (!select || !button || !status) return;
+  const requestedYear = Number(select.value);
+  button.disabled = true;
+  status.textContent = "Saving active bid year…";
+  try {
+    const { error } = await supabaseClient().rpc("set_active_bid_year", { requested_bid_year: requestedYear });
+    if (error) throw error;
+    await loadBidYearCatalog(supabaseClient());
+    renderApp();
+    status.textContent = `${activeBidYear} is now the active bid year. You are still viewing ${BID_YEAR}.`;
+  } catch (error) {
+    status.textContent = error.message || "The active bid year could not be saved.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function applyBidYearSettings(settings) {
@@ -2583,6 +2776,12 @@ function manualLeaveRangeFromDateInputs(panel) {
   return formatLeaveRangeFromKeys(keys);
 }
 
+function defaultManualLeaveEndDate(panel) {
+  const startInput = panel.querySelector("[data-manual-leave-start]");
+  const endInput = panel.querySelector("[data-manual-leave-end]");
+  if (startInput?.value && endInput) endInput.value = startInput.value;
+}
+
 function manualLeaveRangeValue(panel) {
   return panel.querySelector("[data-manual-leave-range]")?.value.trim() || manualLeaveRangeFromDateInputs(panel);
 }
@@ -2767,8 +2966,9 @@ function renderManualBidPanel(panel) {
     fatigueSelect.title = selectedLine ? "Choose a group or leave the preference unassigned." : "Choose an RDO line first.";
     const fatigueOverrideInput = panel.querySelector("[data-manual-fatigue-override]");
     if (fatigueOverrideInput) {
-      fatigueOverrideInput.checked = resolvedGroup ? values.fatigueOverride : false;
-      fatigueOverrideInput.disabled = !resolvedGroup;
+      const canOverride = ["intake", "admin"].includes(currentUser?.role);
+      fatigueOverrideInput.checked = canOverride && resolvedGroup ? values.fatigueOverride : false;
+      fatigueOverrideInput.disabled = !canOverride || !resolvedGroup;
       fatigueOverrideInput.title = resolvedGroup ? "" : "An override only applies to a selected fatigue group.";
     }
   }
@@ -2834,6 +3034,19 @@ function renderManualBidPanel(panel) {
 }
 
 function renderManualBidEntry() {
+  const userId = supabaseState.authUserId || currentUser?.supabaseProfileId;
+  if (userId) {
+    const preferenceKey = `${MANUAL_INTAKE_PANEL_STORAGE_KEY}:${userId}`;
+    const preferences = storedJsonValue(preferenceKey, {});
+    document.querySelectorAll("[data-manual-intake-toggle]").forEach((button) => {
+      if (button.dataset.preferenceKey === preferenceKey) return;
+      const panelName = button.dataset.manualIntakeToggle;
+      const open = preferences?.[panelName] !== false;
+      button.dataset.preferenceKey = preferenceKey;
+      button.setAttribute("aria-expanded", String(open));
+      document.querySelector(`[data-manual-intake-content="${panelName}"]`).hidden = !open;
+    });
+  }
   document.querySelectorAll("[data-manual-bid-panel]").forEach(renderManualBidPanel);
 }
 
@@ -2951,11 +3164,11 @@ async function submitManualRdoBid(panel, person, area) {
   setManualBidStatus(panel, `${person.initials}'s RDO bid was saved to Supabase and added to the intake queue.`, "success");
 }
 
-function manualLeaveValidationMessage({ person, area, range, dateKeys, round, days, weekKeys }) {
+function manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges }) {
   if (round === 1) {
     const usedWeeks = roundOneWeekKeySetForItems([
       ...leaveRoundUsageForInitials(person.initials, 1),
-      { range, round },
+      ...requestedRanges.map((keys) => ({ dateKeys: keys, round })),
     ]);
 
     if (usedWeeks.size > roundOneWeekLimit()) {
@@ -2999,11 +3212,7 @@ async function submitManualLeaveBid(panel, person, area) {
   }
 
   const chargeableDates = chargeableLeaveDatesForInitials(range, person.initials, round);
-  const rdoDates = leaveRdoDatesForInitials(range, person.initials);
-  if (round > 1 && rdoDates.length) {
-    setManualBidStatus(panel, `Round ${round} cannot include RDO dates: ${formatLeaveConflictDates(rdoDates)}.`, "error");
-    return;
-  }
+  const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
   const chargedDays = chargeableDates.length;
   const manualDaysInput = panel.querySelector("[data-manual-leave-days]");
   if (manualDaysInput) manualDaysInput.value = String(chargedDays);
@@ -3011,17 +3220,16 @@ async function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "That selection does not include any chargeable leave days after RDOs are removed.", "error");
     return;
   }
+  const requestedRanges = contiguousLeaveDateRanges(requestedDates);
 
-  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(dateKeys) : [];
+  const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(requestedDates) : [];
   const weekUnits = weekKeys.length;
   const validationMessage = manualLeaveValidationMessage({
     person,
-    area,
-    range,
-    dateKeys,
     round,
     days: chargedDays,
     weekKeys,
+    requestedRanges,
   });
   if (validationMessage) {
     setManualBidStatus(panel, validationMessage, "error");
@@ -3059,33 +3267,52 @@ async function submitManualLeaveBid(panel, person, area) {
     weekKeys,
     summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${range} · ${chargedDays} ${chargedDays === 1 ? "day" : "days"}${weekUnits ? ` · ${weekUnits} bid week${weekUnits === 1 ? "" : "s"}` : ""}`,
   };
+  const requests = requestedRanges.map((keys, index) => {
+    const segmentRange = formatLeaveRangeFromKeys(keys);
+    const segmentDays = chargeableLeaveDateKeys(keys, person.initials, round).length;
+    const segmentWeekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
+    return {
+      ...request,
+      id: `${request.id}-${index + 1}`,
+      range: segmentRange,
+      dateKeys: keys,
+      startDateKey: keys[0],
+      endDateKey: keys[keys.length - 1],
+      days: segmentDays,
+      weekUnits: segmentWeekKeys.length,
+      weekKeys: segmentWeekKeys,
+      summary: `${person.ghostBidder ? "Ghost Leave · " : person.bidAs === "GL" ? "GL Bid · " : ""}${segmentRange} · ${segmentDays} ${segmentDays === 1 ? "day" : "days"}`,
+    };
+  });
 
   try {
     setManualBidStatus(panel, `Saving ${person.initials}'s leave bid to Supabase...`);
-    const savedBatch = await saveSupabaseManualLeaveRequest(request, person, area, notes);
-    const submissionId = savedBatch?.submission_ids?.[0];
-    if (submissionId) request.supabaseSubmissionId = submissionId;
+    const savedBatch = await saveSupabaseManualLeaveRequest(requests, person, area, notes);
+    requests.forEach((item, index) => {
+      item.supabaseSubmissionId = savedBatch.submission_ids[index];
+    });
   } catch (error) {
     setManualBidStatus(panel, error.message || "The manual leave bid could not be saved. Try again.", "error");
     return;
   }
 
-  intakeQueue.unshift(request);
-  leaveBids.push({
+  intakeQueue.unshift(...requests);
+  requests.forEach((item) => leaveBids.push({
     priority: nextLeavePriority(),
-    range: request.range,
-    days: request.days,
+    range: item.range,
+    dateKeys: item.dateKeys,
+    days: item.days,
     status: "Pending",
     notes,
     initials: person.initials,
     area,
     round,
-    weekUnits,
-    weekKeys,
-  });
+    weekUnits: item.weekUnits,
+    weekKeys: item.weekKeys,
+  }));
 
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
-  queueBidSubmittedEmail(request);
+  requests.forEach(queueBidSubmittedEmail);
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -3554,6 +3781,15 @@ function leaveSlotDatesForInitials(range, initials = currentUser.initials) {
 
 function leaveRdoDatesForInitials(range, initials = currentUser.initials) {
   return datesInLeaveRange(range).filter((key) => isRdoDateForInitials(key, initials));
+}
+
+function contiguousLeaveDateRanges(keys) {
+  return keys.reduce((ranges, key) => {
+    const last = ranges[ranges.length - 1];
+    if (last && addDaysToDateKey(last[last.length - 1], 1) === key) last.push(key);
+    else ranges.push([key]);
+    return ranges;
+  }, []);
 }
 
 function setLeaveDaysInput(days) {
@@ -4310,6 +4546,7 @@ async function submitLeaveDraftBatch() {
     status: "Pending",
     submittedAt,
     batchId,
+    submissionBatchKey: batchId,
     range: draft.range,
     days: draft.days,
     round: draft.round,
@@ -4453,7 +4690,7 @@ function bidRound(item) {
 }
 
 function queueBidSubmittedEmail(items) {
-  const submissions = Array.isArray(items) ? items : [items];
+  const submissions = groupedLeaveIntakeItems(Array.isArray(items) ? items : [items]);
   if (!submissions.length) return;
 
   const first = submissions[0];
@@ -4760,8 +4997,11 @@ function captureIntakeOverrideFields(item) {
   if (!item || !editor) return;
 
   if (item.type === "RDO Line") {
+    const originalLine = item.line;
+    const originalGroup = item.fatigueGroup;
     item.line = editor.querySelector("[data-override-line]")?.value || item.line;
     item.fatigueGroup = editor.querySelector("[data-override-group]")?.value ?? item.fatigueGroup;
+    if (item.line !== originalLine || item.fatigueGroup !== originalGroup) item.fatigueOverride = false;
     item.flex = editor.querySelector("[data-override-flex]")?.value || item.flex;
     item.aws = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-aws]")?.value || item.aws);
     item.mid = rdoPreferenceForBidRole(item.bidAs, item.area, editor.querySelector("[data-override-mid]")?.value || item.mid);
@@ -4784,6 +5024,66 @@ async function supabaseSubmissionIdForIntakeItem(item) {
   return intakeSubmissionIdFromBiddingState(item, data?.submissions || []);
 }
 
+// Review decisions change bid state and inventory, not FAQs, roster or settings.
+// Keep existing data visible and commit the new snapshot only after all reads pass.
+async function refreshBiddingAfterIntakeDecision() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.bidYearId || supabaseState.loading) {
+    await loadSupabaseReferenceData();
+    return;
+  }
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  supabaseState.loading = true;
+  let refreshFailed = false;
+  try {
+    const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
+      readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
+      readReferenceData("leave requests", () => client.rpc("read_leave_intake_queue", { queue_bid_year: year })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bid windows", () => loadPublishedBidWindows(client, supabaseState.bidYearId)),
+      readReferenceData("areas", () => client.from("areas").select("id,name")),
+    ]);
+    for (const result of [bidding, leave, slots, lines, windows, areas]) {
+      if (result.error) throw result.error;
+    }
+    if (gl.error && !isMissingSupabaseRoutine(gl.error)) throw gl.error;
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    for (let index = leaveBids.length - 1; index >= 0; index--) {
+      if (leaveBids[index].supabaseRequestId) leaveBids.splice(index, 1);
+    }
+    upsertRdoLinesFromDatabase(lines.data || [], areaById);
+    if (!gl.error) applyGlRdoAssignments(gl.data || []);
+    upsertRdoSubmissionsFromDatabase(submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())), areaById);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(slots), areaById);
+    applyBidWindowsFromDatabase(supabaseRows(windows));
+    intakeBidderSelection.record = null;
+    intakeBidderSelection.loading = false;
+    intakeBidderSelection.error = "";
+    intakeBidderSelection.generation += 1;
+    supabaseState.placeholdersCleared = true;
+    supabaseState.loadedAt = new Date();
+    lastAlertDatabaseSnapshot = "";
+    calendarRenderRevision += 1;
+  } catch (error) {
+    refreshFailed = true;
+    console.warn("Bid review refresh failed; reloading reference data:", error.message || error);
+  } finally {
+    supabaseState.loading = false;
+  }
+  if (refreshFailed && supabaseState.authUserId === userId && BID_YEAR === year) await loadSupabaseReferenceData();
+}
+
 async function persistIntakeDecision(item, decision, denialReason = "") {
   if (!supabaseState.connected) {
     throw new Error("This intake decision could not reach the database. Check the connection and try again.");
@@ -4794,6 +5094,7 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
     ? {
         line: item.line,
         fatigueGroup: item.fatigueGroup,
+        fatigueOverride: Boolean(item.fatigueOverride),
         flex: item.flex === true || item.flex === "Yes",
         aws: item.aws === true || item.aws === "Yes",
         mid: item.mid,
@@ -4809,6 +5110,37 @@ async function persistIntakeDecision(item, decision, denialReason = "") {
   if (error) throw error;
   item.supabaseSubmissionId = submissionId;
   return true;
+}
+
+let intakeDecisionPending = false;
+
+function updateConfirmedIntakeDecision(item, decision, reason = "") {
+  const status = decision === "approved" ? "Approved" : "Denied";
+  item.status = status;
+  for (const member of item.members || [item]) {
+    member.status = status;
+    if (reason) member.denialReason = reason;
+    if (member.type === "Leave") {
+      const bid = leaveBidForItem(member);
+      if (bid) bid.status = status;
+    }
+  }
+  // Clear the pending notification before inventory reads or email delivery finish.
+  renderAlerts();
+}
+
+async function runIntakeDecision(action, id) {
+  if (intakeDecisionPending) return;
+  intakeDecisionPending = true;
+  const buttons = [...document.querySelectorAll("[data-intake-approve], [data-intake-deny-confirm]")]
+    .filter((button) => !button.disabled);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await action(id);
+  } finally {
+    intakeDecisionPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 async function approveIntakeItem(id) {
@@ -4839,16 +5171,16 @@ async function approveIntakeItem(id) {
     }
     item.glLineTypeVerified = true;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && !["A", "B", "C"].includes(item.fatigueGroup)) {
-    item.reviewNote = "Assign fatigue group A, B, or C before approving this bid.";
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup && !["A", "B", "C"].includes(item.fatigueGroup)) {
+    item.reviewNote = "Choose fatigue group A, B, C, or No preference before approving this bid.";
     activeOverrideId = id;
     renderApp();
     setPage("intake");
     return;
   }
-  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid) {
+  if (item.type === "RDO Line" && item.bidAs !== "GL" && !item.ghostBid && item.fatigueGroup) {
     const line = rdoLines.find((entry) => entry.line === item.line && lineForArea(entry, item.area));
-    if (!fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
+    if (!item.fatigueOverride && !fatigueGroupIsAvailableForLine(line, item.fatigueGroup)) {
       item.reviewNote = `Fatigue Group ${item.fatigueGroup} is full for this area or RDO set. Assign an available group before approving this bid.`;
       activeOverrideId = id;
       renderApp();
@@ -4866,11 +5198,12 @@ async function approveIntakeItem(id) {
     return;
   }
   if (persisted) {
+    updateConfirmedIntakeDecision(item, "approved");
     queueBidVerifiedEmail(item);
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -4923,11 +5256,12 @@ async function denyIntakeItem(id) {
   }
   if (persisted) {
     item.denialReason = reason;
+    updateConfirmedIntakeDecision(item, "denied", reason);
     queueBidDeniedEmail(item);
     activeDenialId = null;
     activeOverrideId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
     return;
@@ -4983,7 +5317,7 @@ async function saveSupabaseApprovedLeaveEdit(item) {
     item.summary = `${item.range} · ${item.days} ${item.days === 1 ? "day" : "days"}`;
   }
 
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   return true;
 }
 
@@ -5044,7 +5378,7 @@ async function removeApprovedLeaveBid(id) {
     activeOverrideId = null;
     activeDenialId = null;
     supabaseState.placeholdersCleared = false;
-    await loadSupabaseReferenceData();
+    await refreshBiddingAfterIntakeDecision();
     renderApp();
     setPage("intake");
   } catch (error) {
@@ -5079,6 +5413,49 @@ async function saveSupabasePendingRdoEdit(item) {
   return true;
 }
 
+async function saveSupabaseApprovedRdoEdit(item) {
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) throw new Error("The RDO edit could not reach the database. Check the connection and try again.");
+  let bidderId = item.bidderId;
+  // Older read_bidding_state routines return initials and area without a bidder ID.
+  if (!bidderId) {
+    if (!item.initials || !item.area) throw new Error("The saved bidder could not be identified. Reload the queue before editing.");
+    const { data: results, error: lookupError } = await client.rpc("read_admin_bidder_editor", {
+      requested_bid_year: BID_YEAR, search_text: item.initials,
+    });
+    if (lookupError) throw lookupError;
+    const matches = (results?.bidders || []).filter(person =>
+      String(person.initials || "").trim().toUpperCase() === String(item.initials).trim().toUpperCase()
+      && person.area === item.area);
+    if (matches.length !== 1) throw new Error("The saved bidder could not be uniquely identified. Reload the queue before editing.");
+    bidderId = matches[0].id;
+  }
+  const { data: record, error: readError } = await client.rpc("read_admin_bidder_editor", {
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
+  });
+  if (readError) throw readError;
+  const line = record.lines.find(entry => entry.line_code === item.line);
+  if (!line) throw new Error("This RDO line is not eligible for the bidder.");
+  if (record.snapshot.rdo?.id !== item.supabaseSubmissionId || record.snapshot.rdo?.status !== "approved") {
+    throw new Error("This RDO bid has changed. Reload the queue and edit the latest approved bid.");
+  }
+  const { data, error } = await client.rpc("edit_admin_bidder", {
+    requested_bid_year: BID_YEAR, target_bidder_id: bidderId,
+    expected_snapshot: record.snapshot,
+    changes: {
+      rdo: { line_id: line.id, fatigue_group: item.fatigueGroup,
+        flex: item.flex === true || item.flex === "Yes", aws: item.aws === true || item.aws === "Yes",
+        mid: item.mid, gl_line_type_verified: item.bidAs !== "GL"
+          || Boolean(document.querySelector("[data-gl-line-type-verification]")?.checked) },
+      leave: record.snapshot.leave.map(row => ({ id: row.id,
+        start_date: row.requested_start_date, end_date: row.requested_end_date })),
+    },
+    validate_only: false,
+  });
+  if (error) throw error;
+  if (!data?.valid || !data?.saved) throw new Error((data?.errors || ["The database did not confirm the RDO save."]).join("\n"));
+}
+
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
@@ -5111,7 +5488,7 @@ async function saveIntakeOverride(id) {
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
-      await loadSupabaseReferenceData();
+      await refreshBiddingAfterIntakeDecision();
       renderApp();
       setPage("intake");
       return;
@@ -5128,6 +5505,30 @@ async function saveIntakeOverride(id) {
       setPage("intake");
       return;
     }
+  }
+
+  if (item.status === "Approved" && item.type === "RDO Line") {
+    try {
+      await saveSupabaseApprovedRdoEdit(item);
+      activeOverrideId = null;
+      activeDenialId = null;
+      supabaseState.placeholdersCleared = false;
+      await refreshBiddingAfterIntakeDecision();
+      renderApp();
+      setPage("intake");
+    } catch (error) {
+      item.line = originalLine;
+      item.fatigueGroup = originalFatigueGroup;
+      item.flex = originalFlex;
+      item.aws = originalAws;
+      item.mid = originalMid;
+      item.summary = original;
+      item.reviewNote = error.message || "The approved RDO changes could not be saved.";
+      activeOverrideId = id;
+      renderApp();
+      setPage("intake");
+    }
+    return;
   }
 
   if (item.status === "Approved" && item.type === "Leave" && supabaseState.connected && !item.supabaseRequestId) {
@@ -5448,6 +5849,11 @@ function openPublicDateSheet(button) {
   const details = visibleLeaveSlotDetails(key, publicState.area);
   const sheet = document.querySelector("[data-public-date-sheet]");
   document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
+  if (!leaveSlotDataIsLoaded(details)) {
+    sheet.querySelector("[data-public-date-content]").innerHTML = `<p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p>`;
+    sheet.showModal();
+    return;
+  }
   const holiday = calendarHolidayKind(key, { area: publicState.area });
   sheet.querySelector("[data-public-date-content]").innerHTML = `
     <p>${escapeHtml(publicState.area)} · Read-only availability</p>
@@ -5662,7 +6068,8 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const baseSlotDetails = context ? cachedBaseLeaveSlotDetails(key, context) : null;
   const detailArea = context?.area || options.area || currentUser.area;
   const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
-  const isClosed = canShowLeaveState && (
+  const slotDataLoaded = leaveSlotDataIsLoaded(baseSlotDetails || leaveSlotsForDate(key, detailArea));
+  const isClosed = canShowLeaveState && slotDataLoaded && (
     baseSlotDetails
       ? leaveSlotOpenCountForDetails(baseSlotDetails, availabilityBucket) === 0 || (availabilityBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key))
       : isLeaveSlotsFull(key, options.area, availabilityBucket)
@@ -5700,7 +6107,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     : `Group ${fatigueGroup} fatigue week`;
   const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
   const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
-  const vacationStatus = `${holidayKind?.label || (isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
+  const vacationStatus = `${holidayKind?.label || (!slotDataLoaded ? leaveSlotLoadingMessage() : isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
@@ -5905,6 +6312,10 @@ function syncMemberCalendarSelection(previousPreviewKeys = []) {
 }
 
 function leaveSlotMap(area = currentUser.area) {
+  return cachedLeaveRead(JSON.stringify(["leaveSlotMap", area]), () => leaveSlotMapUncached(area));
+}
+
+function leaveSlotMapUncached(area = currentUser.area) {
   const entries = {};
 
   leaveSlotWeeks.forEach((week) => {
@@ -5959,6 +6370,20 @@ function leaveSlotsForDate(key, area = currentUser.area) {
   return leaveSlotsForDateFromMap(key, area);
 }
 
+function leaveSlotDataIsLoaded(details) {
+  return ["cpcCapacity", "devCapacity", "cpcOpen", "devOpen"].every((field) => (
+    details?.[field] !== null && details?.[field] !== undefined
+    && Number.isFinite(Number(details[field])) && Number(details[field]) >= 0
+  ));
+}
+
+function leaveSlotLoadingMessage() {
+  return supabaseState.leaveSlotsLoadState === "loading"
+    || (supabaseState.leaveSlotsLoadState === "idle" && !supabaseState.referenceDataLoaded)
+    ? "Loading leave slots…"
+    : "Leave slots could not be loaded. Refresh to try again.";
+}
+
 function leaveSlotCapacityForDetails(details, bucket) {
   const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
   if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
@@ -5986,7 +6411,7 @@ function hasLeaveSlotDetails(key, area = currentUser.area) {
 
 function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   const details = leaveSlotsForDate(key, area);
-  return leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key));
+  return leaveSlotDataIsLoaded(details) && (leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key)));
 }
 
 function slotRows(type, initials, capacity) {
@@ -6003,6 +6428,9 @@ function slotRows(type, initials, capacity) {
 
 function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    return `<span class="leave-date-tooltip slot-summary${persistent ? " permanent-slot-summary" : ""}"><span>${escapeHtml(leaveSlotLoadingMessage())}</span></span>`;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
@@ -6050,6 +6478,10 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
   const details = inspectOnly
     ? visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMap(area), { includePrivateOverlays: false })
     : leaveSlotsForDate(key, area);
+  if (!leaveSlotDataIsLoaded(details)) {
+    target.innerHTML = `<article class="leave-day-detail"><h3>${escapeHtml(details.label)}</h3><p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p></article>`;
+    return;
+  }
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -6069,7 +6501,7 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
       <div class="leave-slot-summary">
         <span><b>${details.cpc.length}</b> / ${cpcCapacity} CPC slots filled</span>
         <span><b>${details.dev.length}</b> / ${devCapacity} developmental slots filled</span>
-        ${details.holidayInLieu ? "<span><b>Holiday In-Lieu</b> observed for your RDO line</span>" : ""}
+        ${details.holidayInLieu ? `<span><b>Holiday In-Lieu</b> ${holidayInLieuIsProvisional() ? "provisional—pending RDO approval" : "observed for your RDO line"}</span>` : ""}
         ${details.holiday && !details.holidayInLieu ? "<span><b>Holiday</b> Federal holiday</span>" : ""}
       </div>
       <div class="daily-slot-grid">
@@ -6159,13 +6591,13 @@ function isLegalHolidayDate(key) {
 }
 
 function firstRdoWeekdayForInitials(initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   const rdoWeekdays = [...rdoWeekdaysForLine(line)].sort((a, b) => a - b);
   return rdoWeekdays[0];
 }
 
 function isRdoWeekdayForInitials(weekday, initials = currentUser.initials) {
-  const line = rdoLineForInitials(initials);
+  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
   return rdoWeekdaysForLine(line).has(weekday);
 }
 
@@ -6236,6 +6668,16 @@ function isHolidayInLieuDate(key, initials = currentUser.initials) {
     holidayInLieuDatesForYear(year - 1, initials).has(key);
 }
 
+function holidayInLieuIsProvisional(initials = currentUser.initials) {
+  const normalized = String(initials || "").trim().toUpperCase();
+  const request = intakeQueue.find((item) =>
+    item.type === "RDO Line" &&
+    item.initials === normalized &&
+    ["Pending", "Approved"].includes(item.status)
+  );
+  return request?.status === "Pending" && Boolean(submittedRdoLineForInitials(normalized));
+}
+
 function calendarHolidayKind(key, options = {}) {
   const isPublicCalendar = options.showRdo === false && options.showPersonalLeave === false;
 
@@ -6246,7 +6688,11 @@ function calendarHolidayKind(key, options = {}) {
   }
 
   if (isHolidayInLieuDate(key)) {
-    return { label: "Holiday In-Lieu", className: "holiday-in-lieu-day", badgeClass: "in-lieu" };
+    return {
+      label: holidayInLieuIsProvisional() ? "Holiday In-Lieu (provisional—pending RDO approval)" : "Holiday In-Lieu",
+      className: "holiday-in-lieu-day",
+      badgeClass: "in-lieu",
+    };
   }
 
   return isHolidayDate(key)
@@ -6261,6 +6707,18 @@ function formatCalendarDate(key) {
     month: "short",
     day: "numeric",
   }).format(new Date(year, month - 1, day));
+}
+
+function replaceBrowserHistory(targetWindow, url) {
+  try {
+    // Keep the receiver attached, including when updating a containing frame.
+    const history = targetWindow.history;
+    history.replaceState.call(history, history.state, "", url);
+    return true;
+  } catch {
+    // URL cleanup/navigation bookkeeping must not interrupt authentication.
+    return false;
+  }
 }
 
 function adoptParentSupabaseAuthHash() {
@@ -6278,14 +6736,14 @@ function adoptParentSupabaseAuthHash() {
     || authParams.has("error_description");
   if (!isSupabaseAuthResponse) return;
 
-  window.history.replaceState(
-    null,
-    "",
+  const adopted = replaceBrowserHistory(
+    window,
     `${window.location.pathname}${window.location.search}${parentUrl.hash}`
   );
+  if (!adopted) return;
 
   parentUrl.hash = "";
-  window.top.history.replaceState(null, "", parentUrl.toString());
+  replaceBrowserHistory(window.top, parentUrl.toString());
 }
 
 function supabaseClient() {
@@ -6309,6 +6767,12 @@ function setAuthStatus(message, status = "info") {
   if (!target) return;
   target.textContent = message;
   target.dataset.status = status;
+  if (status === "error" && !isMemberAppVisible()) {
+    // Failed sign-in must leave its explanation visible in the login popup.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu) loginMenu.hidden = false;
+    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+  }
 }
 
 const supportedEmailTokenTypes = new Set([
@@ -6337,7 +6801,7 @@ function clearSupabaseEmailTokenFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete("token_hash");
   url.searchParams.delete("type");
-  window.history.replaceState({}, document.title, url.toString());
+  replaceBrowserHistory(window, url.toString());
 }
 
 function showPendingSupabaseEmailConfirmation(client, pendingToken) {
@@ -6395,15 +6859,38 @@ function showPendingSupabaseEmailConfirmation(client, pendingToken) {
 
 function friendlyAuthFailure(error) {
   const message = error?.message || String(error || "");
+  if (error?.code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "The email or password is incorrect. Try again, or use Set or reset password.";
+  }
   if (/load failed|failed to fetch|network/i.test(message)) {
     return "Login could not reach Supabase. Check your connection and try again.";
   }
   return message || "That login did not work.";
 }
 
+function requestedPublicView() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("page") !== "public") return null;
+  const area = params.get("area");
+  const section = params.get("section");
+  return {
+    area: [...ZLA_AREAS, "FAQ", "Previous Years"].includes(area) ? area : DEFAULT_PUBLIC_AREA,
+    section: ["Calendar", "RDO", "Bid Time"].includes(section) ? section : DEFAULT_PUBLIC_SECTION,
+  };
+}
+
+function syncPublicPageUrl(area, section) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", "public");
+  url.searchParams.set("area", area);
+  url.searchParams.set("section", section);
+  url.searchParams.delete("member");
+  syncNavigationUrl(url);
+}
+
 function requestedLandingPage() {
   const requestedPage = new URLSearchParams(window.location.search).get("page");
-  return ["dashboard", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
+  return ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(requestedPage) ? requestedPage : "";
 }
 
 function defaultLandingPageForRole() {
@@ -6417,10 +6904,9 @@ function intendedLandingPage(requestedPage = requestedLandingPage()) {
   if (requestedPage === "admin" || requestedPage === "admin-tools") {
     return hasSystemAdminAccess() ? requestedPage : defaultPage;
   }
-  if (requestedPage === "intake" || requestedPage === "intake-schedule") {
-    return canUseIntakeView() ? requestedPage : defaultPage;
-  }
-  if (requestedPage === "dashboard") return "dashboard";
+  if (requestedPage === "intake") return canUseIntakeView() ? requestedPage : defaultPage;
+  if (requestedPage === "intake-schedule") return canViewIntakeSchedule() ? requestedPage : defaultPage;
+  if (["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile"].includes(requestedPage)) return requestedPage;
   return defaultPage;
 }
 
@@ -6446,6 +6932,7 @@ function clearSupabaseAccountState() {
   document.querySelector('[data-bidder-editor-results]')?.replaceChildren();
   supabaseState.authEmail = "";
   supabaseState.authUserId = "";
+  stopLiveAlertUpdates();
   supabaseState.pendingAuthEmail = "";
   syncAccountFields();
 }
@@ -6607,10 +7094,11 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   renderApp();
   setPage(intendedLandingPage(page));
+  startLiveAlertUpdates();
   document.documentElement.classList.remove("member-boot-pending");
 }
 
-function showPublicHome() {
+function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
@@ -6624,7 +7112,7 @@ function showPublicHome() {
     loginToggle.setAttribute("aria-expanded", "false");
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  renderPublicPage(DEFAULT_PUBLIC_AREA, DEFAULT_PUBLIC_SECTION);
+  renderPublicPage(area, section, { persistNavigation: true });
   document.documentElement.classList.remove("member-boot-pending");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6648,7 +7136,12 @@ async function initializeSupabaseAuth() {
 
       restoreSupabaseSession();
     }
-    if (event === "SIGNED_OUT") clearSupabaseAccountState();
+    if (event === "SIGNED_OUT") {
+      clearSupabaseAccountState();
+      currentUser = null;
+      showPublicHome();
+      setAuthStatus("Signed out. Sign in again to manage intake shifts.", "info");
+    }
   });
 
   const pendingToken = pendingSupabaseEmailToken();
@@ -6676,7 +7169,8 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
       await loadSupabaseReferenceData();
-      showLoggedInApp(page);
+      if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
+      else showLoggedInApp(page);
       return true;
     } catch (error) {
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
@@ -6689,44 +7183,65 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
   return supabaseState.authRestorePromise;
 }
 
+let loginLinkRequestPending = false;
+
 async function sendSupabaseLoginLink(email) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
+  if (loginLinkRequestPending) return;
+  loginLinkRequestPending = true;
+  const buttons = document.querySelectorAll("[data-send-login-link], [data-email-login-form] button[type='submit']");
+  buttons.forEach((button) => { button.disabled = true; });
+  setAuthStatus("Sending login link...");
 
-  if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    let canRequestLink = false;
-    try {
-      canRequestLink = await canRequestSupabaseLoginEmail(email);
-    } catch (error) {
-      setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+  try {
+    const client = supabaseClient();
+    if (!client) {
+      setAuthStatus("Login is not configured yet.", "error");
       return;
     }
-    if (!canRequestLink) {
-      setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+
+    if (window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
+      let canRequestLink = false;
+      try {
+        canRequestLink = await canRequestSupabaseLoginEmail(email);
+      } catch (error) {
+        setAuthStatus(error.message || "Could not verify that email against the BUE roster.", "error");
+        return;
+      }
+      if (!canRequestLink) {
+        setAuthStatus("Use the email address listed for you in the BUE roster.", "error");
+        return;
+      }
+    }
+
+    await client.auth.signOut();
+    clearSupabaseAccountState();
+
+    const { error } = await client.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: supabaseAuthRedirectUrl(),
+        shouldCreateUser: true,
+      },
+    });
+
+    if (error) {
+      setAuthStatus(friendlyAuthFailure(error), "error");
       return;
     }
+
+    setAuthStatus("Login link requested. Check your inbox and spam folder. If you request another link, use the newest email.", "success");
+  } catch (error) {
+    setAuthStatus(friendlyAuthFailure(error), "error");
+  } finally {
+    loginLinkRequestPending = false;
+    buttons.forEach((button) => { button.disabled = false; });
+    // Keep the request result visible even if auth initialization closed the menu.
+    const loginMenu = document.querySelector("[data-public-login-menu]");
+    if (loginMenu && !isMemberAppVisible()) {
+      loginMenu.hidden = false;
+      document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "true");
+    }
   }
-
-  await client.auth.signOut();
-  clearSupabaseAccountState();
-
-  const { error } = await client.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: supabaseAuthRedirectUrl(),
-      shouldCreateUser: true,
-    },
-  });
-
-  if (error) {
-    setAuthStatus(error.message, "error");
-    return;
-  }
-
-  setAuthStatus("Login link sent. Check that email inbox. Any password entered here is not used by the login link.", "success");
 }
 
 async function sendSupabasePasswordReset(email) {
@@ -6987,6 +7502,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       .map((day) => day.shift_code);
     const area = areaNameForRow(row, areaById);
     const nextLine = {
+      id: row.id,
       area,
       pattern: row.pattern,
       line: row.line_code,
@@ -7000,6 +7516,7 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
       fourTen: row.four_ten ? "Yes" : "No",
       flex: typeof row.flex === "boolean" ? (row.flex ? "Yes" : "No") : "",
       status: row.status === "taken" ? "Taken" : row.status === "locked" ? "Taken" : "Open",
+      glBids: [],
     };
     const existingIndex = rdoLines.findIndex((line) => line.line === nextLine.line && (line.area || "Area A") === area);
     if (existingIndex >= 0) {
@@ -7012,6 +7529,30 @@ function upsertRdoLinesFromDatabase(rows, areaById) {
   if (!selectedLineId && rdoLines.length) {
     selectedLineId = rdoLinesForArea(currentUser?.area || "Area A")[0]?.line || rdoLines[0].line;
   }
+}
+
+function applyGlRdoAssignments(rows) {
+  rdoLines.forEach((line) => {
+    line.glBids = [];
+  });
+
+  (rows || []).forEach((row) => {
+    const line = rdoLines.find((candidate) => (
+      (row.rdo_line_id && candidate.id === row.rdo_line_id)
+      || (candidate.line === row.line_code && candidate.area === row.area_name)
+    ));
+    const initials = String(row.initials || "").trim().toUpperCase();
+    if (!line || !initials || line.glBids.some((bid) => bid.initials === initials)) return;
+    line.glBids.push({
+      initials,
+      status: uiStatusFromDatabase(row.status || "pending"),
+      ghostBid: Boolean(row.ghost_bid),
+    });
+  });
+
+  rdoLines.forEach((line) => {
+    line.glBids.sort((left, right) => left.initials.localeCompare(right.initials));
+  });
 }
 
 function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
@@ -7059,6 +7600,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     round,
     line,
     fatigueGroup,
+    fatigueOverride: payload.fatigueOverride === true,
     flex,
     aws,
     mid,
@@ -7318,6 +7860,7 @@ function resetSupabaseBackedData() {
   publicFaqContent.entries = [];
   publicFaqContent.documents = [];
   intakeSchedules.splice(0, intakeSchedules.length);
+  intakeCalendarMarks.clear();
   intakeTeamInitials.clear();
   holidayOverrides.clear();
   fullLeaveDates.clear();
@@ -7383,6 +7926,9 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
         phone: person.phone,
         area: person.area,
         bidAs: person.bidAs,
+        role: seniorityEntryAppRole(currentEntry),
+        roleLabel: seniorityEntryAppRole(currentEntry) === "admin" ? "Bidding Admin" : seniorityEntryAppRole(currentEntry) === "intake" ? "Bidding Intake" : "BUE Controller",
+        systemAdmin: seniorityEntryAppRole(currentEntry) === "admin",
         seniorityRank: person.rank,
         leaveSlotAllowance: person.leaveSlotAllowance,
       };
@@ -7440,7 +7986,6 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
     const initials = bidder.initials || row.initials || "";
     if (!initials) return;
 
-    intakeTeamInitials.add(initials);
     intakeSchedules.push({
       id: row.id,
       initials,
@@ -7456,7 +8001,7 @@ function applyIntakeSchedulesFromDatabase(rows, areaById = new Map()) {
 }
 
 function loadIntakeSchedules(client) {
-  if (!supabaseState.authUserId) return Promise.resolve({ data: [], error: null });
+  if (!supabaseState.authUserId || !canViewIntakeSchedule()) return Promise.resolve({ data: [], error: null });
   return client.rpc("read_intake_schedules", { requested_bid_year: BID_YEAR });
 }
 
@@ -7476,6 +8021,8 @@ async function ensureSupabaseBidYearId() {
 }
 
 async function saveSupabaseRdoRequest(request, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The RDO bid could not reach the database. Sign in and try again.");
@@ -7497,14 +8044,19 @@ async function saveSupabaseRdoRequest(request, options = {}) {
 }
 
 async function saveSupabaseManualRdoRequest(request, person, area) {
+  if (request.fatigueOverride && !["intake", "admin"].includes(currentUser?.role)) {
+    throw new Error("Only intake and admin users may override fatigue capacity.");
+  }
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
   }
-  const { data, error } = await client.rpc("submit_rdo_bid", {
+  const { data, error } = await client.rpc(request.fatigueOverride ? "submit_manual_rdo_fatigue_override" : "submit_rdo_bid", {
     requested_bid_year: BID_YEAR,
     requested_line_code: request.line,
-    requested_fatigue_group: request.fatigueGroup,
+    requested_fatigue_group: request.fatigueGroup || null,
     requested_flex: request.flex === true || request.flex === "Yes",
     requested_aws: request.aws === true || request.aws === "Yes",
     requested_mid: request.mid,
@@ -7518,16 +8070,17 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   return data;
 }
 
-async function saveSupabaseManualLeaveRequest(request, person, area, notes = "") {
+async function saveSupabaseManualLeaveRequest(requests, person, area, notes = "") {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
   }
-  const dateKeys = datesInLeaveRange(request.range);
   const targetRdoLine = rdoLineForInitials(person.initials);
-  const requestedItems = [{
-    start_date: dateKeys[0],
-    end_date: dateKeys[dateKeys.length - 1],
+  const requestedItems = requests.map((request) => ({
+    start_date: request.startDateKey,
+    end_date: request.endDateKey,
     round: request.round,
     rdo_line_code: targetRdoLine?.line || null,
     fatigue_group: targetRdoLine?.group || null,
@@ -7535,7 +8088,7 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     aws: targetRdoLine?.aws || null,
     mid: targetRdoLine?.mid || null,
     notes,
-  }];
+  }));
   const { data, error } = await client.rpc("submit_leave_bid_batch", {
     requested_bid_year: BID_YEAR,
     requested_items: requestedItems,
@@ -7544,13 +8097,15 @@ async function saveSupabaseManualLeaveRequest(request, person, area, notes = "")
     manual_entry: true,
   });
   if (error) throw error;
-  if (!Array.isArray(data?.submission_ids) || !data.submission_ids.length) {
+  if (!Array.isArray(data?.submission_ids) || data.submission_ids.length !== requests.length) {
     throw new Error("Supabase did not return the saved manual leave submission.");
   }
   return data;
 }
 
 async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {}) {
+  const yearError = selectedBidYearErrorMessage();
+  if (yearError) throw new Error(yearError);
   const client = supabaseClient();
   if (!client || !currentUser.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
@@ -7614,6 +8169,28 @@ async function loadPublishedLeaveSlots(client) {
   return client.rpc("read_public_leave_slots", { requested_bid_year: BID_YEAR });
 }
 
+async function loadPublishedGlRdoAssignments(client) {
+  return client.rpc("read_public_gl_rdo_assignments", { requested_bid_year: BID_YEAR });
+}
+
+async function loadPublicPilotCalendar() {
+  const client = supabaseClient();
+  if (!client) return;
+  supabaseState.loading = true;
+  try {
+    await loadBidYearCatalog(client);
+    const result = await readReferenceData("pilot leave slots", () => loadPublishedLeaveSlots(client));
+    if (result.error) throw result.error;
+    applyLeaveSlotScheduleFromDatabase(supabaseRows(result), new Map());
+    calendarRenderRevision += 1;
+  } catch (error) {
+    console.warn(`Public leave slots could not load: ${error.message || error}`);
+  } finally {
+    supabaseState.loading = false;
+    supabaseState.referenceDataLoaded = true;
+  }
+}
+
 async function loadRdoLines(client, bidYearId) {
   const orderedResult = await client
     .from("rdo_lines")
@@ -7629,12 +8206,63 @@ async function loadRdoLines(client, bidYearId) {
     .eq("bid_year_id", bidYearId);
 }
 
+// Only use this helper for reads: mutations must never be replayed automatically.
+const referenceLoadDiagnostics = [];
+async function readReferenceData(label, request) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const started = Date.now();
+    const controller = new AbortController();
+    let timer;
+    let result;
+    try {
+      const pending = request();
+      if (typeof pending?.abortSignal === "function") pending.abortSignal(controller.signal);
+      result = await Promise.race([
+        pending,
+        new Promise((resolve) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            resolve({ data: null, error: { code: "READ_TIMEOUT" }, status: 0 });
+          }, 15000);
+        }),
+      ]);
+    } catch (error) {
+      result = { data: null, error, status: 0 };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!result?.error) return result;
+    const status = Number(result.status || 0);
+    const code = String(result.error.code || "");
+    const transient = status === 408 || status === 429 || status >= 500
+      || code === "READ_TIMEOUT" || code === "57014"
+      || (!status && /Failed to fetch|NetworkError|network|timeout|AbortError/i.test(`${result.error.name || ""} ${result.error.message || ""}`));
+    // Deliberately exclude response bodies, URLs, tokens, and bidder details.
+    const diagnostic = { section: label, attempt, status, code, elapsedMs: Date.now() - started, at: new Date().toISOString(), retrying: transient && attempt < 3 };
+    referenceLoadDiagnostics.push(diagnostic);
+    if (referenceLoadDiagnostics.length > 50) referenceLoadDiagnostics.shift();
+    window.NATCA_REFERENCE_LOAD_DIAGNOSTICS = referenceLoadDiagnostics;
+    console.warn("Bidding reference read failed", diagnostic);
+    if (!transient || attempt === 3) return result;
+    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250)));
+  }
+}
+
+function refreshPublicReferenceSection() {
+  if (!isMemberAppVisible()) renderPublicPage();
+}
+
 async function loadSupabaseReferenceData() {
   const client = supabaseClient();
   if (!client) {
     resetSupabaseBackedData();
+    supabaseState.rdoLinesLoadState = "error";
     supabaseState.enabled = false;
     supabaseState.connected = false;
+    supabaseState.faqLoadState = "error";
+    supabaseState.bidTimesLoadState = "error";
+    supabaseState.leaveSlotsLoadState = "error";
+    supabaseState.referenceDataLoaded = true;
     supabaseState.message = "Supabase is not configured. No bidding data was loaded.";
     return;
   }
@@ -7644,34 +8272,56 @@ async function loadSupabaseReferenceData() {
   supabaseState.enabled = true;
   supabaseState.loading = true;
   supabaseState.intakeSchedulesError = "";
+  supabaseState.rdoLinesLoadState = "loading";
   supabaseState.message = "Loading bidding data from Supabase...";
 
+  supabaseState.faqLoadState = "loading";
+  supabaseState.bidTimesLoadState = "loading";
+  supabaseState.leaveSlotsLoadState = "loading";
+  const rosterRequest = readReferenceData("roster", () => client.rpc("read_bidding_roster"));
+  const faqReads = Promise.all([
+    readReferenceData("FAQ entries", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
+    readReferenceData("MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+  ]).then(([entries, documents]) => {
+    if (!entries.error) publicFaqContent.entries = entries.data || [];
+    if (!documents.error) publicFaqContent.documents = documents.data || [];
+    supabaseState.faqLoadState = entries.error || documents.error ? "error" : "loaded";
+    refreshPublicReferenceSection();
+    return [entries, documents];
+  });
   try {
-    const [bidYearResult, areasResult, rosterResult] = await Promise.all([
-      client
+    await loadBidYearCatalog(client);
+    const [bidYearResult, areasResult] = await Promise.all([
+      readReferenceData("bid year", () => client
         .from("bid_years")
         .select("id,bid_year,annual_leave_allowance_days")
         .eq("bid_year", BID_YEAR)
-        .single(),
-      client.from("areas").select("id,code,name,display_order").order("display_order"),
-      client.rpc("read_bidding_roster"),
+        .single()),
+      readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order")),
     ]);
-    const requiredError = [bidYearResult, areasResult, rosterResult].find((result) => result.error)?.error;
+    const requiredError = [bidYearResult, areasResult].find((result) => result.error)?.error;
     if (requiredError) throw requiredError;
 
     const bidYear = bidYearResult.data;
     supabaseState.bidYearId = bidYear.id;
     const areaById = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-    applyRosterFromDatabase(rosterResult.data || [], areaById);
+    let rosterResult;
+    const rosterReady = rosterRequest.then((result) => {
+      rosterResult = result;
+      if (!result.error) applyRosterFromDatabase(result.data || [], areaById);
+      return result;
+    });
 
     const [
       holidaysResult,
       rdoLinesResult,
+      glRdoAssignmentsResult,
       biddingStateResult,
       leaveSlotsResult,
       leaveRequestsResult,
       ghostStatusResult,
       intakeSchedulesResult,
+      intakeCalendarMarksResult,
       shiftPresetsResult,
       bidYearSettingsResult,
       roundRulesResult,
@@ -7681,35 +8331,62 @@ async function loadSupabaseReferenceData() {
       faqEntriesResult,
       mouDocumentsResult,
       _helpThreadsLoaded,
+      _rosterLoaded,
     ] = await Promise.all([
-      client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
-      loadRdoLines(client, bidYear.id),
-      supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
-      loadPublishedLeaveSlots(client),
-      supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
-      loadIntakeSchedules(client),
-      hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null }),
-      client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_round_rules", { requested_bid_year: BID_YEAR }),
-      client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR }),
-      supabaseState.authUserId
+      readReferenceData("holidays", () => client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id)),
+      readReferenceData("RDO lines", () => loadRdoLines(client, bidYear.id)).then((result) => {
+        supabaseState.rdoLinesLoadState = result.error ? "error" : "loaded";
+        if (!result.error) upsertRdoLinesFromDatabase(result.data || [], areaById);
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
+      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
+        supabaseState.leaveSlotsLoadState = result.error ? "error" : "loaded";
+        if (!result.error) {
+          applyLeaveSlotScheduleFromDatabase(supabaseRows(result), areaById);
+          calendarRenderRevision += 1;
+        }
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      readReferenceData("leave requests", () => supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
+      readReferenceData("calendar marks", () => supabaseState.authUserId
+        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
+        : Promise.resolve({ data: [], error: null })),
+      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+      readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
+      readReferenceData("pilot settings", () => supabaseState.authUserId
         ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
-        : Promise.resolve({ data: null, error: null }),
-      loadPublishedBidWindows(client, bidYear.id),
-      client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at"),
-      client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at"),
-      loadSupabaseHelpThreads(),
+        : Promise.resolve({ data: null, error: null })),
+      Promise.all([readReferenceData("bid windows", () => loadPublishedBidWindows(client, bidYear.id)), rosterReady]).then(([result]) => {
+        supabaseState.bidTimesLoadState = result.error || rosterResult.error ? "error" : "loaded";
+        if (!result.error) applyBidWindowsFromDatabase(supabaseRows(result));
+        refreshPublicReferenceSection();
+        return result;
+      }),
+      faqReads.then((results) => results[0]),
+      faqReads.then((results) => results[1]),
+      readReferenceData("help threads", () => loadSupabaseHelpThreads().then(() => ({ data: null, error: null }))),
+      rosterReady,
     ]);
 
     const loadWarnings = [
+      supabaseLoadWarning("roster", rosterResult),
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
       isMissingSupabaseRoutine(ghostStatusResult.error) ? null : supabaseLoadWarning("ghost bidding status", ghostStatusResult),
       supabaseLoadWarning("intake schedules", intakeSchedulesResult),
+      supabaseLoadWarning("intake calendar days", intakeCalendarMarksResult),
       isMissingSupabaseRoutine(shiftPresetsResult.error) ? null : supabaseLoadWarning("intake shift presets", shiftPresetsResult),
       isMissingSupabaseRoutine(bidYearSettingsResult.error) ? null : supabaseLoadWarning("bid year settings", bidYearSettingsResult),
       isMissingSupabaseRoutine(roundRulesResult.error) ? null : supabaseLoadWarning("round rules", roundRulesResult),
@@ -7724,7 +8401,7 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
-    if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
+    if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
       : biddingStateResult.data?.submissions || [];
@@ -7733,7 +8410,6 @@ async function loadSupabaseReferenceData() {
       && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())
     ));
     if (!biddingStateResult.error) upsertRdoSubmissionsFromDatabase(rdoSubmissionRows, areaById);
-    if (!leaveSlotsResult.error) applyLeaveSlotScheduleFromDatabase(supabaseRows(leaveSlotsResult), areaById);
     if (!leaveRequestsResult.error) {
       upsertLeaveRequestsFromDatabase(
         attachSubmissionIdsToLeaveRequests(
@@ -7746,6 +8422,10 @@ async function loadSupabaseReferenceData() {
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
     supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
     if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!intakeCalendarMarksResult.error) {
+      intakeCalendarMarks.clear();
+      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+    }
     if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
@@ -7754,7 +8434,6 @@ async function loadSupabaseReferenceData() {
       applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
       await refreshPilotRounds();
     }
-    if (!bidWindowsResult.error) applyBidWindowsFromDatabase(bidWindowsResult.data || []);
     if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
     if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
@@ -7766,9 +8445,13 @@ async function loadSupabaseReferenceData() {
     }
   } catch (error) {
     supabaseState.connected = false;
+    if (supabaseState.rdoLinesLoadState === "loading") supabaseState.rdoLinesLoadState = "error";
+    if (supabaseState.bidTimesLoadState === "loading") supabaseState.bidTimesLoadState = "error";
+    if (supabaseState.leaveSlotsLoadState === "loading") supabaseState.leaveSlotsLoadState = "error";
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
+    await faqReads;
     supabaseState.loading = false;
     supabaseState.referenceDataLoaded = true;
   }
@@ -7795,6 +8478,7 @@ function formatDuration(milliseconds) {
 }
 
 function formatDateTime(date) {
+  if (!date || !Number.isFinite(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -8148,9 +8832,9 @@ function renderPublicFaq() {
   const documents = publicFaqContent.documents || [];
 
   if (!entries.length && !documents.length) {
-    const message = !supabaseState.referenceDataLoaded
+    const message = ["idle", "loading"].includes(supabaseState.faqLoadState)
       ? "Loading the current FAQ and bidding references…"
-      : supabaseState.connected
+      : supabaseState.faqLoadState === "loaded"
         ? "No FAQ items or MOU documents are published yet."
         : "The current FAQ could not be loaded. Please refresh to try again.";
     return `
@@ -8315,7 +8999,18 @@ function rdoFatigueGroupBadge(group) {
     : "";
 }
 
+function rdoLinesLoadMessage() {
+  if (supabaseState.rdoLinesLoadState === "loaded") return "";
+  if (supabaseState.rdoLinesLoadState === "loading"
+      || (supabaseState.rdoLinesLoadState === "idle" && !supabaseState.referenceDataLoaded)) {
+    return "Loading RDO lines…";
+  }
+  return "RDO lines could not be loaded. Please refresh the browser to reload.";
+}
+
 function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
   if (!lines.length) return `<tr><td colspan="12">No RDO lines match those filters for ${area}.</td></tr>`;
 
   let lastPattern = "";
@@ -8331,7 +9026,7 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
     rows.push(`
       <tr class="${line.status === "Taken" ? "occupied-row" : ""}">
         <td>${line.line}</td>
-        <td><b>${lineOccupant(line)}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td>${rdoFatigueGroupBadge(rdoLineDisplayFatigueGroup(line))}</td>
         <td>${rdoLineAwsReferenceCell(line)}</td>
@@ -8344,6 +9039,8 @@ function publicRdoRowsMarkup(area, lines, showPatternGroups = true) {
 }
 
 function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) return `<div class="public-rdo-empty" role="status">${escapeHtml(loadMessage)}</div>`;
   if (!lines.length) return `<div class="public-rdo-empty">No RDO lines match those filters for ${area}.</div>`;
 
   return PUBLIC_RDO_LINE_SECTIONS.map((section) => {
@@ -8364,7 +9061,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
               <details class="mobile-rdo-card">
                 <summary>
                   <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-line-status">${lineStatusMarkup(line)}</span>
                   <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
@@ -8433,6 +9130,7 @@ function renderPublicRdoTable(area) {
           <option value="No" ${publicRdoFilters.fourTen === "No" ? "selected" : ""}>4-10: No</option>
         </select>
       </div>
+      <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL / Ghost Bid · visible, but does not occupy the line</p>
       <div class="mobile-rdo-view" role="group" aria-label="RDO display">
         <button type="button" data-rdo-presentation="cards" aria-pressed="${publicRdoPresentation === "cards"}">Line cards</button>
         <button type="button" data-rdo-presentation="table" aria-pressed="${publicRdoPresentation === "table"}">Compare table</button>
@@ -8446,6 +9144,12 @@ function renderPublicRdoTable(area) {
 }
 
 function renderPublicBidTimeTable(area) {
+  if (supabaseState.bidTimesLoadState !== "loaded") {
+    const message = supabaseState.bidTimesLoadState === "error"
+      ? "Bid times could not be loaded. Refresh to try again."
+      : "Loading bid times…";
+    return `<p role="status">${escapeHtml(message)}</p>`;
+  }
   const showBidderNames = Boolean(supabaseState.authUserId);
 
   return `
@@ -8463,7 +9167,7 @@ function renderPublicBidTimeTable(area) {
           <article class="mobile-bid-time-card" data-public-bid-time-card>
             <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
-            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
+            <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</dd></div>`).join("")}</dl>
           </article>
         `).join("")}
         ${seniority.length ? "" : "<p>No bid times are published for this area yet.</p>"}
@@ -8496,7 +9200,7 @@ function renderPublicBidTimeTable(area) {
                 ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
                 <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
-                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
+                ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled.  Please refresh the browser to reload.")}</td>`).join("")}
               </tr>
             `).join("")}
           </tbody>
@@ -8572,7 +9276,8 @@ function publicRosterArea(area = publicState.area) {
   return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
-function renderPublicPage(area = publicState.area, section = publicState.section) {
+function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false } = {}) {
+  if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
@@ -8618,7 +9323,7 @@ function activeScheduledIntakeWindow() {
   if (!currentUser?.initials) return null;
   const nowDate = new Date();
   return intakeSchedules.find((schedule) => {
-    const accessStart = new Date(schedule.start.getTime() - 15 * 60 * 1000);
+    const accessStart = new Date(schedule.start.getTime() - 60 * 60 * 1000);
     return schedule.initials === currentUser.initials && nowDate >= accessStart && nowDate <= schedule.end;
   }) || null;
 }
@@ -8636,6 +9341,45 @@ function hasSystemAdminAccess() {
 
 function canUseIntakeView() {
   return hasIntakeAccess();
+}
+
+function canViewIntakeSchedule() {
+  return hasSystemAdminAccess()
+    || Boolean(currentUser?.supabaseProfileId && intakeTeamInitials.has(currentUser.initials));
+}
+
+async function refreshIntakeScheduleMembership() {
+  const client = supabaseClient();
+  if (!client || !supabaseState.authUserId) return false;
+
+  const { data, error } = await client.rpc("read_bidding_roster");
+  if (error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyRosterFromDatabase(data || []);
+  if (!canViewIntakeSchedule()) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+
+  const schedulesResult = await loadIntakeSchedules(client);
+  supabaseState.intakeSchedulesError = schedulesResult.error?.message || "";
+  if (schedulesResult.error) {
+    closeIntakeScheduleAfterFailedCheck();
+    return false;
+  }
+  applyIntakeSchedulesFromDatabase(schedulesResult.data || []);
+  renderApp();
+  return true;
+}
+
+function closeIntakeScheduleAfterFailedCheck() {
+  intakeSchedules.splice(0, intakeSchedules.length);
+  if (document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    setPage("dashboard");
+  }
+  renderApp();
 }
 
 function pageForViewMode(mode) {
@@ -8695,6 +9439,7 @@ function userSeniorityLongText() {
 
 function renderCurrentUser() {
   const canOpenIntake = canUseIntakeView();
+  const canOpenIntakeSchedule = canViewIntakeSchedule();
   const displayedSeniorityRank = currentUserSeniorityRank();
   const displayedBidderCount = currentUserBidderCount();
   const hasSeniority = Number.isFinite(displayedSeniorityRank);
@@ -8781,7 +9526,7 @@ function renderCurrentUser() {
   });
 
   document.querySelectorAll("[data-intake-rep-only]").forEach((element) => {
-    element.hidden = !canOpenIntake;
+    element.hidden = !canOpenIntakeSchedule;
   });
 
   document.querySelectorAll("[data-system-admin-only]").forEach((element) => {
@@ -8817,6 +9562,7 @@ function closeLateBidDialog() {
 }
 
 function updateBidWindow(force = false) {
+  if (!currentUser || !isMemberAppVisible()) return;
   return withLeaveReadCache(() => updateBidWindowWithCache(force));
 }
 
@@ -8833,7 +9579,7 @@ function updateBidWindowWithCache(force = false) {
   const isBefore = !pilotState.database && viewingHomeArea && personalBidWindow && now < personalBidWindow.start;
   const isOpen = !pilotState.database && viewingHomeArea && personalBidWindow && now >= personalBidWindow.start && now < personalBidWindow.end;
   const isTestingBypass = bidWindowLockIsBypassed();
-  const canUseBidActions = viewingHomeArea && (isOpen || isTestingBypass);
+  const canUseBidActions = !selectedBidYearErrorMessage() && viewingHomeArea && (isOpen || isTestingBypass);
   const showLateBidContact = shouldShowLateBidContact(now);
   const activeRank = roundState?.phase === "open" ? roundState.activeRank : null;
   const activePerson = seniority.find((person) => person.rank === activeRank);
@@ -9111,6 +9857,30 @@ function lineOccupant(line) {
   return "";
 }
 
+function lineGlBids(line) {
+  return Array.isArray(line?.glBids) ? line.glBids : [];
+}
+
+function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
+  const occupant = lineOccupant(line);
+  const glBids = lineGlBids(line);
+  const pieces = [];
+  if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
+  else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
+  glBids.forEach((bid) => {
+    pieces.push(`<span class="gl-line-bidder" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
+  });
+  return pieces.join('<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>');
+}
+
+function lineStatusMarkup(line, openLabel = "Open") {
+  const label = line.status === "Taken" ? "Taken" : openLabel;
+  const bidders = lineBidderMarkup(line);
+  return bidders
+    ? `${escapeHtml(label)}<span class="rdo-line-bidder-separator" aria-hidden="true"> · </span>${bidders}`
+    : escapeHtml(label);
+}
+
 function selectedMidValue(line) {
   return isForcedMid(line) ? line.mid : selectedMidPreference;
 }
@@ -9267,6 +10037,7 @@ function rdoLineMatchesFilterSet(line, filters) {
     const searchable = [
       line.line,
       line.cpc,
+      ...lineGlBids(line).map((bid) => bid.initials),
       line.pattern,
       line.group,
       line.status,
@@ -9306,6 +10077,16 @@ function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
 
+  const loadMessage = rdoLinesLoadMessage();
+  if (loadMessage) {
+    setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${currentViewArea()}`);
+    setText("[data-rdo-filter-count]", supabaseState.rdoLinesLoadState === "loading" ? "Loading…" : "Unavailable");
+    target.innerHTML = `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
+    const mobileCards = document.querySelector("[data-member-rdo-cards]");
+    if (mobileCards) mobileCards.innerHTML = `<div class="empty-state" role="status">${escapeHtml(loadMessage)}</div>`;
+    return;
+  }
+
   let lastPattern = "";
   const rows = [];
   const viewArea = currentViewArea();
@@ -9334,7 +10115,6 @@ function renderRdoLines() {
     }
 
     const isSelected = line.line === selectedLineId;
-    const displayCpc = lineOccupant(line);
     const isOccupied = line.status === "Taken";
     const canSelect = isViewingHomeArea() && !bidderSelectionLocked && !isOccupied
       && rdoLineMatchesBidRole(line, currentUserBidAs(), viewArea);
@@ -9347,7 +10127,7 @@ function renderRdoLines() {
     rows.push(`
       <tr class="${isCurrentUserRdoLine(line) ? "own-rdo-row" : ""} ${isSelected && isViewingHomeArea() ? "selected-row" : ""} ${canSelect ? "selectable-row" : "occupied-row"}" ${canSelect ? `data-line-id="${line.line}"` : ""}>
         <td>${line.line}</td>
-        <td><b>${displayCpc}</b></td>
+        <td><b class="rdo-line-bidders">${lineBidderMarkup(line, { showOpenWhenShared: true })}</b></td>
         ${line.week.map((value, index) => `<td>${shiftCell(value, index === swingIndex)}</td>`).join("")}
         <td class="${groupValue ? "" : "empty-group"}">${groupValue}</td>
         <td>${rdoLineAwsReferenceCell(line)}</td>
@@ -9373,7 +10153,7 @@ function renderRdoLines() {
           .map((value, index) => value === "RDO" ? dayNames[index] : "")
           .filter(Boolean)
           .join(", ") || line.pattern;
-        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() && matchesBidRole ? "Open" : "View only";
+        const status = lineStatusMarkup(line, isViewingHomeArea() && matchesBidRole ? "Open" : "View only");
         const swingIndex = thirdDaySwingIndex(line.week);
         const selectButton = !isOccupied && isViewingHomeArea() && matchesBidRole && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`
@@ -9586,7 +10366,6 @@ function renderLeaveRows(targetId) {
       return compact
         ? `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
@@ -9595,7 +10374,6 @@ function renderLeaveRows(targetId) {
       `
         : `
         <tr>
-          <td><b>${bid.priority}</b></td>
           <td><span class="round-pill">Rd ${round}</span></td>
           <td>${bid.ghostBid ? '<span class="ghost-bid-badge">Ghost Leave</span><br>' : isGlLeaveItem(bid) ? '<span class="gl-bid-badge">GL Bid · No area slot used</span><br>' : ''}${bid.range}</td>
           <td>${bid.days}</td>
@@ -11033,6 +11811,56 @@ async function exportSeniorityRoster() {
   }
 }
 
+async function exportBidTimes(form) {
+  if (!hasSystemAdminAccess()) return;
+  const button = form.querySelector("[data-export-bid-times]");
+  const status = form.querySelector("[data-bid-time-export-status]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]:checked'), input => input.value);
+  if (!areas.length) {
+    status.textContent = "Choose at least one area to export.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = `Preparing ${BID_YEAR} bid times…`;
+  try {
+    const client = supabaseClient();
+    if (!client) throw new Error("Supabase is not configured on this page.");
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session?.access_token) throw new Error("Sign in with an admin account before exporting.");
+    const params = new URLSearchParams({ year: String(BID_YEAR) });
+    areas.forEach(area => params.append("area", area));
+    const response = await fetch(`/api/admin/bid-times/export?${params}`, {
+      headers: { Authorization: `Bearer ${data.session.access_token}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || "The bid times could not be exported.");
+    }
+    downloadBlob(`zla-bid-times-${BID_YEAR}.xlsx`, await response.blob());
+    status.textContent = `Exported ${BID_YEAR} bid times for ${areas.join(", ")}.`;
+  } catch (error) {
+    status.textContent = error.message || "The bid times could not be exported.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.addEventListener("submit", event => {
+  if (!event.target.matches("[data-bid-time-export-form]")) return;
+  event.preventDefault();
+  void exportBidTimes(event.target);
+});
+
+document.addEventListener("change", event => {
+  const form = event.target.closest("[data-bid-time-export-form]");
+  if (!form) return;
+  const all = form.querySelector("[data-bid-time-export-all]");
+  const areas = Array.from(form.querySelectorAll('[name="export-area"]'));
+  if (event.target === all) areas.forEach(input => { input.checked = all.checked; });
+  all.checked = areas.every(input => input.checked);
+  all.indeterminate = !all.checked && areas.some(input => input.checked);
+});
+
 function rosterEntryInitials(entry) {
   return entry[3] || "";
 }
@@ -11955,6 +12783,9 @@ function renderEmailLog() {
     : '<p class="empty-state small">No notification emails have been queued yet.</p>';
 }
 
+// Rounds 5 and 6 are reserved for a future bidding update.
+const BID_WINDOW_BUILDER_ROUND_COUNT = 4;
+
 function setBidWindowBuilderStatus(message, status = "info") {
   const target = document.querySelector("[data-bid-window-builder-status]");
   if (!target) return;
@@ -12052,7 +12883,7 @@ function generateBidWindowBuilderPreview(settings) {
   let roundStartDate = nextBidWindowBuilderOpenDate(settings.startDate, blackouts);
   let lastScheduledDate = roundStartDate;
 
-  for (let round = 1; round <= 6; round += 1) {
+  for (let round = 1; round <= BID_WINDOW_BUILDER_ROUND_COUNT; round += 1) {
     lastScheduledDate = roundStartDate;
     areaSchedules.forEach((schedule) => {
       let scheduleDate = roundStartDate;
@@ -12074,7 +12905,7 @@ function generateBidWindowBuilderPreview(settings) {
       if (schedule.rows.length && scheduleDate > lastScheduledDate) lastScheduledDate = scheduleDate;
     });
 
-    if (round < 6) {
+    if (round < BID_WINDOW_BUILDER_ROUND_COUNT) {
       roundStartDate = addDaysToDateKey(lastScheduledDate);
       for (let reviewDay = 0; reviewDay < settings.reviewDays; reviewDay += 1) {
         roundStartDate = nextBidWindowBuilderOpenDate(roundStartDate, blackouts);
@@ -12132,7 +12963,7 @@ function renderBidWindowBuilderPreview() {
   }
 
   const { areaSchedules, largestArea, totalBues, firstWindow, lastWindow, settings } = bidWindowBuilderPreview;
-  const windowCount = totalBues * 6;
+  const windowCount = totalBues * BID_WINDOW_BUILDER_ROUND_COUNT;
   const scheduleHeading = settings.keepAreasConsistent ? "All Areas Schedule Preview" : `${settings.area} Schedule Preview`;
   summary.textContent = `${totalBues} BUEs · ${windowCount} windows`;
   target.innerHTML = `
@@ -12203,7 +13034,7 @@ function buildBidWindowPreviewFromForm(event) {
     bidWindowBuilderPreview = generateBidWindowBuilderPreview(bidWindowBuilderSettings());
     renderBidWindowBuilderPreview();
     const { totalBues, settings } = bidWindowBuilderPreview;
-    setBidWindowBuilderStatus(`${totalBues * 6} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
+    setBidWindowBuilderStatus(`${totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} windows are ready to save for ${settings.keepAreasConsistent ? "all areas" : settings.area}. Review the schedule below.`, "success");
   } catch (error) {
     bidWindowBuilderPreview = null;
     renderBidWindowBuilderPreview();
@@ -12272,7 +13103,7 @@ async function saveBidWindowBuilderSchedule() {
     requested_window_minutes: settings.windowMinutes,
     requested_blackout_dates: settings.blackoutDates,
     requested_review_days: settings.reviewDays,
-    requested_round_count: 6,
+    requested_round_count: BID_WINDOW_BUILDER_ROUND_COUNT,
   };
   if (!settings.keepAreasConsistent) {
     parameters.requested_area_code = AREA_CODE_BY_NAME[settings.area] || settings.area;
@@ -12296,7 +13127,7 @@ async function saveBidWindowBuilderSchedule() {
   bidWindowBuilderSaving = false;
   renderApp();
   setBidWindowBuilderStatus(
-    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * 6} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
+    `${data?.windows_processed || bidWindowBuilderPreview.totalBues * BID_WINDOW_BUILDER_ROUND_COUNT} bid windows saved for ${settings.keepAreasConsistent ? "all areas" : settings.area}.`,
     "success"
   );
 }
@@ -12599,6 +13430,7 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (!client || !supabaseState.connected) {
     throw new Error("The intake schedule could not reach the database. Check the connection and try again.");
   }
+  if (!await ensureIntakeScheduleSession(client)) return false;
   const routine = scheduleId ? "update_intake_schedule" : "create_intake_schedule";
   const parameters = {
     requested_bid_year: BID_YEAR,
@@ -12613,6 +13445,27 @@ async function saveIntakeScheduleToSupabase(initials, start, end, scheduleId = "
   if (error) throw error;
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
+  return true;
+}
+
+async function ensureIntakeScheduleSession(client) {
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    currentUser = null;
+    clearSupabaseAccountState();
+    showPublicHome();
+    setAuthStatus("Your sign-in ended. Sign in again to manage intake shifts.", "error");
+    return false;
+  }
+
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError || !userData.user || userData.user.id !== sessionData.session.user.id) {
+    setScheduleFormStatus("Could not verify your sign-in. Check the connection or sign in again.", "error");
+    return false;
+  }
+
+  syncSupabaseAccountStateFromSession(sessionData.session);
+  return true;
 }
 
 function setIntakeScheduleMutationPending(isPending) {
@@ -12639,7 +13492,6 @@ function resetIntakeScheduleEditor(options = {}) {
   editingIntakeScheduleId = "";
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (options.resetValues && form) {
-    form.querySelector("[data-intake-shift-date]").value = "";
     form.querySelector("[data-intake-shift-time]").value = "";
     form.querySelector("[data-intake-shift-duration]").value = "";
     syncIntakeShiftForm(form);
@@ -12688,6 +13540,7 @@ async function deleteIntakeSchedule(scheduleId) {
     setScheduleFormStatus("The intake schedule could not reach the database. Check the connection and try again.", "error");
     return;
   }
+  if (!await ensureIntakeScheduleSession(client)) return;
 
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`Deleting ${schedule.name}'s intake shift...`);
@@ -12757,7 +13610,7 @@ function renderScheduleDayAssignments(schedules) {
   return `
     <span class="schedule-day-assignments">
       ${schedules.map((schedule) => `
-        <span class="schedule-day-assignment">
+        <span class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}">
           <b>${escapeHtml(schedule.initials)}</b>
           <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
         </span>
@@ -12769,12 +13622,15 @@ function renderScheduleDayAssignments(schedules) {
 function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const key = dateKeyFromDate(date);
   const schedules = schedulesForDateKey(key);
+  const markKind = intakeCalendarMarks.get(key);
+  const markLabel = INTAKE_CALENDAR_MARK_LABELS[markKind] || "";
   const hasUserSchedule = schedules.some((schedule) => schedule.initials === currentUser.initials);
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" type="button" data-intake-calendar-date="${key}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
       <span class="date-number">${label}</span>
+      ${markLabel && showAssignments ? `<span class="intake-day-mark-label">${markLabel}</span>` : ""}
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
     </button>
@@ -12855,9 +13711,104 @@ function updateScheduleCalendarControls() {
       return;
     }
 
-    const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
-    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+    if (scheduleCalendarView === "two-month") {
+      const nextMonth = new Date(scheduleActiveDate.getFullYear(), scheduleActiveDate.getMonth() + 1, 1);
+      label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()} – ${monthNames[nextMonth.getMonth()]} ${nextMonth.getFullYear()}`;
+      return;
+    }
+
+    label.textContent = `${monthNames[scheduleActiveDate.getMonth()]} ${scheduleActiveDate.getFullYear()}`;
   });
+}
+
+function renderIntakeCalendarMarkEditor() {
+  const panel = document.querySelector("[data-intake-calendar-mark-editor]");
+  if (!panel) return;
+  panel.hidden = !hasSystemAdminAccess();
+  if (panel.hidden) return;
+
+  const dateInput = panel.querySelector("[data-intake-calendar-mark-date]");
+  const kindInput = panel.querySelector("[data-intake-calendar-mark-kind]");
+  const currentKind = intakeCalendarMarks.get(dateInput?.value);
+  if (currentKind && kindInput && kindInput.dataset.selectedDate !== dateInput.value) {
+    kindInput.value = currentKind;
+  }
+  if (kindInput) kindInput.dataset.selectedDate = dateInput?.value || "";
+  const clearButton = panel.querySelector("[data-clear-intake-calendar-mark]");
+  if (clearButton) clearButton.hidden = !currentKind;
+
+  const list = panel.querySelector("[data-intake-calendar-mark-list]");
+  if (!list) return;
+  list.innerHTML = [...intakeCalendarMarks.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, kind]) => `<button type="button" class="intake-calendar-mark-item ${kind}" data-edit-intake-calendar-mark="${date}"><span>${escapeHtml(formatCalendarDate(date))}</span><strong>${INTAKE_CALENDAR_MARK_LABELS[kind]}</strong></button>`)
+    .join("");
+}
+
+function selectIntakeCalendarMarkDate(date) {
+  const input = document.querySelector("[data-intake-calendar-mark-date]");
+  if (!input || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  input.value = date;
+  const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+  if (kindInput) kindInput.dataset.selectedDate = "";
+  renderIntakeCalendarMarkEditor();
+  input.focus();
+}
+
+function setIntakeCalendarMarkStatus(message, status = "info") {
+  const target = document.querySelector("[data-intake-calendar-mark-status]");
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.status = status;
+}
+
+async function saveIntakeCalendarMark(event) {
+  event.preventDefault();
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  const kind = document.querySelector("[data-intake-calendar-mark-kind]")?.value || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !INTAKE_CALENDAR_MARK_LABELS[kind]) {
+    setIntakeCalendarMarkStatus("Choose a date and day type.", "error");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-save-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .upsert({ bid_year: BID_YEAR, marked_date: date, kind }, { onConflict: "bid_year,marked_date" });
+    if (error) throw error;
+    intakeCalendarMarks.set(date, kind);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} marked as ${INTAKE_CALENDAR_MARK_LABELS[kind]}.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be saved.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function clearIntakeCalendarMark() {
+  if (!hasSystemAdminAccess()) return;
+  const date = document.querySelector("[data-intake-calendar-mark-date]")?.value || "";
+  if (!intakeCalendarMarks.has(date)) return;
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected || !await ensureIntakeScheduleSession(client)) return;
+  const button = document.querySelector("[data-clear-intake-calendar-mark]");
+  if (button) button.disabled = true;
+  try {
+    const { error } = await client.from("intake_calendar_marks")
+      .delete().eq("bid_year", BID_YEAR).eq("marked_date", date);
+    if (error) throw error;
+    intakeCalendarMarks.delete(date);
+    renderIntakeSchedule();
+    setIntakeCalendarMarkStatus(`${formatCalendarDate(date)} cleared.`, "success");
+  } catch (error) {
+    setIntakeCalendarMarkStatus(error.message || "The day could not be cleared.", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function moveSchedulePeriod(direction) {
@@ -12867,6 +13818,7 @@ function moveSchedulePeriod(direction) {
   } else if (scheduleCalendarView === "week") {
     nextDate.setDate(nextDate.getDate() + direction * 7);
   } else {
+    nextDate.setDate(1);
     nextDate.setMonth(nextDate.getMonth() + direction);
   }
   scheduleActiveDate = nextDate;
@@ -12882,7 +13834,7 @@ function renderIntakeSchedule() {
   updateScheduleCalendarControls();
 
   if (calendar) {
-    calendar.classList.remove("month-view", "week-view", "year-view");
+    calendar.classList.remove("month-view", "two-month-view", "week-view", "year-view");
     calendar.classList.add(`${scheduleCalendarView}-view`);
     if (scheduleCalendarView === "year") {
       calendar.innerHTML = monthNames
@@ -12891,7 +13843,8 @@ function renderIntakeSchedule() {
     } else if (scheduleCalendarView === "week") {
       calendar.innerHTML = renderScheduleWeekCard(scheduleActiveDate);
     } else {
-      const visibleMonths = [0, 1].map((offset) => new Date(
+      const monthCount = scheduleCalendarView === "two-month" ? 2 : 1;
+      const visibleMonths = Array.from({ length: monthCount }, (_, offset) => new Date(
         scheduleActiveDate.getFullYear(),
         scheduleActiveDate.getMonth() + offset,
         1
@@ -12908,6 +13861,7 @@ function renderIntakeSchedule() {
 
   const adminCard = document.querySelector("[data-admin-schedule-card]");
   if (adminCard) adminCard.hidden = !hasIntakeAccess();
+  renderIntakeCalendarMarkEditor();
 
   const sortedSchedules = [...intakeSchedules].sort((a, b) => a.start - b.start);
   const userSchedules = sortedSchedules.filter((schedule) => schedule.initials === currentUser.initials);
@@ -12921,12 +13875,18 @@ function renderIntakeSchedule() {
   }
   list.innerHTML = `
     <div class="schedule-list-section">
-      <h3>Your Intake Assignments</h3>
+      <div class="schedule-list-heading">
+        <h3>Your Intake Assignments</h3>
+        ${userSchedules.length ? '<button class="secondary-action small" type="button" data-download-intake-schedule aria-label="Download all your intake assignments as a calendar file">Download all .ics</button>' : ""}
+      </div>
       ${userSchedules.length
         ? userSchedules.map((schedule) => `
           <article>
             <strong>${escapeHtml(formatDateRange(schedule.start, schedule.end))}</strong>
             <span>${escapeHtml(schedule.area)}</span>
+            <div class="schedule-list-actions">
+              <button class="secondary-action small" type="button" data-download-intake-schedule="${escapeHtml(schedule.id)}" aria-label="Download intake assignment for ${escapeHtml(formatCalendarDate(dateKeyFromDate(schedule.start)))} as a calendar file">Download .ics</button>
+            </div>
           </article>
         `).join("")
         : '<p class="empty-state small">No intake shifts assigned for this bidding year.</p>'}
@@ -12996,12 +13956,12 @@ async function addIntakeScheduleFromForm() {
   setIntakeScheduleMutationPending(true);
   setScheduleFormStatus(`${actionLabel} ${name}'s intake shift...`);
   try {
-    await saveIntakeScheduleToSupabase(initials, start, end, scheduleId);
+    if (!await saveIntakeScheduleToSupabase(initials, start, end, scheduleId)) return;
     logHistory(area, scheduleId ? "Intake shift updated" : "Intake shift assigned", `${currentUser.initials} ${scheduleId ? "updated" : "scheduled"} ${name} (${initials}) for ${formatDateRange(start, end)} · ${area}.`);
     resetIntakeScheduleEditor({ resetValues: true });
     renderApp();
     setPage("intake-schedule");
-    setScheduleFormStatus(`${name}'s intake shift was ${scheduleId ? "updated" : "scheduled"} in Supabase for ${formatDateRange(start, end)}. Access starts 15 minutes before the shift.`, "success");
+    setScheduleFormStatus(`${name}'s intake shift was ${scheduleId ? "updated" : "scheduled"} in Supabase for ${formatDateRange(start, end)}. Access starts 60 minutes before the shift.`, "success");
   } catch (error) {
     setScheduleFormStatus(
       scheduleId && isMissingSupabaseRoutine(error)
@@ -13180,10 +14140,99 @@ function renderHistory() {
     .join("");
 }
 
-function alertItems() {
+let alertRefreshPending = false;
+let alertRefreshTimer = null;
+let alertRealtimeChannel = null;
+let alertRealtimeUserId = "";
+let lastAlertDatabaseSnapshot = "";
+
+function stopLiveAlertUpdates() {
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = null;
+  if (alertRealtimeChannel) void supabaseClient()?.removeChannel(alertRealtimeChannel);
+  alertRealtimeChannel = null;
+  alertRealtimeUserId = "";
+  lastAlertDatabaseSnapshot = "";
+}
+
+function scheduleLiveAlertRefresh() {
+  // A submission can change several tables. Fetch once after the burst settles.
+  clearTimeout(alertRefreshTimer);
+  alertRefreshTimer = setTimeout(() => {
+    alertRefreshTimer = null;
+    void refreshLiveAlerts();
+  }, 750);
+}
+
+function startLiveAlertUpdates() {
+  const client = supabaseClient();
+  const userId = supabaseState.authUserId;
+  if (!client || !userId || alertRealtimeUserId === userId) return;
+  stopLiveAlertUpdates();
+  alertRealtimeUserId = userId;
+  alertRealtimeChannel = client.channel(`bidding-alerts-${userId}`);
+  for (const table of ["intake_submissions", "leave_requests", "help_threads", "help_messages"]) {
+    alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleLiveAlertRefresh);
+  }
+  alertRealtimeChannel.subscribe((status) => {
+    if (status === "SUBSCRIBED") scheduleLiveAlertRefresh();
+  });
+}
+
+async function refreshLiveAlerts() {
+  if (alertRefreshPending || document.visibilityState !== "visible" || !isMemberAppVisible()
+    || !supabaseState.authUserId || !supabaseState.connected || supabaseState.loading) return;
+  const client = supabaseClient();
+  if (!client) return;
+  alertRefreshPending = true;
+  const userId = supabaseState.authUserId;
+  const previousData = JSON.stringify([intakeQueue, helpThreads]);
+  try {
+    const requester = currentHelpRequester();
+    const [bidding, leave, help] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }),
+      client.rpc("live_help_threads", {
+        help_bid_year: BID_YEAR,
+        help_session_id: requester.sessionId || liveHelpSessionId(),
+      }),
+    ]);
+    const snapshot = JSON.stringify([userId, bidding.data, leave.data, help.data]);
+    if (!bidding.error && !leave.error && !help.error && snapshot === lastAlertDatabaseSnapshot) return;
+    const areas = await client.from("areas").select("id,name");
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = !bidding.error && !leave.error && !areas.error
+      ? attachSubmissionIdsToLeaveRequests(
+        await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+      ) : null;
+    // Discard results from an old session or a read overtaken by a local action.
+    if (supabaseState.authUserId !== userId || supabaseState.loading || !isMemberAppVisible()
+      || JSON.stringify([intakeQueue, helpThreads]) !== previousData) return;
+    if (leaveRows) {
+      const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+        && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+        .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+      inferRdoBidChanges(rdoItems);
+      // Replace the database snapshot so removed or superseded alerts also disappear.
+      intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+      intakeQueue.unshift(...rdoItems);
+      upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    }
+    if (!help.error) helpThreads = (help.data || []).map(helpThreadFromRpc);
+    if (!bidding.error && !leave.error && !help.error && !areas.error) lastAlertDatabaseSnapshot = snapshot;
+    if (JSON.stringify([intakeQueue, helpThreads]) !== previousData) renderAlerts();
+  } catch (error) {
+    console.warn("Alert refresh unavailable:", error.message || error);
+  } finally {
+    alertRefreshPending = false;
+  }
+}
+
+function alertItems(groupedItems = groupedLeaveIntakeItems()) {
   const isIntake = hasIntakeAccess();
   if (isIntake) {
-    const intakeAlerts = pendingIntakeItems().map((item) => ({
+    const intakeAlerts = groupedItems.filter((item) => item.status === "Pending").map((item) => ({
       category: "Intake",
       title: `${item.initials} submitted ${bidTypeLabel(item)}`,
       detail: `${item.summary} · ${item.area}`,
@@ -13204,7 +14253,7 @@ function alertItems() {
     return [...intakeAlerts, ...helpAlerts];
   }
 
-  const bidAlerts = intakeQueue
+  const bidAlerts = groupedItems
     .filter((item) => item.initials === currentUser.initials && ["Pending", "Approved", "Denied"].includes(item.status))
     .map((item) => ({
       category: item.status,
@@ -13227,10 +14276,11 @@ function alertItems() {
 }
 
 function renderAlerts() {
-  const items = alertItems();
+  const groupedItems = groupedLeaveIntakeItems();
+  const items = alertItems(groupedItems);
   const count = items.filter((item) => item.category !== "Approved").length;
   setText("[data-alert-count]", count);
-  setText("[data-intake-count]", pendingIntakeItems().length);
+  setText("[data-intake-count]", groupedItems.filter((item) => item.status === "Pending").length);
 
   if (lastAudibleAlertCount !== null && count > lastAudibleAlertCount) {
     playAlertDing();
@@ -14126,6 +15176,10 @@ function renderIntakeBidderDetail(person, rows) {
 }
 
 function renderIntakeBidderSummary() {
+  return withLeaveReadCache(() => renderIntakeBidderSummaryWithCache());
+}
+
+function renderIntakeBidderSummaryWithCache() {
   const target = document.querySelector("[data-intake-bidder-summary]");
   const area = document.querySelector("[data-intake-bidder-area]");
   const role = document.querySelector("[data-intake-bidder-role]");
@@ -14136,7 +15190,7 @@ function renderIntakeBidderSummary() {
     role.textContent = "";
     role.className = "intake-bidder-role";
     area.textContent = "Select a controller";
-    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>';
+    target.innerHTML = '<div class="intake-bidder-empty">Select a controller from the Intake Queue, RDO Selection, or Requested Leave Dates.</div>';
     renderIntakeBidderDetail({}, []);
     return;
   }
@@ -14218,7 +15272,7 @@ async function loadSelectedIntakeBidder() {
   }
 }
 
-function selectIntakeBidder(initials, profileId = "") {
+function selectIntakeBidder(initials, profileId = "", { deferRender = false } = {}) {
   const normalized = String(initials || "").trim().toUpperCase();
   const person = bueByInitials(normalized);
   if (!normalized || !person) return;
@@ -14231,9 +15285,11 @@ function selectIntakeBidder(initials, profileId = "") {
     intakeBidderSelection.detail = "";
     intakeBidderSelection.error = "";
     intakeBidderSelection.generation += 1;
+    intakeBidderSelection.loading = false;
   }
+  if (deferRender) return;
   renderIntakeBidderSummary();
-  if (changed || !intakeBidderSelection.record) void loadSelectedIntakeBidder();
+  if (!intakeBidderSelection.loading && (changed || !intakeBidderSelection.record)) void loadSelectedIntakeBidder();
 }
 
 function ensureIntakeBidderSelection() {
@@ -14261,8 +15317,8 @@ const intakeGroupReviewState = new Map();
 function groupedLeaveIntakeItems(items = intakeQueue) {
   const weekStartsByBidder = new Map();
   items.forEach((item) => {
-    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved"].includes(item.status)) return;
-    const owner = `${item.area}|${item.initials}`;
+    if (item.type !== "Leave" || intakeItemRound(item) !== 1 || !["Pending", "Approved", "Denied"].includes(item.status)) return;
+    const owner = `${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`;
     const dates = weekStartsByBidder.get(owner) || [];
     dates.push(...leaveDateKeysForItem(item));
     weekStartsByBidder.set(owner, dates);
@@ -14275,7 +15331,7 @@ function groupedLeaveIntakeItems(items = intakeQueue) {
     const round = intakeItemRound(item);
     const dates = leaveDateKeysForItem(item).sort();
     if (!dates.length) { result.push(item); return; }
-    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}`) || roundOneWeekKeysForDateKeys(dates);
+    const starts = weekStartsByBidder.get(`${item.area}|${item.initials}|${item.status === "Denied" ? item.submissionBatchKey : "active"}`) || roundOneWeekKeysForDateKeys(dates);
     const weekStart = round === 1 ? starts.find((start) => dates[0] >= start && dates[0] <= dateKeyFromDate(new Date(dateFromKey(start).getTime() + 6 * 86400000))) : "";
     // Legacy continuous requests spanning two weeks already have one approval;
     // keep their edit/review controls instead of approving half a saved range.
@@ -14344,15 +15400,77 @@ async function reviewIntakeLeaveGroup(item, decision, reason = "") {
     submission_ids: ids, decision, denial_reason_text: reason || null,
   });
   if (error) throw error;
+  updateConfirmedIntakeDecision(item, decision, reason);
   if (decision === "approved") queueBidVerifiedEmail(item);
   else { item.denialReason = reason; queueBidDeniedEmail(item); }
   intakeGroupReviewState.delete(item.id);
   activeOverrideId = null;
   activeDenialId = null;
   supabaseState.placeholdersCleared = false;
-  await loadSupabaseReferenceData();
+  await refreshBiddingAfterIntakeDecision();
   renderApp();
   setPage("intake");
+}
+
+let intakeQueueRefreshPending = false;
+
+async function refreshIntakeQueue() {
+  if (intakeQueueRefreshPending || !hasIntakeAccess()) return;
+  const button = document.querySelector("[data-intake-refresh]");
+  const status = document.querySelector("[data-intake-refresh-status]");
+  const userId = supabaseState.authUserId;
+  const bidYear = BID_YEAR;
+  const previousQueue = JSON.stringify(intakeQueue);
+  intakeQueueRefreshPending = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+  }
+  if (status) {
+    status.hidden = false;
+    status.textContent = "Loading the latest bids…";
+  }
+  try {
+    const client = supabaseClient();
+    if (!client || !userId || !supabaseState.connected || supabaseState.loading) {
+      throw new Error("Queue unavailable. Check your connection and try again.");
+    }
+    const [bidding, leave, areas] = await Promise.all([
+      client.rpc("read_bidding_state", { requested_bid_year: bidYear }),
+      client.rpc("read_leave_intake_queue", { queue_bid_year: bidYear }),
+      client.from("areas").select("id,name"),
+    ]);
+    for (const result of [bidding, leave, areas]) {
+      if (result.error) throw result.error;
+    }
+    const submissions = bidding.data?.submissions || [];
+    const leaveRows = attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, leave.data || []), submissions
+    );
+    if (supabaseState.authUserId !== userId || BID_YEAR !== bidYear || supabaseState.loading
+      || !hasIntakeAccess() || JSON.stringify(intakeQueue) !== previousQueue) {
+      throw new Error("The queue changed while refreshing. Please try again.");
+    }
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const rdoItems = submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+      && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase()))
+      .map((row) => supabaseRdoSubmissionToIntakeItem(row, areaById));
+    inferRdoBidChanges(rdoItems);
+    intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+    intakeQueue.unshift(...rdoItems);
+    upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+    renderIntakeQueue();
+    renderAlerts();
+    if (status) status.textContent = "Queue updated.";
+  } catch (error) {
+    if (status) status.textContent = `Could not refresh the queue. ${error.message || "Please try again."}`;
+  } finally {
+    intakeQueueRefreshPending = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Refresh Queue";
+    }
+  }
 }
 
 function renderIntakeQueue() {
@@ -14480,6 +15598,10 @@ function revealIntakeDetail() {
 }
 
 function openIntakeItemFromAlert(itemId) {
+  return withLeaveReadCache(() => openIntakeItemFromAlertWithCache(itemId));
+}
+
+function openIntakeItemFromAlertWithCache(itemId) {
   const groupedItem = groupedLeaveIntakeItems().find((item) =>
     item.id === itemId || item.members?.some((member) => member.id === itemId)
   );
@@ -14491,9 +15613,13 @@ function openIntakeItemFromAlert(itemId) {
   activeDenialId = null;
   intakeSearchQuery = "";
   Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
-  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
+  selectIntakeBidder(groupedItem.initials, groupedItem.bidderId, { deferRender: true });
+  const alreadyInIntake = document.querySelector(".page.active")?.dataset.pagePanel === "intake";
   setPage("intake");
-  renderIntakeQueue();
+  if (alreadyInIntake) {
+    renderIntakeQueue();
+    ensureIntakeBidderSelection();
+  }
 
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
     const card = [...document.querySelectorAll("[data-intake-card]")]
@@ -14504,16 +15630,47 @@ function openIntakeItemFromAlert(itemId) {
   }));
 }
 
+function syncNavigationUrl(url) {
+  replaceBrowserHistory(window, url.toString());
+  // Preserve the visible address when this app is embedded in the dashboard.
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: "bidding-navigation", search: url.search }, window.location.origin);
+    try {
+      const parentUrl = new URL(window.parent.location.href);
+      for (const key of ["page", "member", "area", "section", "bidYear"]) {
+        if (url.searchParams.has(key)) parentUrl.searchParams.set(key, url.searchParams.get(key));
+        else parentUrl.searchParams.delete(key);
+      }
+      replaceBrowserHistory(window.parent, parentUrl.toString());
+    } catch {
+      // A host on another origin cannot expose its address to this frame.
+    }
+  }
+}
+
+function syncMemberPageUrl(pageName) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("page", pageName);
+  url.searchParams.delete("area");
+  url.searchParams.delete("section");
+  syncNavigationUrl(url);
+}
+
 function setPage(pageName) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
   }
-  if (pageName === "intake-schedule" && !canUseIntakeView()) {
+  if (pageName === "intake-schedule" && !canViewIntakeSchedule()) {
     pageName = "dashboard";
   }
   if ((pageName === "admin" || pageName === "admin-tools") && !hasSystemAdminAccess()) {
     pageName = "dashboard";
   }
+
+  syncMemberPageUrl(pageName);
+
+  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
 
   const activePageName = document.querySelector(".page.active")?.dataset.pagePanel;
 
@@ -14557,26 +15714,9 @@ function setPage(pageName) {
 }
 
 function updateSelectedBidYear(year) {
-  const isHistorical = Number(year) < BID_YEAR;
-  displayedCalendarYear = Number(year);
-  setSelectedDateYear(displayedCalendarYear);
-  const label = document.getElementById("bid-year-label");
-  const historyHeading = document.querySelector("[data-history-heading]");
-  const historySummary = document.querySelector("[data-history-summary]");
-
-  if (label) label.textContent = `${year} Annual Bidding`;
-
-  if (historyHeading) {
-    historyHeading.textContent = isHistorical ? `${year} Historical Bidding` : "Bid History";
+  if (Number(year) !== BID_YEAR && bidYearCatalog.some((entry) => entry.bid_year === Number(year))) {
+    navigateToBidYear(Number(year));
   }
-
-  if (historySummary) {
-    historySummary.textContent = isHistorical
-      ? `Review ${currentUser.area} bidding activity from ${year}. Bidding intake admins can review all areas.`
-      : `${currentUser.area} submission timeline, saved drafts, changes, and verification events.`;
-  }
-
-  setPage(isHistorical ? "history" : "dashboard");
 }
 
 function biddingExportRows() {
@@ -14932,8 +16072,9 @@ function bidderEditorDraft() {
       gl_line_type_verified: bidderEditor.person?.bid_role !== 'GL'
         || Boolean(form.querySelector('[data-editor-gl-line-type-verification]')?.checked) } : null,
     leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
-      start_date: form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null,
-      end_date: form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null,
+      // Hidden requests must retain their dates in the complete database save payload.
+      start_date: row.status === 'approved' ? form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null : row.requested_start_date,
+      end_date: row.status === 'approved' ? form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null : row.requested_end_date,
     })),
   };
 }
@@ -15001,12 +16142,12 @@ function renderBidderEditorForm() {
       I verified this GL is bidding as <span data-editor-gl-line-type-label>${glLineCategory}</span>. All GL rules still apply.
     </label>` : ''}</fieldset>
     ${[1,2,3,4,5].map(round => {
-      const rows = snapshot.leave.filter(row => row.round_number === round);
+      const rows = snapshot.leave.filter(row => row.round_number === round && row.status === 'approved');
       return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
         <div class="bidder-editor-date-row"><div><strong>Priority ${row.priority}</strong> · ${escapeHtml(row.status)}<br><small>${row.charged_days} charged days currently</small></div>
           <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" /></label>
           <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" /></label>
-        </div>`).join('') : '<p>No leave bids in this round.</p>'}</fieldset>`;
+        </div>`).join('') : '<p>No approved leave bids in this round.</p>'}</fieldset>`;
     }).join('')}
     <div data-editor-review aria-live="polite"></div>
     <div class="bidder-editor-actions"><button type="button" class="secondary-action" data-editor-check>1. Confirm &amp; check changes</button>
@@ -15081,7 +16222,7 @@ async function processBidderEditor(validateOnly) {
       bidderEditor.record.snapshot = data.snapshot;
       renderBidderEditorForm();
       bidderEditorStatus('Changes saved to the database. All bid rounds have been refreshed.', 'success');
-      try { await loadSupabaseReferenceData(); renderApp(); }
+      try { await refreshBiddingAfterIntakeDecision(); renderApp(); }
       catch { bidderEditorStatus('Changes saved. Refresh the page to update other bidding views.', 'success'); }
     }
   } catch (error) { bidderEditorStatus(error.message || 'Unable to complete this operation. Reload before retrying.', 'error'); }
@@ -15140,6 +16281,22 @@ document.addEventListener('change', (event) => {
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
 document.addEventListener('click', (event) => {
+  const manualIntakeToggle = event.target.closest('[data-manual-intake-toggle]');
+  if (manualIntakeToggle) {
+    const panelName = manualIntakeToggle.dataset.manualIntakeToggle;
+    const content = document.querySelector(`[data-manual-intake-content="${panelName}"]`);
+    const open = manualIntakeToggle.getAttribute('aria-expanded') !== 'true';
+    manualIntakeToggle.setAttribute('aria-expanded', String(open));
+    if (content) content.hidden = !open;
+    const preferenceKey = manualIntakeToggle.dataset.preferenceKey;
+    if (preferenceKey) {
+      storeJsonValue(preferenceKey, {
+        ...storedJsonValue(preferenceKey, {}),
+        [panelName]: open,
+      });
+    }
+    return;
+  }
   const bidder = event.target.closest('[data-editor-bidder]');
   if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
   if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
@@ -15165,6 +16322,7 @@ function renderMemberPageContent(pageName) {
       syncRdoFilterControls();
       renderRdoLines();
     }
+    if (["dashboard", "leave", "calendar"].includes(pageName)) renderMemberLeaveContent(pageName);
     if (pageName === "leave") renderSubmittedLeaveManager();
     if (pageName === "seniority") renderSeniority();
     if (pageName === "intake-schedule") renderIntakeSchedule();
@@ -15183,11 +16341,28 @@ function renderMemberPageContent(pageName) {
   });
 }
 
+// Rebuild personal leave controls only when their page is visible. Admin and
+// intake saves must not calculate annual leave budgets for hidden pages.
+function renderMemberLeaveContent(pageName) {
+  if (pageName === "dashboard" || pageName === "leave") {
+    syncLeaveBuilderInputs();
+    renderLeaveRows(pageName === "dashboard" ? "dashboard-leave-rows" : "leave-page-rows");
+    renderLeaveAllowanceSummary();
+    renderLeaveBucketCards();
+  }
+  if (pageName === "leave") {
+    renderLeaveDraftQueue();
+    renderLeaveDatePicker();
+  }
+  if (pageName === "leave" || pageName === "calendar") renderLeaveSlotBoard();
+}
+
 function renderApp() {
   return withLeaveReadCache(() => renderAppWithCache());
 }
 
 function renderAppWithCache() {
+  syncBidYearControls();
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
   if (!isMemberAppVisible()) {
@@ -15197,16 +16372,10 @@ function renderAppWithCache() {
 
   seniority = buildSeniority();
   renderCurrentUser();
+  // Mark hidden calendars stale so navigation renders the latest saved bids.
+  calendarRenderRevision += 1;
   renderCalendars({ includePublic: false });
-  syncLeaveBuilderInputs();
   updateSelectedLine();
-  renderLeaveRows("dashboard-leave-rows");
-  renderLeaveRows("leave-page-rows");
-  renderLeaveDraftQueue();
-  renderLeaveAllowanceSummary();
-  renderLeaveDatePicker();
-  renderLeaveBucketCards();
-  renderLeaveSlotBoard();
   renderHelpSummary();
   renderHelpPanel();
   renderAlerts();
@@ -15223,10 +16392,20 @@ function logOut() {
   document.querySelector(".login-screen")?.removeAttribute("hidden");
   const loginToggle = document.querySelector("[data-public-login-toggle]");
   if (loginToggle) loginToggle.textContent = "Login";
-  renderPublicPage();
+  renderPublicPage(publicState.area, publicState.section, { persistNavigation: true });
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-refresh]")) {
+    await refreshIntakeQueue();
+    return;
+  }
+  // Navigation must stay available even when bidding data cannot load.
+  const pageNavigation = event.target.closest("[data-page]");
+  if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
+    setPage(pageNavigation.dataset.page);
+    return;
+  }
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
   if (intakeBidderDetailOpen) {
     intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
@@ -15467,7 +16646,7 @@ document.addEventListener("click", async (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar");
+    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
     return;
   }
 
@@ -15575,6 +16754,12 @@ document.addEventListener("click", async (event) => {
   const bidWindowDownload = event.target.closest("[data-download-bid-windows]");
   if (bidWindowDownload) {
     downloadBidWindowsIcs(bidWindowDownload.dataset.downloadBidWindows);
+    return;
+  }
+
+  const intakeScheduleDownload = event.target.closest("[data-download-intake-schedule]");
+  if (intakeScheduleDownload) {
+    downloadIntakeScheduleIcs(intakeScheduleDownload.dataset.downloadIntakeSchedule);
     return;
   }
 
@@ -15704,6 +16889,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const markedDayButton = event.target.closest("[data-intake-calendar-date]");
+  if (markedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(markedDayButton.dataset.intakeCalendarDate);
+    return;
+  }
+
+  const editMarkedDayButton = event.target.closest("[data-edit-intake-calendar-mark]");
+  if (editMarkedDayButton && hasSystemAdminAccess()) {
+    selectIntakeCalendarMarkDate(editMarkedDayButton.dataset.editIntakeCalendarMark);
+    return;
+  }
+
+  if (event.target.closest("[data-clear-intake-calendar-mark]")) {
+    await clearIntakeCalendarMark();
+    return;
+  }
+
   const schedulePeriodButton = event.target.closest("[data-schedule-period-action]");
   if (schedulePeriodButton) {
     moveSchedulePeriod(schedulePeriodButton.dataset.schedulePeriodAction === "next" ? 1 : -1);
@@ -15814,7 +17016,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    await approveIntakeItem(intakeApprove.dataset.intakeApprove);
+    await runIntakeDecision(approveIntakeItem, intakeApprove.dataset.intakeApprove);
     return;
   }
 
@@ -15830,7 +17032,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    await denyIntakeItem(intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await runIntakeDecision(denyIntakeItem, intakeDenyConfirm.dataset.intakeDenyConfirm);
     return;
   }
 
@@ -16025,7 +17227,14 @@ document.addEventListener("click", async (event) => {
 
   const trigger = event.target.closest("[data-page]");
   if (!trigger) return;
+  if (trigger.dataset.page === "intake-schedule" && !await refreshIntakeScheduleMembership()) return;
   setPage(trigger.dataset.page);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+    void refreshIntakeScheduleMembership();
+  }
 });
 
 document.addEventListener("keydown", async (event) => {
@@ -16063,6 +17272,8 @@ document.addEventListener("keydown", async (event) => {
     revealIntakeDetail();
   }
 });
+
+document.querySelector("[data-save-active-bid-year]")?.addEventListener("click", saveActiveBidYear);
 
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
   updateSelectedBidYear(event.target.value);
@@ -16119,6 +17330,7 @@ document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRos
 document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
 document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
 document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
+document.querySelector("[data-intake-calendar-mark-form]")?.addEventListener("submit", saveIntakeCalendarMark);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -16133,6 +17345,12 @@ document.addEventListener("mousemove", resizeRosterColumn);
 document.addEventListener("mouseup", finishRosterColumnResize);
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-intake-calendar-mark-date]")) {
+    const kindInput = document.querySelector("[data-intake-calendar-mark-kind]");
+    if (kindInput) kindInput.dataset.selectedDate = "";
+    renderIntakeCalendarMarkEditor();
+    return;
+  }
   if (event.target.matches("[data-intake-shift-date], [data-intake-shift-time], [data-intake-shift-duration]")) {
     syncIntakeShiftForm(event.target.closest(".schedule-form"));
     return;
@@ -16178,6 +17396,7 @@ document.addEventListener("input", (event) => {
   const manualPanel = event.target.closest("[data-manual-bid-panel]");
   const manualLeaveDateField = event.target.closest("[data-manual-leave-start], [data-manual-leave-end]");
   if (manualPanel && manualLeaveDateField) {
+    if (manualLeaveDateField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     return;
   }
@@ -16244,7 +17463,7 @@ document.addEventListener("change", async (event) => {
   }
 
   if (event.target.matches("[data-mobile-public-area]")) {
-    renderPublicPage(event.target.value, publicState.section);
+    renderPublicPage(event.target.value, publicState.section, { persistNavigation: true });
     return;
   }
   if (event.target.matches("[data-mobile-month]")) {
@@ -16346,6 +17565,7 @@ document.addEventListener("change", async (event) => {
 
   const manualReactiveField = event.target.closest("[data-manual-bid-controller], [data-manual-bid-type], [data-manual-bid-area], [data-manual-rdo-line], [data-manual-fatigue-group], [data-manual-fatigue-override], [data-manual-leave-start], [data-manual-leave-end], [data-manual-leave-round]");
   if (manualPanel && manualReactiveField) {
+    if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     renderManualBidPanel(manualPanel);
     if (manualReactiveField.matches("[data-manual-bid-controller]")) {
       const person = manualBidSelectedPerson(manualReactiveField.value);
@@ -16370,12 +17590,14 @@ document.addEventListener("change", async (event) => {
   renderApp();
 });
 
+Object.assign(publicState, requestedPublicView() || {});
 initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
 initializeSupabaseAuth().then(async (restoredSession) => {
-  if (!restoredSession && window.NATCA_SUPABASE_CONFIG?.environment !== "pilot") {
-    await loadSupabaseReferenceData();
+  if (!restoredSession) {
+    if (window.NATCA_SUPABASE_CONFIG?.environment === "pilot") await loadPublicPilotCalendar();
+    else await loadSupabaseReferenceData();
   }
   if (isMemberAppVisible()) {
     renderApp();
@@ -16388,8 +17610,17 @@ setInterval(() => {
   if (document.visibilityState === "visible") updateBidWindow();
 }, 1000);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") updateBidWindow(true);
+  if (document.visibilityState === "visible") {
+    updateBidWindow(true);
+    void refreshLiveAlerts();
+    void refreshActiveBidYear();
+  }
 });
+window.addEventListener("focus", () => { void refreshActiveBidYear(); });
+window.addEventListener("focus", scheduleLiveAlertRefresh);
+window.addEventListener("online", scheduleLiveAlertRefresh);
+// Reconcile missed events or unavailable Realtime without frequent polling.
+setInterval(() => { void refreshLiveAlerts(); void refreshActiveBidYear(); }, 60000);
 window.NATCA_BIDDING_READY = true;
 
 setInterval(() => {

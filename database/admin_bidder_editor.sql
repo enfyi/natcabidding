@@ -54,7 +54,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -518,7 +518,7 @@ begin
     and lower(email) = lower(auth.jwt()->>'email') and active;
   if actor.id is null or not (actor.role in ('admin','intake') or exists (
     select 1 from public.intake_schedules s where s.intake_user_id=actor.id
-      and now() between s.starts_at - interval '15 minutes' and s.ends_at
+      and now() between s.starts_at - interval '60 minutes' and s.ends_at
   )) then raise exception 'Active intake or administrator access is required.'; end if;
   if target_id is not null and not exists (
     select 1 from public.bidders b where b.id=target_id and b.active
@@ -652,15 +652,15 @@ begin
     if target.bid_role <> 'GL' and line_row.status <> 'open' and line_row.assigned_bidder_id is distinct from target.id then
       raise exception 'This RDO line is no longer available.';
     end if;
-    group_name := line_change->>'fatigue_group';
-    if group_name is null or group_name not in ('A','B','C') then raise exception 'Choose fatigue group A, B, or C.'; end if;
+    group_name := nullif(trim(line_change->>'fatigue_group'), '');
+    if group_name is not null and group_name not in ('A','B','C') then raise exception 'Choose fatigue group A, B, C, or No preference.'; end if;
     if line_row.fatigue_group like '%only' and group_name <> left(line_row.fatigue_group,1) then
       raise exception 'This line requires fatigue group %.',left(line_row.fatigue_group,1);
     end if;
     if jsonb_typeof(line_change->'flex') is distinct from 'boolean' or jsonb_typeof(line_change->'aws') is distinct from 'boolean'
       or coalesce(line_change->>'mid','') not in ('Yes','No','BID') then raise exception 'Choose valid Flex, AWS, and Mid values.'; end if;
     if line_row.mid='BID' and line_change->>'mid' <> 'BID' then raise exception 'A designated Mid line must retain BID.'; end if;
-    if line_row.line_type in ('CPC','DEV') and target.bid_role <> 'GL'
+    if group_name is not null and line_row.line_type in ('CPC','DEV') and target.bid_role <> 'GL'
       and not private.fatigue_group_is_available(year_id,target.area_id,line_row.id,group_name,target.id) then
       raise exception 'Fatigue group % is full for this area or RDO set.',group_name;
     end if;

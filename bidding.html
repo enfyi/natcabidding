@@ -10,7 +10,7 @@
     <title>NATCA ZLA Bidding</title>
     <script>
       const bootParams = new URLSearchParams(location.search);
-      if (bootParams.get("member") === "1" || ["dashboard", "intake", "intake-schedule", "admin"].includes(bootParams.get("page"))) {
+      if (bootParams.get("member") === "1" || ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(bootParams.get("page"))) {
         document.documentElement.classList.add("member-boot-pending");
       }
     </script>
@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=header-view-area-leave-card-rail-brand-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-line-mode-ink-mid-bid-line-fatigue-capacity-sync-calendar-layers-button-fit-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-left-aligned-counts-member-leave-manager-bidder-editor-bid-window-builder-mobile-seven-day-full-calendar-mobile-initials-only-responsive-bid-change-live-validation-shift-actions-intake-control-drawers-selected-bidder-rdo-fit-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-role-badge-admin-leave-management" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -174,10 +174,11 @@
                 <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="public">Full</button>
               </div>
               <div class="segmented calendar-workforce-tabs" aria-label="Public calendar workforce">
-                <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="public">CPC</button>
-                <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="public">DEV</button>
+                <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="public-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="public">CPC</button>
+                <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="public-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="public">DEV</button>
               </div>
             </div>
+            <p class="calendar-workforce-description" id="public-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
             <p class="calendar-layout-description" data-calendar-layout-description="public">Select a date to view its slots.</p>
             <div class="calendar-toolbar">
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -302,9 +303,8 @@
             </label>
             <label>
               <span>Bid Year</span>
-              <select aria-label="Bid year" data-bid-year-select>
-                <option>2027</option>
-                <option>2026</option>
+              <select id="selected-bid-year" name="selected-bid-year" aria-label="Bid year" data-bid-year-select disabled>
+                <option>Checking…</option>
               </select>
             </label>
             <div class="status-chip" id="bid-window-status">
@@ -337,6 +337,7 @@
             </button>
           </div>
         </header>
+        <p class="status-chip closed" role="status" data-bid-year-notice hidden></p>
         <section class="alerts-menu" aria-label="Alerts" hidden data-alert-menu>
           <div class="panel">
             <div class="panel-header compact">
@@ -433,10 +434,11 @@
                   <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="dashboard">Full</button>
                 </div>
                 <div class="segmented calendar-workforce-tabs" aria-label="Dashboard calendar workforce">
-                  <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="dashboard">CPC</button>
-                  <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="dashboard">DEV</button>
+                  <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="dashboard-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="dashboard">CPC</button>
+                  <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="dashboard-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="dashboard">DEV</button>
                 </div>
               </div>
+              <p class="calendar-workforce-description" id="dashboard-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
               <p class="calendar-layout-description" data-calendar-layout-description="dashboard">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -509,7 +511,7 @@
               <div class="panel-header">
                 <div>
                   <h2>Leave Bids</h2>
-                  <p>Drag to reorder annual leave priority before submitting.</p>
+                  <p>Review annual leave bids before submitting.</p>
                   <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                 </div>
                 <button class="primary-action small" type="button" data-page="leave">Add Leave</button>
@@ -524,7 +526,6 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Priority</th>
                       <th>Round</th>
                       <th>Date Range</th>
                       <th>Days</th>
@@ -602,6 +603,7 @@
                 <button type="button" aria-pressed="true" data-member-rdo-presentation="table">Compare table</button>
               </div>
               <p class="mobile-table-hint member-rdo-table-hint">Swipe horizontally to compare the full weekly schedule.</p>
+              <p class="rdo-gl-legend"><span class="gl-line-bidder">*</span> GL Bid · visible, but does not occupy the line</p>
               <div class="member-rdo-results" data-member-rdo-results data-presentation="table">
                 <div class="mobile-rdo-cards member-rdo-cards" data-member-rdo-cards></div>
                 <div class="table-wrap tall rdo-page-table-wrap" tabindex="0" role="region" aria-label="RDO schedule comparison table, scroll horizontally">
@@ -689,10 +691,11 @@
                   <button type="button" role="tab" aria-selected="false" data-calendar-layout="full" data-calendar-scope="leave">Full</button>
                 </div>
                 <div class="segmented calendar-workforce-tabs" aria-label="Leave calendar workforce">
-                  <button class="active" type="button" aria-pressed="true" data-calendar-workforce="cpc" data-calendar-scope="leave">CPC</button>
-                  <button type="button" aria-pressed="false" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
+                  <button class="active" type="button" aria-pressed="true" title="Highlight dates based on available CPC leave slots." aria-describedby="leave-calendar-workforce-help" data-calendar-workforce="cpc" data-calendar-scope="leave">CPC</button>
+                  <button type="button" aria-pressed="false" title="Highlight dates based on available developmental leave slots." aria-describedby="leave-calendar-workforce-help" data-calendar-workforce="dev" data-calendar-scope="leave">DEV</button>
                 </div>
               </div>
+              <p class="calendar-workforce-description" id="leave-calendar-workforce-help" data-calendar-workforce-help>Highlight leave availability for CPC or DEV. Date details show both groups.</p>
               <p class="calendar-layout-description" data-calendar-layout-description="leave">Select a date to view its slots.</p>
               <div class="calendar-toolbar">
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
@@ -719,7 +722,7 @@
                 <div class="panel-header compact">
                   <div>
                     <h2>Leave Bids</h2>
-                    <p>Review and prioritize annual leave before submitting.</p>
+                    <p>Review annual leave bids before submitting.</p>
                     <p class="privacy-note">Private notes are for your view only. They are not shown to admins, intake reps, exports, or other BUEs.</p>
                   </div>
                 </div>
@@ -733,7 +736,6 @@
                   <table>
                     <thead>
                       <tr>
-                        <th>Priority</th>
                         <th>Round</th>
                         <th>Date Range</th>
                         <th>Days</th>
@@ -943,7 +945,7 @@
               </div>
             </div>
             <div class="intake-bidder-summary" data-intake-bidder-summary aria-live="polite">
-              <div class="intake-bidder-empty">Select a controller from the Intake Queue or Manual Bid Entry.</div>
+              <div class="intake-bidder-empty">Select a controller from the Intake Queue, RDO Selection, or Requested Leave Dates.</div>
             </div>
             <div class="intake-bidder-detail" data-intake-bidder-detail hidden></div>
           </section>
@@ -953,6 +955,8 @@
                 <div>
                   <h2>Intake Queue</h2>
                   <p>Review submitted bids before they are applied to bid lines or leave slots.</p>
+                  <button class="secondary-action small" type="button" data-intake-refresh>Refresh Queue</button>
+                  <p data-intake-refresh-status role="status" aria-live="polite" hidden></p>
                 </div>
                 <div class="intake-search-tools" aria-label="Search intake queue">
                   <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
@@ -1027,13 +1031,10 @@
                 <div class="denial-editor" data-denial-editor></div>
               </section>
               <section class="panel manual-bid-card" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Manual Bid Entry</h3>
-                    <p>Enter an RDO or leave bid on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
+                <button class="manual-intake-toggle" type="button" aria-expanded="true" aria-controls="intake-rdo-selection" data-manual-intake-toggle="rdo">
+                  <span><strong>RDO Selection</strong><small>Enter an RDO bid on behalf of any controller.</small></span>
+                </button>
+                <div class="schedule-form manual-bid-form" id="intake-rdo-selection" data-manual-intake-content="rdo">
                   <label class="manual-controller-search">
                     Find Controller
                     <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
@@ -1043,13 +1044,6 @@
                   <label>
                     Controller
                     <select data-manual-bid-controller></select>
-                  </label>
-                  <label>
-                    Bid Type
-                    <select data-manual-bid-type>
-                      <option value="RDO Line">RDO Line</option>
-                      <option value="Leave">Leave</option>
-                    </select>
                   </label>
                   <label>
                     Bid Area
@@ -1092,43 +1086,15 @@
                       <select data-manual-mid></select>
                     </label>
                   </div>
-                  <div class="manual-bid-fields" data-manual-leave-fields hidden>
-                    <label class="wide">
-                      Leave Range
-                      <input type="text" placeholder="Jan 10 - Jan 16, 2027" data-manual-leave-range />
-                    </label>
-                    <label>
-                      Days
-                      <input type="number" min="1" max="36" placeholder="Auto" data-manual-leave-days />
-                    </label>
-                    <label>
-                      Round
-                      <select data-manual-leave-round>
-                        <option value="1">Round 1</option>
-                        <option value="2">Round 2</option>
-                        <option value="3">Round 3</option>
-                        <option value="4">Round 4</option>
-                        <option value="5">Round 5</option>
-                        <option value="6">Round 6</option>
-                      </select>
-                    </label>
-                    <label class="wide">
-                      Notes
-                      <input type="text" placeholder="Optional note" data-manual-leave-notes />
-                    </label>
-                  </div>
                   <button class="primary-action small" type="button" data-manual-bid-submit>Add to Intake Queue</button>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
               <section class="panel manual-leave-request-card" data-manual-bid-panel>
-                <div class="panel-header compact">
-                  <div>
-                    <h3>Requested Leave Dates</h3>
-                    <p>Submit requested leave dates on behalf of any controller.</p>
-                  </div>
-                </div>
-                <div class="schedule-form manual-bid-form">
+                <button class="manual-intake-toggle" type="button" aria-expanded="true" aria-controls="intake-requested-leave" data-manual-intake-toggle="leave">
+                  <span><strong>Requested Leave Dates</strong><small>Submit requested leave dates on behalf of any controller.</small></span>
+                </button>
+                <div class="schedule-form manual-bid-form" id="intake-requested-leave" data-manual-intake-content="leave">
                   <label class="manual-controller-search">
                     Find Controller
                     <input type="search" placeholder="Name or initials" autocomplete="off" data-manual-controller-search />
@@ -1202,6 +1168,7 @@
                 <div class="schedule-view-controls" aria-label="Intake schedule calendar controls">
                   <div class="segmented schedule-view-tabs" role="tablist" aria-label="Intake schedule view">
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="year">Year</button>
+                    <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="two-month">2 Months</button>
                     <button class="active" type="button" role="tab" aria-selected="true" data-schedule-calendar-view="month">Month</button>
                     <button type="button" role="tab" aria-selected="false" data-schedule-calendar-view="week">Week</button>
                   </div>
@@ -1212,17 +1179,22 @@
                   </div>
                 </div>
               </div>
+              <div class="intake-calendar-legend" aria-label="Calendar day colors">
+                <span class="holiday">Holiday</span>
+                <span class="natca-validation">NATCA Validation</span>
+                <span class="faa-validation">FAA Validation</span>
+              </div>
               <div class="year-calendar schedule-calendar" id="intake-schedule-calendar"></div>
               <div class="intake-schedule-list" data-intake-schedule-list></div>
             </section>
             <aside class="right-stack">
               <section class="panel">
                 <h3>Access Rule</h3>
-                <p>Intake permissions start 15 minutes before each assigned shift.</p>
+                <p>Intake permissions start 60 minutes before each assigned shift.</p>
               </section>
               <section class="panel" data-admin-schedule-card>
                 <h3>Admin Scheduling</h3>
-                <p>Assign temporary intake access. Access begins 15 minutes before the scheduled shift.</p>
+                <p>Assign temporary intake access. Access begins 60 minutes before the scheduled shift.</p>
                 <div class="schedule-form">
                   <label>
                     Intake Team Member
@@ -1260,6 +1232,25 @@
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
+              </section>
+              <section class="panel" data-intake-calendar-mark-editor hidden>
+                <h3>Calendar Days</h3>
+                <form class="schedule-form" data-intake-calendar-mark-form>
+                  <label>Date <input type="date" required data-intake-calendar-mark-date /></label>
+                  <label>Mark As
+                    <select data-intake-calendar-mark-kind>
+                      <option value="holiday">Holiday</option>
+                      <option value="natca_validation">NATCA Validation</option>
+                      <option value="faa_validation">FAA Validation</option>
+                    </select>
+                  </label>
+                  <div class="schedule-form-actions">
+                    <button class="primary-action small" type="submit" data-save-intake-calendar-mark>Save Day</button>
+                    <button class="secondary-action small" type="button" data-clear-intake-calendar-mark hidden>Clear</button>
+                  </div>
+                  <p class="form-status" data-intake-calendar-mark-status role="status"></p>
+                </form>
+                <div class="intake-calendar-mark-list" data-intake-calendar-mark-list></div>
               </section>
               <section class="panel" data-shift-builder hidden>
                 <h3>Shift Builder</h3>
@@ -1359,6 +1350,25 @@
                   </div>
                   <span class="status open" data-bid-window-builder-summary>Ready to build</span>
                 </div>
+                <form class="bid-time-export-form" data-bid-time-export-form>
+                  <h4>Export Bid Times</h4>
+                  <p>Download the saved schedule for the active bid year, including each bidder’s type (CPC, R-DEV, D-DEV, GL, TMC, or DEV) and annual bid allocation in hours. Round start times use Pacific time; unscheduled rounds are blank.</p>
+                  <label class="toggle-row"><input type="checkbox" data-bid-time-export-all checked />All areas</label>
+                  <fieldset>
+                    <legend>Areas to export</legend>
+                    <div class="bid-time-export-areas">
+                      <label><input type="checkbox" name="export-area" value="Area A" checked />Area A</label>
+                      <label><input type="checkbox" name="export-area" value="Area B" checked />Area B</label>
+                      <label><input type="checkbox" name="export-area" value="Area C" checked />Area C</label>
+                      <label><input type="checkbox" name="export-area" value="Area D" checked />Area D</label>
+                      <label><input type="checkbox" name="export-area" value="Area E" checked />Area E</label>
+                      <label><input type="checkbox" name="export-area" value="Area F" checked />Area F</label>
+                      <label><input type="checkbox" name="export-area" value="TMU" checked />TMU</label>
+                    </div>
+                  </fieldset>
+                  <button class="secondary-action small" type="submit" data-export-bid-times>Export Bid Times to Excel</button>
+                  <p class="form-status" data-bid-time-export-status role="status"></p>
+                </form>
                 <form class="bid-window-builder-form" data-bid-window-builder-form>
                   <label class="toggle-row bid-window-consistency-toggle">
                     <input type="checkbox" data-bid-window-builder-consistent checked />
@@ -1539,6 +1549,7 @@
             <span class="pill open">System Admin</span>
           </header>
           <nav class="admin-section-nav" aria-label="Bidding setup sections">
+            <button type="button" data-admin-section-target="admin-bid-year-section">Bid year</button>
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
@@ -1546,6 +1557,19 @@
             <button type="button" data-admin-section-target="admin-backup-section">Backups</button>
           </nav>
           <div class="admin-tools-page-grid">
+              <section class="panel admin-section-target" id="admin-bid-year-section" data-system-admin-only hidden>
+                <div class="panel-header compact"><div>
+                  <h3>Active Bid Year</h3>
+                  <p>New visits open the active year. Other years are view-only for bidders. Changing this setting preserves existing records and your selected view.</p>
+                </div></div>
+                <p>Current active year: <strong data-active-bid-year-label>Checking…</strong></p>
+                <label for="active-bid-year">Active bid year</label>
+                <select id="active-bid-year" name="active-bid-year" data-active-bid-year-select disabled></select>
+                <button class="primary-action" type="button" data-save-active-bid-year>Save Active Year</button>
+                <p role="status" data-active-bid-year-status>Only existing open bid years can be activated. Switching the year reloads the page and clears unsent selections.</p>
+              </section>
+
+
               <section class="panel bid-window-testing-card admin-section-target" id="admin-policy-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact">
                   <div>
@@ -1862,7 +1886,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=view-switcher-prototype-login-fallback-header-view-area-balance-layout-nav-group-aws-line-mode-status-card-aws-order-fatigue-colors-leave-year-start-mid-bid-line-fatigue-capacity-sync-calendar-layers-remove-duplicate-fatigue-area-leave-remaining-starting-balance-manual-bids-current-bidder-flex-default-warning-validation-period-round-rule-card-leave-page-summary-next-bid-window-leave-slot-modal-area-slots-summary-bue-leave-slot-allowance-numeric-area-slots-member-leave-manager-bidder-editor-non-bidding-role-bid-window-builder-mobile-seven-day-full-calendar-area-af-four-dev-default-responsive-bid-change-live-validation-public-bid-window-sync-pilot-window-bypass-email-confirmation-public-schedule-shift-actions-intake-control-drawers-selected-bidder-password-change-late-bid-contact-dialog-aws-schedule-lock-two-month-intake-aws-table-column-bid-line-order-bid-line-read-fallback-blank-line-preferences-role-badge-alert-review-focus-admin-leave-management"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-alert-review-focus"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

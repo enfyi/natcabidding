@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+const source = readFileSync(new URL('../bidding.js', import.meta.url), 'utf8');
+const code = source.slice(source.indexOf('let loginLinkRequestPending'), source.indexOf('async function sendSupabasePasswordReset'));
+let mode = 'success', requests = 0, status, resolveRequest;
+const buttons = [{ disabled: false }, { disabled: false }];
+const menu = { hidden: true };
+const toggle = { setAttribute(k, v) { this[k] = v; } };
+const client = { auth: { async signOut() {}, async signInWithOtp() { requests++; if (mode === 'network') throw new Error('Failed to fetch'); if (mode === 'rate') return { error: { message: 'Wait 42 seconds.' } }; if (mode === 'pending') await new Promise(r => { resolveRequest = r; }); return { error: null }; } } };
+const context = vm.createContext({ document: { querySelectorAll: () => buttons, querySelector: s => s.includes('menu') ? menu : toggle }, window: { NATCA_SUPABASE_CONFIG: { environment: 'production' } }, supabaseClient: () => client, canRequestSupabaseLoginEmail: async () => mode !== 'roster', clearSupabaseAccountState() {}, supabaseAuthRedirectUrl: () => 'https://example.com', setAuthStatus: (message, kind) => { status = { message, kind }; }, friendlyAuthFailure: e => e.message, isMemberAppVisible: () => false });
+vm.runInContext(code, context);
+for (mode of ['success', 'network', 'rate', 'roster']) {
+  menu.hidden = true;
+  await context.sendSupabaseLoginLink('test@example.com');
+  assert.equal(menu.hidden, false);
+  assert.equal(toggle['aria-expanded'], 'true');
+  assert.ok(buttons.every(b => !b.disabled));
+  assert.equal(status.kind, mode === 'success' ? 'success' : 'error');
+}
+mode = 'pending';
+const before = requests;
+const first = context.sendSupabaseLoginLink('test@example.com');
+await new Promise(r => setTimeout(r, 0));
+assert.ok(buttons.every(b => b.disabled));
+await context.sendSupabaseLoginLink('test@example.com');
+assert.equal(requests, before + 1);
+resolveRequest(); await first;
+assert.ok(buttons.every(b => !b.disabled));
+console.log('Magic-link checks passed: success, network error, rate limit, roster denial, duplicate click, and popup visibility.');
