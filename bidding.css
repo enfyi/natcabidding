@@ -12230,3 +12230,8 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .bid-time-export-form fieldset { margin: 12px 0; border: 0; padding: 0; }
 .bid-time-export-areas { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 8px; }
 .bid-time-export-areas label { display: flex; align-items: center; gap: 6px; }
+.month-grid > button.tmu-one-slot-left,
+.week-calendar-grid > button.tmu-one-slot-left {
+  outline: 2px solid #333;
+  outline-offset: -2px;
+}
