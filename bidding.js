@@ -9008,7 +9008,7 @@ function updateBidWindowWithCache(force = false) {
   const areaRoundOpen = roundState?.phase === "open";
   const statusText = pilotState.database ? (isTestingBypass ? "Open" : "Closed") : areaRoundOpen ? "Open" : "Closed";
   const showCurrentBidder = !pilotState.database && !isOpen && !isBefore && areaRoundOpen && Boolean(activePerson);
-  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Bid Window Open" : "Bid Window Closed";
+  const clockLabel = pilotState.database ? (isTestingBypass ? `Pilot Round ${testRound} On` : "Pilot Rounds Off") : isOpen ? "Your Bid Window is Open" : "Your Bid Window is Closed";
   const countdownText = pilotState.database ? (isTestingBypass ? "No time limit" : "Closed") : isOpen
       ? formatDuration(personalBidWindow.end - now)
       : isBefore
