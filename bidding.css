@@ -6538,6 +6538,44 @@ tr.occupied-row .rdo-tag {
   width: 100%;
 }
 
+.manual-leave-batch-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.manual-leave-batch-actions button {
+  flex: 1;
+}
+
+.manual-leave-batch[hidden] {
+  display: none;
+}
+
+.manual-leave-batch {
+  margin-top: 16px;
+  border-top: 1px solid #d6e2ed;
+  padding-top: 12px;
+}
+
+.manual-leave-batch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #d6e2ed;
+  padding: 8px 0;
+}
+
+.manual-leave-batch-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .manual-leave-batch-actions { flex-direction: column; }
+}
+
 .manual-intake-toggle {
   display: flex;
   align-items: center;

@@ -1141,7 +1141,14 @@
                       <input type="text" placeholder="Optional note" data-manual-leave-notes />
                     </label>
                   </div>
-                  <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  <div class="manual-leave-batch" data-manual-leave-batch hidden>
+                    <strong data-manual-leave-batch-summary></strong>
+                    <div data-manual-leave-batch-list></div>
+                  </div>
+                  <div class="manual-leave-batch-actions">
+                    <button class="secondary-action small" type="button" data-manual-leave-add>Add to batch</button>
+                    <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
+                  </div>
                   <p class="form-status" data-manual-bid-status></p>
                 </div>
               </section>
@@ -1886,7 +1893,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-alert-review-focus"></script>
+    <script src="bidding.js?v=admin-leave-calendar-intake-panels-intake-hour-access-20261002-refresh-page-live-alerts-public-navigation-active-bid-year-v2-sign-up-flow-fix-profile-menu-dismiss-show-login-error-fix-checking-bid-year-fix-history-receiver-fix-no-fatigue-preference-visible-page-refresh-week-alerts-intake-performance-immediate-decision-alerts-review-load-performance-manual-leave-input-performance-background-approval-refresh-protect-editing-alert-review-focus"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
