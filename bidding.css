@@ -12269,11 +12269,11 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   color: #ffffff !important;
   background: #334155 !important;
 }
-.public-main .public-rdo-panel tr.occupied-row .rdo-line-bidders,
-.public-main .public-rdo-panel .gl-line-bidder {
+.public-main .public-rdo-panel tr.occupied-row .rdo-line-bidders {
   color: #334155;
 }
 
+.public-main .public-rdo-panel .gl-line-bidder,
 .public-main .public-rdo-panel .ghost-line-bidder {
   color: #7b8494;
 }
