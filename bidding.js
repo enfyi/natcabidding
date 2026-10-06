@@ -2700,6 +2700,7 @@ async function addOrUpdateRdoSubmission() {
 
   logHistory(currentUser.area, "RDO bid submitted", `${currentUser.initials} submitted ${request.summary}. Intake approval is still required before the line is populated.`);
   renderApp();
+  showActionFeedback("RDO bid submitted and sent to intake review.", "success");
 }
 
 function controllerName(person) {
@@ -2783,7 +2784,61 @@ function selectManualLeaveController(initials) {
   renderManualBidPanel(leavePanel);
 }
 
+let actionFeedbackTimer;
+const pendingUiActions = new Set();
+
+function showActionFeedback(message, status = "info") {
+  if (!message) return;
+  let notice = document.querySelector("[data-action-feedback]");
+  if (!notice) {
+    notice = document.createElement("div");
+    notice.dataset.actionFeedback = "";
+    notice.className = "action-feedback";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    notice.setAttribute("aria-atomic", "true");
+    document.body.appendChild(notice);
+  }
+  clearTimeout(actionFeedbackTimer);
+  notice.textContent = message;
+  notice.dataset.status = status;
+  notice.hidden = false;
+  if (status !== "info") actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, status === "error" ? 12000 : 7000);
+}
+
+async function runUiAction(key, button, label, action) {
+  if (pendingUiActions.has(key)) return;
+  pendingUiActions.add(key);
+  const originalLabel = button?.tagName === "BUTTON" ? button.textContent : null;
+  const wasDisabled = button?.disabled;
+  if (button) {
+    button.disabled = true;
+    if (originalLabel !== null) button.textContent = label;
+    button.setAttribute("aria-busy", "true");
+  }
+  showActionFeedback(label);
+  try {
+    // Let the browser paint feedback before expensive synchronous rendering.
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    await action();
+  } catch (error) {
+    showActionFeedback(error.message || "The action could not finish. Please try again.", "error");
+  } finally {
+    pendingUiActions.delete(key);
+    if (button) {
+      if (originalLabel !== null) button.textContent = originalLabel;
+      button.disabled = wasDisabled;
+      button.removeAttribute("aria-busy");
+    }
+    const notice = document.querySelector("[data-action-feedback]");
+    if (notice?.dataset.status === "info") {
+      actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, 7000);
+    }
+  }
+}
+
 function setManualBidStatus(panel, message, status = "info") {
+  showActionFeedback(message, status);
   const target = panel?.querySelector("[data-manual-bid-status]");
   if (!target) return;
   target.textContent = message;
@@ -3431,6 +3486,7 @@ async function submitManualBidEntry(panel) {
 }
 
 function setLeaveBuilderStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-leave-builder-status]");
   if (!target) return;
   target.textContent = message;
@@ -16980,7 +17036,10 @@ document.addEventListener("click", async (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
+    await runUiAction("public-area-switch", publicButton, "Loading…", () => {
+      renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
+      showActionFeedback(`Now viewing ${publicButton.dataset.publicArea} · ${publicState.section}.`, "success");
+    });
     return;
   }
 
@@ -17114,7 +17173,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-submit-leave-batch]")) {
-    await submitLeaveDraftBatch();
+    await runUiAction("leave-submit", event.target.closest("[data-submit-leave-batch]"), "Submitting batch…", submitLeaveDraftBatch);
     return;
   }
 
@@ -17360,7 +17419,7 @@ document.addEventListener("click", async (event) => {
   }
   if (manualBidSubmit) {
     const panel = manualBidSubmit.closest("[data-manual-bid-panel]");
-    if (panel) await submitManualBidEntry(panel);
+    if (panel) await runUiAction("manual-submit", manualBidSubmit, "Submitting bid…", () => submitManualBidEntry(panel));
     return;
   }
 
@@ -17483,7 +17542,7 @@ document.addEventListener("click", async (event) => {
   if (selectLineButton && !selectLineButton.hidden) {
     const line = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === selectedLineId);
     if (line && line.status !== "Taken") {
-      void addOrUpdateRdoSubmission();
+      await runUiAction("rdo-submit", selectLineButton, "Submitting bid…", addOrUpdateRdoSubmission);
     }
     return;
   }
@@ -17940,8 +17999,12 @@ document.addEventListener("change", async (event) => {
 
   const viewAreaSelect = event.target.closest("[data-view-area-select]");
   if (!viewAreaSelect) return;
-  selectedViewArea = viewAreaSelect.value || currentUser.area;
-  renderApp();
+  const nextArea = viewAreaSelect.value || currentUser.area;
+  await runUiAction("area-switch", viewAreaSelect, `Loading ${nextArea}…`, () => {
+    selectedViewArea = nextArea;
+    renderApp();
+    showActionFeedback(`Now viewing ${nextArea}.`, "success");
+  });
 });
 
 Object.assign(publicState, requestedPublicView() || {});
