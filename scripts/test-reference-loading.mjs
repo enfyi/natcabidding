@@ -21,7 +21,7 @@ function setup({ catalogFails = false, rosterFails = false, helpGate } = {}) {
   const context = vm.createContext({
     console: { warn() {} }, window: {}, AbortController,
     setTimeout: (fn, ms) => setTimeout(fn, ms === 15000 ? 30 : 0), clearTimeout,
-    supabaseState: state, publicFaqContent: {}, BID_YEAR: 2027, calendarRenderRevision: 0,
+    liveDataSnapshots: new Map(), supabaseState: state, publicFaqContent: {}, BID_YEAR: 2027, calendarRenderRevision: 0,
     supabaseClient: () => client, resetSupabaseBackedData() {},
     loadBidYearCatalog: async () => { if (catalogFails) throw Error('catalog failed') },
     isMemberAppVisible: () => false, renderPublicPage: () => applied.add('render'),

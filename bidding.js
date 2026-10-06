@@ -5133,6 +5133,7 @@ async function refreshBiddingAfterIntakeDecision({ expectedDecisionRevision = nu
     intakeBidderSelection.error = "";
     intakeBidderSelection.generation += 1;
     supabaseState.placeholdersCleared = true;
+    liveDataSnapshots.clear();
     supabaseState.loadedAt = new Date();
     lastAlertDatabaseSnapshot = "";
     calendarRenderRevision += 1;
@@ -6898,6 +6899,7 @@ function supabaseClient() {
   if (!supabaseState.client) {
     adoptParentSupabaseAuthHash();
     supabaseState.client = window.supabase.createClient(config.url, config.publishableKey, {
+      global: { fetch: fetchWithLiveUpdateTracking },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -8437,6 +8439,7 @@ async function loadSupabaseReferenceData() {
   }
   if (supabaseState.loading) return;
   resetSupabaseBackedData();
+  liveDataSnapshots.clear();
 
   supabaseState.enabled = true;
   supabaseState.loading = true;
@@ -14342,6 +14345,263 @@ function renderHistory() {
     .join("");
 }
 
+// Realtime events invalidate small groups; the fallback reconciles all groups.
+const liveDataTables = {
+  roster: ["bidders", "areas"],
+  bidding: ["rdo_lines", "rdo_line_days", "intake_submissions", "leave_requests", "leave_request_dates", "leave_request_week_buckets", "leave_credit_events"],
+  slots: ["leave_slots", "leave_slot_capacities"],
+  windows: ["bid_windows"],
+  schedules: ["intake_schedules", "intake_calendar_marks", "intake_shift_presets"],
+  rules: ["bid_year_settings", "bid_rounds", "bidder_bid_year_settings", "bid_years", "holidays"],
+  faq: ["faq_entries", "mou_documents"],
+};
+let liveDataTimer = null;
+let liveDataRunning = false;
+let liveDataGeneration = 0;
+let liveDataActivityRevision = 0;
+let liveDataWritesPending = 0;
+const liveDataDirtyGroups = new Set();
+const liveDataSnapshots = new Map();
+
+async function fetchWithLiveUpdateTracking(input, init) {
+  const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
+  const method = String(init?.method || input?.method || "GET").toUpperCase();
+  const routine = url.pathname.split("/rpc/")[1];
+  const writing = url.pathname.includes("/rest/v1/") && !["GET", "HEAD"].includes(method)
+    && !(routine && (routine.startsWith("read_") || routine === "live_help_threads"));
+  if (!writing) return window.fetch(input, init);
+  liveDataWritesPending += 1;
+  liveDataActivityRevision += 1;
+  try {
+    return await window.fetch(input, init);
+  } finally {
+    liveDataWritesPending -= 1;
+    liveDataActivityRevision += 1;
+    scheduleLiveDataRefresh();
+  }
+}
+
+function hasActiveLiveDataEditing() {
+  return hasActiveIntakeEditing() || intakeDecisionPending || intakeDecisionRefreshRunning
+    || intakeScheduleMutationPending || shiftPresetMutationPending || leaveManagementPendingId
+    || intakeLeaveRemovalPendingId || pilotBidderResetPending || biddingBackupBusy
+    || liveDataWritesPending > 0
+    || Boolean(document.querySelector('[role="dialog"]:not([hidden]), [data-bid-change-modal]:not([hidden]), [data-leave-slot-modal]:not([hidden])'));
+}
+
+function liveDataLocalSnapshot() {
+  return JSON.stringify([supabaseState.loadedAt, rdoLines, leaveBids, intakeQueue, senioritySource,
+    databaseBidWindows.size, intakeSchedules, publicFaqContent]);
+}
+
+function scheduleLiveDataRefresh(groups = Object.keys(liveDataTables), delay = 750) {
+  const publicPilot = window.NATCA_SUPABASE_CONFIG?.environment === "pilot" && !isMemberAppVisible();
+  groups.filter((group) => !publicPilot || group === "slots").forEach((group) => liveDataDirtyGroups.add(group));
+  clearTimeout(liveDataTimer);
+  liveDataTimer = setTimeout(() => {
+    liveDataTimer = null;
+    void refreshLiveData();
+  }, delay);
+}
+
+function stopLiveDataUpdates() {
+  liveDataGeneration += 1;
+  clearTimeout(liveDataTimer);
+  liveDataTimer = null;
+  liveDataDirtyGroups.clear();
+  liveDataSnapshots.clear();
+}
+
+async function readLiveDataGroup(group, client, areaById, member) {
+  const empty = () => Promise.resolve({ data: [], error: null });
+  const read = (label, request) => readReferenceData(label, request);
+  let results;
+  let apply;
+  if (group === "roster") {
+    results = [await read("live roster", () => client.rpc("read_bidding_roster"))];
+    apply = () => applyRosterFromDatabase(results[0].data || [], areaById);
+  } else if (group === "bidding") {
+    results = await Promise.all([
+      read("live RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
+      read("live GL assignments", () => loadPublishedGlRdoAssignments(client)),
+      read("live bidding state", () => member ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : empty()),
+      read("live leave requests", () => member ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : empty()),
+    ]);
+    if (results.some((result) => result.error)) return { results };
+    const submissions = results[2].data?.submissions || [];
+    const leaveRows = member ? attachSubmissionIdsToLeaveRequests(
+      await attachLeaveRequestWeekBuckets(client, results[3].data || []), submissions
+    ) : [];
+    apply = () => {
+      // Replace deleted/renamed lines as well as updating existing lines.
+      rdoLines.splice(0, rdoLines.length);
+      upsertRdoLinesFromDatabase(results[0].data || [], areaById);
+      applyGlRdoAssignments(supabaseRows(results[1]));
+      if (member) {
+        intakeQueue = intakeQueue.filter((item) => !item.supabaseSubmissionId && !item.supabaseRequestId);
+        for (let index = leaveBids.length - 1; index >= 0; index--) {
+          if (leaveBids[index].supabaseRequestId) leaveBids.splice(index, 1);
+        }
+        upsertRdoSubmissionsFromDatabase(submissions.filter((row) => biddingStateSubmissionType(row) === "RDO Line"
+          && ["pending", "approved", "denied"].includes(String(row.status || "").toLowerCase())), areaById);
+        upsertLeaveRequestsFromDatabase(leaveRows, areaById);
+        lastAlertDatabaseSnapshot = "";
+        intakeBidderSelection.record = null;
+        intakeBidderSelection.generation += 1;
+      }
+    };
+    // Bucket attachments are part of the comparison, not only the base requests.
+    results = [...results, { data: leaveRows, error: null }];
+  } else if (group === "slots") {
+    results = [await read("live leave slots", () => loadPublishedLeaveSlots(client))];
+    apply = () => applyLeaveSlotScheduleFromDatabase(supabaseRows(results[0]), areaById);
+  } else if (group === "windows") {
+    results = [await read("live bid windows", () => loadPublishedBidWindows(client, supabaseState.bidYearId))];
+    apply = () => applyBidWindowsFromDatabase(supabaseRows(results[0]));
+  } else if (group === "schedules") {
+    results = await Promise.all([
+      read("live intake schedules", () => loadIntakeSchedules(client)),
+      read("live calendar marks", () => member ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR) : empty()),
+      read("live shift presets", () => member && hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : empty()),
+    ]);
+    apply = () => {
+      applyIntakeSchedulesFromDatabase(results[0].data || [], areaById);
+      if (member) {
+        intakeCalendarMarks.clear();
+        (results[1].data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+        if (hasIntakeAccess()) applyIntakeShiftPresets(results[2].data);
+      }
+    };
+  } else if (group === "rules") {
+    results = await Promise.all([
+      read("live year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      read("live round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
+      read("live approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
+      read("live ghost status", () => member ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : empty()),
+      read("live holidays", () => client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", supabaseState.bidYearId)),
+    ]);
+    apply = () => {
+      applyBidYearSettings(Array.isArray(results[0].data) ? results[0].data[0] : results[0].data);
+      if (results[1].data) applyRoundRules(results[1].data);
+      if (results[2].data !== null) applyApprovalRules(results[2].data);
+      if (member) applyGhostBiddingStatus(results[3].data || []);
+      holidayOverrides.clear();
+      supabaseRows(results[4]).forEach((row) => { if (row.holiday_date) holidayOverrides.add(row.holiday_date); });
+    };
+  } else if (group === "faq") {
+    results = await Promise.all([
+      read("live FAQ", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
+      read("live MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+    ]);
+    apply = () => {
+      publicFaqContent.entries = results[0].data || [];
+      publicFaqContent.documents = results[1].data || [];
+    };
+  }
+  return { results, apply };
+}
+
+// Keep unsaved values in static forms and filter controls when a section redraws.
+// Manual entry and profile editors are deferred altogether by the editing guard.
+function liveDataControlKey(control) {
+  if (control.id) return `id:${control.id}`;
+  const data = [...control.attributes].filter((attribute) => attribute.name.startsWith("data-"))
+    .map((attribute) => [attribute.name, attribute.value]);
+  if (!data.length && !control.name) return "";
+  return JSON.stringify([control.tagName, control.name, data]);
+}
+
+function captureLiveDataControls() {
+  const controls = new Map();
+  for (const control of document.querySelectorAll("input, textarea, select")) {
+    if (control.type === "password" || control.type === "file" || control.type === "hidden") continue;
+    const key = liveDataControlKey(control);
+    if (key) controls.set(key, { value: control.value, checked: control.checked });
+  }
+  return controls;
+}
+
+function restoreLiveDataControls(controls) {
+  for (const control of document.querySelectorAll("input, textarea, select")) {
+    const saved = controls.get(liveDataControlKey(control));
+    if (!saved) continue;
+    if (control.tagName !== "SELECT" || [...control.options].some((option) => option.value === saved.value)) {
+      control.value = saved.value;
+    }
+    if (["checkbox", "radio"].includes(control.type)) control.checked = saved.checked;
+  }
+}
+
+async function refreshLiveData() {
+  if (liveDataRunning || !liveDataDirtyGroups.size || document.visibilityState !== "visible") return;
+  const publicPilot = window.NATCA_SUPABASE_CONFIG?.environment === "pilot" && !isMemberAppVisible();
+  const ready = publicPilot ? supabaseState.referenceDataLoaded : supabaseState.connected && supabaseState.bidYearId;
+  if (!ready || supabaseState.loading || hasActiveLiveDataEditing()) {
+    if (ready) scheduleLiveDataRefresh([], 1000);
+    return;
+  }
+  const client = supabaseClient();
+  if (!client) return;
+  const generation = liveDataGeneration;
+  const activity = liveDataActivityRevision;
+  const year = BID_YEAR;
+  const userId = supabaseState.authUserId;
+  const member = isMemberAppVisible();
+  const before = liveDataLocalSnapshot();
+  const groups = [...liveDataDirtyGroups];
+  groups.forEach((group) => liveDataDirtyGroups.delete(group));
+  liveDataRunning = true;
+  try {
+    const areas = publicPilot ? { data: [], error: null }
+      : await readReferenceData("live areas", () => client.from("areas").select("id,name"));
+    if (areas.error) throw areas.error;
+    const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
+    const updates = await Promise.all(groups.map((group) => readLiveDataGroup(group, client, areaById, member)));
+    if (generation !== liveDataGeneration || year !== BID_YEAR || userId !== supabaseState.authUserId
+      || member !== isMemberAppVisible()) return;
+    // Never apply a read overtaken by editing, a local save, or a foreground load.
+    if (activity !== liveDataActivityRevision || supabaseState.loading || hasActiveLiveDataEditing()
+      || before !== liveDataLocalSnapshot()) {
+      scheduleLiveDataRefresh(groups, 1000);
+      return;
+    }
+    let changed = false;
+    updates.forEach((update, index) => {
+      if (!update.apply || update.results.some((result) => result.error)) {
+        liveDataDirtyGroups.add(groups[index]);
+        return;
+      }
+      const snapshot = JSON.stringify([year, userId, areas.data, update.results.map((result) => result.data)]);
+      if (liveDataSnapshots.get(groups[index]) === snapshot) return;
+      update.apply();
+      liveDataSnapshots.set(groups[index], snapshot);
+      changed = true;
+    });
+    if (changed) {
+      supabaseState.loadedAt = new Date();
+      calendarRenderRevision += 1;
+      const scrollX = window.scrollX;
+      const scrollY = window.scrollY;
+      const controls = captureLiveDataControls();
+      if (member) renderApp();
+      else renderPublicPage();
+      restoreLiveDataControls(controls);
+      window.scrollTo(scrollX, scrollY);
+    }
+  } catch (error) {
+    if (generation === liveDataGeneration) groups.forEach((group) => liveDataDirtyGroups.add(group));
+    console.warn("Background bidding refresh unavailable:", error.message || error);
+  } finally {
+    liveDataRunning = false;
+    if (liveDataDirtyGroups.size && document.visibilityState === "visible") scheduleLiveDataRefresh([], 5000);
+  }
+}
+
+// Discard in-flight reads if the user starts interacting with the page.
+for (const eventName of ["input", "change", "pointerdown"]) {
+  document.addEventListener(eventName, () => { liveDataActivityRevision += 1; }, true);
+}
+
 let alertRefreshPending = false;
 let alertRefreshTimer = null;
 let alertRealtimeChannel = null;
@@ -14365,6 +14625,7 @@ function renderLiveIntakeQueue() {
 }
 
 function stopLiveAlertUpdates() {
+  stopLiveDataUpdates();
   clearTimeout(liveIntakeQueueRenderTimer);
   liveIntakeQueueRenderTimer = null;
   liveIntakeQueueRenderPending = false;
@@ -14387,16 +14648,31 @@ function scheduleLiveAlertRefresh() {
 
 function startLiveAlertUpdates() {
   const client = supabaseClient();
-  const userId = supabaseState.authUserId;
-  if (!client || !userId || alertRealtimeUserId === userId) return;
+  const userId = supabaseState.authUserId || "public";
+  if (!client || alertRealtimeUserId === userId) return;
   stopLiveAlertUpdates();
   alertRealtimeUserId = userId;
   alertRealtimeChannel = client.channel(`bidding-alerts-${userId}`);
   for (const table of ["intake_submissions", "leave_requests", "help_threads", "help_messages"]) {
     alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table }, scheduleLiveAlertRefresh);
   }
+  for (const [group, tables] of Object.entries(liveDataTables)) {
+    for (const table of tables) {
+      alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
+        const groups = group === "bidding" ? ["bidding", "slots", "windows"]
+          : group === "roster" ? Object.keys(liveDataTables) : [group];
+        scheduleLiveDataRefresh(groups);
+      });
+    }
+  }
+  alertRealtimeChannel.on("postgres_changes", { event: "*", schema: "public", table: "bidding_site_settings" }, () => {
+    void refreshActiveBidYear();
+  });
   alertRealtimeChannel.subscribe((status) => {
-    if (status === "SUBSCRIBED") scheduleLiveAlertRefresh();
+    if (status === "SUBSCRIBED") {
+      scheduleLiveAlertRefresh();
+      scheduleLiveDataRefresh();
+    }
   });
 }
 
@@ -17959,6 +18235,7 @@ initializeSupabaseAuth().then(async (restoredSession) => {
     renderPublicPage();
     document.documentElement.classList.remove("member-boot-pending");
   }
+  startLiveAlertUpdates();
 });
 setInterval(() => {
   if (document.visibilityState === "visible") updateBidWindow();
@@ -17968,13 +18245,20 @@ document.addEventListener("visibilitychange", () => {
     updateBidWindow(true);
     void refreshLiveAlerts();
     void refreshActiveBidYear();
+    scheduleLiveDataRefresh();
   }
 });
 window.addEventListener("focus", () => { void refreshActiveBidYear(); });
 window.addEventListener("focus", scheduleLiveAlertRefresh);
 window.addEventListener("online", scheduleLiveAlertRefresh);
+window.addEventListener("focus", () => scheduleLiveDataRefresh());
+window.addEventListener("online", () => scheduleLiveDataRefresh());
 // Reconcile missed events or unavailable Realtime without frequent polling.
-setInterval(() => { void refreshLiveAlerts(); void refreshActiveBidYear(); }, 60000);
+setInterval(() => {
+  void refreshLiveAlerts();
+  void refreshActiveBidYear();
+  if (document.visibilityState === "visible") scheduleLiveDataRefresh();
+}, 60000);
 window.NATCA_BIDDING_READY = true;
 
 setInterval(() => {
