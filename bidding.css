@@ -12277,3 +12277,27 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .public-main .public-rdo-panel .ghost-line-bidder {
   color: #7b8494;
 }
+
+/* Feedback stays visible while the user works in long forms and calendars. */
+.action-feedback {
+  position: fixed;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  width: max-content;
+  max-width: min(620px, calc(100vw - 32px));
+  padding: 14px 20px;
+  border: 1px solid #64748b;
+  border-radius: 12px;
+  background: #172337;
+  color: #fff;
+  box-shadow: 0 8px 32px #0004;
+  font-size: 14px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.action-feedback[hidden] { display: none; }
+.action-feedback[data-status="success"] { background: #14532d; border-color: #4ade80; }
+.action-feedback[data-status="error"] { background: #7f1d1d; border-color: #fca5a5; }
+button[aria-busy="true"] { cursor: progress; opacity: .75; }
