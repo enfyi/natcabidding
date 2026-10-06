@@ -601,3 +601,44 @@ h1 {
   .bid-line-editor-grid,
   .bid-line-schedule > div { grid-template-columns: 1fr; }
 }
+
+/* Admin feedback uses the same paper, ink, and green palette as its cards. */
+.admin-action-feedback {
+  --feedback-accent: var(--green);
+  position: fixed;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-inline-start: 4px solid var(--feedback-accent);
+  border-radius: 16px;
+  background: #fffffc;
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgba(22, 54, 39, 0.14);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.admin-action-feedback[hidden] { display: none; }
+.admin-action-feedback.line-feedback { bottom: calc(120px + env(safe-area-inset-bottom)); }
+.admin-action-feedback[data-status="success"] { --feedback-accent: var(--green); background: #f2faf5; }
+.admin-action-feedback[data-status="error"] { --feedback-accent: var(--red); background: #fff5f3; }
+
+@media (max-width: 640px) {
+  .admin-action-feedback {
+    width: calc(100% - 24px);
+    max-width: 560px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 13px 16px;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+  }
+  .admin-action-feedback.line-feedback { bottom: calc(120px + env(safe-area-inset-bottom)); }
+}

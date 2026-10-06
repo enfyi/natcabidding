@@ -2326,14 +2326,17 @@ async function saveActiveBidYear() {
   const requestedYear = Number(select.value);
   button.disabled = true;
   status.textContent = "Saving active bid year…";
+  showActionFeedback(status.textContent, "info");
   try {
     const { error } = await supabaseClient().rpc("set_active_bid_year", { requested_bid_year: requestedYear });
     if (error) throw error;
     await loadBidYearCatalog(supabaseClient());
     renderApp();
     status.textContent = `${activeBidYear} is now the active bid year. You are still viewing ${BID_YEAR}.`;
+    showActionFeedback(status.textContent, "success");
   } catch (error) {
     status.textContent = error.message || "The active bid year could not be saved.";
+    showActionFeedback(status.textContent, "error");
   } finally {
     button.disabled = false;
   }
@@ -2407,6 +2410,7 @@ async function setPilotRound(round, enabled) {
   pilotOpenRounds = data || [];
   syncPilotControls();
   renderApp();
+  showActionFeedback(`Pilot Round ${round} ${enabled ? "opened" : "closed"}.`, "success");
 }
 
 let pilotBidderResetPending = false;
@@ -2496,6 +2500,7 @@ async function savePilotSettings() {
   applyPilotSettings(Array.isArray(data) ? data[0] : data);
   syncPilotControls();
   renderApp();
+  showActionFeedback("Pilot settings saved.", "success");
 }
 
 async function resetPilotData() {
@@ -2510,6 +2515,7 @@ async function resetPilotData() {
   supabaseState.placeholdersCleared = false;
   await loadSupabaseReferenceData();
   renderApp();
+  showActionFeedback("Pilot bids reset.", "success");
   window.alert("Practice data was reset. Tester accounts, roster, schedules, and pilot access were kept.");
 }
 
@@ -2535,10 +2541,12 @@ async function resetPilotBidderRound() {
     supabaseState.placeholdersCleared = false;
     await loadSupabaseReferenceData();
     renderApp();
+    showActionFeedback(`${label}: Round ${round} reset.`, "success");
     setText("[data-pilot-reset-status]", round === 1
       ? `${label}: RDO bid and all leave rounds reset. They can restart with Round 1.`
       : `${label}: Round ${round} reset. They can test that round again.`);
   } catch (error) {
+    showActionFeedback(resetSaved ? "Reset saved, but the page could not refresh. Reload to see the updated bids." : error.message || "This bidder’s round could not be reset.", resetSaved ? "success" : "error");
     setText("[data-pilot-reset-status]", resetSaved
       ? "Reset saved, but the page could not refresh. Reload to see the updated bids."
       : error.message || "This bidder's round could not be reset.");
@@ -2803,7 +2811,7 @@ function showActionFeedback(message, status = "info") {
   notice.textContent = message;
   notice.dataset.status = status;
   notice.hidden = false;
-  if (status !== "info") actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, status === "error" ? 12000 : 7000);
+  if (status !== "info" || !pendingUiActions.size) actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, status === "error" ? 12000 : 7000);
 }
 
 async function runUiAction(key, button, label, action) {
@@ -2826,15 +2834,29 @@ async function runUiAction(key, button, label, action) {
   } finally {
     pendingUiActions.delete(key);
     if (button) {
-      if (originalLabel !== null) button.textContent = originalLabel;
-      button.disabled = wasDisabled;
+      if (originalLabel !== null && button.textContent === label) button.textContent = originalLabel;
+      button.disabled = wasDisabled || button.dataset?.awaitingRdoDecision === "true";
       button.removeAttribute("aria-busy");
     }
     const notice = document.querySelector("[data-action-feedback]");
     if (notice?.dataset.status === "info") {
+      if (notice.textContent === label) notice.hidden = true;
       actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, 7000);
     }
   }
+}
+
+function bindUiActionForm(selector, key, label, action) {
+  document.querySelector(selector)?.addEventListener("submit", event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = event.submitter || form.querySelector("button[type='submit']");
+    void runUiAction(key, button, label, () => action({
+      currentTarget: form,
+      target: form,
+      preventDefault() {},
+    }));
+  });
 }
 
 function setManualBidStatus(panel, message, status = "info") {
@@ -5312,7 +5334,14 @@ async function runIntakeDecision(action, id) {
     .filter((button) => !button.disabled);
   buttons.forEach((button) => { button.disabled = true; });
   try {
+    const item = intakeReviewItemById(id);
     await action(id);
+    if (item && ["Approved", "Denied"].includes(item.status)) {
+      showActionFeedback(`${item.initials}'s bid ${item.status.toLowerCase()}.`, "success");
+    } else {
+      const note = intakeGroupReviewState.get(id)?.reviewNote || item?.reviewNote;
+      if (note) showActionFeedback(note, "error");
+    }
   } finally {
     intakeDecisionPending = false;
     buttons.forEach((button) => { button.disabled = false; });
@@ -5501,6 +5530,7 @@ async function removeApprovedLeaveBid(id) {
   if (!intakeLeaveRoundIsOpen(item)) {
     const reviewNote = `Round ${intakeItemRound(item)} is closed. This bid can no longer be removed.`;
     item.reviewNote = reviewNote;
+    showActionFeedback(reviewNote, "error");
     if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
     renderIntakeQueue();
     return;
@@ -5511,6 +5541,7 @@ async function removeApprovedLeaveBid(id) {
   if (requestIds.length !== requests.length) {
     const reviewNote = "One or more leave dates are not linked to saved database records. Reload the queue before removing this bid.";
     item.reviewNote = reviewNote;
+    showActionFeedback(reviewNote, "error");
     if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
     renderIntakeQueue();
     return;
@@ -5547,6 +5578,7 @@ async function removeApprovedLeaveBid(id) {
       "Approved leave bid removed",
       `${currentUser.initials} removed ${item.initials}'s ${description} from pre-approved leave slots. The cancelled bid remains in history.`
     );
+    showActionFeedback("Approved leave bid removed.", "success");
     intakeLeaveRemovalPendingId = null;
     if (item.members) intakeGroupReviewState.delete(item.id);
     activeOverrideId = null;
@@ -5559,6 +5591,7 @@ async function removeApprovedLeaveBid(id) {
     intakeLeaveRemovalPendingId = null;
     const reviewNote = error.message || "The approved leave bid could not be removed.";
     item.reviewNote = reviewNote;
+    showActionFeedback(reviewNote, "error");
     if (item.members) intakeGroupReviewState.set(item.id, { reviewNote });
     renderApp();
     setPage("intake");
@@ -5635,12 +5668,14 @@ async function saveIntakeOverride(id) {
   if (!item) return;
   if (item.type === "RDO Line" && !hasIntakeAccess()) {
     item.reviewNote = "Active intake access is required to edit RDO bids.";
+    showActionFeedback(item.reviewNote, "error");
     activeOverrideId = null;
     renderIntakeQueue();
     return;
   }
   if (item.type === "Leave" && !intakeLeaveRoundIsOpen(item)) {
     item.reviewNote = `Round ${intakeItemRound(item)} is closed. Leave dates can no longer be edited.`;
+    showActionFeedback(item.reviewNote, "error");
     activeOverrideId = null;
     renderIntakeQueue();
     return;
@@ -5648,6 +5683,7 @@ async function saveIntakeOverride(id) {
 
   if (item.type === "RDO Line" && !supabaseState.connected) {
     item.reviewNote = "The RDO edit could not reach the database. Check the connection and try again.";
+    showActionFeedback(item.reviewNote, "error");
     renderIntakeQueue();
     return;
   }
@@ -5671,6 +5707,7 @@ async function saveIntakeOverride(id) {
         "Intake override saved",
         `${currentUser.initials} edited ${item.initials}'s ${bidTypeLabel(item)} request from "${original}" to "${item.summary}".`
       );
+      showActionFeedback("Bid changes saved.", "success");
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
@@ -5686,6 +5723,7 @@ async function saveIntakeOverride(id) {
       item.mid = originalMid;
       item.summary = original;
       item.reviewNote = error.message || "The pending RDO changes could not be saved.";
+      showActionFeedback(item.reviewNote, "error");
       activeOverrideId = id;
       renderApp();
       setPage("intake");
@@ -5696,6 +5734,7 @@ async function saveIntakeOverride(id) {
   if (item.status === "Approved" && item.type === "RDO Line") {
     try {
       await saveSupabaseApprovedRdoEdit(item);
+      showActionFeedback("Bid changes saved.", "success");
       activeOverrideId = null;
       activeDenialId = null;
       supabaseState.placeholdersCleared = false;
@@ -5710,6 +5749,7 @@ async function saveIntakeOverride(id) {
       item.mid = originalMid;
       item.summary = original;
       item.reviewNote = error.message || "The approved RDO changes could not be saved.";
+      showActionFeedback(item.reviewNote, "error");
       activeOverrideId = id;
       renderApp();
       setPage("intake");
@@ -5723,6 +5763,7 @@ async function saveIntakeOverride(id) {
     item.leaveCapacityOverride = originalCapacityOverride;
     item.summary = original;
     item.reviewNote = "This approved leave request has not been saved to Supabase, so its dates cannot be replaced durably.";
+    showActionFeedback(item.reviewNote, "error");
     activeOverrideId = id;
     renderApp();
     setPage("intake");
@@ -5732,6 +5773,7 @@ async function saveIntakeOverride(id) {
   if (item.status === "Approved" && item.type === "Leave" && item.supabaseRequestId) {
     try {
       item.reviewNote = "Saving replacement dates...";
+      showActionFeedback(item.reviewNote, "info");
       renderIntakeQueue();
       await saveSupabaseApprovedLeaveEdit(item);
       logHistory(
@@ -5739,6 +5781,7 @@ async function saveIntakeOverride(id) {
         "Approved leave dates replaced",
         `${currentUser.initials} replaced ${item.initials}'s approved leave dates from "${originalRange}" to "${item.range}".`
       );
+      showActionFeedback("Bid changes saved.", "success");
       activeOverrideId = null;
       activeDenialId = null;
       renderApp();
@@ -5750,6 +5793,7 @@ async function saveIntakeOverride(id) {
       item.leaveCapacityOverride = originalCapacityOverride;
       item.summary = original;
       item.reviewNote = error.message || "The approved leave dates could not be replaced.";
+      showActionFeedback(item.reviewNote, "error");
       activeOverrideId = id;
       renderApp();
       setPage("intake");
@@ -5780,6 +5824,7 @@ async function saveIntakeOverride(id) {
     item.status === "Approved" ? "Admin override applied" : "Intake override saved",
     `${currentUser.initials} edited ${item.initials}'s ${bidTypeLabel(item)} request from "${original}" to "${item.summary}".`
   );
+  showActionFeedback("Bid changes saved.", "success");
   activeDenialId = null;
   renderApp();
   setPage("intake");
@@ -8763,6 +8808,7 @@ function renderShiftPresets() {
 }
 
 function setShiftBuilderStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-shift-builder-status]");
   if (target) { target.textContent = message; target.dataset.status = status; }
 }
@@ -9937,10 +9983,11 @@ function updateBidWindowWithCache(force = false) {
   syncLeaveBidWindowControls(now);
 
   document.querySelectorAll("[data-bid-entry-action]").forEach((button) => {
+    button.dataset.awaitingRdoDecision = String(Boolean(pendingRequest));
     if (pendingRequest) {
       button.disabled = true;
       button.classList.add("disabled");
-      button.textContent = "Awaiting Intake Decision";
+      button.textContent = "Awaiting Intaker Decision";
       button.title = "Wait for intake to approve or deny this RDO bid before changing it.";
       return;
     }
@@ -11444,6 +11491,7 @@ function applyApprovalRules(value) {
 }
 
 function setApprovalRuleStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-approval-rule-status]");
   if (!target) return;
   target.textContent = message;
@@ -11517,6 +11565,7 @@ function applyRoundRules(value) {
 }
 
 function setRoundRuleStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-round-rule-status]");
   if (!target) return;
   target.textContent = message;
@@ -11809,6 +11858,7 @@ function renderLeaveBucketCards() {
 }
 
 function setIntakeTeamStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-intake-team-status]");
   if (!target) return;
   target.textContent = message;
@@ -12027,6 +12077,7 @@ async function removeBueFromIntakeTeam(initials) {
 }
 
 function setRosterStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-roster-status]");
   if (!target) return;
   target.textContent = message;
@@ -12076,10 +12127,12 @@ async function exportBidTimes(form) {
   const areas = Array.from(form.querySelectorAll('[name="export-area"]:checked'), input => input.value);
   if (!areas.length) {
     status.textContent = "Choose at least one area to export.";
+    showActionFeedback(status.textContent, "error");
     return;
   }
   button.disabled = true;
   status.textContent = `Preparing ${BID_YEAR} bid times…`;
+  showActionFeedback(status.textContent, "info");
   try {
     const client = supabaseClient();
     if (!client) throw new Error("Supabase is not configured on this page.");
@@ -12096,8 +12149,10 @@ async function exportBidTimes(form) {
     }
     downloadBlob(`zla-bid-times-${BID_YEAR}.xlsx`, await response.blob());
     status.textContent = `Exported ${BID_YEAR} bid times for ${areas.join(", ")}.`;
+    showActionFeedback(status.textContent, "success");
   } catch (error) {
     status.textContent = error.message || "The bid times could not be exported.";
+    showActionFeedback(status.textContent, "error");
   } finally {
     button.disabled = false;
   }
@@ -12106,7 +12161,8 @@ async function exportBidTimes(form) {
 document.addEventListener("submit", event => {
   if (!event.target.matches("[data-bid-time-export-form]")) return;
   event.preventDefault();
-  void exportBidTimes(event.target);
+  const form = event.target;
+  void runUiAction("bid-times-export", event.submitter || form.querySelector("[data-export-bid-times]"), "Exporting bid times…", () => exportBidTimes(form));
 });
 
 document.addEventListener("change", event => {
@@ -13045,6 +13101,7 @@ function renderEmailLog() {
 const BID_WINDOW_BUILDER_ROUND_COUNT = 4;
 
 function setBidWindowBuilderStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-bid-window-builder-status]");
   if (!target) return;
   target.textContent = message;
@@ -13452,6 +13509,7 @@ function renderAdminToolsPage() {
 }
 
 function setSlotCapacityStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-slot-capacity-status]");
   if (!target) return;
   target.textContent = message;
@@ -14014,6 +14072,7 @@ function selectIntakeCalendarMarkDate(date) {
 }
 
 function setIntakeCalendarMarkStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-intake-calendar-mark-status]");
   if (!target) return;
   target.textContent = message;
@@ -14171,6 +14230,7 @@ function syncScheduleFormDefaults() {
 }
 
 function setScheduleFormStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector("[data-schedule-status]");
   if (!target) return;
   target.textContent = message;
@@ -15797,6 +15857,7 @@ async function refreshIntakeQueue() {
   if (status) {
     status.hidden = false;
     status.textContent = "Loading the latest bids…";
+    showActionFeedback(status.textContent, "info");
   }
   try {
     const client = supabaseClient();
@@ -15830,8 +15891,10 @@ async function refreshIntakeQueue() {
     renderIntakeQueue();
     renderAlerts();
     if (status) status.textContent = "Queue updated.";
+    showActionFeedback("Queue updated.", "success");
   } catch (error) {
     if (status) status.textContent = `Could not refresh the queue. ${error.message || "Please try again."}`;
+    showActionFeedback(`Could not refresh the queue. ${error.message || "Please try again."}`, "error");
   } finally {
     intakeQueueRefreshPending = false;
     if (button) {
@@ -16429,6 +16492,7 @@ function downloadBiddingXlsx() {
 const bidderEditor = { record: null, person: null, results: [], validated: '', busy: false, generation: 0 };
 let bidderEditorSearchTimer;
 function bidderEditorStatus(message, kind = '') {
+  showActionFeedback(message, kind || 'info');
   const status = document.querySelector('[data-bidder-editor-status]');
   if (status) { status.textContent = message; status.dataset.kind = kind; }
 }
@@ -16651,7 +16715,7 @@ document.addEventListener('change', (event) => {
     invalidateBidderEditor();
   } else if (event.target.closest('[data-bidder-editor-form]')) invalidateBidderEditor();
 });
-document.addEventListener('click', (event) => {
+document.addEventListener('click', async (event) => {
   const manualIntakeToggle = event.target.closest('[data-manual-intake-toggle]');
   if (manualIntakeToggle) {
     const panelName = manualIntakeToggle.dataset.manualIntakeToggle;
@@ -16669,10 +16733,10 @@ document.addEventListener('click', (event) => {
     return;
   }
   const bidder = event.target.closest('[data-editor-bidder]');
-  if (bidder) void loadBidderEditor(bidder.dataset.editorBidder);
-  if (event.target.closest('[data-editor-check]')) void processBidderEditor(true);
-  if (event.target.closest('[data-editor-submit]')) void processBidderEditor(false);
-  if (event.target.closest('[data-editor-save-ghost]')) void saveBidderGhostStatus();
+  if (bidder) await runUiAction("editor-load", bidder, "Loading bidder…", () => loadBidderEditor(bidder.dataset.editorBidder));
+  if (event.target.closest('[data-editor-check]')) await runUiAction('editor-save', event.target.closest('[data-editor-check]'), 'Validating changes…', () => processBidderEditor(true));
+  if (event.target.closest('[data-editor-submit]')) await runUiAction('editor-save', event.target.closest('[data-editor-submit]'), 'Saving changes…', () => processBidderEditor(false));
+  if (event.target.closest('[data-editor-save-ghost]')) await runUiAction('editor-save', event.target.closest('[data-editor-save-ghost]'), 'Saving ghost status…', () => saveBidderGhostStatus());
 
   const intakeControl = event.target.closest('[data-intake-control]');
   if (intakeControl) {
@@ -16786,7 +16850,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-intake-refresh]")) {
-    await refreshIntakeQueue();
+    await runUiAction("intake-refresh", event.target.closest("[data-intake-refresh]"), "Refreshing bids…", refreshIntakeQueue);
     return;
   }
   // Navigation must stay available even when bidding data cannot load.
@@ -16904,7 +16968,7 @@ document.addEventListener("click", async (event) => {
   primeAlertSound();
 
   if (event.target.closest("[data-add-approval-rule]")) {
-    await saveApprovalRuleFromInput();
+    await runUiAction("approval-rule-save", document.querySelector("[data-add-approval-rule]"), "Saving rule…", saveApprovalRuleFromInput);
     return;
   }
 
@@ -16916,13 +16980,13 @@ document.addEventListener("click", async (event) => {
 
   const approvalRuleRemove = event.target.closest("[data-approval-rule-remove]");
   if (approvalRuleRemove) {
-    await removeApprovalRule(Number(approvalRuleRemove.dataset.approvalRuleRemove));
+    await runUiAction("approval-rule-save", approvalRuleRemove, "Removing rule…", () => removeApprovalRule(Number(approvalRuleRemove.dataset.approvalRuleRemove)));
     return;
   }
 
   const roundRuleSave = event.target.closest("[data-save-round-rule]");
   if (roundRuleSave) {
-    await saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule));
+    await runUiAction("round-rule-save", roundRuleSave, "Saving round…", () => saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule)));
     return;
   }
 
@@ -16933,17 +16997,17 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-save-pilot-settings]")) {
-    await savePilotSettings();
+    await runUiAction("pilot-settings", event.target.closest("[data-save-pilot-settings]"), "Saving settings…", savePilotSettings);
     return;
   }
 
   if (event.target.closest("[data-reset-pilot-data]")) {
-    await resetPilotData();
+    await runUiAction("pilot-reset", event.target.closest("[data-reset-pilot-data]"), "Resetting pilot…", resetPilotData);
     return;
   }
 
   if (event.target.closest("[data-reset-pilot-bidder]")) {
-    await resetPilotBidderRound();
+    await runUiAction("pilot-reset", event.target.closest("[data-reset-pilot-bidder]"), "Resetting bidder…", resetPilotBidderRound);
     return;
   }
 
@@ -17237,7 +17301,7 @@ document.addEventListener("click", async (event) => {
 
   const deleteIntakeScheduleButton = event.target.closest("[data-delete-intake-schedule]");
   if (deleteIntakeScheduleButton) {
-    await deleteIntakeSchedule(deleteIntakeScheduleButton.dataset.deleteIntakeSchedule);
+    await runUiAction("intake-schedule-save", deleteIntakeScheduleButton, "Deleting shift…", () => deleteIntakeSchedule(deleteIntakeScheduleButton.dataset.deleteIntakeSchedule));
     return;
   }
 
@@ -17248,7 +17312,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-add-intake-schedule]")) {
-    await addIntakeScheduleFromForm();
+    await runUiAction("intake-schedule-save", event.target.closest("[data-add-intake-schedule]"), "Saving shift…", addIntakeScheduleFromForm);
     return;
   }
 
@@ -17272,7 +17336,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   const deleteShiftPresetButton = event.target.closest("[data-delete-shift-preset]");
-  if (deleteShiftPresetButton) { await deleteShiftPreset(deleteShiftPresetButton.dataset.deleteShiftPreset); return; }
+  if (deleteShiftPresetButton) { await runUiAction("shift-save", deleteShiftPresetButton, "Deleting shift…", () => deleteShiftPreset(deleteShiftPresetButton.dataset.deleteShiftPreset)); return; }
   if (event.target.closest("[data-cancel-shift-preset]")) { resetShiftPresetEditor(); setShiftBuilderStatus(""); return; }
 
   const scheduleViewButton = event.target.closest("[data-schedule-calendar-view]");
@@ -17295,7 +17359,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-clear-intake-calendar-mark]")) {
-    await clearIntakeCalendarMark();
+    await runUiAction("calendar-mark-save", event.target.closest("[data-clear-intake-calendar-mark]"), "Clearing day type…", clearIntakeCalendarMark);
     return;
   }
 
@@ -17306,13 +17370,13 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-add-intake-team-member]")) {
-    await addSelectedBueToIntakeTeam();
+    await runUiAction("intake-team-save", event.target.closest("[data-add-intake-team-member]"), "Adding member…", addSelectedBueToIntakeTeam);
     return;
   }
 
   const removeIntakeTeamMember = event.target.closest("[data-remove-intake-team-member]");
   if (removeIntakeTeamMember) {
-    await removeBueFromIntakeTeam(removeIntakeTeamMember.dataset.removeIntakeTeamMember);
+    await runUiAction("intake-team-save", removeIntakeTeamMember, "Removing member…", () => removeBueFromIntakeTeam(removeIntakeTeamMember.dataset.removeIntakeTeamMember));
     return;
   }
 
@@ -17328,7 +17392,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-save-bid-window-schedule]")) {
-    await saveBidWindowBuilderSchedule();
+    await runUiAction("window-save", event.target.closest("[data-save-bid-window-schedule]"), "Saving schedule…", saveBidWindowBuilderSchedule);
     return;
   }
 
@@ -17339,17 +17403,17 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest("[data-export-seniority-roster]")) {
-    void exportSeniorityRoster();
+    await runUiAction("roster-export", event.target.closest("[data-export-seniority-roster]"), "Exporting roster…", exportSeniorityRoster);
     return;
   }
 
   if (event.target.closest("[data-roster-delete-selected]")) {
-    void deleteRosterEntryByIndex(document.querySelector("[data-roster-edit-index]")?.value);
+    await runUiAction("roster-save", event.target.closest("[data-roster-delete-selected]"), "Removing bidder…", () => deleteRosterEntryByIndex(document.querySelector("[data-roster-edit-index]")?.value));
     return;
   }
 
   if (event.target.closest("[data-apply-bulk-roster]")) {
-    applyBulkRosterChanges();
+    await runUiAction("roster-save", event.target.closest("[data-apply-bulk-roster]"), "Saving roster changes…", applyBulkRosterChanges);
     return;
   }
 
@@ -17361,7 +17425,7 @@ document.addEventListener("click", async (event) => {
 
   const deleteRosterButton = event.target.closest("[data-delete-roster-bue]");
   if (deleteRosterButton) {
-    void deleteRosterEntryByIndex(deleteRosterButton.dataset.deleteRosterBue);
+    await runUiAction("roster-save", deleteRosterButton, "Removing bidder…", () => deleteRosterEntryByIndex(deleteRosterButton.dataset.deleteRosterBue));
     return;
   }
 
@@ -17425,7 +17489,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeApprove = event.target.closest("[data-intake-approve]");
   if (intakeApprove) {
-    await runIntakeDecision(approveIntakeItem, intakeApprove.dataset.intakeApprove);
+    await runUiAction("intake-decision", intakeApprove, "Approving…", () => runIntakeDecision(approveIntakeItem, intakeApprove.dataset.intakeApprove));
     return;
   }
 
@@ -17441,7 +17505,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeDenyConfirm = event.target.closest("[data-intake-deny-confirm]");
   if (intakeDenyConfirm) {
-    await runIntakeDecision(denyIntakeItem, intakeDenyConfirm.dataset.intakeDenyConfirm);
+    await runUiAction("intake-decision", intakeDenyConfirm, "Denying…", () => runIntakeDecision(denyIntakeItem, intakeDenyConfirm.dataset.intakeDenyConfirm));
     return;
   }
 
@@ -17464,7 +17528,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
-    await saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride);
+    await runUiAction("intake-edit", intakeSaveOverride, "Saving changes…", () => saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride));
     return;
   }
 
@@ -17476,7 +17540,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeRemoveLeave = event.target.closest("[data-intake-remove-leave]");
   if (intakeRemoveLeave) {
-    await removeApprovedLeaveBid(intakeRemoveLeave.dataset.intakeRemoveLeave);
+    await runUiAction("intake-edit", intakeRemoveLeave, "Removing leave…", () => removeApprovedLeaveBid(intakeRemoveLeave.dataset.intakeRemoveLeave));
     return;
   }
 
@@ -17657,7 +17721,7 @@ document.addEventListener("keydown", async (event) => {
 
   if (event.key === "Enter" && event.target.closest("[data-approval-rule-input]")) {
     event.preventDefault();
-    await saveApprovalRuleFromInput();
+    await runUiAction("approval-rule-save", document.querySelector("[data-add-approval-rule]"), "Saving rule…", saveApprovalRuleFromInput);
     return;
   }
 
@@ -17682,7 +17746,7 @@ document.addEventListener("keydown", async (event) => {
   }
 });
 
-document.querySelector("[data-save-active-bid-year]")?.addEventListener("click", saveActiveBidYear);
+document.querySelector("[data-save-active-bid-year]")?.addEventListener("click", event => { void runUiAction("active-year-save", event.currentTarget, "Saving year…", saveActiveBidYear); });
 
 document.querySelector("[data-bid-year-select]")?.addEventListener("change", (event) => {
   updateSelectedBidYear(event.target.value);
@@ -17735,11 +17799,11 @@ document.querySelector("[data-account-password-form]")?.addEventListener("submit
   updateSupabaseAccountPassword();
 });
 
-document.querySelector("[data-roster-form]")?.addEventListener("submit", saveRosterEntry);
-document.querySelector("[data-slot-capacity-form]")?.addEventListener("submit", saveSlotCapacity);
-document.querySelector("[data-bid-window-builder-form]")?.addEventListener("submit", buildBidWindowPreviewFromForm);
-document.querySelector("[data-shift-builder-form]")?.addEventListener("submit", saveShiftPreset);
-document.querySelector("[data-intake-calendar-mark-form]")?.addEventListener("submit", saveIntakeCalendarMark);
+bindUiActionForm("[data-roster-form]", "roster-save", "Saving roster…", saveRosterEntry);
+bindUiActionForm("[data-slot-capacity-form]", "capacity-save", "Saving capacity…", saveSlotCapacity);
+bindUiActionForm("[data-bid-window-builder-form]", "window-preview", "Building preview…", buildBidWindowPreviewFromForm);
+bindUiActionForm("[data-shift-builder-form]", "shift-save", "Saving shift…", saveShiftPreset);
+bindUiActionForm("[data-intake-calendar-mark-form]", "calendar-mark-save", "Saving day type…", saveIntakeCalendarMark);
 
 document.addEventListener("dragstart", startRosterRowDrag);
 document.addEventListener("dragstart", startApprovalRuleDrag);
@@ -17846,7 +17910,10 @@ document.addEventListener("change", async (event) => {
     return;
   }
   if (event.target.matches("[data-pilot-round-toggle]")) {
-    await setPilotRound(Number(event.target.dataset.pilotRoundToggle), event.target.checked);
+    const toggle = event.target;
+    const round = Number(toggle.dataset.pilotRoundToggle);
+    const enabled = toggle.checked;
+    await runUiAction("pilot-round-save", toggle, "Updating pilot round…", () => setPilotRound(round, enabled));
     return;
   }
   if (event.target.matches("[data-pilot-round-picker]")) {
@@ -18045,7 +18112,8 @@ setInterval(() => {
 }, 10000);
 
 
-function backupStatus(message) {
+function backupStatus(message, status = "info") {
+  showActionFeedback(message, status);
   const target = document.querySelector('[data-backup-status]');
   if (target) target.textContent = message;
 }
@@ -18099,12 +18167,12 @@ async function performBiddingBackupAction(action) {
         interval_minutes: interval, retention_days: retention, timezone: 'America/Los_Angeles',
       });
       if (result.error) throw result.error;
-      backupStatus('Backup schedule saved.');
+      backupStatus('Backup schedule saved.', 'success');
     } else if (action === 'now') {
       backupStatus('Backing up now… Keep this page open until the backup finishes.');
       const result = await client.rpc('backup_bidding_now');
       if (result.error) throw result.error;
-      backupStatus('Backup completed and saved.');
+      backupStatus('Backup completed and saved.', 'success');
     } else {
       backupStatus('Preparing backup download…');
       const result = await client.from('bidding_backups').select('id,created_at,payload').order('id', { ascending: false }).limit(1);
@@ -18117,9 +18185,9 @@ async function performBiddingBackupAction(action) {
       link.download = `zla-bidding-backup-${backup.id}.json`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      backupStatus('Backup downloaded.');
+      backupStatus('Backup downloaded.', 'success');
     }
-  } catch (error) { backupStatus(error.message || 'The backup operation failed.'); }
+  } catch (error) { backupStatus(error.message || 'The backup operation failed.', 'error'); }
   finally {
     biddingBackupBusy = false;
     buttons.forEach(button => { button.disabled = false; });
@@ -18129,9 +18197,10 @@ async function performBiddingBackupAction(action) {
 document.addEventListener('submit', event => {
   if (!event.target.matches('[data-backup-form]')) return;
   event.preventDefault();
-  void performBiddingBackupAction('save');
+  const form = event.target;
+  void runUiAction('backup', event.submitter || form.querySelector('button[type=submit]'), 'Saving schedule…', () => performBiddingBackupAction('save'));
 });
 document.addEventListener('click', event => {
-  if (event.target.closest('[data-backup-now]')) void performBiddingBackupAction('now');
-  if (event.target.closest('[data-backup-download]')) void performBiddingBackupAction('download');
+  if (event.target.closest('[data-backup-now]')) void runUiAction('backup', event.target.closest('[data-backup-now]'), 'Backing up…', () => performBiddingBackupAction('now'));
+  if (event.target.closest('[data-backup-download]')) void runUiAction('backup', event.target.closest('[data-backup-download]'), 'Downloading…', () => performBiddingBackupAction('download'));
 });

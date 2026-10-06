@@ -12278,26 +12278,54 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
   color: #7b8494;
 }
 
-/* Feedback stays visible while the user works in long forms and calendars. */
+/* Feedback follows the light workspace cards and NATCA teal accents. */
 .action-feedback {
+  --feedback-accent: #3d888d;
   position: fixed;
-  bottom: max(24px, env(safe-area-inset-bottom));
+  bottom: calc(24px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
   width: max-content;
-  max-width: min(620px, calc(100vw - 32px));
-  padding: 14px 20px;
-  border: 1px solid #64748b;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 16px 20px;
+  border: 1px solid #dbe4ef;
+  border-inline-start: 4px solid var(--feedback-accent);
   border-radius: 12px;
-  background: #172337;
-  color: #fff;
-  box-shadow: 0 8px 32px #0004;
-  font-size: 14px;
-  line-height: 1.5;
+  background: #ffffff;
+  color: #172033;
+  box-shadow: 0 8px 28px rgba(21, 45, 59, 0.14);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 .action-feedback[hidden] { display: none; }
-.action-feedback[data-status="success"] { background: #14532d; border-color: #4ade80; }
-.action-feedback[data-status="error"] { background: #7f1d1d; border-color: #fca5a5; }
+.action-feedback[data-status="success"] { --feedback-accent: #1f6f4a; background: #f2faf5; }
+.action-feedback[data-status="error"] { --feedback-accent: #9d2e2e; background: #fff5f3; }
 button[aria-busy="true"] { cursor: progress; opacity: .75; }
+
+@media (max-width: 640px) {
+  .action-feedback {
+    width: calc(100% - 24px);
+    max-width: 560px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 13px 16px;
+    border-radius: 10px;
+    font-size: 0.8125rem;
+  }
+  body:has(.app-shell:not([hidden])) .action-feedback {
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Keep the RDO decision state legible after the saving indicator clears. */
+.app-main [data-select-line][data-awaiting-rdo-decision="true"] {
+  color: #64748b;
+  border-color: #cbd5e1;
+  background: #e5e7eb;
+  opacity: 1;
+  cursor: not-allowed;
+}
