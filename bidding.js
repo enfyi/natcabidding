@@ -6007,7 +6007,7 @@ function openPublicDateSheet(button) {
       return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
         ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
     }).join("")}
-    ${(details.glBids || []).length ? `<section class="gl-bid-detail"><h3>GL Bids · no slots used</h3>${details.glBids.map((bid) => `<div class="slot-row gl-bid-row"><span>GL Bid</span><b>${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b></div>`).join("")}</section>` : ""}
+    ${(details.glBids || []).length ? `<section class="gl-bid-detail"><h3>GL Bids · no slots used</h3>${details.glBids.map((bid) => `<div class="slot-row gl-bid-row"><span>GL Bid</span><b aria-label="${escapeHtml(`${bid.initials} · GL Bid${bid.status ? ` · ${bid.status}` : ""}`)}">${escapeHtml(bid.initials)}</b></div>`).join("")}</section>` : ""}
     ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
   sheet.showModal();
 }
@@ -6606,7 +6606,7 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
         ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
           <span class="tooltip-slot-row gl-bid-row filled">
             <span class="tooltip-slot-name">GL Bid</span>
-            <b class="tooltip-slot-value">${escapeHtml(bid.initials)}${bid.status ? ` · ${escapeHtml(bid.status)}` : ""}</b>
+            <b class="tooltip-slot-value" aria-label="${escapeHtml(`${bid.initials} · GL Bid${bid.status ? ` · ${bid.status}` : ""}`)}">${escapeHtml(bid.initials)}</b>
           </span>`).join("")}` : ""}
       </span>
     </span>
