@@ -15004,12 +15004,12 @@ function renderOverrideEditor(item) {
       </label>
       <label>Flex
         <select data-override-flex>
-          ${["Yes", "No"].map((value) => `<option ${value === item.flex ? "selected" : ""}>${value}</option>`).join("")}
+          ${["Yes", "No"].map((value) => `<option ${value === rdoBidPreferenceLabel(item.flex) ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <label>AWS
         <select data-override-aws ${developmentalBidder ? "disabled" : ""}>
-          ${developmentalBidder ? '<option value="No">No — DEV does not work AWS</option>' : ["Yes", "No"].map((value) => `<option ${value === item.aws ? "selected" : ""}>${value}</option>`).join("")}
+          ${developmentalBidder ? '<option value="No">No — DEV does not work AWS</option>' : ["Yes", "No"].map((value) => `<option ${value === rdoBidPreferenceLabel(item.aws) ? "selected" : ""}>${value}</option>`).join("")}
         </select>
       </label>
       <label>Mid

@@ -522,7 +522,6 @@ begin
   )) then raise exception 'Active intake or administrator access is required.'; end if;
   if target_id is not null and not exists (
     select 1 from public.bidders b where b.id=target_id and b.active
-      and (actor.role='admin' or b.area_id=actor.area_id)
   ) then raise exception 'This bidder is outside your authorized area or is inactive.'; end if;
   return actor.id;
 end $$;
@@ -577,7 +576,7 @@ begin
         public.is_ghost_bidder(year_id,b.id) is_ghost_bidder
       from public.bidders b join public.areas a on a.id=b.area_id
       join public.bidders actor on actor.id=actor_id
-      where b.active and b.bid_role <> 'ADM' and (actor.role='admin' or b.area_id=actor.area_id)
+      where b.active and b.bid_role <> 'ADM'
         and (b.first_name || ' ' || b.last_name || ' ' || coalesce(b.initials,'')) ilike '%' || trim(coalesce(search_text,'')) || '%'
       order by b.last_name,b.first_name,b.id limit 50
     ) x;
