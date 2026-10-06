@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
 import type { BidTimeImportPreview, BidTimeImportRow } from '@/lib/bid-time-import-types'
@@ -266,7 +267,7 @@ export function BidTimeImporter() {
         </button>
       </section>
 
-      {status ? <p className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} role="status">{status}</p> : null}
+      <ActionStatus message={status} busy={busy} className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} />
       {issues.length ? (
         <section className="import-issues" aria-label="Workbook errors">
           <h2>Fix these workbook rows</h2>
