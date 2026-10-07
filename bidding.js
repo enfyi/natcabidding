@@ -4439,6 +4439,7 @@ function bidRecipientEmail(item) {
 
 function bidTypeLabel(item) {
   if (item?.type === "RDO Line" && item.ghostBid) return "Ghost Line";
+  if (item?.type === "RDO Line" && item.bidAs === "GL") return "GL RDO";
   if (item?.type === "Leave" && item.ghostBid) return "Ghost Leave";
   if (item?.type === "Leave" && isGlLeaveItem(item)) return "GL Bid";
   return item?.type || "Bid";
@@ -14524,6 +14525,7 @@ function renderIntakeQueueWithCache() {
             <span>Seniority #${item.seniority}</span>
             <span>Bid as ${item.bidAs}</span>
             ${item.ghostBid ? `<span class="ghost-bid-badge">Does not count against area capacity</span>` : ""}
+            ${item.type === "RDO Line" && item.bidAs === "GL" && !item.ghostBid ? `<span class="gl-bid-badge">GL RDO · visible, no line taken</span>` : ""}
             ${item.type === "Leave" && isGlLeaveItem(item) ? `<span class="gl-bid-badge">GL Bid · visible, no slot used</span>` : ""}
             <span>${escapeHtml(intakeSubmissionLabel(item))}</span>
           </div>
