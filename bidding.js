@@ -9414,20 +9414,31 @@ function renderPublicRdoTable(area) {
   `;
 }
 
+function bidTimeOpenRound(rank, area, roundCount, date = new Date()) {
+  for (let round = 1; round <= roundCount; round += 1) {
+    const window = bidWindowForRankRound(rank, round, area);
+    if (window && date >= window.start && date < window.end) return round;
+  }
+  return null;
+}
+
 function bidTimeCurrentBidderDot(person) {
-  const label = person.openRound ? `Round ${person.openRound} bid window open` : "";
-  return `<i class="open-now bid-time-current-dot" data-bid-time-current-dot data-bidder-rank="${person.rank}" data-bidder-area="${escapeHtml(person.area)}" role="img" aria-label="${label}" title="${label}"${person.openRound ? "" : " hidden"}></i>`;
+  const roundCount = person.rounds.length;
+  const round = bidTimeOpenRound(person.rank, person.area, roundCount);
+  const label = round ? `Round ${round} bid window open` : "";
+  return `<i class="open-now bid-time-current-dot" data-bid-time-current-dot data-bidder-rank="${person.rank}" data-bidder-area="${escapeHtml(person.area)}" data-bidder-round-count="${roundCount}" role="img" aria-label="${label}" title="${label}"${round ? "" : " hidden"}></i>`;
 }
 
 function syncBidTimeCurrentBidderDots(date = new Date()) {
-  const states = new Map();
+  const rounds = new Map();
   document.querySelectorAll("[data-bid-time-current-dot]").forEach((dot) => {
-    const area = dot.dataset.bidderArea;
-    if (!states.has(area)) states.set(area, areaBidRoundState(date, area));
-    const state = states.get(area);
-    const isOpen = state?.phase === "open" && state.activeRank === Number(dot.dataset.bidderRank);
-    const label = isOpen ? `Round ${state.round} bid window open` : "";
-    dot.hidden = !isOpen;
+    const { bidderArea, bidderRank, bidderRoundCount } = dot.dataset;
+    const key = `${bidderArea}:${bidderRank}:${bidderRoundCount}`;
+    if (!rounds.has(key)) rounds.set(key, bidTimeOpenRound(Number(bidderRank), bidderArea, Number(bidderRoundCount), date));
+    const round = rounds.get(key);
+    const label = round ? `Round ${round} bid window open` : "";
+    dot.hidden = !round;
+    dot.parentElement.classList.toggle("current-bid-time-name", Boolean(round));
     if (dot.getAttribute("aria-label") !== label) {
       dot.setAttribute("aria-label", label);
       dot.title = label;

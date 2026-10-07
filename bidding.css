@@ -12340,3 +12340,22 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .bid-time-current-dot[hidden] {
   display: none;
 }
+
+/* Mark the name as well as the dot so the open window is easy to spot. */
+.current-bid-time-name {
+  background: #d9f99d !important;
+  color: #14532d !important;
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px #d9f99d;
+}
+
+.current-bid-time-name strong {
+  color: #14532d !important;
+}
+
+.bid-time-current-dot {
+  width: 13px;
+  height: 13px;
+  background: #65d52e;
+  box-shadow: 0 0 0 3px rgba(101, 213, 46, .2);
+}
