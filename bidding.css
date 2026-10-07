@@ -11935,3 +11935,14 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .backup-fields label { display: grid; gap: 6px; }
 .backup-fields input { width: 100%; min-width: 0; }
 .backup-form { margin-bottom: 16px; }
+
+/* Shared current bid-window indicator for public and dashboard bid times. */
+.bid-time-current-dot {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.bid-time-current-dot[hidden] {
+  display: none;
+}

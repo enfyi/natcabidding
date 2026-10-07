@@ -8479,6 +8479,27 @@ function renderPublicRdoTable(area) {
   `;
 }
 
+function bidTimeCurrentBidderDot(person) {
+  const label = person.openRound ? `Round ${person.openRound} bid window open` : "";
+  return `<i class="open-now bid-time-current-dot" data-bid-time-current-dot data-bidder-rank="${person.rank}" data-bidder-area="${escapeHtml(person.area)}" role="img" aria-label="${label}" title="${label}"${person.openRound ? "" : " hidden"}></i>`;
+}
+
+function syncBidTimeCurrentBidderDots(date = new Date()) {
+  const states = new Map();
+  document.querySelectorAll("[data-bid-time-current-dot]").forEach((dot) => {
+    const area = dot.dataset.bidderArea;
+    if (!states.has(area)) states.set(area, areaBidRoundState(date, area));
+    const state = states.get(area);
+    const isOpen = state?.phase === "open" && state.activeRank === Number(dot.dataset.bidderRank);
+    const label = isOpen ? `Round ${state.round} bid window open` : "";
+    dot.hidden = !isOpen;
+    if (dot.getAttribute("aria-label") !== label) {
+      dot.setAttribute("aria-label", label);
+      dot.title = label;
+    }
+  });
+}
+
 function renderPublicBidTimeTable(area) {
   const showBidderNames = Boolean(supabaseState.authUserId);
 
@@ -8495,7 +8516,7 @@ function renderPublicBidTimeTable(area) {
       <div class="mobile-bid-time-cards">
         ${seniority.map((person) => `
           <article class="mobile-bid-time-card" data-public-bid-time-card>
-            <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
+            <h3 data-bidder-name><span>${person.rank}.${showBidderNames ? ` ${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}` : ""} ${bidTimeCurrentBidderDot(person)}</span><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></h3>
             <p>${escapeHtml(person.initials)}</p>
             <dl>${person.rounds.map((round, index) => `<div><dt>Round ${index + 1}</dt><dd>${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</dd></div>`).join("")}</dl>
           </article>
@@ -8527,8 +8548,8 @@ function renderPublicBidTimeTable(area) {
             ${seniority.map((person) => `
               <tr data-public-bid-time-row>
                 <td>${person.rank}</td>
-                ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)}</td>` : ""}
-                <td class="bid-time-initials">${escapeHtml(person.initials)}</td>
+                ${showBidderNames ? `<td class="bid-time-name">${escapeHtml(person.firstName)} ${escapeHtml(person.lastName)} ${bidTimeCurrentBidderDot(person)}</td>` : ""}
+                <td class="bid-time-initials">${escapeHtml(person.initials)}${showBidderNames ? "" : ` ${bidTimeCurrentBidderDot(person)}`}</td>
                 <td><span class="bid-as ${bidAsClass(person.bidAs)}">${escapeHtml(person.bidAs)}</span></td>
                 ${person.rounds.map((round) => `<td class="bid-time-round">${escapeHtml(publicBidTimeLabel(round) || "Not scheduled")}</td>`).join("")}
               </tr>
@@ -8857,6 +8878,7 @@ function updateBidWindow(force = false) {
 function updateBidWindowWithCache(force = false) {
   const now = new Date();
   syncIntakeBidderWindowStatus(now);
+  syncBidTimeCurrentBidderDots(now);
   const roundState = areaBidRoundState(now);
   const isValidationPeriod = !pilotState.database && roundState?.phase === "validation";
   const personalBidWindow = currentUserBidWindow(now);
@@ -13061,7 +13083,7 @@ function seniorityCardMarkup(people = seniority) {
         </div>
         <div class="seniority-card-name">
           <strong>${isCurrentUser ? `${person.firstName} ${person.lastName} · ${person.initials} · You` : `${person.firstName} ${person.lastName}`}</strong>
-          ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+          ${bidTimeCurrentBidderDot(person)}
         </div>
         <div class="seniority-card-meta">
           <small class="bid-as ${bidAsClass(person.bidAs)}">${person.bidAs}</small>
@@ -13113,7 +13135,7 @@ function seniorityTableMarkup(people = seniority) {
                 <div class="seniority-table-person">
                   <span class="seniority-table-name">
                     ${escapeHtml(`${person.firstName} ${person.lastName}`)}${isCurrentUser ? " · You" : ""}
-                    ${isBiddingNow ? `<i class="open-now" title="Round ${person.openRound} bid window open"></i>` : ""}
+                    ${bidTimeCurrentBidderDot(person)}
                   </span>
                   ${isCurrentUser ? `<button class="secondary-action calendar-download" type="button" data-download-bid-windows="${person.rank}">Download .ics</button>` : ""}
                 </div>
