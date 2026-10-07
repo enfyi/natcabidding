@@ -1,22 +1,26 @@
+import DashboardFrame from './dashboard-frame'
 import { isBiddingLandingPage } from '@/lib/auth-landing'
 
 type DashboardPageProps = {
-  searchParams: Promise<{ page?: string }>
+  searchParams: Promise<{ page?: string; area?: string; section?: string; bidYear?: string }>
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const { page } = await searchParams
+  const { page, area, section, bidYear } = await searchParams
+  const publicParams = new URLSearchParams({ page: 'public' })
+  if (area) publicParams.set('area', area)
+  if (section) publicParams.set('section', section)
   const frameSrc = isBiddingLandingPage(page)
     ? `/bidding.html?page=${page}`
-    : '/bidding.html?member=1'
+    : page === 'public'
+      ? `/bidding.html?${publicParams}`
+      : '/bidding.html?member=1'
+
+  const selectedYear = typeof bidYear === 'string' && /^\d{4}$/.test(bidYear) ? `&bidYear=${bidYear}` : ''
 
   return (
     <main className="dashboard-app-shell">
-      <iframe
-        className="dashboard-app-frame public-dashboard-frame"
-        src={frameSrc}
-        title="ZLA bidding dashboard"
-      />
+      <DashboardFrame src={`${frameSrc}${selectedYear}`} />
     </main>
   )
 }

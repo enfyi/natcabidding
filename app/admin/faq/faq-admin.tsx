@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { getSupabaseEnv } from '@/lib/env'
@@ -725,7 +726,7 @@ export function FaqAdmin() {
             <span className="faq-field-label">Answer</span>
             <HtmlEditor value={answer} onChange={setAnswer} placeholder="Write the answer exactly as it should appear." ariaLabel="New FAQ answer" />
           </div>
-          <button className="button primary" type="button" disabled={busy} onClick={() => void addEntry()}>Publish FAQ</button>
+          <button className="button primary" type="button" disabled={busy} aria-busy={busy} onClick={() => void addEntry()}>{busy ? 'Working…' : 'Publish FAQ'}</button>
         </section>
 
         <section className="import-card faq-editor-card" aria-labelledby="mou-add-heading">
@@ -751,11 +752,11 @@ export function FaqAdmin() {
             <input data-mou-file-input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(event) => setDocFile(event.target.files?.[0] || null)} />
             <small>{docFile ? `${docFile.name} · ${(docFile.size / 1024).toFixed(1)} KB` : 'Choose the MOU file to upload.'}</small>
           </label>
-          <button className="button primary" type="button" disabled={busy} onClick={() => void addDocument()}>Upload MOU</button>
+          <button className="button primary" type="button" disabled={busy} aria-busy={busy} onClick={() => void addDocument()}>{busy ? 'Working…' : 'Upload MOU'}</button>
         </section>
       </div>
 
-      {status ? <p className="import-status" role="status">{status}</p> : null}
+      <ActionStatus message={status} busy={busy} className="import-status" />
 
       <section className="import-card faq-list-card" aria-labelledby="faq-list-heading">
         <div className="import-section-heading">

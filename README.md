@@ -86,6 +86,30 @@ environment variables at request time. Set `NEXT_PUBLIC_APP_ENVIRONMENT=pilot`
 on an isolated pilot deployment to show the permanent practice-data banner.
 Never point a pilot deployment at the production Supabase project.
 
+## Active and selected bidding years
+
+Apply `database/active_bid_year.sql` after the existing schema and authorization
+helpers. It restores `read_bid_year_settings`, provides the year catalog and an
+admin-only active-year setter, and makes inactive RDO and leave records view-only
+for bidders. The installer selects the existing year only when there is exactly
+one; installations with multiple years require an explicit initial admin choice.
+The public read functions intentionally expose only year metadata and the
+existing window settings. The settings table itself is inaccessible to clients.
+
+In **Bidding Setup → Active Bid Year**, a system administrator can activate an
+existing open year. The member **Bid Year** dropdown independently chooses which
+year to view. Changing that view reloads the page and clears unsent selections;
+it never changes the administrator's active year. Reads and submissions use the
+selected year explicitly. New bids require the active year and the existing bid
+window rules. Administrators can maintain archived records, but cannot insert
+new RDO or leave bids into an inactive year. No roster or schedule is copied.
+
+Run `node scripts/test-active-bid-year.mjs` for client checks and
+`scripts/test-active-bid-year.sql` through an administrative database connection
+for permission and stale-session checks. The SQL test rolls back all test data.
+Install this upgrade independently in production and in the separate pilot
+database. Each environment keeps its own active-year setting and bidding rules.
+
 ## Isolated bidding pilot
 
 Use a separate Supabase project and a separate Vercel deployment for a
@@ -145,7 +169,11 @@ Log, but cannot call the protected email endpoint.
 live `bid_windows` rows:
 
 - 15 minutes before a bidder's window opens.
-- 30 minutes before a bidder's window closes.
+- 30 minutes before a bidder's window closes, unless they already have approved
+  leave for that bid year and round (also checked for queued retries).
+
+For existing installations, apply `database/skip_approved_leave_reminders.sql`
+to update this rule.
 
 Supabase Cron invokes `/api/cron/bid-window-reminders` once per minute. Store the
 same random value (at least 32 characters) as `BID_REMINDER_CRON_SECRET` in Vercel
@@ -160,3 +188,24 @@ reminder only once after successful delivery.
 the verified claim check before rendering. Add another private route by including
 it in the protected-route predicate in `lib/supabase/proxy.ts` and validating the
 user again in server-side data access or Server Actions.
+
+## Reference loading diagnostics
+
+FAQ and MOU reads run independently of the bid-year lookup. RDO and calendar
+reads require a verified year and area mapping, but do not wait for the roster
+or optional intake data. Bid times require both roster and window reads.
+Temporary network errors, timeouts, HTTP 408/429/5xx responses, and PostgreSQL
+statement timeouts receive up to three attempts, with staggered backoff. Each
+attempt has a 15-second limit. Permission and schema errors are not retried.
+This policy applies only to reference reads, never bid submissions or mutations.
+
+Browser console warnings identify the failed section, HTTP status, error code,
+attempt, duration, and time. The latest 50 failures are also available through
+`window.NATCA_REFERENCE_LOAD_DIAGNOSTICS`. These records exclude response bodies,
+credentials, URLs, and bidder details; they remain in memory in that browser tab
+and are not sent to a central logging service.
+
+Run `pnpm test:reference-loading` to verify retry limits, timeout recovery,
+permission failures, section independence, and 100 simulated concurrent readers.
+The simulated concurrency check does not measure production server capacity;
+a separate approved staging load test is needed for that.
