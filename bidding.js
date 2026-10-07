@@ -8046,10 +8046,14 @@ async function attachLeaveRequestWeekBuckets(client, rows = []) {
     .map((row) => row.id);
   const startsByRequest = new Map();
 
+  const batches = [];
   for (let index = 0; index < requestIds.length; index += 100) {
-    const { data, error } = await client.from("leave_request_week_buckets")
+    batches.push(client.from("leave_request_week_buckets")
       .select("leave_request_id,bucket_start_date")
-      .in("leave_request_id", requestIds.slice(index, index + 100));
+      .in("leave_request_id", requestIds.slice(index, index + 100)));
+  }
+  const results = await Promise.all(batches);
+  for (const { data, error } of results) {
     if (error) {
       console.warn(`Round 1 week buckets could not be loaded: ${error.message || error}`);
       return rows;
@@ -8599,8 +8603,6 @@ async function loadSupabaseReferenceData() {
       approvalRulesResult,
       pilotSettingsResult,
       bidWindowsResult,
-      faqEntriesResult,
-      mouDocumentsResult,
       _helpThreadsLoaded,
       _rosterLoaded,
     ] = await Promise.all([
@@ -8641,8 +8643,6 @@ async function loadSupabaseReferenceData() {
         refreshPublicReferenceSection();
         return result;
       }),
-      faqReads.then((results) => results[0]),
-      faqReads.then((results) => results[1]),
       readReferenceData("help threads", () => loadSupabaseHelpThreads().then(() => ({ data: null, error: null }))),
       rosterReady,
     ]);
@@ -8664,8 +8664,6 @@ async function loadSupabaseReferenceData() {
       isMissingSupabaseRoutine(approvalRulesResult.error) ? null : supabaseLoadWarning("approval rules", approvalRulesResult),
       isMissingSupabaseRoutine(pilotSettingsResult.error) ? null : supabaseLoadWarning("pilot settings", pilotSettingsResult),
       isMissingSupabaseRoutine(bidWindowsResult.error) ? null : supabaseLoadWarning("bid windows", bidWindowsResult),
-      isMissingSupabaseColumn(faqEntriesResult.error) ? null : supabaseLoadWarning("FAQ entries", faqEntriesResult),
-      isMissingSupabaseColumn(mouDocumentsResult.error) ? null : supabaseLoadWarning("MOU documents", mouDocumentsResult),
     ].filter(Boolean);
 
     supabaseRows(holidaysResult).forEach((holiday) => {
@@ -8705,11 +8703,9 @@ async function loadSupabaseReferenceData() {
       applyPilotSettings(Array.isArray(pilotSettingsResult.data) ? pilotSettingsResult.data[0] : pilotSettingsResult.data);
       await refreshPilotRounds();
     }
-    if (!faqEntriesResult.error) publicFaqContent.entries = faqEntriesResult.data || [];
-    if (!mouDocumentsResult.error) publicFaqContent.documents = mouDocumentsResult.data || [];
     supabaseState.connected = true;
     supabaseState.loadedAt = new Date();
-    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${rdoSubmissionRows.length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave-slot days, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${supabaseRows(faqEntriesResult).length} FAQ entries, and ${supabaseRows(mouDocumentsResult).length} MOU documents.`;
+    supabaseState.message = `Connected to Supabase. Loaded ${(areasResult.data || []).length} areas, ${(rosterResult.data || []).length} bidders, ${supabaseRows(bidWindowsResult).length} bid windows, ${supabaseRows(holidaysResult).length} holidays, ${supabaseRows(rdoLinesResult).length} RDO lines, ${rdoSubmissionRows.length} RDO submissions, ${supabaseRows(leaveSlotsResult).length} leave-slot days, ${supabaseRows(leaveRequestsResult).length} leave requests, ${supabaseRows(intakeSchedulesResult).length} intake schedules, ${publicFaqContent.entries.length} FAQ entries, and ${publicFaqContent.documents.length} MOU documents.`;
     if (loadWarnings.length) {
       supabaseState.message += ` Some optional data could not load: ${loadWarnings.join("; ")}`;
       console.warn(supabaseState.message);
@@ -8722,7 +8718,8 @@ async function loadSupabaseReferenceData() {
     supabaseState.message = `Supabase data unavailable. No prototype fallback was loaded. ${error.message || error}`;
     console.warn(supabaseState.message);
   } finally {
-    await faqReads;
+    // FAQ content updates independently and must not delay member startup.
+    void faqReads;
     supabaseState.loading = false;
     supabaseState.referenceDataLoaded = true;
   }
@@ -18153,6 +18150,8 @@ initializeMobilePublicNavigation();
 resetSupabaseBackedData();
 renderPublicPage();
 initializeSupabaseAuth().then(async (restoredSession) => {
+  // Session restoration already renders the requested member page.
+  if (restoredSession) return;
   if (!restoredSession) {
     if (window.NATCA_SUPABASE_CONFIG?.environment === "pilot") await loadPublicPilotCalendar();
     else await loadSupabaseReferenceData();
