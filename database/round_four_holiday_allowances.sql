@@ -54,10 +54,12 @@ as $function$
     from eligible_bidders bidder
   ),
   usage as (
-    select coalesce(sum(request.charged_days), 0)::integer as used_days
+    select count(*)::integer as used_days
     from public.leave_requests request
     join eligible_bidders bidder on bidder.id = request.bidder_id
-    where request.bid_year_id = year_id
+    join public.leave_request_dates request_date on request_date.leave_request_id = request.id
+    where not request_date.is_rdo
+      and request.bid_year_id = year_id
       and request.status in ('pending', 'approved')
       and not request.is_ghost_bid
   )
