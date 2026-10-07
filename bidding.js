@@ -1831,6 +1831,7 @@ let intakeEditorReturnFocus = null;
 let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
+let intakeSearchEmployeeInitials = "";
 const intakeBidderSelection = {
   initials: "",
   profileId: "",
@@ -13893,7 +13894,9 @@ function intakeSearchText(item) {
 
 function intakeItemMatchesFilters(item) {
   const query = intakeSearchQuery.trim().toLowerCase();
-  if (query && !intakeSearchText(item).includes(query)) return false;
+  if (intakeSearchEmployeeInitials) {
+    if (item.initials !== intakeSearchEmployeeInitials) return false;
+  } else if (query && !intakeSearchText(item).includes(query)) return false;
   if (intakeFilters.status !== "all" && item.status !== intakeFilters.status) return false;
   if (intakeFilters.type !== "all" && item.type !== intakeFilters.type) return false;
   if (intakeFilters.area !== "all" && item.area !== intakeFilters.area) return false;
@@ -13914,7 +13917,31 @@ function compareIntakeItems(left, right) {
   return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
 }
 
+function renderIntakeEmployeeSearch() {
+  const input = document.querySelector("[data-intake-search]");
+  const results = document.querySelector("[data-intake-employee-results]");
+  const status = document.querySelector("[data-intake-employee-status]");
+  if (!input || !results || !status) return;
+  const query = intakeSearchQuery.trim();
+  const selected = bueByInitials(intakeSearchEmployeeInitials);
+  const matches = query && !selected
+    ? bueRoster().filter((person) => manualBidControllerMatches(person, query))
+    : [];
+  results.innerHTML = matches.map((person) => `
+    <button type="button" data-intake-employee-result="${escapeHtml(person.initials)}">
+      <strong>${escapeHtml(personDisplayName(person))} · ${escapeHtml(person.initials)}</strong>
+      <span>${escapeHtml(person.area)} · Seniority #${escapeHtml(person.rank)} · ${escapeHtml(person.bidAs || "CPC")}</span>
+    </button>
+  `).join("");
+  results.hidden = matches.length === 0;
+  input.setAttribute("aria-expanded", String(!results.hidden));
+  status.textContent = selected
+    ? `Selected ${personDisplayName(selected)} (${selected.initials}). Showing their bids with the current filters.`
+    : matches.length ? `${matches.length} ${matches.length === 1 ? "employee" : "employees"}. Select an employee to view their information.` : "";
+}
+
 function syncIntakeSearchControls() {
+  renderIntakeEmployeeSearch();
   const sort = document.querySelector("[data-intake-sort]");
   if (sort) sort.value = intakeSort;
   const search = document.querySelector("[data-intake-search]");
@@ -14593,6 +14620,7 @@ function openIntakeItemFromAlert(itemId) {
   activeOverrideId = null;
   activeDenialId = null;
   intakeSearchQuery = "";
+  intakeSearchEmployeeInitials = "";
   Object.keys(intakeFilters).forEach((filterName) => { intakeFilters[filterName] = "all"; });
   selectIntakeBidder(groupedItem.initials, groupedItem.bidderId);
   setPage("intake");
@@ -15346,6 +15374,18 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-intake-bidder-detail-close]")) {
     intakeBidderSelection.detail = "";
     renderIntakeBidderSummary();
+    return;
+  }
+
+  const intakeEmployeeResult = event.target.closest("[data-intake-employee-result]");
+  if (intakeEmployeeResult) {
+    const person = bueByInitials(intakeEmployeeResult.dataset.intakeEmployeeResult);
+    if (!person) return;
+    intakeSearchEmployeeInitials = person.initials;
+    intakeSearchQuery = personDisplayName(person);
+    selectIntakeBidder(person.initials, person.profileId);
+    renderIntakeQueue();
+    document.querySelector("[data-intake-search]")?.focus();
     return;
   }
 
@@ -16294,6 +16334,7 @@ document.addEventListener("input", (event) => {
   const intakeSearch = event.target.closest("[data-intake-search]");
   if (intakeSearch) {
     intakeSearchQuery = intakeSearch.value;
+    intakeSearchEmployeeInitials = "";
     renderIntakeQueue();
     return;
   }
