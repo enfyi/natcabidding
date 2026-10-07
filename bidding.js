@@ -15304,6 +15304,11 @@ function compareIntakeItems(left, right) {
   return intakeSortTimestamp(right, "approvedAt") - intakeSortTimestamp(left, "approvedAt") || enteredDifference;
 }
 
+function compareIntakeActionItems(left, right) {
+  const pendingDifference = Number(right.status === "Pending") - Number(left.status === "Pending");
+  return pendingDifference || compareIntakeItems(left, right);
+}
+
 function renderIntakeEmployeeSearch() {
   const input = document.querySelector("[data-intake-search]");
   const results = document.querySelector("[data-intake-employee-results]");
