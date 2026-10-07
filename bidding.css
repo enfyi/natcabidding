@@ -12329,3 +12329,14 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   opacity: 1;
   cursor: not-allowed;
 }
+
+/* Shared current bid-window indicator for public and dashboard bid times. */
+.bid-time-current-dot {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.bid-time-current-dot[hidden] {
+  display: none;
+}
