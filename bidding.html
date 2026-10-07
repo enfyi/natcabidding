@@ -961,7 +961,9 @@
                   <p data-intake-refresh-status role="status" aria-live="polite" hidden></p>
                 </div>
                 <div class="intake-search-tools" aria-label="Search intake queue">
-                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
+                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." aria-label="Search employees or intake bids" autocomplete="off" aria-controls="intake-employee-results" aria-expanded="false" data-intake-search />
+                  <div id="intake-employee-results" class="manual-controller-results" aria-label="Matching employees" data-intake-employee-results hidden></div>
+                  <small data-intake-employee-status aria-live="polite"></small>
                   <select data-intake-sort aria-label="Sort intake queue">
                     <option value="approved">Time approved — newest first</option>
                     <option value="entered">Time entered — newest first</option>
