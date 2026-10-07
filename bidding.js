@@ -4065,16 +4065,35 @@ function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
     .reduce((total, person) => total + leaveBidDayAllowanceForPerson(person), 0);
 }
 
+function areaCommittedLeaveItems() {
+  const byRequest = new Map();
+  // Intake contains the area's saved bids; leaveBids contains personal/local bids.
+  // Process intake last so saved status replaces a stale personal copy.
+  [...leaveBids, ...intakeQueue.filter((item) => item.type === "Leave")].forEach((item) => {
+    const round = leaveRoundForItem(item);
+    const initials = String(item.initials || currentUser.initials).trim().toUpperCase();
+    const key = JSON.stringify([leaveItemArea(item), initials, round, leaveDateKeysForItem(item)]);
+    byRequest.set(key, { ...item, initials, round });
+  });
+  return [...byRequest.values()].filter((item) => ["Approved", "Pending"].includes(item.status));
+}
+
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
-  return [...leaveCommittedItems(), ...extraItems]
+  return [...areaCommittedLeaveItems(), ...extraItems]
     .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
     .reduce((total, item) => total + leaveSlotUnitsForItem(item), 0);
 }
 
+function leaveItemAreaUsedDays(item) {
+  // Area capacity counts every bid workday, including holidays and in-lieu days.
+  // Personal charged days and later-round holiday credits are separate.
+  return leaveSlotDateKeys(leaveDateKeysForItem(item), item.initials || currentUser.initials).length;
+}
+
 function areaLeaveSlotUsedDays(area = currentViewArea(), bucket = "cpc", extraItems = []) {
-  return [...leaveCommittedItems(), ...extraItems]
+  return [...areaCommittedLeaveItems(), ...extraItems]
     .filter((item) => !isAreaLeaveBalanceExemptItem(item) && leaveItemArea(item) === area && leaveSlotBucketForBidAs(leaveItemBidAs(item)) === bucket)
-    .reduce((total, item) => total + leaveItemChargedDays(item), 0);
+    .reduce((total, item) => total + leaveItemAreaUsedDays(item), 0);
 }
 
 function estimatedLeaveDaysFromHours(hours, hoursPerDay = LEAVE_SLOT_HOURS_PER_DAY) {
