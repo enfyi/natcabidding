@@ -22,15 +22,15 @@ as $$
       slot.slot_date,
       count(*) filter (
         where slot.slot_group = 'cpc'
-          and slot.slot_code !~ '^CAPACITY-'
+          and not starts_with(slot.slot_code, 'CAPACITY-')
       )::integer as cpc_capacity,
       count(*) filter (
         where slot.slot_group = 'dev'
-          and slot.slot_code !~ '^CAPACITY-'
+          and not starts_with(slot.slot_code, 'CAPACITY-')
       )::integer as dev_capacity,
       count(*) filter (
         where slot.slot_group = 'cpc'
-          and slot.slot_code !~ '^CAPACITY-'
+          and not starts_with(slot.slot_code, 'CAPACITY-')
           and slot.status = 'open'
           and slot.bidder_id is null
           and slot.source_leave_request_id is null
@@ -38,7 +38,7 @@ as $$
       )::integer as cpc_open,
       count(*) filter (
         where slot.slot_group = 'dev'
-          and slot.slot_code !~ '^CAPACITY-'
+          and not starts_with(slot.slot_code, 'CAPACITY-')
           and slot.status = 'open'
           and slot.bidder_id is null
           and slot.source_leave_request_id is null
@@ -47,7 +47,7 @@ as $$
       coalesce(
         jsonb_agg(slot.slot_initials order by slot.slot_code) filter (
           where slot.slot_group = 'cpc'
-            and slot.slot_code !~ '^CAPACITY-'
+            and not starts_with(slot.slot_code, 'CAPACITY-')
             and slot.status in ('approved', 'pending', 'held')
             and nullif(trim(slot.slot_initials), '') is not null
         ),
@@ -56,13 +56,13 @@ as $$
       coalesce(
         jsonb_agg(slot.slot_initials order by slot.slot_code) filter (
           where slot.slot_group = 'dev'
-            and slot.slot_code !~ '^CAPACITY-'
+            and not starts_with(slot.slot_code, 'CAPACITY-')
             and slot.status in ('approved', 'pending', 'held')
             and nullif(trim(slot.slot_initials), '') is not null
         ),
         '[]'::jsonb
       ) as dev_initials,
-      bool_or(slot.status = 'unavailable' and slot.slot_code !~ '^CAPACITY-') as unavailable
+      bool_or(slot.status = 'unavailable' and not starts_with(slot.slot_code, 'CAPACITY-')) as unavailable
     from public.leave_slots slot
     join target_year on target_year.id = slot.bid_year_id
     group by slot.bid_year_id, slot.area_id, slot.slot_date
