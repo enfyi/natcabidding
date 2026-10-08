@@ -1502,15 +1502,25 @@ function currentUserBidderCount(area = currentUser.area) {
   return activeRosterEntries(area).length || currentUser.bidderCount;
 }
 
+function currentUserBidWindowForRound(roundNumber, area = currentUser.area) {
+  // Saved assignments belong to bidder IDs, not the current roster position.
+  if (area === currentUser.area && currentUser.supabaseProfileId) {
+    return databaseBidWindows.get(databaseBidWindowKey(currentUser.supabaseProfileId, roundNumber)) || null;
+  }
+  return bidWindowForRankRound(currentUserSeniorityRank(area), roundNumber, area);
+}
+
 function currentUserBidWindow(date = new Date(), area = currentUser.area) {
-  const rank = currentUserSeniorityRank(area);
-  if (!Number.isFinite(rank)) return null;
+  const roundCount = Math.max(
+    roundDateBlocksForArea(area)[0]?.length || 0,
+    ...Array.from(databaseBidWindows.values(), (window) => window.round)
+  );
+  const windows = Array.from({ length: roundCount }, (_, index) => currentUserBidWindowForRound(index + 1, area))
+    .filter(Boolean)
+    .sort((left, right) => left.start - right.start);
 
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  const windows = Array.from({ length: roundCount }, (_, index) => bidWindowForRankRound(rank, index + 1, area))
-    .filter(Boolean);
-
-  return windows.find((window) => date < window.end) || null;
+  return windows.find((window) => date >= window.start && date < window.end)
+    || windows.find((window) => date < window.end) || null;
 }
 
 function roundWindows(roundNumber, area = currentViewArea()) {
@@ -2022,7 +2032,7 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
     const rank = currentUserSeniorityRank(currentUser.area);
     const activeRound = areaBidRoundState(date, currentUser.area)?.round;
     const activeRoundWindow = Number.isFinite(rank) && activeRound
-      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      ? currentUserBidWindowForRound(activeRound, currentUser.area)
       : null;
     if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
 
@@ -2030,7 +2040,7 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
       const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
       const hasClosedWindow = Number.isFinite(rank) && Array.from(
         { length: roundCount },
-        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+        (_, index) => currentUserBidWindowForRound(index + 1, currentUser.area)
       ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
       return hasClosedWindow
         ? LATE_BID_MESSAGE
@@ -2085,7 +2095,7 @@ function rdoChangeWindowErrorMessage(date = new Date()) {
       ? ""
       : "RDO changes are only allowed while your pilot Round 1 is open in your home area.";
   }
-  const window = bidWindowForRankRound(currentUserSeniorityRank(currentUser.area), 1, currentUser.area);
+  const window = currentUserBidWindowForRound(1, currentUser.area);
   const closesAt = window ? Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000) : 0;
   if (!isViewingHomeArea()
       || !window || date < window.start || date.getTime() >= closesAt) {
