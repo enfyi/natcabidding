@@ -6,7 +6,7 @@ const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 const code = source.slice(source.indexOf('const referenceLoadDiagnostics = []'), source.indexOf('\nfunction dateFromKey'))
 const ok = data => ({ data, error: null, status: 200 })
 const failure = status => ({ data: null, error: { code: 'TEST_FAILURE' }, status })
-function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate, memberVisible = false } = {}) {
+function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate, intakeGate, memberVisible = false } = {}) {
   const applied = new Set()
   const state = { authUserId: '', loading: false }
   const client = {
@@ -20,6 +20,8 @@ function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate,
   }
   const context = vm.createContext({
     console: { warn() {}, info() {} }, window: {}, AbortController,
+    document: { querySelector: () => ({ dataset: { pagePanel: "intake-schedule" } }) },
+    renderIntakeSchedule: () => applied.add("intake render"),
     setTimeout: (fn, ms) => setTimeout(fn, ms === 15000 ? 30 : 0), clearTimeout,
     liveDataSnapshots: new Map(), supabaseState: state, publicFaqContent: { entries: [], documents: [] }, BID_YEAR: 2027, calendarRenderRevision: 0,
     supabaseClient: () => client, resetSupabaseBackedData() {},
@@ -27,7 +29,7 @@ function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate,
     isMemberAppVisible: () => memberVisible, renderPublicPage: () => applied.add('render'),
     renderHelpSummary: () => applied.add('help summary'), renderHelpPanel: () => applied.add('help panel'), renderAlerts: () => applied.add('alerts'),
     loadRdoLines: async () => ok([]), loadPublishedLeaveSlots: () => leaveGate || Promise.resolve(ok([])),
-    loadPublishedGlRdoAssignments: async () => ok([]), loadIntakeSchedules: async () => ok([]),
+    loadPublishedGlRdoAssignments: async () => ok([]), loadIntakeSchedules: () => intakeGate || Promise.resolve(ok([])),
     loadPublishedBidWindows: async () => ok([]), loadSupabaseHelpThreads: () => helpGate || Promise.resolve(true),
     hasIntakeAccess: () => false, supabaseRows: result => result.data || [],
     supabaseLoadWarning: (name, result) => result.error ? name : null,
@@ -37,7 +39,7 @@ function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate,
     upsertRdoLinesFromDatabase: () => applied.add('rdo'),
     applyLeaveSlotScheduleFromDatabase: () => applied.add('calendar'),
     applyBidWindowsFromDatabase: () => applied.add('bid times'),
-    applyGlRdoAssignments() {}, applyGhostBiddingStatus() {}, applyIntakeSchedulesFromDatabase() {},
+    applyGlRdoAssignments() {}, applyGhostBiddingStatus() {}, applyIntakeSchedulesFromDatabase() { applied.add("intake schedules") },
     applyBidYearSettings() {}, applyRoundRules() {}, applyApprovalRules() {},
     upsertRdoSubmissionsFromDatabase() {}, upsertLeaveRequestsFromDatabase() {},
     attachSubmissionIdsToLeaveRequests: rows => rows, attachLeaveRequestWeekBuckets: async (_, rows) => rows,
@@ -149,3 +151,35 @@ const complete = setup()
 await complete.context.loadSupabaseReferenceData()
 assert.equal(complete.state.bidTimesLoadState, 'loaded')
 console.log('Reference loading: retries, permissions, timeouts, independent sections, partial failures, and 100 concurrent readers passed.')
+
+// A slow intake calendar must not hold up fresh dashboard bidding data.
+let releaseIntake;
+const intakeGate = new Promise(resolve => { releaseIntake = resolve });
+const dashboard = setup({ intakeGate, memberVisible: true });
+await Promise.race([
+  dashboard.context.loadSupabaseReferenceData({ deferIntakeData: true }),
+  new Promise((_, reject) => setTimeout(() => reject(Error('Dashboard waited for intake')), 500)),
+]);
+assert.equal(dashboard.state.connected, true);
+assert.equal(dashboard.state.loading, false);
+assert.equal(dashboard.applied.has('intake schedules'), false);
+assert.equal(dashboard.applied.has('rdo'), true);
+assert.equal(dashboard.applied.has('calendar'), true);
+releaseIntake(ok([]));
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(dashboard.applied.has('intake schedules'), true);
+assert.equal(dashboard.applied.has('intake render'), true);
+
+// Responses from a previous reload or account must not overwrite the new view.
+for (const staleReason of ['reload', 'sign-out', 'year']) {
+  let release;
+  const stale = setup({ intakeGate: new Promise(resolve => { release = resolve }) });
+  await stale.context.loadSupabaseReferenceData({ deferIntakeData: true });
+  if (staleReason === 'reload') stale.state.referenceLoadToken = {};
+  if (staleReason === 'sign-out') stale.state.authUserId = null;
+  if (staleReason === 'year') stale.context.BID_YEAR = 2028;
+  release(ok([]));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stale.applied.has('intake schedules'), false, staleReason);
+}
+console.log('PASS dashboard becomes ready while intake is pending; background updates and stale-response protection.');

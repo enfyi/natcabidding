@@ -7506,7 +7506,9 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       }
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
-      await measureDashboardStartupStep("essential bidding data", loadSupabaseReferenceData);
+      await measureDashboardStartupStep("essential bidding data", () => loadSupabaseReferenceData({
+        deferIntakeData: !requestedPublicView() && intendedLandingPage(page) === "dashboard",
+      }));
       const renderStarted = Date.now();
       if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
       else showLoggedInApp(page);
@@ -8662,7 +8664,17 @@ function loadBackgroundHelpThreads() {
   });
 }
 
-async function loadSupabaseReferenceData() {
+function applyIntakeReferenceData(intakeSchedulesResult, intakeCalendarMarksResult, shiftPresetsResult, areaById) {
+    supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
+    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!intakeCalendarMarksResult.error) {
+      intakeCalendarMarks.clear();
+      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+    }
+    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
+}
+
+async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
   const client = supabaseClient();
   if (!client) {
     resetSupabaseBackedData();
@@ -8677,6 +8689,9 @@ async function loadSupabaseReferenceData() {
     return;
   }
   if (supabaseState.loading) return;
+  const loadToken = {};
+  supabaseState.referenceLoadToken = loadToken;
+  const loadUserId = supabaseState.authUserId;
   resetSupabaseBackedData();
   liveDataSnapshots.clear();
 
@@ -8725,6 +8740,29 @@ async function loadSupabaseReferenceData() {
       return result;
     });
 
+    const intakeYear = BID_YEAR;
+    const intakeReads = Promise.all([
+      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
+      readReferenceData("calendar marks", () => supabaseState.authUserId
+        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", intakeYear)
+        : Promise.resolve({ data: [], error: null })),
+      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+    ]);
+    if (deferIntakeData) {
+      void intakeReads.then(([schedules, marks, presets]) => {
+        // Ignore an old reload after a year switch, another reload, or sign-out.
+        if (supabaseState.referenceLoadToken !== loadToken || BID_YEAR !== intakeYear
+          || supabaseState.authUserId !== loadUserId) return;
+        applyIntakeReferenceData(schedules, marks, presets, areaById);
+        if (isMemberAppVisible() && document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+          renderIntakeSchedule();
+        }
+      }).catch((error) => console.warn("Background intake data could not load", error));
+    }
+    const intakeReady = deferIntakeData
+      ? Promise.resolve([{ data: null, error: null }, { data: null, error: null }, { data: null, error: null }])
+      : intakeReads;
+
     const [
       holidaysResult,
       rdoLinesResult,
@@ -8765,11 +8803,9 @@ async function loadSupabaseReferenceData() {
       }),
       readReferenceData("leave requests", () => supabaseState.authUserId ? loadLeaveRequestsWithWeeks(client) : Promise.resolve({ data: [], error: null })),
       readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
-      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
-      readReferenceData("calendar marks", () => supabaseState.authUserId
-        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
-        : Promise.resolve({ data: [], error: null })),
-      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+      intakeReady.then((results) => results[0]),
+      intakeReady.then((results) => results[1]),
+      intakeReady.then((results) => results[2]),
       readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
       readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
       readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
@@ -8829,13 +8865,7 @@ async function loadSupabaseReferenceData() {
       );
     }
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
-    supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
-    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
-    if (!intakeCalendarMarksResult.error) {
-      intakeCalendarMarks.clear();
-      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
-    }
-    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
+    if (!deferIntakeData) applyIntakeReferenceData(intakeSchedulesResult, intakeCalendarMarksResult, shiftPresetsResult, areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
