@@ -12277,3 +12277,85 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .public-main .public-rdo-panel .ghost-line-bidder {
   color: #7b8494;
 }
+
+/* Feedback follows the light workspace cards and NATCA teal accents. */
+.action-feedback {
+  --feedback-accent: #3d888d;
+  position: fixed;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 16px 20px;
+  border: 1px solid #dbe4ef;
+  border-inline-start: 4px solid var(--feedback-accent);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #172033;
+  box-shadow: 0 8px 28px rgba(21, 45, 59, 0.14);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.action-feedback[hidden] { display: none; }
+.action-feedback[data-status="success"] { --feedback-accent: #1f6f4a; background: #f2faf5; }
+.action-feedback[data-status="error"] { --feedback-accent: #9d2e2e; background: #fff5f3; }
+button[aria-busy="true"] { cursor: progress; opacity: .75; }
+
+@media (max-width: 640px) {
+  .action-feedback {
+    width: calc(100% - 24px);
+    max-width: 560px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 13px 16px;
+    border-radius: 10px;
+    font-size: 0.8125rem;
+  }
+  body:has(.app-shell:not([hidden])) .action-feedback {
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Keep the RDO decision state legible after the saving indicator clears. */
+.app-main [data-select-line][data-awaiting-rdo-decision="true"] {
+  color: #64748b;
+  border-color: #cbd5e1;
+  background: #e5e7eb;
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+/* Shared current bid-window indicator for public and dashboard bid times. */
+.bid-time-current-dot {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.bid-time-current-dot[hidden] {
+  display: none;
+}
+
+/* Mark the name as well as the dot so the open window is easy to spot. */
+.current-bid-time-name {
+  background: #d9f99d !important;
+  color: #14532d !important;
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px #d9f99d;
+}
+
+.current-bid-time-name strong {
+  color: #14532d !important;
+}
+
+.bid-time-current-dot {
+  width: 13px;
+  height: 13px;
+  background: #65d52e;
+  box-shadow: 0 0 0 3px rgba(101, 213, 46, .2);
+}

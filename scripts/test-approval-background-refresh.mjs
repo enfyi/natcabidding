@@ -63,6 +63,7 @@ assert.equal(renders, 1, 'A refresh failure does not change confirmed decisions'
 let saved = 0, scheduled = 0;
 const items = new Map(['first','second'].map(id => [id, { id, type: 'Leave', status: 'Pending' }]));
 const approval = vm.createContext({
+  showActionFeedback() {}, intakeGroupReviewState: new Map(),
   document: { querySelectorAll: () => [] },
   intakeReviewItemById: id => items.get(id), activeOverrideId: null, activeDenialId: null,
   persistIntakeDecision: async () => { saved++; return true; },

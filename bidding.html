@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -961,7 +961,9 @@
                   <p data-intake-refresh-status role="status" aria-live="polite" hidden></p>
                 </div>
                 <div class="intake-search-tools" aria-label="Search intake queue">
-                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." data-intake-search />
+                  <input type="search" placeholder="Search name, initials, dates, RDO, area..." aria-label="Search employees or intake bids" autocomplete="off" aria-controls="intake-employee-results" aria-expanded="false" data-intake-search />
+                  <div id="intake-employee-results" class="manual-controller-results" aria-label="Matching employees" data-intake-employee-results hidden></div>
+                  <small data-intake-employee-status aria-live="polite"></small>
                   <select data-intake-sort aria-label="Sort intake queue">
                     <option value="approved">Time approved — newest first</option>
                     <option value="entered">Time entered — newest first</option>
@@ -1896,7 +1898,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261005-intaker-rdo-edit"></script>
+    <script src="bidding.js?v=20261007-dashboard-reload-speed"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

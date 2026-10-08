@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8');
+const start = source.indexOf('async function attachLeaveRequestWeekBuckets(');
+const end = source.indexOf('\nfunction ', start);
+const context = vm.createContext({console});
+vm.runInContext(source.slice(start,end), context);
+const pending = [];
+const client = {from: () => ({select: () => ({in: (_, ids) => new Promise(resolve => pending.push({ids,resolve}))})})};
+const rows = Array.from({length:201}, (_,id) => ({id,round_number:1,status:'approved'}));
+const resultPromise = context.attachLeaveRequestWeekBuckets(client, rows);
+assert.equal(pending.length,3, 'All batches start before awaiting any result');
+for (const batch of pending) batch.resolve({data:batch.ids.map(id=>({leave_request_id:id,bucket_start_date:'2027-03-21'})),error:null});
+const result = await resultPromise;
+assert.equal(result.length,201);
+for (const row of result) assert.equal(row.weekBucketStarts[0],'2027-03-21');
+console.log('Parallel reload batches preserve all leave week details.');
