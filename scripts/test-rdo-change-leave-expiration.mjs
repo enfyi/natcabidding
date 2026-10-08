@@ -10,7 +10,8 @@ const migration = await readFile(
 
 assert.match(source, /function pendingCurrentUserLeaveRequests\(/)
 assert.match(source, /Wait until they are approved or denied before changing your RDO bid/)
-assert.match(source, /Are you sure you want to change your RDO bid\? All approved Round 1 leave dates will expire/)
+assert.match(source, /rdoBidChangeConfirmation\(currentUser, request, request\.originalBid\)/)
+assert.match(source, /All approved Round 1 leave dates will expire/)
 assert.match(source, /item\.status === "Pending"[\s\S]{0,240}Wait until they are approved or denied before changing them/)
 assert.match(source, /item\.status !== "Approved"[\s\S]{0,240}awaiting an intake decision/)
 assert.match(source, /expired: "Expired"/)

@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getBidNotificationSender, getEmailTransporter } from '@/lib/email'
 import { getSupabaseEnv } from '@/lib/env'
 
-const NOTIFICATION_KINDS = new Set(['submitted', 'approved', 'denied'])
+const NOTIFICATION_KINDS = new Set(['approved', 'denied'])
 const INITIALS_PATTERN = /^[A-Z0-9-]{1,12}$/
 
 type NotificationRequest = {

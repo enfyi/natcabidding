@@ -53,7 +53,7 @@ declare
   area_extra_groups integer;
   rdo_extra_groups integer;
 begin
-  if requested_group not in ('A', 'B', 'C') then return false; end if;
+  if requested_group is null or requested_group not in ('A', 'B', 'C') then return false; end if;
 
   select * into strict line_row
   from public.rdo_lines line

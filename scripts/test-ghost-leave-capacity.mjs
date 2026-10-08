@@ -96,8 +96,42 @@ assert.deepEqual(
 );
 assert.match(source, /class="gl-bid-marker"[^>]*>\*<\/span>/, 'GL calendar dates use the compact asterisk marker');
 
+const rdoOverlayStart = source.indexOf('function applyGlRdoAssignments(');
+const rdoOverlayEnd = source.indexOf('function supabaseRdoSubmissionToIntakeItem(', rdoOverlayStart);
+assert.ok(rdoOverlayStart >= 0 && rdoOverlayEnd > rdoOverlayStart, 'GL RDO overlay loader was found');
+const rdoLines = [
+  { id: 'line-30', area: 'Area A', line: '30', cpc: 'AC', status: 'Taken', glBids: [] },
+];
+const rdoOverlayContext = {
+  rdoLines,
+  uiStatusFromDatabase: (status) => status[0].toUpperCase() + status.slice(1),
+};
+vm.createContext(rdoOverlayContext);
+vm.runInContext(source.slice(rdoOverlayStart, rdoOverlayEnd), rdoOverlayContext);
+rdoOverlayContext.applyGlRdoAssignments([
+  { rdo_line_id: 'line-30', initials: 'GL', status: 'approved' },
+  { rdo_line_id: 'line-30', initials: 'G2', status: 'pending' },
+]);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(rdoLines[0].glBids)),
+  [{ initials: 'G2', status: 'Pending' }, { initials: 'GL', status: 'Approved' }],
+  'Multiple GL bidders can share one real RDO line',
+);
+
+const rdoMarkupStart = source.indexOf('function lineOccupant(');
+const rdoMarkupEnd = source.indexOf('function selectedMidValue(', rdoMarkupStart);
+const rdoMarkupContext = {
+  currentUser: { initials: 'AC' },
+  escapeHtml: (value) => String(value),
+};
+vm.createContext(rdoMarkupContext);
+vm.runInContext(source.slice(rdoMarkupStart, rdoMarkupEnd), rdoMarkupContext);
+const sharedMarkup = rdoMarkupContext.lineBidderMarkup(rdoLines[0], { showOpenWhenShared: true });
+assert.match(sharedMarkup, />AC<.*>\*G2<.*>\*GL</, 'The real occupant and both gray GL overlays render together');
+
 const markup = readFileSync(new URL('../bidding.html', import.meta.url), 'utf8');
 assert.match(markup, /<i class="gl-bid">\*<\/i> GL Bid/, 'The calendar legend explains the GL asterisk marker');
+assert.match(markup, /GL Bid · visible, but does not occupy the line/, 'The RDO table legend explains shared GL lines');
 
 assert.match(source, /round >= 1 && round <= 6/);
 console.log('PASS ghost and GL bidders stay outside area totals while GL uses its personal balance through Round 6');

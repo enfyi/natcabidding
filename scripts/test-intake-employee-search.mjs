@@ -43,3 +43,10 @@ context.intakeSearchQuery = '';
 context.intakeFilters.status = 'all';
 assert.equal(context.intakeItemMatchesFilters(ownBid), true);
 console.log('Intake employee matching and selected bidder filtering checks passed.');
+
+// Exercise the comparator called during intake rendering after a reload.
+context.compareIntakeItems = (left, right) => right.timestamp - left.timestamp;
+vm.runInContext(extract('compareIntakeActionItems'), context);
+assert.ok(context.compareIntakeActionItems({status: 'Pending', timestamp: 1}, {status: 'Approved', timestamp: 2}) < 0);
+assert.ok(context.compareIntakeActionItems({status: 'Approved', timestamp: 1}, {status: 'Approved', timestamp: 2}) > 0);
+console.log('Intake startup queue sorting checks passed.');

@@ -1,0 +1,5 @@
+/outputs/
+/database/
+/supabase/
+/tools/
+.env*
