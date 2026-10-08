@@ -16,6 +16,11 @@ const monthNames = [
 ];
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const calendarDateFormatter = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+});
 // BID_YEAR is the selected view; the active year is controlled independently by admins.
 let BID_YEAR = 2027;
 let activeBidYear = null;
@@ -4307,15 +4312,17 @@ function visibleLeaveSlotDetailsFromMap(
   slotMap = leaveSlotMap(area),
   { includePrivateOverlays = true } = {}
 ) {
-  const details = leaveSlotsForDateFromMap(key, area, slotMap);
+  const details = leaveSlotsForDateFromMap(key, area, slotMap, {
+    includePersonalHolidays: includePrivateOverlays && Boolean(currentUser),
+  });
   const visible = {
     ...details,
     cpc: [...(details.cpc || [])],
     dev: [...(details.dev || [])],
     glBids: [...(details.glBids || [])],
   };
-  const showCurrentUserOverlay = includePrivateOverlays && area === currentUser.area;
-  const previewItem = activeLeavePreviewItem();
+  const showCurrentUserOverlay = includePrivateOverlays && Boolean(currentUser) && area === currentUser.area;
+  const previewItem = showCurrentUserOverlay ? activeLeavePreviewItem() : null;
   if (showCurrentUserOverlay && !currentUser.ghostBidder && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
     if (isGlLeaveItem(previewItem)) addVisibleGlBid(visible, previewItem);
     else showInitialsInVisibleSlot(visible, leaveSlotBucketForBidAs(previewItem.bidAs), currentUser.initials);
@@ -6024,7 +6031,9 @@ function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlot
 
 function cachedBaseLeaveSlotDetails(key, context) {
   if (!context.baseSlotDetails.has(key)) {
-    context.baseSlotDetails.set(key, leaveSlotsForDateFromMap(key, context.area, context.slotMap));
+    context.baseSlotDetails.set(key, leaveSlotsForDateFromMap(key, context.area, context.slotMap, {
+      includePersonalHolidays: !context.publicReadOnly && Boolean(currentUser),
+    }));
   }
 
   return context.baseSlotDetails.get(key);
@@ -6174,7 +6183,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
           : "";
   const expandedSlots = Boolean(calendarScope && calendarLayouts[calendarScope] === "full");
   const slotBucket = calendarWorkforceForScope(calendarScope);
-  const deferSlotTooltip = window.matchMedia("(max-width: 900px)").matches && !expandedSlots;
+  const deferSlotTooltip = !expandedSlots && (isPublicCalendar || window.matchMedia("(max-width: 900px)").matches);
   const renderKey = [
     displayedCalendarYear,
     calendarMode,
@@ -6656,16 +6665,13 @@ function leaveSlotMapUncached(area = currentUser.area, onlyDate = null) {
   return entries;
 }
 
-function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveSlotMap(area)) {
+function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveSlotMap(area), { includePersonalHolidays = Boolean(currentUser) } = {}) {
   const details = slotMap[key] || {
     date: key,
     label: formatCalendarDate(key),
     cpc: [],
     dev: [],
-    holiday: isHolidayDate(key),
-    holidayInLieu: isHolidayInLieuDate(key),
   };
-  const holidayInLieu = details.holidayInLieu || isHolidayInLieuDate(key);
 
   return {
     ...details,
@@ -6673,8 +6679,8 @@ function leaveSlotsForDateFromMap(key, area = currentUser.area, slotMap = leaveS
     cpc: details.cpc || [],
     dev: details.dev || [],
     glBids: details.glBids || [],
-    holiday: details.holiday || isHolidayDate(key),
-    holidayInLieu,
+    holiday: details.holiday || (includePersonalHolidays ? isHolidayDate(key) : isLegalHolidayDate(key)),
+    holidayInLieu: details.holidayInLieu || (includePersonalHolidays ? isHolidayInLieuDate(key) : false),
   };
 }
 
@@ -6737,6 +6743,36 @@ function slotRows(type, initials, capacity) {
     `;
   }).join("");
 }
+
+function showPublicCalendarTooltip(button) {
+  const calendar = button.closest("#public-calendar");
+  if (!calendar || calendar.classList.contains("expanded-slots-calendar") || window.matchMedia("(max-width: 900px)").matches) return;
+  if (button.querySelector(".leave-date-tooltip")) return;
+  calendar.querySelectorAll("[data-lazy-slot-tooltip]").forEach((previous) => {
+    previous.querySelector(".leave-date-tooltip")?.remove();
+    delete previous.dataset.lazySlotTooltip;
+  });
+  const key = button.dataset.publicLeaveDate;
+  const area = publicState.area;
+  const tooltip = withLeaveReadCache(() => {
+    const details = visibleLeaveSlotDetailsFromMap(key, area, leaveSlotMapUncached(area, key), { includePrivateOverlays: false });
+    const holiday = calendarHolidayKind(key, { showRdo: false, showPersonalLeave: false });
+    return quickLeaveSlotTooltip(key, holiday, area, details);
+  });
+  button.insertAdjacentHTML("beforeend", tooltip);
+  button.dataset.lazySlotTooltip = "true";
+}
+
+// Delegate so cached calendar nodes retain hover and keyboard behavior.
+document.addEventListener("pointerover", (event) => {
+  if (event.pointerType === "touch") return;
+  const button = event.target.closest("[data-public-leave-date]");
+  if (button) showPublicCalendarTooltip(button);
+});
+document.addEventListener("focusin", (event) => {
+  const button = event.target.closest("[data-public-leave-date]");
+  if (button) showPublicCalendarTooltip(button);
+});
 
 function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area = currentUser.area, slotDetails = null, persistent = false) {
   const details = slotDetails || visibleLeaveSlotDetails(key, area);
@@ -7023,11 +7059,7 @@ function calendarHolidayKind(key, options = {}) {
 
 function formatCalendarDate(key) {
   const [year, month, day] = key.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(year, month - 1, day));
+  return calendarDateFormatter.format(new Date(year, month - 1, day));
 }
 
 function replaceBrowserHistory(targetWindow, url) {
@@ -8743,6 +8775,8 @@ async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
     // Area definitions do not depend on which year the catalog selects.
     const areasRequest = readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order"));
     await loadBidYearCatalog(client);
+    // The public slots RPC needs only the selected year, not the year UUID or areas.
+    const leaveSlotsRequest = readReferenceData("leave slots", () => loadPublishedLeaveSlots(client));
     const [bidYearResult, areasResult] = await Promise.all([
       readReferenceData("bid year", () => client
         .from("bid_years")
@@ -8816,7 +8850,7 @@ async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
       readReferenceData("ghost RDO labels", () => client.rpc("read_public_ghost_rdo_bids", { requested_bid_year: BID_YEAR })),
       readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
       readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
-      readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
+      leaveSlotsRequest.then((result) => {
         supabaseState.leaveSlotsLoadState = result.error ? "error" : "loaded";
         if (!result.error) {
           applyLeaveSlotScheduleFromDatabase(supabaseRows(result), areaById);
@@ -15006,6 +15040,44 @@ async function refreshLiveData() {
   }
 }
 
+function refreshPublicCalendarSlots(previousSlots) {
+  const calendar = document.getElementById("public-calendar");
+  if (!calendar?.childElementCount || Number(calendar.dataset.calendarRevision) !== calendarRenderRevision - 1) return false;
+  const area = publicState.area;
+  const expandedSlots = calendarLayouts.public === "full";
+  const context = makeCalendarRenderContext({
+    area, showRdo: false, showPersonalLeave: false,
+    deferSlotTooltip: !expandedSlots, publicReadOnly: true,
+    slotBucket: calendarWorkforceForScope("public"),
+  });
+  const keys = new Set([...Object.keys(previousSlots), ...Object.keys(extraLeaveSlotData)]);
+  const dates = new Set();
+  keys.forEach((key) => {
+    const before = previousSlots[key];
+    const after = extraLeaveSlotData[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    if (before && slotMatchesArea(before, area)) dates.add(before.date || key);
+    if (after && slotMatchesArea(after, area)) dates.add(after.date || key);
+  });
+  dates.forEach((key) => {
+    const button = calendar.querySelector(`[data-calendar-date="${key}"]`);
+    if (!button) return;
+    const wasFocused = document.activeElement === button;
+    const date = dateFromKey(key);
+    button.outerHTML = renderCalendarDay(date.getMonth(), date.getDate(), expandedSlots, date.getFullYear(), {
+      area, showRdo: false, showPersonalLeave: false, publicReadOnly: true,
+      deferSlotTooltip: !expandedSlots, expandedSlots, context,
+    });
+    if (wasFocused) calendar.querySelector(`[data-calendar-date="${key}"]`)?.focus({ preventScroll: true });
+  });
+  // Other cached areas may contain changed dates. Never reuse a stale snapshot.
+  publicCalendarCache.clear();
+  publicCalendarCacheRevision = calendarRenderRevision;
+  calendar.dataset.calendarRevision = String(calendarRenderRevision);
+  publicCalendarCache.set(calendar.dataset.calendarRenderKey, [...calendar.childNodes].map((node) => node.cloneNode(true)));
+  return true;
+}
+
 // Render only consumers of the changed groups. Hidden pages render on navigation.
 function renderLiveDataSections(groups, member, previousSlots) {
   return withLeaveReadCache(() => {
@@ -15016,7 +15088,10 @@ function renderLiveDataSections(groups, member, previousSlots) {
       const relevant = publicState.area === "FAQ" ? has("faq")
         : publicState.section === "Calendar" ? calendarChanged
         : has("bidding", "roster", "windows", "rules");
-      if (relevant) renderPublicPage();
+      if (relevant) {
+        const canPatchSlots = publicState.section === "Calendar" && has("slots") && !has("roster", "rules");
+        if (!canPatchSlots || !refreshPublicCalendarSlots(previousSlots)) renderPublicPage();
+      }
       return;
     }
     const page = document.querySelector(".page.active")?.dataset.pagePanel;
