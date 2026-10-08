@@ -21,7 +21,7 @@ function setup({ catalogFails = false, rosterFails = false, helpGate } = {}) {
   const context = vm.createContext({
     console: { warn() {} }, window: {}, AbortController,
     setTimeout: (fn, ms) => setTimeout(fn, ms === 15000 ? 30 : 0), clearTimeout,
-    liveDataSnapshots: new Map(), supabaseState: state, publicFaqContent: {}, BID_YEAR: 2027, calendarRenderRevision: 0,
+    liveDataSnapshots: new Map(), supabaseState: state, publicFaqContent: { entries: [], documents: [] }, BID_YEAR: 2027, calendarRenderRevision: 0,
     supabaseClient: () => client, resetSupabaseBackedData() {},
     loadBidYearCatalog: async () => { if (catalogFails) throw Error('catalog failed') },
     isMemberAppVisible: () => false, renderPublicPage: () => applied.add('render'),
@@ -72,6 +72,8 @@ assert.deepEqual(Object.keys(context.window.NATCA_REFERENCE_LOAD_DIAGNOSTICS[0])
 
 const catalog = setup({ catalogFails: true })
 await catalog.context.loadSupabaseReferenceData()
+// FAQ loading is independent of member startup on the latest production code.
+await new Promise(resolve => setImmediate(resolve))
 assert.equal(catalog.state.faqLoadState, 'loaded')
 assert.equal(catalog.state.rdoLinesLoadState, 'error')
 
