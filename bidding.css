@@ -12378,11 +12378,15 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   }
 
   .rdo-table-panel .rdo-mobile-count {
-    display: inline;
-    color: var(--muted);
-    font-size: 0.75rem;
-    font-weight: 400;
-    line-height: 1.5;
+    display: inline-block;
+    padding: 3px 8px;
+    border: 1px solid #b9d9d3;
+    border-radius: 999px;
+    color: #19594f;
+    background: #e8f4ef;
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.4;
     white-space: nowrap;
   }
 
