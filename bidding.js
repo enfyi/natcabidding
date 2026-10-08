@@ -4295,6 +4295,23 @@ function addVisibleGlBid(visible, item, fallbackInitials = currentUser.initials)
   visible.glBids = glBids;
 }
 
+function ghostLeaveBidsForDate(key, area) {
+  const bids = new Map();
+  const items = area === currentUser.area ? [...leaveBids, ...intakeQueue] : intakeQueue;
+  items.forEach((item) => {
+    if ((item.area || currentUser.area) !== area) return;
+    if (item.type && item.type !== "Leave") return;
+    if (!["Pending", "Approved"].includes(item.status) || !isGhostLeaveItem(item)) return;
+    const initials = String(item.initials || currentUser.initials || "").trim().toUpperCase();
+    if (!initials || !leaveSlotDatesForInitials(item.range, initials).includes(key)) return;
+    // A submitted bid can appear in both the member list and intake queue.
+    if (!bids.has(initials) || item.status === "Approved") {
+      bids.set(initials, { initials, status: item.status });
+    }
+  });
+  return [...bids.values()];
+}
+
 function visibleLeaveSlotDetailsFromMap(
   key,
   area = currentUser.area,
@@ -6111,8 +6128,14 @@ function initializeMobilePublicNavigation() {
 }
 
 function openPublicDateSheet(button) {
+  return withLeaveReadCache(() => openPublicDateSheetWithCache(button));
+}
+
+function openPublicDateSheetWithCache(button) {
   const key = button.dataset.publicLeaveDate;
-  const details = visibleLeaveSlotDetails(key, publicState.area);
+  // A day popup needs only this date, not formatted records for the whole year.
+  const slotMap = leaveSlotMapUncached(publicState.area, key);
+  const details = visibleLeaveSlotDetailsFromMap(key, publicState.area, slotMap, { includePrivateOverlays: false });
   const sheet = document.querySelector("[data-public-date-sheet]");
   document.getElementById("public-date-title").textContent = `${formatCalendarDate(key)}, ${dateFromKey(key).getFullYear()}`;
   if (!leaveSlotDataIsLoaded(details)) {
@@ -6120,7 +6143,7 @@ function openPublicDateSheet(button) {
     sheet.showModal();
     return;
   }
-  const holiday = calendarHolidayKind(key, { area: publicState.area });
+  const holiday = calendarHolidayKind(key, { area: publicState.area, showRdo: false, showPersonalLeave: false });
   sheet.querySelector("[data-public-date-content]").innerHTML = `
     <p>${escapeHtml(publicState.area)} · Read-only availability</p>
     ${holiday ? `<p>${escapeHtml(holiday.label)}</p>` : ""}
@@ -6584,11 +6607,12 @@ function leaveSlotMap(area = currentUser.area) {
   return cachedLeaveRead(JSON.stringify(["leaveSlotMap", area]), () => leaveSlotMapUncached(area));
 }
 
-function leaveSlotMapUncached(area = currentUser.area) {
+function leaveSlotMapUncached(area = currentUser.area, onlyDate = null) {
   const entries = {};
 
   leaveSlotWeeks.forEach((week) => {
     week.days.forEach((day) => {
+      if (onlyDate && day.date !== onlyDate) return;
       if (!slotMatchesArea(day, area)) return;
       entries[day.date] = {
         group: week.group,
@@ -6601,6 +6625,7 @@ function leaveSlotMapUncached(area = currentUser.area) {
   Object.entries(extraLeaveSlotData).forEach(([storageKey, day]) => {
     if (!slotMatchesArea(day, area)) return;
     const date = day.date || storageKey;
+    if (onlyDate && date !== onlyDate) return;
     entries[date] = {
       date,
       label: formatCalendarDate(date),
@@ -6751,6 +6776,7 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
     target.innerHTML = `<article class="leave-day-detail"><h3>${escapeHtml(details.label)}</h3><p role="status">${escapeHtml(leaveSlotLoadingMessage())}</p></article>`;
     return;
   }
+  const ghostBids = inspectOnly ? ghostLeaveBidsForDate(key, area) : [];
   const cpcCapacity = leaveSlotCapacityForDetails(details, "cpc");
   const devCapacity = leaveSlotCapacityForDetails(details, "dev");
   const cpcFull = leaveSlotOpenCountForDetails(details, "cpc") === 0;
@@ -6789,6 +6815,10 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
           ${slotRows("Dev", details.dev, devCapacity)}
         </section>
       </div>
+      ${ghostBids.length ? `<section class="daily-slot-card ghost-bid-detail" aria-label="Ghost bids, no slots used">
+        <h4>Ghost bids · no slots used</h4>
+        ${ghostBids.map((bid) => `<div class="slot-row"><span>Ghost Bid · ${escapeHtml(bid.status)}</span><b>${escapeHtml(bid.initials)}</b></div>`).join("")}
+      </section>` : ""}
       ${details.unavailable ? '<p class="unavailable-note">This day is blocked or manually unavailable for additional bidding.</p>' : ""}
     </article>
   `;
