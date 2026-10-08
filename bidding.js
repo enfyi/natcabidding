@@ -14782,9 +14782,44 @@ function liveDataFallbackGroups(now = Date.now()) {
   });
 }
 
+function publicBiddingReadUrl(url, init, method) {
+  if (supabaseState.authUserId || window.NATCA_SUPABASE_CONFIG?.environment === "pilot"
+    || url.origin !== window.NATCA_SUPABASE_CONFIG?.url || !url.pathname.startsWith("/rest/v1/")) return null;
+  const resource = url.pathname.slice("/rest/v1/".length).replace(/^rpc\//, "");
+  const routines = ["read_bid_year_catalog", "read_bidding_roster", "read_public_bid_windows",
+    "read_public_leave_slots", "read_public_gl_rdo_assignments", "read_public_ghost_rdo_bids",
+    "read_bid_year_settings", "read_round_rules", "read_approval_rules"];
+  const tables = ["areas", "bid_years", "holidays", "rdo_lines", "faq_entries", "mou_documents"];
+  const rpc = url.pathname.includes("/rpc/");
+  if (rpc ? method !== "POST" || !routines.includes(resource) : method !== "GET" || !tables.includes(resource)) return null;
+  let year = BID_YEAR;
+  if (rpc) {
+    try { year = JSON.parse(init?.body || "{}").requested_bid_year || BID_YEAR; } catch { return null; }
+  } else if (resource === "bid_years") {
+    const requestedYear = url.searchParams.get("bid_year");
+    if (!/^eq\.\d{4}$/.test(requestedYear || "")) return null;
+    year = Number(requestedYear.slice(3));
+  }
+  const proxy = new URL("api/public/bidding", window.location.href);
+  proxy.searchParams.set("resource", resource);
+  proxy.searchParams.set("year", String(year));
+  if (["holidays", "rdo_lines"].includes(resource)) {
+    const filter = url.searchParams.get("bid_year_id");
+    if (!filter?.startsWith("eq.")) return null;
+    proxy.searchParams.set("yearId", filter.slice(3));
+  }
+  return proxy;
+}
+
 async function fetchWithLiveUpdateTracking(input, init) {
   const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
   const method = String(init?.method || input?.method || "GET").toUpperCase();
+  const publicReadUrl = publicBiddingReadUrl(url, init, method);
+  if (publicReadUrl) {
+    // The public route shares anonymous reads across visitors. Keep member reads
+    // and every write direct, and never pass an auth header into this cache.
+    return window.fetch(publicReadUrl, { method: "GET", credentials: "omit", signal: init?.signal });
+  }
   const routine = url.pathname.split("/rpc/")[1];
   const writing = url.pathname.includes("/rest/v1/") && !["GET", "HEAD"].includes(method)
     && !(routine && (routine.startsWith("read_") || routine === "live_help_threads"));

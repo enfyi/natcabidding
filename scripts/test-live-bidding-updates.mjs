@@ -85,7 +85,7 @@ await ctx.refreshLiveData();
 assert.equal(reads, beforeHidden, 'Hidden tabs do no background reads');
 
 let finishFetch;
-const fetchCtx = vm.createContext({ URL, liveDataWritesPending: 0, liveDataActivityRevision: 0,
+const fetchCtx = vm.createContext({ URL, publicBiddingReadUrl: () => null, liveDataWritesPending: 0, liveDataActivityRevision: 0,
   scheduleLiveDataRefresh() {}, window: { fetch: async () => new Promise(resolve => { finishFetch = resolve; }) } });
 vm.runInContext(fn('fetchWithLiveUpdateTracking'), fetchCtx);
 const read = fetchCtx.fetchWithLiveUpdateTracking('https://example.supabase.co/rest/v1/rpc/read_round_rules', { method: 'POST' });
