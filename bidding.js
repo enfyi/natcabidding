@@ -2813,6 +2813,7 @@ async function runUiAction(key, button, label, action, { deferPaint = true } = {
   if (pendingUiActions.has(key)) return;
   pendingUiActions.add(key);
   const originalLabel = button?.tagName === "BUTTON" ? button.textContent : null;
+  const originalContent = originalLabel !== null && button.childNodes ? [...button.childNodes] : null;
   const wasDisabled = button?.disabled;
   if (button) {
     button.disabled = true;
@@ -2829,7 +2830,10 @@ async function runUiAction(key, button, label, action, { deferPaint = true } = {
   } finally {
     pendingUiActions.delete(key);
     if (button) {
-      if (originalLabel !== null && button.textContent === label) button.textContent = originalLabel;
+      if (originalLabel !== null && button.textContent === label) {
+        if (originalContent) button.replaceChildren(...originalContent);
+        else button.textContent = originalLabel;
+      }
       button.disabled = wasDisabled || button.dataset?.awaitingRdoDecision === "true";
       button.removeAttribute("aria-busy");
     }
@@ -7011,14 +7015,16 @@ function holidayInLieuDatesForYearUncached(year, initials = currentUser.initials
   return inLieuDates;
 }
 
-function isHolidayDate(key, initials = currentUser.initials) {
+function isHolidayDate(key, initials = currentUser?.initials) {
+  if (!initials) return isLegalHolidayDate(key);
   const [year] = key.split("-").map(Number);
   return federalHolidayDatesForYear(year, initials).has(key) ||
     federalHolidayDatesForYear(year + 1, initials).has(key) ||
     federalHolidayDatesForYear(year - 1, initials).has(key);
 }
 
-function isHolidayInLieuDate(key, initials = currentUser.initials) {
+function isHolidayInLieuDate(key, initials = currentUser?.initials) {
+  if (!initials) return false;
   const [year] = key.split("-").map(Number);
   return holidayInLieuDatesForYear(year, initials).has(key) ||
     holidayInLieuDatesForYear(year + 1, initials).has(key) ||
@@ -7549,6 +7555,24 @@ async function initializeSupabaseAuth() {
   }
 
   return restoreSupabaseSession();
+}
+
+async function openMemberDashboard() {
+  // Let startup finish before changing its public/member destination.
+  const pending = supabaseState.authRestorePromise;
+  if (pending && !await pending) return false;
+  if (!supabaseState.authUserId) return false;
+  syncMemberPageUrl("dashboard");
+  if (!currentUser?.supabaseProfileId) return restoreSupabaseSession("dashboard");
+  // Returning from the public view should not reload all bidding data.
+  try {
+    showLoggedInApp("dashboard");
+    return true;
+  } catch (error) {
+    showPublicHome();
+    setAuthStatus(error.message || "Could not open your dashboard. Please try again.", "error");
+    return false;
+  }
 }
 
 async function restoreSupabaseSession(page = requestedLandingPage()) {
@@ -17553,7 +17577,11 @@ document.addEventListener("click", async (event) => {
   // Navigation must stay available even when bidding data cannot load.
   const pageNavigation = event.target.closest("[data-page]");
   if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
-    setPage(pageNavigation.dataset.page);
+    if (pageNavigation.dataset.page === "dashboard") {
+      await runUiAction("dashboard-navigation", pageNavigation, "Opening dashboard…", () => setPage("dashboard"));
+    } else {
+      setPage(pageNavigation.dataset.page);
+    }
     return;
   }
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
@@ -17724,7 +17752,7 @@ document.addEventListener("click", async (event) => {
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
     if (supabaseState.authUserId) {
-      await restoreSupabaseSession();
+      await runUiAction("open-dashboard", publicLoginToggle, "Opening dashboard…", openMemberDashboard);
       return;
     }
     const shouldOpen = publicLoginMenu.hidden;
