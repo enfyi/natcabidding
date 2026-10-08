@@ -7461,20 +7461,24 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
   if (supabaseState.authRestorePromise) return supabaseState.authRestorePromise;
 
   supabaseState.authRestorePromise = (async () => {
-    const session = await refreshSupabaseAccountState();
+    const startupStarted = Date.now();
+    const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
     if (!session) return false;
 
     try {
-      const profile = await claimSupabaseProfile();
+      const profile = await measureDashboardStartupStep("member profile", claimSupabaseProfile);
       if (!profile) {
         await rejectUnmatchedSupabaseLogin();
         return false;
       }
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
-      await loadSupabaseReferenceData();
+      await measureDashboardStartupStep("essential bidding data", loadSupabaseReferenceData);
+      const renderStarted = Date.now();
       if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
       else showLoggedInApp(page);
+      recordReferenceLoadDiagnostic({ section: "dashboard rendering", elapsedMs: Date.now() - renderStarted });
+      recordReferenceLoadDiagnostic({ section: "dashboard ready", elapsedMs: Date.now() - startupStarted });
       return true;
     } catch (error) {
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
@@ -8539,6 +8543,25 @@ async function loadRdoLines(client, bidYearId) {
 
 // Only use this helper for reads: mutations must never be replayed automatically.
 const referenceLoadDiagnostics = [];
+function recordReferenceLoadDiagnostic(diagnostic) {
+  referenceLoadDiagnostics.push(diagnostic);
+  if (referenceLoadDiagnostics.length > 100) referenceLoadDiagnostics.shift();
+  window.NATCA_REFERENCE_LOAD_DIAGNOSTICS = referenceLoadDiagnostics;
+  // Keep timings readable in remote browser logs without exposing response data.
+  const message = `Bidding load timing ${JSON.stringify(diagnostic)}`;
+  if (diagnostic.code) console.warn(message);
+  else console.info(message);
+}
+
+async function measureDashboardStartupStep(section, operation) {
+  const started = Date.now();
+  try {
+    return await operation();
+  } finally {
+    recordReferenceLoadDiagnostic({ section, elapsedMs: Date.now() - started });
+  }
+}
+
 async function readReferenceData(label, request) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const started = Date.now();
@@ -8562,25 +8585,42 @@ async function readReferenceData(label, request) {
     } finally {
       clearTimeout(timer);
     }
-    if (!result?.error) return result;
     const status = Number(result.status || 0);
-    const code = String(result.error.code || "");
+    const code = String(result.error?.code || "");
+    if (!result?.error) {
+      recordReferenceLoadDiagnostic({ section: label, attempt, status, code, elapsedMs: Date.now() - started, at: new Date().toISOString(), retrying: false });
+      return result;
+    }
     const transient = status === 408 || status === 429 || status >= 500
       || code === "READ_TIMEOUT" || code === "57014"
       || (!status && /Failed to fetch|NetworkError|network|timeout|AbortError/i.test(`${result.error.name || ""} ${result.error.message || ""}`));
     // Deliberately exclude response bodies, URLs, tokens, and bidder details.
     const diagnostic = { section: label, attempt, status, code, elapsedMs: Date.now() - started, at: new Date().toISOString(), retrying: transient && attempt < 3 };
-    referenceLoadDiagnostics.push(diagnostic);
-    if (referenceLoadDiagnostics.length > 50) referenceLoadDiagnostics.shift();
-    window.NATCA_REFERENCE_LOAD_DIAGNOSTICS = referenceLoadDiagnostics;
-    console.warn("Bidding reference read failed", diagnostic);
+    recordReferenceLoadDiagnostic(diagnostic);
     if (!transient || attempt === 3) return result;
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250)));
   }
 }
 
 function refreshPublicReferenceSection() {
+  // The public page is hidden behind the boot screen during member restoration.
+  if (supabaseState.authUserId && supabaseState.authRestorePromise) return;
   if (!isMemberAppVisible()) renderPublicPage();
+}
+
+function loadBackgroundHelpThreads() {
+  const userId = supabaseState.authUserId;
+  const year = BID_YEAR;
+  void readReferenceData("help threads", () => loadSupabaseHelpThreads().then((loaded) => (
+    loaded ? { data: null, error: null } : { data: null, error: { code: "HELP_UNAVAILABLE" } }
+  ))).then(() => {
+    if (supabaseState.authUserId !== userId || BID_YEAR !== year) return;
+    if (isMemberAppVisible()) {
+      renderHelpSummary();
+      renderHelpPanel();
+      renderAlerts();
+    }
+  });
 }
 
 async function loadSupabaseReferenceData() {
@@ -8622,6 +8662,8 @@ async function loadSupabaseReferenceData() {
     return [entries, documents];
   });
   try {
+    // Area definitions do not depend on which year the catalog selects.
+    const areasRequest = readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order"));
     await loadBidYearCatalog(client);
     const [bidYearResult, areasResult] = await Promise.all([
       readReferenceData("bid year", () => client
@@ -8629,7 +8671,7 @@ async function loadSupabaseReferenceData() {
         .select("id,bid_year,annual_leave_allowance_days")
         .eq("bid_year", BID_YEAR)
         .single()),
-      readReferenceData("areas", () => client.from("areas").select("id,code,name,display_order").order("display_order")),
+      areasRequest,
     ]);
     const requiredError = [bidYearResult, areasResult].find((result) => result.error)?.error;
     if (requiredError) throw requiredError;
@@ -8660,7 +8702,6 @@ async function loadSupabaseReferenceData() {
       approvalRulesResult,
       pilotSettingsResult,
       bidWindowsResult,
-      _helpThreadsLoaded,
       _rosterLoaded,
     ] = await Promise.all([
       readReferenceData("holidays", () => client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id)),
@@ -8700,7 +8741,6 @@ async function loadSupabaseReferenceData() {
         refreshPublicReferenceSection();
         return result;
       }),
-      readReferenceData("help threads", () => loadSupabaseHelpThreads().then(() => ({ data: null, error: null }))),
       rosterReady,
     ]);
 
@@ -8779,6 +8819,9 @@ async function loadSupabaseReferenceData() {
     void faqReads;
     supabaseState.loading = false;
     supabaseState.referenceDataLoaded = true;
+    // Help has no bearing on bidding eligibility or availability. Start it after
+    // essential data is applied, and refresh only help-related UI when it arrives.
+    if (supabaseState.connected) loadBackgroundHelpThreads();
   }
 }
 
@@ -15138,12 +15181,16 @@ async function loadSupabaseHelpThreads() {
   if (!client) return false;
 
   const requester = currentHelpRequester();
+  const requestedYear = BID_YEAR;
+  const requestedUserId = supabaseState.authUserId;
+  const isCurrentRequest = () => BID_YEAR === requestedYear && supabaseState.authUserId === requestedUserId;
   try {
     const { data, error } = await client.rpc("live_help_threads", {
       help_bid_year: BID_YEAR,
       help_session_id: requester.sessionId || liveHelpSessionId(),
     });
     if (error) throw error;
+    if (!isCurrentRequest()) return false;
     helpThreads = (data || []).map(helpThreadFromRpc);
     return true;
   } catch (error) {
@@ -15152,10 +15199,11 @@ async function loadSupabaseHelpThreads() {
     }
   }
 
-  if (!requester.verified && !hasIntakeAccess()) return false;
+  if (!isCurrentRequest() || (!requester.verified && !hasIntakeAccess())) return false;
 
   try {
     await ensureSupabaseBidYearId();
+    if (!isCurrentRequest()) return false;
     let query = client
       .from("help_threads")
       .select("id,bid_year_id,bidder_id,subject,status,created_at,updated_at,help_messages(id,sender_id,message,created_at)")
@@ -15164,6 +15212,7 @@ async function loadSupabaseHelpThreads() {
     if (!hasIntakeAccess()) query = query.eq("bidder_id", requester.bidderId);
     const { data, error } = await query;
     if (error) throw error;
+    if (!isCurrentRequest()) return false;
     helpThreads = (data || []).map(helpThreadFromLegacyRow);
     return true;
   } catch (error) {

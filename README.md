@@ -199,8 +199,15 @@ statement timeouts receive up to three attempts, with staggered backoff. Each
 attempt has a 15-second limit. Permission and schema errors are not retried.
 This policy applies only to reference reads, never bid submissions or mutations.
 
-Browser console warnings identify the failed section, HTTP status, error code,
-attempt, duration, and time. The latest 50 failures are also available through
+Member startup waits for fresh bidding data and access rules, but not help
+conversations, FAQs, or MOUs. Help loads after the essential data and refreshes
+only help-related controls. Area definitions load alongside the bid-year catalog.
+
+Browser console timing messages identify each reference read's section, HTTP
+status, error code, attempt, duration, and time, including successful reads.
+Startup timings also separate session restoration, member profile, essential
+data, rendering, and total time to dashboard readiness (starting at session
+restoration, excluding initial document/script download). The latest 100 records are available through
 `window.NATCA_REFERENCE_LOAD_DIAGNOSTICS`. These records exclude response bodies,
 credentials, URLs, and bidder details; they remain in memory in that browser tab
 and are not sent to a central logging service.
