@@ -122,6 +122,7 @@ let pilotState = {
   lastResetAt: null,
 };
 const ghostBidderIds = new Set();
+let publicGhostRdoBids = [];
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -7378,6 +7379,7 @@ function resetSupabaseBackedData() {
   fullLeaveDates.clear();
   ghostBidderIds.clear();
   intakeBidderSelection.record = null;
+  publicGhostRdoBids = [];
   intakeBidderSelection.error = "";
   intakeBidderSelection.loading = false;
   intakeBidderSelection.generation += 1;
@@ -7722,6 +7724,7 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
+      publicGhostRdoBidsResult,
       biddingStateResult,
       leaveSlotsResult,
       leaveRequestsResult,
@@ -7739,6 +7742,7 @@ async function loadSupabaseReferenceData() {
     ] = await Promise.all([
       client.from("holidays").select("holiday_date,name,is_observed").eq("bid_year_id", bidYear.id),
       loadRdoLines(client, bidYear.id),
+      client.rpc("read_public_ghost_rdo_bids", { requested_bid_year: BID_YEAR }),
       supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null }),
       loadPublishedLeaveSlots(client),
       supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null }),
@@ -7760,6 +7764,7 @@ async function loadSupabaseReferenceData() {
     const loadWarnings = [
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      supabaseLoadWarning("ghost RDO labels", publicGhostRdoBidsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
       supabaseLoadWarning("leave requests", leaveRequestsResult),
@@ -7780,6 +7785,7 @@ async function loadSupabaseReferenceData() {
     });
 
     if (!rdoLinesResult.error) upsertRdoLinesFromDatabase(rdoLinesResult.data || [], areaById);
+    publicGhostRdoBids = publicGhostRdoBidsResult.error ? [] : supabaseRows(publicGhostRdoBidsResult);
     const biddingStateSubmissions = biddingStateResult.error
       ? []
       : biddingStateResult.data?.submissions || [];
@@ -8419,7 +8425,7 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
               <details class="mobile-rdo-card">
                 <summary>
                   <span><strong>Line ${escapeHtml(line.line)}</strong><span class="mobile-rdo-pattern">RDO: ${line.week.map((value, index) => value === "RDO" ? dayNames[index] : "").filter(Boolean).join(", ") || escapeHtml(line.pattern)}</span></span>
-                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${escapeHtml(lineOccupant(line))}` : "Open"}</span>
+                  <span class="mobile-line-status">${line.status === "Taken" ? `Taken · ${lineOccupant(line)}` : lineOccupant(line) || "Open"}</span>
                   <span class="mobile-expand-label">Schedule <span aria-hidden="true">⌄</span></span>
                 </summary>
                 <dl class="mobile-line-week">${line.week.map((value, index) => `<div><dt>${dayNames[index]}</dt><dd>${shiftCell(value, index === swingIndex)}</dd></div>`).join("")}</dl>
@@ -9183,9 +9189,13 @@ function shiftCell(value, isThirdDaySwing = false) {
 }
 
 function lineOccupant(line) {
-  if (line.status === "Taken") return line.cpc || "";
-  if (line.status === "Selected") return line.cpc || currentUser.initials;
-  return "";
+  const occupant = line.status === "Taken" ? line.cpc || ""
+    : line.status === "Selected" ? line.cpc || currentUser.initials : "";
+  const ghostInitials = [...new Set(publicGhostRdoBids
+    .filter((bid) => bid.line === line.line && bid.area === (line.area || "Area A"))
+    .map((bid) => bid.initials).filter(Boolean))];
+  if (!ghostInitials.length) return escapeHtml(occupant);
+  return `${escapeHtml(occupant || "Open")} · ${ghostInitials.map((initials) => `<span class="ghost-rdo-occupant" title="Ghost bid · source line remains available">*${escapeHtml(initials)}</span>`).join(" · ")}`;
 }
 
 function selectedMidValue(line) {
@@ -9450,7 +9460,7 @@ function renderRdoLines() {
           .map((value, index) => value === "RDO" ? dayNames[index] : "")
           .filter(Boolean)
           .join(", ") || line.pattern;
-        const status = isOccupied ? `Taken · ${escapeHtml(lineOccupant(line))}` : isViewingHomeArea() && matchesBidRole ? "Open" : "View only";
+        const status = isOccupied ? `Taken · ${lineOccupant(line)}` : lineOccupant(line) || (isViewingHomeArea() && matchesBidRole ? "Open" : "View only");
         const swingIndex = thirdDaySwingIndex(line.week);
         const selectButton = !isOccupied && isViewingHomeArea() && matchesBidRole && !bidderSelectionLocked
           ? `<button class="${isSelected ? "secondary-action" : "primary-action"} small member-line-select" type="button" data-line-id="${escapeHtml(line.line)}">${isSelected ? "Selected" : `Select Line ${escapeHtml(line.line)}`}</button>`

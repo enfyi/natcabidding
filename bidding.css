@@ -4055,6 +4055,10 @@ tr.occupied-row .rdo-tag {
   font-weight: 800;
 }
 
+.ghost-rdo-occupant {
+  color: #8b7aaa;
+}
+
 .gl-bid-badge,
 .gl-bid-marker {
   border: 1px solid #e0a92f;
