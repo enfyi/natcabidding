@@ -5938,14 +5938,16 @@ tr.occupied-row .rdo-tag {
 }
 
 .calendar-panel.full .schedule-calendar .month-grid > span,
-.calendar-panel.full .schedule-calendar .month-grid > button {
+.calendar-panel.full .schedule-calendar .month-grid > button,
+.calendar-panel.full .schedule-calendar .month-grid > .schedule-day {
   min-height: 18px;
   font-size: 0.58rem;
 }
 
 .calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > span,
-.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > button {
-  min-height: 56px;
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > button,
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > .schedule-day {
+  min-height: 70px;
   font-size: 0.72rem;
 }
 
@@ -5953,7 +5955,7 @@ tr.occupied-row .rdo-tag {
   gap: 6px;
 }
 
-.schedule-calendar.week-view .week-day-column button {
+.schedule-calendar.week-view .week-day-column > .schedule-day {
   min-height: 104px;
   font-size: 0.72rem;
 }
@@ -12360,6 +12362,23 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   display: none;
 }
 
+
+.schedule-day { position: relative; border-radius: 5px; }
+.schedule-day > .date-number { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 3px; }
+.schedule-calendar .schedule-day-assignment { border: 0; border-radius: 4px; background: transparent; padding: 5px 3px; min-height: 28px; text-align: left; }
+.schedule-calendar button.schedule-day-assignment { cursor: pointer; }
+.schedule-calendar button.schedule-day-assignment:is(:hover, :focus-visible, .selected) { background: #ffffffb3; outline: 2px solid #0f766e; outline-offset: -2px; }
+.schedule-day:focus-within .schedule-tooltip { opacity: 1; visibility: visible; }
+.schedule-day:focus-within { z-index: 100; }
+.intake-day-dialog { width: min(420px, 90vw); border: 1px solid #cbd5e1; border-radius: 12px; padding: 24px; color: #172033; }
+.intake-day-dialog::backdrop { background: #0f172a66; }
+.intake-day-shift-list { display: grid; gap: 8px; margin: 16px 0; }
+.intake-day-shift-list > :is(button, div) { display: grid; gap: 6px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #eff6ff; text-align: left; }
+.intake-day-shift-list > button { cursor: pointer; }
+.intake-day-dialog form { margin-top: 16px; }
+
+.schedule-calendar .schedule-day { display: grid; place-items: center; min-height: 20px; color: var(--muted); font-family: "JetBrains Mono", monospace; }
+.schedule-calendar .schedule-day > .date-number { min-height: 0; color: inherit; background: transparent; }
 /* Mark the name as well as the dot so the open window is easy to spot. */
 .current-bid-time-name {
   background: #d9f99d !important;
