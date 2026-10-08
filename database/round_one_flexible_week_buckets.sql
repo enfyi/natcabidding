@@ -461,7 +461,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -1012,7 +1012,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -1040,9 +1040,6 @@ begin
   where b.id = request_row.bidder_id
     and b.active;
 
-  if actor.role <> 'admin' and actor.area_id is distinct from target.area_id then
-    raise exception 'Intake users can only replace approved leave in their own area.';
-  end if;
 
   if target.bid_role in ('ADM', 'NB') then
     raise exception 'This profile cannot be assigned leave.';

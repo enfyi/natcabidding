@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useState } from 'react'
 import type { BidLineImportPreview, BidLineImportRow } from '@/lib/bid-line-import-types'
@@ -594,7 +595,7 @@ export function BidLineImporter() {
         </button>
       </section>
 
-      {status ? <p className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} role="status">{status}</p> : null}
+      <ActionStatus message={status} busy={busy} className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} />
       {issues.length ? (
         <section className="import-issues" aria-label="Workbook errors">
           <h2>Fix these workbook rows</h2>
@@ -618,7 +619,7 @@ export function BidLineImporter() {
           </div>
 
           <p className="import-safety-note import-editor-note"><strong>Area-specific:</strong> Every line belongs to one bid year and area. Up and Down set the order bidders see. Assigned, taken, locked, or historically referenced lines remain protected from deletion.</p>
-          {lineManagementStatus ? <p className="import-inline-status" role="status">{lineManagementStatus}</p> : null}
+          <ActionStatus message={lineManagementStatus} busy={savingLine || deletingLineId !== null || reorderingLineId !== null} className="import-inline-status" />
 
           {lineDraft ? (
             <section className="bid-line-editor" aria-labelledby="bid-line-editor-heading">

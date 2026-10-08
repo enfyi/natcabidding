@@ -48,6 +48,17 @@ assert.deepEqual(Array.from(capacity, (item) => item.crewMax), [2, 1, 1])
 assert.equal(capacity.find((item) => item.group === 'A').available, false)
 assert.equal(capacity.find((item) => item.group === 'B').available, true)
 
+// A four-line crew at 1/2 must permit the second assignment. Once A claims
+// the remainder, B and C have one slot each; the area still has ample space.
+context.rdoLines[7].status = 'Open'
+context.rdoLines[7].group = ''
+capacity = context.testApi.fatigueCapacityForLine(context.rdoLines[8], null, '')
+assert.equal(capacity.find((item) => item.group === 'A').crewUsed, 1)
+assert.equal(capacity.find((item) => item.group === 'A').crewMax, 2)
+assert.equal(capacity.find((item) => item.group === 'A').available, true)
+context.rdoLines[7].status = 'Taken'
+context.rdoLines[7].group = 'A'
+
 context.rdoLines.slice(10, 21).forEach((item) => {
   item.status = 'Taken'
   item.group = 'A'

@@ -1,6 +1,6 @@
-export type BiddingLandingPage = 'dashboard' | 'intake' | 'intake-schedule' | 'admin'
+export type BiddingLandingPage = 'dashboard' | 'seniority' | 'rdos' | 'leave' | 'calendar' | 'history' | 'profile' | 'intake' | 'intake-schedule' | 'admin' | 'admin-tools'
 
-const LANDING_PAGES = new Set<string>(['dashboard', 'intake', 'intake-schedule', 'admin'])
+const LANDING_PAGES = new Set<string>(['dashboard', 'seniority', 'rdos', 'leave', 'calendar', 'history', 'profile', 'intake', 'intake-schedule', 'admin', 'admin-tools'])
 
 export function isBiddingLandingPage(value: unknown): value is BiddingLandingPage {
   return typeof value === 'string' && LANDING_PAGES.has(value)
