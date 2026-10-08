@@ -7404,9 +7404,19 @@ function profileFromSupabase(row) {
 async function claimSupabaseProfile() {
   const client = supabaseClient();
   if (!client) return null;
+  const { data: identity, error: identityError } = await client.auth.getUser();
+  if (identityError) throw identityError;
+  if (!identity.user?.email) throw new Error("Could not verify your sign-in. Sign in again.");
   const { data, error } = await client.rpc("claim_current_bidder_profile");
   if (error) throw error;
   const profile = Array.isArray(data) ? data[0] : data;
+  if (profile && normalizedEmail(profile.email) !== normalizedEmail(identity.user.email)) {
+    throw new Error("Your login does not match the loaded BUE profile. Sign out and sign in again.");
+  }
+  const { data: latest, error: sessionError } = await client.auth.getSession();
+  if (sessionError || latest.session?.user?.id !== identity.user.id) {
+    throw new Error("Your sign-in changed while loading your profile. Sign in again.");
+  }
   return profile ? profileFromSupabase(profile) : null;
 }
 
@@ -7469,6 +7479,24 @@ async function initializeSupabaseAuth() {
   if (!client || supabaseState.authInitialized) return;
 
   supabaseState.authInitialized = true;
+  // The Next.js login uses cookies; this embedded app uses local storage.
+  // Replace any older browser identity before registering restoration callbacks.
+  if (new URL(window.location.href).searchParams.get("serverSession") === "1") {
+    try {
+      const response = await fetch("api/auth/session", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("Your sign-in ended. Sign in again.");
+      const session = await response.json();
+      const { error } = await client.auth.setSession(session);
+      if (error) throw error;
+    } catch (error) {
+      currentUser = null;
+      await client.auth.signOut({ scope: "local" });
+      clearSupabaseAccountState();
+      showPublicHome();
+      setAuthStatus(error.message || "Could not verify your sign-in.", "error");
+      return false;
+    }
+  }
   client.auth.onAuthStateChange((event, session) => {
     if (session && ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"].includes(event)) {
       const isKnownSession = Boolean(
@@ -7505,10 +7533,9 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
 
   supabaseState.authRestorePromise = (async () => {
     const startupStarted = Date.now();
-    const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
-    if (!session) return false;
-
     try {
+      const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
+      if (!session) return false;
       const profile = await measureDashboardStartupStep("member profile", claimSupabaseProfile);
       if (!profile) {
         await rejectUnmatchedSupabaseLogin();
@@ -7526,6 +7553,8 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       recordReferenceLoadDiagnostic({ section: "dashboard ready", elapsedMs: Date.now() - startupStarted });
       return true;
     } catch (error) {
+      currentUser = null;
+      showPublicHome();
       setAuthStatus(error.message || "Could not load your BUE profile.", "error");
       return false;
     } finally {
@@ -7665,6 +7694,8 @@ async function loginWithSupabasePassword(email, password) {
     await loadSupabaseReferenceData();
     showLoggedInApp(requestedLandingPage());
   } catch (error) {
+    currentUser = null;
+    showPublicHome();
     setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
   }
 }
