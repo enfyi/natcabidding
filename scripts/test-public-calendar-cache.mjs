@@ -6,6 +6,7 @@ const source = readFileSync(new URL('../bidding.js', import.meta.url), 'utf8');
 const start = source.indexOf('function makeCalendar(');
 const makeCalendar = source.slice(start, source.indexOf('\n}', start) + 2);
 let builds = 0;
+let deferred;
 const node = () => ({ cloneNode: () => node() });
 const target = {
   dataset: {}, childNodes: [],
@@ -25,12 +26,13 @@ const context = {
   monthNames: Array(12).fill('month'),
   calendarWorkforceForScope: () => 'cpc',
   syncMobileCalendarControls() {}, syncMobileCalendarMonths() {},
-  makeCalendarRenderContext() { builds++; return {}; },
+  makeCalendarRenderContext(options) { builds++; deferred = options.deferSlotTooltip; return {}; },
   renderMonthCard: () => '<month/>', renderLeaveYearContinuation: () => '',
 };
 vm.runInNewContext(makeCalendar, context);
 const render = () => context.makeCalendar('public-calendar', { reuseCurrent: true });
 render();
+assert.equal(deferred, true, 'Desktop minimal view defers date details');
 render();
 assert.equal(builds, 1, 'Returning from a tab reuses the current calendar');
 context.publicState.area = 'Area B';
@@ -44,6 +46,7 @@ assert.equal(builds, 3, 'Fresh database data invalidates cached calendars');
 context.calendarLayouts.public = 'full';
 render();
 assert.equal(builds, 4, 'Layout changes rebuild the calendar');
+assert.equal(deferred, false, 'Full layout retains inline date details');
 context.displayedCalendarYear++;
 render();
 assert.equal(builds, 5, 'Year changes rebuild the calendar');
