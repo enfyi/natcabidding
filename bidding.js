@@ -2808,6 +2808,7 @@ async function runUiAction(key, button, label, action, { deferPaint = true } = {
   if (pendingUiActions.has(key)) return;
   pendingUiActions.add(key);
   const originalLabel = button?.tagName === "BUTTON" ? button.textContent : null;
+  const originalContent = originalLabel !== null && button.childNodes ? [...button.childNodes] : null;
   const wasDisabled = button?.disabled;
   if (button) {
     button.disabled = true;
@@ -2824,7 +2825,10 @@ async function runUiAction(key, button, label, action, { deferPaint = true } = {
   } finally {
     pendingUiActions.delete(key);
     if (button) {
-      if (originalLabel !== null && button.textContent === label) button.textContent = originalLabel;
+      if (originalLabel !== null && button.textContent === label) {
+        if (originalContent) button.replaceChildren(...originalContent);
+        else button.textContent = originalLabel;
+      }
       button.disabled = wasDisabled || button.dataset?.awaitingRdoDecision === "true";
       button.removeAttribute("aria-busy");
     }
@@ -17498,7 +17502,11 @@ document.addEventListener("click", async (event) => {
   // Navigation must stay available even when bidding data cannot load.
   const pageNavigation = event.target.closest("[data-page]");
   if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
-    setPage(pageNavigation.dataset.page);
+    if (pageNavigation.dataset.page === "dashboard") {
+      await runUiAction("dashboard-navigation", pageNavigation, "Opening dashboard…", () => setPage("dashboard"));
+    } else {
+      setPage(pageNavigation.dataset.page);
+    }
     return;
   }
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
