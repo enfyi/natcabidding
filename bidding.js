@@ -7519,6 +7519,24 @@ async function initializeSupabaseAuth() {
   return restoreSupabaseSession();
 }
 
+async function openMemberDashboard() {
+  // Let startup finish before changing its public/member destination.
+  const pending = supabaseState.authRestorePromise;
+  if (pending && !await pending) return false;
+  if (!supabaseState.authUserId) return false;
+  syncMemberPageUrl("dashboard");
+  if (!currentUser?.supabaseProfileId) return restoreSupabaseSession("dashboard");
+  // Returning from the public view should not reload all bidding data.
+  try {
+    showLoggedInApp("dashboard");
+    return true;
+  } catch (error) {
+    showPublicHome();
+    setAuthStatus(error.message || "Could not open your dashboard. Please try again.", "error");
+    return false;
+  }
+}
+
 async function restoreSupabaseSession(page = requestedLandingPage()) {
   if (supabaseState.authRestorePromise) return supabaseState.authRestorePromise;
 
@@ -17649,12 +17667,7 @@ document.addEventListener("click", async (event) => {
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
     if (supabaseState.authUserId) {
-      const dashboardUrl = new URL(window.location.href);
-      dashboardUrl.searchParams.set("page", "dashboard");
-      dashboardUrl.searchParams.delete("area");
-      dashboardUrl.searchParams.delete("section");
-      window.history.replaceState(window.history.state, "", dashboardUrl);
-      await restoreSupabaseSession("dashboard");
+      await runUiAction("open-dashboard", publicLoginToggle, "Opening dashboard…", openMemberDashboard);
       return;
     }
     const shouldOpen = publicLoginMenu.hidden;
