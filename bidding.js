@@ -129,32 +129,8 @@ let pilotState = {
 };
 const ghostBidderIds = new Set();
 let publicGhostRdoBids = [];
-const now = Date.now();
-const testAccounts = {
-  bue: {
-    firstName: "Michael",
-    lastName: "Schoelen",
-    initials: "OC",
-    seniorityRank: 5,
-    bidderCount: 45,
-    area: "Area A",
-    role: "controller",
-    roleLabel: "BUE Controller",
-    systemAdmin: true,
-    phone: "(626) 392-1194",
-    email: "m.schoelen@yahoo.com",
-    leaveSlotAllowance: DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE,
-    adminGrant: {
-      type: "Bidding Intake",
-      scope: "All Areas",
-      start: new Date(now - 60 * 60 * 1000),
-      end: new Date(now + 4 * 60 * 60 * 1000),
-      grantedBy: "NATCA ZLA Bidding Chair",
-    },
-  },
-};
-
-let currentUser = { ...testAccounts.bue };
+// Member identity is assigned only after an authenticated profile is loaded.
+let currentUser = null;
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
@@ -4874,7 +4850,7 @@ function queueNotificationEmail(to, subject, body, area = currentUser.area, noti
 }
 
 function bidRecipientEmail(item) {
-  const recipient = bueByInitials(item.initials) || Object.values(testAccounts).find((account) => account.initials === item.initials);
+  const recipient = bueByInitials(item.initials);
   return recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`;
 }
 
@@ -7268,6 +7244,8 @@ function supabaseAuthRedirectUrl() {
 }
 
 function clearSupabaseAccountState() {
+  currentUser = null;
+  document.querySelector(".app-shell")?.setAttribute("hidden", "");
   bidderEditor.generation += 1;
   bidderEditor.record = null;
   bidderEditor.person = null;
@@ -7438,21 +7416,34 @@ async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no
 }
 
 function showLoggedInApp(page = requestedLandingPage()) {
-  selectedViewArea = currentUser.area;
-  document.querySelector(".login-screen")?.setAttribute("hidden", "");
-  document.querySelector(".app-shell")?.removeAttribute("hidden");
-  document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
-  // Select the destination first so startup never renders another page's calendar.
-  setPage(intendedLandingPage(page), { render: false });
-  renderApp();
-  startLiveAlertUpdates();
-  document.documentElement.classList.remove("member-boot-pending");
+  if (!currentUser?.supabaseProfileId) {
+    showPublicHome();
+    return;
+  }
+  document.documentElement.classList.add("member-render-pending");
+  try {
+    selectedViewArea = currentUser.area;
+    document.querySelector(".login-screen")?.setAttribute("hidden", "");
+    document.querySelector(".app-shell")?.removeAttribute("hidden");
+    document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
+    // Select the destination first so startup never renders another page's calendar.
+    setPage(intendedLandingPage(page), { render: false });
+    renderApp();
+    startLiveAlertUpdates();
+    document.documentElement.classList.remove("member-boot-pending");
+  } catch (error) {
+    currentUser = null;
+    document.querySelector(".app-shell")?.setAttribute("hidden", "");
+    throw error;
+  } finally {
+    document.documentElement.classList.remove("member-render-pending");
+  }
 }
 
 function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
@@ -7535,8 +7526,13 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
     const startupStarted = Date.now();
     try {
       const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
-      if (!session) return false;
+      if (!session) {
+        currentUser = null;
+        showPublicHome();
+        return false;
+      }
       const profile = await measureDashboardStartupStep("member profile", claimSupabaseProfile);
+      if (supabaseState.authUserId !== session.user.id) return false;
       if (!profile) {
         await rejectUnmatchedSupabaseLogin();
         return false;
@@ -7546,6 +7542,7 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       await measureDashboardStartupStep("essential bidding data", () => loadSupabaseReferenceData({
         deferIntakeData: !requestedPublicView() && intendedLandingPage(page) === "dashboard",
       }));
+      if (supabaseState.authUserId !== session.user.id) return false;
       const renderStarted = Date.now();
       if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
       else showLoggedInApp(page);
@@ -7554,8 +7551,9 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       return true;
     } catch (error) {
       currentUser = null;
+      document.querySelector(".app-shell")?.setAttribute("hidden", "");
       showPublicHome();
-      setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+      setAuthStatus(error.message || "Could not load your BUE profile. Please reload and try again.", "error");
       return false;
     } finally {
       supabaseState.authRestorePromise = null;
@@ -7682,22 +7680,7 @@ async function loginWithSupabasePassword(email, password) {
     return;
   }
 
-  await refreshSupabaseAccountState();
-  try {
-    const profile = await claimSupabaseProfile();
-    if (!profile) {
-      await rejectUnmatchedSupabaseLogin();
-      return;
-    }
-    currentUser = profile;
-    setAuthStatus("Signed in.", "success");
-    await loadSupabaseReferenceData();
-    showLoggedInApp(requestedLandingPage());
-  } catch (error) {
-    currentUser = null;
-    showPublicHome();
-    setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
-  }
+  await restoreSupabaseSession(requestedLandingPage());
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -7721,7 +7704,7 @@ function profileFormValues() {
 
 async function saveSupabaseProfile(values) {
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     setProfileFormStatus("Profile changes could not reach the database. Sign in and try again.", "error");
     return false;
   }
@@ -7943,7 +7926,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const bidder = row.bidders || row;
   const payload = row.payload || {};
   const line = payload.rdo_line_code || payload.line || row.line || "";
-  const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser?.initials ? currentUser.area : "Area A");
   const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
   const flex = payload.flex ?? "";
   const aws = payload.aws ?? "";
@@ -8126,7 +8109,7 @@ function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
 
 function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   const bidder = row.bidders || row;
-  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser?.initials ? currentUser.area : "Area A");
   const dateKeys = row.requested_start_date && row.requested_end_date
     ? datesBetweenKeys(row.requested_start_date, row.requested_end_date)
     : [];
@@ -8231,7 +8214,7 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
   intakeQueue = intakeQueue.filter((item) => !item.supabaseRequestId || !ids.has(item.supabaseRequestId));
   intakeQueue.unshift(...items);
 
-  const personalItems = items.filter((item) => item.initials === currentUser.initials);
+  const personalItems = currentUser ? items.filter((item) => item.initials === currentUser.initials) : [];
   const personalIds = new Set(personalItems.map((item) => item.supabaseRequestId));
   for (let index = leaveBids.length - 1; index >= 0; index -= 1) {
     if (leaveBids[index].supabaseRequestId && personalIds.has(leaveBids[index].supabaseRequestId)) {
@@ -8443,7 +8426,7 @@ async function saveSupabaseRdoRequest(request, options = {}) {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The RDO bid could not reach the database. Sign in and try again.");
   }
   const { data, error } = await client.rpc("submit_rdo_bid", {
@@ -8469,7 +8452,7 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
   }
   const { data, error } = await client.rpc(request.fatigueOverride ? "submit_manual_rdo_fatigue_override" : "submit_rdo_bid", {
@@ -8493,7 +8476,7 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
   }
   const targetRdoLine = rdoLineForInitials(person.initials);
@@ -8526,7 +8509,7 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
   }
   const targetInitials = options.targetInitials || currentUser.initials;
@@ -17666,7 +17649,7 @@ document.addEventListener("click", async (event) => {
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
     if (supabaseState.authUserId) {
-      showLoggedInApp();
+      await restoreSupabaseSession();
       return;
     }
     const shouldOpen = publicLoginMenu.hidden;
