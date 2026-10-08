@@ -124,6 +124,7 @@ const bidding = vm.createContext({
   readReferenceData: async (_label, request) => request(),
   loadRdoLines: async () => ({ data: [{ id: 'new', line: 'NEW' }] }),
   loadPublishedGlRdoAssignments: async () => ({ data: [] }),
+  loadLeaveRequestsWithWeeks: async () => ({ data: [] }),
   rdoLines: lines, leaveBids: [{ supabaseRequestId: 'deleted-request' }, ...drafts],
   intakeQueue: [{ supabaseSubmissionId: 'deleted-submission' }],
   intakeBidderSelection: { record: {}, generation: 0 },
