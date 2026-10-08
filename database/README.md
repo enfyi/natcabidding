@@ -22,6 +22,10 @@ come from the existing public roster read model.
 Run `database/public_leave_slots_read.sql` so leave calendars load the complete
 saved slot schedule and daily capacity adjustments from Supabase without the
 Data API row limit truncating later dates or areas.
+For existing installations, run `database/optimize_public_leave_slots_read.sql`
+to reduce repeated capacity-marker checks while preserving the deployed function
+and its grants. Run `scripts/test-public-leave-slot-query.sql` to compare the
+complete old and optimized calendar results in a rollback-only transaction.
 
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
