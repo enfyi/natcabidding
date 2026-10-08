@@ -10,7 +10,7 @@ function fn(name) {
 const key = '2027-01-11';
 const ghost = { initials: 'GH', area: 'Area A', type: 'Leave', status: 'Approved', ghostBid: true, range: key };
 const board = { innerHTML: '' };
-const details = { label: key, cpc: ['AA'], dev: [], cpcCapacity: 3, devCapacity: 4, cpcOpen: 2, devOpen: 4 };
+const details = { label: key, cpc: ['AA'], dev: [], cpcCapacity: 3, devCapacity: 4, cpcOpen: 2, devOpen: 4, glBids: [{ initials: 'GL', status: 'Approved' }] };
 const context = vm.createContext({
   currentUser: { area: 'Area A', initials: 'GH' },
   leaveBids: [ghost],
@@ -35,6 +35,8 @@ context.renderLeaveSlotBoardWithCache({ key, area: 'Area A', inspectOnly: true }
 assert.match(board.innerHTML, /Ghost bids · no slots used/);
 assert.match(board.innerHTML, />GH</);
 assert.match(board.innerHTML, />PD</);
+assert.match(board.innerHTML, /GL bids · no slots used/);
+assert.match(board.innerHTML, />GL</);
 assert.match(board.innerHTML, /1<\/b> \/ 3 CPC slots filled/);
 assert.match(board.innerHTML, /CPC Open/);
 assert.deepEqual(details.cpc, ['AA'], 'Ghosts never replace real occupants or consume capacity');
@@ -42,4 +44,6 @@ context.intakeQueue = [];
 context.leaveBids = [];
 context.renderLeaveSlotBoardWithCache({ key, area: 'Area A', inspectOnly: true });
 assert.doesNotMatch(board.innerHTML, /Ghost bids/);
+assert.match(board.innerHTML, />GL</, 'Published GL entries remain visible without any private leave or intake records');
+assert.match(board.innerHTML, /GL bids · no slots used/);
 console.log('PASS dashboard date popup shows approved/pending ghosts once, filters date/area/status, and preserves real slot availability');

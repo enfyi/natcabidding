@@ -6815,6 +6815,10 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
           ${slotRows("Dev", details.dev, devCapacity)}
         </section>
       </div>
+      ${inspectOnly && (details.glBids || []).length ? `<section class="daily-slot-card gl-bid-detail" aria-label="GL bids, no slots used">
+        <h4>GL bids · no slots used</h4>
+        ${details.glBids.map((bid) => `<div class="slot-row"><span>GL Bid · ${escapeHtml(bid.status || "Pending")}</span><b>${escapeHtml(bid.initials)}</b></div>`).join("")}
+      </section>` : ""}
       ${ghostBids.length ? `<section class="daily-slot-card ghost-bid-detail" aria-label="Ghost bids, no slots used">
         <h4>Ghost bids · no slots used</h4>
         ${ghostBids.map((bid) => `<div class="slot-row"><span>Ghost Bid · ${escapeHtml(bid.status)}</span><b>${escapeHtml(bid.initials)}</b></div>`).join("")}
