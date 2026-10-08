@@ -3893,6 +3893,21 @@ tr.occupied-row .rdo-tag {
   background: rgba(122, 189, 194, 0.1);
 }
 
+.intake-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intake-detail-header > div {
+  min-width: 0;
+}
+
+.intake-detail-header > button {
+  flex-shrink: 0;
+}
+
 .intake-detail-panel h3,
 .intake-detail-panel p {
   margin: 0;

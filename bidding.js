@@ -14016,10 +14016,13 @@ function renderIntakeDetailPanel(item, visibleItems) {
   const detailItems = intakeRoundDetailItems(item, visibleItems);
   panel.hidden = false;
   panel.innerHTML = `
-    <div>
-      <span class="intake-type">Round ${round} Bid Detail</span>
-      <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
-      <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+    <div class="intake-detail-header">
+      <div>
+        <span class="intake-type">Round ${round} Bid Detail</span>
+        <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
+        <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+      </div>
+      <button class="secondary-action small" type="button" data-intake-detail-close aria-label="Close bid detail">Close</button>
     </div>
     <div class="intake-detail-list">
       ${detailItems.map((entry) => `
@@ -15395,6 +15398,16 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-detail-close]")) {
+    const detailId = activeIntakeDetailId;
+    activeIntakeDetailId = null;
+    renderIntakeQueue();
+    const returnCard = [...document.querySelectorAll("[data-intake-card]")]
+      .find((card) => card.dataset.intakeCard === detailId);
+    returnCard?.focus({ preventScroll: true });
+    return;
+  }
+
   const intakeBidderDetailOpen = event.target.closest("[data-intake-bidder-detail-open]");
   if (intakeBidderDetailOpen) {
     intakeBidderSelection.detail = intakeBidderDetailOpen.dataset.intakeBidderDetailOpen;
