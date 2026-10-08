@@ -619,6 +619,8 @@ let displayedCalendarYear = BID_YEAR;
 let displayedCalendarMonth = new Date().getFullYear() === BID_YEAR ? new Date().getMonth() : 0;
 const annualMobileCalendars = new Set();
 let calendarRenderRevision = 0;
+const publicCalendarCache = new Map();
+let publicCalendarCacheRevision = -1;
 let pendingPageCalendarFrame = 0;
 let publicRdoPresentation = "table";
 let publicBidTimePresentation = "cards";
@@ -2815,7 +2817,7 @@ function showActionFeedback(message, status = "info") {
   if (status !== "info" || !pendingUiActions.size) actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, status === "error" ? 12000 : 7000);
 }
 
-async function runUiAction(key, button, label, action) {
+async function runUiAction(key, button, label, action, { deferPaint = true } = {}) {
   if (pendingUiActions.has(key)) return;
   pendingUiActions.add(key);
   const originalLabel = button?.tagName === "BUTTON" ? button.textContent : null;
@@ -2828,7 +2830,7 @@ async function runUiAction(key, button, label, action) {
   showActionFeedback(label);
   try {
     // Let the browser paint feedback before expensive synchronous rendering.
-    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    if (deferPaint) await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
     await action();
   } catch (error) {
     showActionFeedback(error.message || "The action could not finish. Please try again.", "error");
@@ -6165,7 +6167,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   const ownerPage = target.closest(".page");
   if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
   if (
-    reuseCurrent &&
+    !isPublicCalendar && reuseCurrent &&
     target.childElementCount > 0 &&
     Number(target.dataset.calendarRevision) === calendarRenderRevision
   ) {
@@ -6202,7 +6204,28 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   target.classList.remove("month-view", "week-view");
   target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
-  if (reuseCurrent) {
+  if (isPublicCalendar) {
+    if (publicCalendarCacheRevision !== calendarRenderRevision) {
+      publicCalendarCache.clear();
+      publicCalendarCacheRevision = calendarRenderRevision;
+    }
+    if (reuseCurrent && target.childElementCount > 0
+      && Number(target.dataset.calendarRevision) === calendarRenderRevision
+      && target.dataset.calendarRenderKey === renderKey) {
+      syncMobileCalendarMonths(target);
+      return;
+    }
+    const cached = reuseCurrent && publicCalendarCache.get(renderKey);
+    if (cached) {
+      target.replaceChildren(...cached.map((node) => node.cloneNode(true)));
+      syncMobileCalendarMonths(target);
+      target.dataset.calendarRevision = String(calendarRenderRevision);
+      target.dataset.calendarRenderKey = renderKey;
+      return;
+    }
+  }
+
+  if (reuseCurrent && !isPublicCalendar) {
     const reusableCalendar = [...document.querySelectorAll(".app-shell .year-calendar[id]")].find(
       (calendar) =>
         calendar !== target &&
@@ -6248,6 +6271,14 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   syncMobileCalendarMonths(target);
   target.dataset.calendarRevision = String(calendarRenderRevision);
   target.dataset.calendarRenderKey = renderKey;
+  if (isPublicCalendar) {
+    // Bound retained DOM to one calendar per area; view changes evict older entries.
+    publicCalendarCache.delete(renderKey);
+    if (publicCalendarCache.size >= ZLA_AREAS.length) {
+      publicCalendarCache.delete(publicCalendarCache.keys().next().value);
+    }
+    publicCalendarCache.set(renderKey, [...target.childNodes].map((node) => node.cloneNode(true)));
+  }
 }
 
 function renderMonthCard(monthIndex, year, options = {}) {
@@ -9693,13 +9724,13 @@ function publicRosterArea(area = publicState.area) {
   return ZLA_AREAS.includes(area) ? area : currentUser?.area || "Area A";
 }
 
-function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false } = {}) {
+function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false, reuseCalendar = false } = {}) {
   if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
   if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
-    renderCalendars({ includeMember: false });
+    renderCalendars({ includeMember: false, reuseCurrent: reuseCalendar });
   } else {
     updateCalendarViewControls();
     updateCalendarYearLabels();
@@ -17591,10 +17622,7 @@ document.addEventListener("click", async (event) => {
 
   const publicButton = event.target.closest("[data-public-area]");
   if (publicButton && !event.target.closest(".app-shell")) {
-    await runUiAction("public-area-switch", publicButton, "Loading…", () => {
-      renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true });
-      showActionFeedback(`Now viewing ${publicButton.dataset.publicArea} · ${publicState.section}.`, "success");
-    });
+    renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true, reuseCalendar: true });
     return;
   }
 
@@ -18431,7 +18459,13 @@ document.addEventListener("change", async (event) => {
   }
 
   if (event.target.matches("[data-mobile-public-area]")) {
-    renderPublicPage(event.target.value, publicState.section, { persistNavigation: true });
+    const areaSelect = event.target;
+    const nextArea = areaSelect.value;
+    const section = publicState.section;
+    await runUiAction("public-area-switch", areaSelect, "Loading…", () => {
+      renderPublicPage(nextArea, section, { persistNavigation: true, reuseCalendar: true });
+      showActionFeedback(`Now viewing ${nextArea} · ${publicState.section}.`, "success");
+    }, { deferPaint: false });
     return;
   }
   if (event.target.matches("[data-mobile-month]")) {
