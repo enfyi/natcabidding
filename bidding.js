@@ -6975,14 +6975,16 @@ function holidayInLieuDatesForYearUncached(year, initials = currentUser.initials
   return inLieuDates;
 }
 
-function isHolidayDate(key, initials = currentUser.initials) {
+function isHolidayDate(key, initials = currentUser?.initials) {
+  if (!initials) return isLegalHolidayDate(key);
   const [year] = key.split("-").map(Number);
   return federalHolidayDatesForYear(year, initials).has(key) ||
     federalHolidayDatesForYear(year + 1, initials).has(key) ||
     federalHolidayDatesForYear(year - 1, initials).has(key);
 }
 
-function isHolidayInLieuDate(key, initials = currentUser.initials) {
+function isHolidayInLieuDate(key, initials = currentUser?.initials) {
+  if (!initials) return false;
   const [year] = key.split("-").map(Number);
   return holidayInLieuDatesForYear(year, initials).has(key) ||
     holidayInLieuDatesForYear(year + 1, initials).has(key) ||
