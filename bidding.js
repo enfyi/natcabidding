@@ -5214,7 +5214,7 @@ async function refreshBiddingAfterIntakeDecision({ expectedDecisionRevision = nu
   try {
     const [bidding, leave, slots, lines, gl, windows, areas] = await Promise.all([
       readReferenceData("bidding state", () => client.rpc("read_bidding_state", { requested_bid_year: year })),
-      readReferenceData("leave requests", () => client.rpc("read_leave_intake_queue", { queue_bid_year: year })),
+      readReferenceData("leave requests", () => loadLeaveRequestsWithWeeks(client, year)),
       readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)),
       readReferenceData("RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
       readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
@@ -7396,8 +7396,9 @@ function showLoggedInApp(page = requestedLandingPage()) {
   document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
+  // Select the destination first so startup never renders another page's calendar.
+  setPage(intendedLandingPage(page), { render: false });
   renderApp();
-  setPage(intendedLandingPage(page));
   startLiveAlertUpdates();
   document.documentElement.classList.remove("member-boot-pending");
 }
@@ -8100,9 +8101,16 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   };
 }
 
+async function loadLeaveRequestsWithWeeks(client, year = BID_YEAR) {
+  const result = await client.rpc("read_leave_intake_queue_with_weeks", { queue_bid_year: year });
+  // Older databases can roll out independently of the client. Never mask other errors.
+  if (result.error?.code !== "PGRST202" && !/Could not find the function.*read_leave_intake_queue_with_weeks/i.test(result.error?.message || "")) return result;
+  return client.rpc("read_leave_intake_queue", { queue_bid_year: year });
+}
+
 async function attachLeaveRequestWeekBuckets(client, rows = []) {
   const requestIds = rows
-    .filter((row) => Number(row.round_number) === 1 && ["pending", "approved"].includes(row.status))
+    .filter((row) => !Array.isArray(row.weekBucketStarts) && Number(row.round_number) === 1 && ["pending", "approved"].includes(row.status))
     .map((row) => row.id);
   const startsByRequest = new Map();
 
@@ -8125,7 +8133,7 @@ async function attachLeaveRequestWeekBuckets(client, rows = []) {
     });
   }
 
-  return rows.map((row) => ({ ...row, weekBucketStarts: startsByRequest.get(row.id) || [] }));
+  return rows.map((row) => ({ ...row, weekBucketStarts: Array.isArray(row.weekBucketStarts) ? row.weekBucketStarts : startsByRequest.get(row.id) || [] }));
 }
 
 function datesBetweenKeys(startKey, endKey) {
@@ -8477,9 +8485,7 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {
   });
   if (error) throw error;
 
-  const { data: savedRequests, error: refreshError } = await client.rpc("read_leave_intake_queue", {
-    queue_bid_year: BID_YEAR,
-  });
+  const { data: savedRequests, error: refreshError } = await loadLeaveRequestsWithWeeks(client);
   if (refreshError) {
     console.warn(`Leave batch was saved, but the intake queue could not be refreshed. ${refreshError.message || refreshError}`);
   } else {
@@ -8722,7 +8728,7 @@ async function loadSupabaseReferenceData() {
         refreshPublicReferenceSection();
         return result;
       }),
-      readReferenceData("leave requests", () => supabaseState.authUserId ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
+      readReferenceData("leave requests", () => supabaseState.authUserId ? loadLeaveRequestsWithWeeks(client) : Promise.resolve({ data: [], error: null })),
       readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
       readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
       readReferenceData("calendar marks", () => supabaseState.authUserId
@@ -14686,7 +14692,7 @@ async function readLiveDataGroup(group, client, areaById, member) {
       read("live RDO lines", () => loadRdoLines(client, supabaseState.bidYearId)),
       read("live GL assignments", () => loadPublishedGlRdoAssignments(client)),
       read("live bidding state", () => member ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : empty()),
-      read("live leave requests", () => member ? client.rpc("read_leave_intake_queue", { queue_bid_year: BID_YEAR }) : empty()),
+      read("live leave requests", () => member ? loadLeaveRequestsWithWeeks(client) : empty()),
     ]);
     if (results.some((result) => result.error)) return { results };
     const submissions = results[2].data?.submissions || [];
@@ -16325,7 +16331,7 @@ async function refreshIntakeQueue() {
     }
     const [bidding, leave, areas] = await Promise.all([
       client.rpc("read_bidding_state", { requested_bid_year: bidYear }),
-      client.rpc("read_leave_intake_queue", { queue_bid_year: bidYear }),
+      loadLeaveRequestsWithWeeks(client, bidYear),
       client.from("areas").select("id,name"),
     ]);
     for (const result of [bidding, leave, areas]) {
@@ -16543,7 +16549,7 @@ function syncMemberPageUrl(pageName) {
   syncNavigationUrl(url);
 }
 
-function setPage(pageName) {
+function setPage(pageName, { render = true } = {}) {
   if (pageName === "intake" && !canUseIntakeView()) {
     pageName = "history";
   }
@@ -16586,12 +16592,12 @@ function setPage(pageName) {
   };
   title.textContent = titles[pageName] || "Dashboard";
   syncViewModeSwitcher(pageName);
-  if (isMemberAppVisible() && activePageName !== pageName) renderMemberPageContent(pageName);
+  if (render && isMemberAppVisible() && activePageName !== pageName) renderMemberPageContent(pageName);
   if (activePageName !== pageName) {
     window.scrollTo({ top: 0, behavior: "instant" });
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   }
-  if (isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
+  if (render && isMemberAppVisible() && ["dashboard", "leave", "calendar"].includes(pageName)) {
     const needsFullRender = memberPageCalendarNeedsRender(pageName);
     renderMemberCalendarForPage(pageName, {
       defer: activePageName !== pageName && needsFullRender,
@@ -17270,7 +17276,7 @@ function renderAppWithCache() {
   renderCurrentUser();
   // Mark hidden calendars stale so navigation renders the latest saved bids.
   calendarRenderRevision += 1;
-  renderCalendars({ includePublic: false });
+  renderCalendars({ includePublic: false, reuseCurrent: true });
   updateSelectedLine();
   renderHelpSummary();
   renderHelpPanel();
