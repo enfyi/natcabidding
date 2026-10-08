@@ -19,7 +19,7 @@ const ctx = vm.createContext({
   readReferenceData: async (_label, request) => request(),
   isMemberAppVisible: () => member, hasActiveLiveDataEditing: () => editing,
   liveDataLocalSnapshot: () => row, captureLiveDataControls: () => new Map(), restoreLiveDataControls() {},
-  renderApp: () => { renders++; }, renderPublicPage: () => { renders++; },
+  extraLeaveSlotData: {}, renderLiveDataSections: () => { renders++; },
   readLiveDataGroup: async () => {
     reads++;
     const snapshot = row;
@@ -30,7 +30,7 @@ const ctx = vm.createContext({
 });
 vm.runInContext(`const liveDataTables = { bidding: [], roster: [], slots: [] };
 let liveDataTimer = null, liveDataRunning = false, liveDataGeneration = 0, liveDataActivityRevision = 0;
-const liveDataDirtyGroups = new Set(), liveDataSnapshots = new Map();
+const liveDataDirtyGroups = new Set(), liveDataSnapshots = new Map(), liveDataLastReadAt = new Map();
 let calendarRenderRevision = 0;
 ` + ['scheduleLiveDataRefresh','stopLiveDataUpdates','refreshLiveData'].map(fn).join('\n'), ctx);
 ctx.scheduleLiveDataRefresh(['bidding']);
@@ -167,7 +167,7 @@ assert.deepEqual(Array.from(dataRefreshes.at(-1)), ['bidding','slots','windows']
 handlers.get('bidders')();
 assert.ok(dataRefreshes.at(-1).includes('windows'), 'Roster changes also refresh related bid windows');
 connectedCallback('SUBSCRIBED');
-assert.equal(alertRefreshes, 1);
+assert.equal(alertRefreshes, 0, "Reconnect uses a single refresh queue");
 assert.equal(dataRefreshes.at(-1), undefined, 'Reconnect reconciles all groups');
 
 ctx.window.NATCA_SUPABASE_CONFIG = { environment: 'pilot' };
@@ -179,3 +179,40 @@ assert.deepEqual(Array.from(vm.runInContext('[...liveDataDirtyGroups]', ctx)), [
 await ctx.refreshLiveData();
 assert.equal(vm.runInContext('liveDataDirtyGroups.size', ctx), 0, 'Public pilot does not require direct bid-year table access');
 console.log('Realtime subscription coverage and public pilot fallback checks passed.');
+
+// Fallback checks are staggered, and successful realtime reads reset their clock.
+vm.runInContext(fn('liveDataFallbackGroups'), listener);
+vm.runInContext('const liveDataLastReadAt = new Map(Object.keys(liveDataTables).map(group => [group, 1000000]));', listener);
+assert.deepEqual(Array.from(listener.liveDataFallbackGroups(1060000)), ['bidding','slots','windows','help']);
+assert.ok(listener.liveDataFallbackGroups(1300000).includes('schedules'));
+assert.ok(!listener.liveDataFallbackGroups(1300000).includes('faq'));
+assert.equal(listener.liveDataFallbackGroups(1600000).length, 8);
+
+// Help does not touch calendars; availability patches only dates with changed data.
+let page = 'calendar';
+const calls = [], target = { childElementCount: 1, dataset: { calendarRevision: '0' } };
+const rendering = vm.createContext({
+  withLeaveReadCache: action => action(), calendarRenderRevision: 0,
+  document: { querySelector: () => ({ dataset: { pagePanel: page } }) },
+  extraLeaveSlotData: { a: { date: '2027-01-01', cpc: ['AB'] }, b: { date: '2027-01-02', cpc: [] } },
+  renderMemberCalendarForPage: () => calls.push('full-calendar'),
+  renderAlerts: () => calls.push('alerts'), renderHelpSummary: () => calls.push('help-summary'),
+  renderHelpPanel: () => calls.push('help-panel'), renderLeaveSlotBoard: () => calls.push('slots'),
+  refreshMemberCalendarDates: dates => calls.push(Array.from(dates)), memberCalendarForPage: () => target,
+});
+vm.runInContext(fn('renderLiveDataSections'), rendering);
+rendering.renderLiveDataSections(new Set(['help']), true, {});
+assert.deepEqual(calls, ['alerts','help-summary','help-panel']);
+calls.length = 0;
+rendering.renderLiveDataSections(new Set(['slots']), true, {
+  a: { date: '2027-01-01', cpc: [] }, b: { date: '2027-01-02', cpc: [] },
+  c: { date: '2027-01-03', cpc: ['CD'] },
+});
+assert.deepEqual(calls, ['slots', ['2027-01-01','2027-01-03']], 'Includes removed dates and skips unchanged dates');
+assert.equal(target.dataset.calendarRevision, '1');
+console.log('Staggered fallback and targeted rendering checks passed.');
+
+calls.length = 0;
+target.dataset.calendarRevision = '-1';
+rendering.renderLiveDataSections(new Set(['slots']), true, {});
+assert.deepEqual(calls, ['slots', 'full-calendar'], 'A stale calendar rebuilds before date patches can mark it current');
