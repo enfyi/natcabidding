@@ -128,32 +128,9 @@ let pilotState = {
   lastResetAt: null,
 };
 const ghostBidderIds = new Set();
-const now = Date.now();
-const testAccounts = {
-  bue: {
-    firstName: "Michael",
-    lastName: "Schoelen",
-    initials: "OC",
-    seniorityRank: 5,
-    bidderCount: 45,
-    area: "Area A",
-    role: "controller",
-    roleLabel: "BUE Controller",
-    systemAdmin: true,
-    phone: "(626) 392-1194",
-    email: "m.schoelen@yahoo.com",
-    leaveSlotAllowance: DEFAULT_BUE_LEAVE_SLOT_ALLOWANCE,
-    adminGrant: {
-      type: "Bidding Intake",
-      scope: "All Areas",
-      start: new Date(now - 60 * 60 * 1000),
-      end: new Date(now + 4 * 60 * 60 * 1000),
-      grantedBy: "NATCA ZLA Bidding Chair",
-    },
-  },
-};
-
-let currentUser = { ...testAccounts.bue };
+let publicGhostRdoBids = [];
+// Member identity is assigned only after an authenticated profile is loaded.
+let currentUser = null;
 let selectedViewArea = null;
 let seniorityViewMode = "cards";
 let senioritySearchQuery = "";
@@ -1504,15 +1481,25 @@ function currentUserBidderCount(area = currentUser.area) {
   return activeRosterEntries(area).length || currentUser.bidderCount;
 }
 
+function currentUserBidWindowForRound(roundNumber, area = currentUser.area) {
+  // Saved assignments belong to bidder IDs, not the current roster position.
+  if (area === currentUser.area && currentUser.supabaseProfileId) {
+    return databaseBidWindows.get(databaseBidWindowKey(currentUser.supabaseProfileId, roundNumber)) || null;
+  }
+  return bidWindowForRankRound(currentUserSeniorityRank(area), roundNumber, area);
+}
+
 function currentUserBidWindow(date = new Date(), area = currentUser.area) {
-  const rank = currentUserSeniorityRank(area);
-  if (!Number.isFinite(rank)) return null;
+  const roundCount = Math.max(
+    roundDateBlocksForArea(area)[0]?.length || 0,
+    ...Array.from(databaseBidWindows.values(), (window) => window.round)
+  );
+  const windows = Array.from({ length: roundCount }, (_, index) => currentUserBidWindowForRound(index + 1, area))
+    .filter(Boolean)
+    .sort((left, right) => left.start - right.start);
 
-  const roundCount = roundDateBlocksForArea(area)[0]?.length || 0;
-  const windows = Array.from({ length: roundCount }, (_, index) => bidWindowForRankRound(rank, index + 1, area))
-    .filter(Boolean);
-
-  return windows.find((window) => date < window.end) || null;
+  return windows.find((window) => date >= window.start && date < window.end)
+    || windows.find((window) => date < window.end) || null;
 }
 
 function roundWindows(roundNumber, area = currentViewArea()) {
@@ -2072,7 +2059,7 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
     const rank = currentUserSeniorityRank(currentUser.area);
     const activeRound = areaBidRoundState(date, currentUser.area)?.round;
     const activeRoundWindow = Number.isFinite(rank) && activeRound
-      ? bidWindowForRankRound(rank, activeRound, currentUser.area)
+      ? currentUserBidWindowForRound(activeRound, currentUser.area)
       : null;
     if (activeRoundWindow && date >= activeRoundWindow.end) return LATE_BID_MESSAGE;
 
@@ -2080,7 +2067,7 @@ function bidWindowErrorMessage(actionLabel = "Bids", date = new Date()) {
       const roundCount = roundDateBlocksForArea(currentUser.area)[0]?.length || 0;
       const hasClosedWindow = Number.isFinite(rank) && Array.from(
         { length: roundCount },
-        (_, index) => bidWindowForRankRound(rank, index + 1, currentUser.area)
+        (_, index) => currentUserBidWindowForRound(index + 1, currentUser.area)
       ).some((scheduledWindow) => scheduledWindow && date >= scheduledWindow.end);
       return hasClosedWindow
         ? LATE_BID_MESSAGE
@@ -2137,7 +2124,7 @@ function rdoChangeWindowErrorMessage(date = new Date()) {
       ? ""
       : "RDO changes are only allowed while your pilot Round 1 is open in your home area.";
   }
-  const window = bidWindowForRankRound(currentUserSeniorityRank(currentUser.area), 1, currentUser.area);
+  const window = currentUserBidWindowForRound(1, currentUser.area);
   const closesAt = window ? Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000) : 0;
   if (!isViewingHomeArea()
       || !window || date < window.start || date.getTime() >= closesAt) {
@@ -4863,7 +4850,7 @@ function queueNotificationEmail(to, subject, body, area = currentUser.area, noti
 }
 
 function bidRecipientEmail(item) {
-  const recipient = bueByInitials(item.initials) || Object.values(testAccounts).find((account) => account.initials === item.initials);
+  const recipient = bueByInitials(item.initials);
   return recipient?.email || `${item.initials.toLowerCase()}@natcazla.com`;
 }
 
@@ -7257,6 +7244,8 @@ function supabaseAuthRedirectUrl() {
 }
 
 function clearSupabaseAccountState() {
+  currentUser = null;
+  document.querySelector(".app-shell")?.setAttribute("hidden", "");
   bidderEditor.generation += 1;
   bidderEditor.record = null;
   bidderEditor.person = null;
@@ -7393,9 +7382,19 @@ function profileFromSupabase(row) {
 async function claimSupabaseProfile() {
   const client = supabaseClient();
   if (!client) return null;
+  const { data: identity, error: identityError } = await client.auth.getUser();
+  if (identityError) throw identityError;
+  if (!identity.user?.email) throw new Error("Could not verify your sign-in. Sign in again.");
   const { data, error } = await client.rpc("claim_current_bidder_profile");
   if (error) throw error;
   const profile = Array.isArray(data) ? data[0] : data;
+  if (profile && normalizedEmail(profile.email) !== normalizedEmail(identity.user.email)) {
+    throw new Error("Your login does not match the loaded BUE profile. Sign out and sign in again.");
+  }
+  const { data: latest, error: sessionError } = await client.auth.getSession();
+  if (sessionError || latest.session?.user?.id !== identity.user.id) {
+    throw new Error("Your sign-in changed while loading your profile. Sign in again.");
+  }
   return profile ? profileFromSupabase(profile) : null;
 }
 
@@ -7417,21 +7416,34 @@ async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no
 }
 
 function showLoggedInApp(page = requestedLandingPage()) {
-  selectedViewArea = currentUser.area;
-  document.querySelector(".login-screen")?.setAttribute("hidden", "");
-  document.querySelector(".app-shell")?.removeAttribute("hidden");
-  document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
-  document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
-  document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
-  // Select the destination first so startup never renders another page's calendar.
-  setPage(intendedLandingPage(page), { render: false });
-  renderApp();
-  startLiveAlertUpdates();
-  document.documentElement.classList.remove("member-boot-pending");
+  if (!currentUser?.supabaseProfileId) {
+    showPublicHome();
+    return;
+  }
+  document.documentElement.classList.add("member-render-pending");
+  try {
+    selectedViewArea = currentUser.area;
+    document.querySelector(".login-screen")?.setAttribute("hidden", "");
+    document.querySelector(".app-shell")?.removeAttribute("hidden");
+    document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-alert-menu]")?.setAttribute("hidden", "");
+    document.querySelector("[data-alert-toggle]")?.setAttribute("aria-expanded", "false");
+    document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
+    // Select the destination first so startup never renders another page's calendar.
+    setPage(intendedLandingPage(page), { render: false });
+    renderApp();
+    startLiveAlertUpdates();
+    document.documentElement.classList.remove("member-boot-pending");
+  } catch (error) {
+    currentUser = null;
+    document.querySelector(".app-shell")?.setAttribute("hidden", "");
+    throw error;
+  } finally {
+    document.documentElement.classList.remove("member-render-pending");
+  }
 }
 
 function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
@@ -7458,6 +7470,24 @@ async function initializeSupabaseAuth() {
   if (!client || supabaseState.authInitialized) return;
 
   supabaseState.authInitialized = true;
+  // The Next.js login uses cookies; this embedded app uses local storage.
+  // Replace any older browser identity before registering restoration callbacks.
+  if (new URL(window.location.href).searchParams.get("serverSession") === "1") {
+    try {
+      const response = await fetch("api/auth/session", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("Your sign-in ended. Sign in again.");
+      const session = await response.json();
+      const { error } = await client.auth.setSession(session);
+      if (error) throw error;
+    } catch (error) {
+      currentUser = null;
+      await client.auth.signOut({ scope: "local" });
+      clearSupabaseAccountState();
+      showPublicHome();
+      setAuthStatus(error.message || "Could not verify your sign-in.", "error");
+      return false;
+    }
+  }
   client.auth.onAuthStateChange((event, session) => {
     if (session && ["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED"].includes(event)) {
       const isKnownSession = Boolean(
@@ -7494,18 +7524,25 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
 
   supabaseState.authRestorePromise = (async () => {
     const startupStarted = Date.now();
-    const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
-    if (!session) return false;
-
     try {
+      const session = await measureDashboardStartupStep("session restoration", refreshSupabaseAccountState);
+      if (!session) {
+        currentUser = null;
+        showPublicHome();
+        return false;
+      }
       const profile = await measureDashboardStartupStep("member profile", claimSupabaseProfile);
+      if (supabaseState.authUserId !== session.user.id) return false;
       if (!profile) {
         await rejectUnmatchedSupabaseLogin();
         return false;
       }
       currentUser = profile;
       setAuthStatus("Signed in.", "success");
-      await measureDashboardStartupStep("essential bidding data", loadSupabaseReferenceData);
+      await measureDashboardStartupStep("essential bidding data", () => loadSupabaseReferenceData({
+        deferIntakeData: !requestedPublicView() && intendedLandingPage(page) === "dashboard",
+      }));
+      if (supabaseState.authUserId !== session.user.id) return false;
       const renderStarted = Date.now();
       if (requestedPublicView()) showPublicHome(publicState.area, publicState.section);
       else showLoggedInApp(page);
@@ -7513,7 +7550,10 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       recordReferenceLoadDiagnostic({ section: "dashboard ready", elapsedMs: Date.now() - startupStarted });
       return true;
     } catch (error) {
-      setAuthStatus(error.message || "Could not load your BUE profile.", "error");
+      currentUser = null;
+      document.querySelector(".app-shell")?.setAttribute("hidden", "");
+      showPublicHome();
+      setAuthStatus(error.message || "Could not load your BUE profile. Please reload and try again.", "error");
       return false;
     } finally {
       supabaseState.authRestorePromise = null;
@@ -7640,20 +7680,7 @@ async function loginWithSupabasePassword(email, password) {
     return;
   }
 
-  await refreshSupabaseAccountState();
-  try {
-    const profile = await claimSupabaseProfile();
-    if (!profile) {
-      await rejectUnmatchedSupabaseLogin();
-      return;
-    }
-    currentUser = profile;
-    setAuthStatus("Signed in.", "success");
-    await loadSupabaseReferenceData();
-    showLoggedInApp(requestedLandingPage());
-  } catch (error) {
-    setAuthStatus(friendlyAuthFailure(error) || "Could not load your BUE profile.", "error");
-  }
+  await restoreSupabaseSession(requestedLandingPage());
 }
 
 function setProfileFormStatus(message, status = "info") {
@@ -7677,7 +7704,7 @@ function profileFormValues() {
 
 async function saveSupabaseProfile(values) {
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     setProfileFormStatus("Profile changes could not reach the database. Sign in and try again.", "error");
     return false;
   }
@@ -7794,7 +7821,7 @@ function lineForArea(line, area = currentUser.area) {
 }
 
 function currentViewArea() {
-  return selectedViewArea || currentUser.area;
+  return selectedViewArea || currentUser?.area || "Area A";
 }
 
 function isViewingHomeArea() {
@@ -7899,7 +7926,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
   const bidder = row.bidders || row;
   const payload = row.payload || {};
   const line = payload.rdo_line_code || payload.line || row.line || "";
-  const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const area = row.area || row.areas?.name || areaById.get(row.area_id || bidder.area_id) || (bidder.initials === currentUser?.initials ? currentUser.area : "Area A");
   const fatigueGroup = payload.fatigue_group || payload.fatigueGroup || "";
   const flex = payload.flex ?? "";
   const aws = payload.aws ?? "";
@@ -8082,7 +8109,7 @@ function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
 
 function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   const bidder = row.bidders || row;
-  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser.initials ? currentUser.area : "Area A");
+  const area = row.area_name || areaById.get(bidder.area_id) || (bidder.initials === currentUser?.initials ? currentUser.area : "Area A");
   const dateKeys = row.requested_start_date && row.requested_end_date
     ? datesBetweenKeys(row.requested_start_date, row.requested_end_date)
     : [];
@@ -8187,7 +8214,7 @@ function upsertLeaveRequestsFromDatabase(rows, areaById) {
   intakeQueue = intakeQueue.filter((item) => !item.supabaseRequestId || !ids.has(item.supabaseRequestId));
   intakeQueue.unshift(...items);
 
-  const personalItems = items.filter((item) => item.initials === currentUser.initials);
+  const personalItems = currentUser ? items.filter((item) => item.initials === currentUser.initials) : [];
   const personalIds = new Set(personalItems.map((item) => item.supabaseRequestId));
   for (let index = leaveBids.length - 1; index >= 0; index -= 1) {
     if (leaveBids[index].supabaseRequestId && personalIds.has(leaveBids[index].supabaseRequestId)) {
@@ -8240,6 +8267,7 @@ function resetSupabaseBackedData() {
   fullLeaveDates.clear();
   ghostBidderIds.clear();
   intakeBidderSelection.record = null;
+  publicGhostRdoBids = [];
   intakeBidderSelection.error = "";
   intakeBidderSelection.loading = false;
   intakeBidderSelection.generation += 1;
@@ -8398,7 +8426,7 @@ async function saveSupabaseRdoRequest(request, options = {}) {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The RDO bid could not reach the database. Sign in and try again.");
   }
   const { data, error } = await client.rpc("submit_rdo_bid", {
@@ -8424,7 +8452,7 @@ async function saveSupabaseManualRdoRequest(request, person, area) {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The manual RDO bid could not reach the database. Sign in and try again.");
   }
   const { data, error } = await client.rpc(request.fatigueOverride ? "submit_manual_rdo_fatigue_override" : "submit_rdo_bid", {
@@ -8448,7 +8476,7 @@ async function saveSupabaseManualLeaveRequest(requests, person, area, notes = ""
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The manual leave bid could not reach the database. Sign in and try again.");
   }
   const targetRdoLine = rdoLineForInitials(person.initials);
@@ -8481,7 +8509,7 @@ async function saveSupabaseLeaveRequests(newRequests, draftsByRange, options = {
   const yearError = selectedBidYearErrorMessage();
   if (yearError) throw new Error(yearError);
   const client = supabaseClient();
-  if (!client || !currentUser.supabaseProfileId) {
+  if (!client || !currentUser?.supabaseProfileId) {
     throw new Error("The leave bid could not reach the database. Sign in and try again.");
   }
   const targetInitials = options.targetInitials || currentUser.initials;
@@ -8660,7 +8688,17 @@ function loadBackgroundHelpThreads() {
   });
 }
 
-async function loadSupabaseReferenceData() {
+function applyIntakeReferenceData(intakeSchedulesResult, intakeCalendarMarksResult, shiftPresetsResult, areaById) {
+    supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
+    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
+    if (!intakeCalendarMarksResult.error) {
+      intakeCalendarMarks.clear();
+      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
+    }
+    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
+}
+
+async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
   const client = supabaseClient();
   if (!client) {
     resetSupabaseBackedData();
@@ -8675,6 +8713,9 @@ async function loadSupabaseReferenceData() {
     return;
   }
   if (supabaseState.loading) return;
+  const loadToken = {};
+  supabaseState.referenceLoadToken = loadToken;
+  const loadUserId = supabaseState.authUserId;
   resetSupabaseBackedData();
   liveDataSnapshots.clear();
 
@@ -8723,9 +8764,33 @@ async function loadSupabaseReferenceData() {
       return result;
     });
 
+    const intakeYear = BID_YEAR;
+    const intakeReads = Promise.all([
+      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
+      readReferenceData("calendar marks", () => supabaseState.authUserId
+        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", intakeYear)
+        : Promise.resolve({ data: [], error: null })),
+      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+    ]);
+    if (deferIntakeData) {
+      void intakeReads.then(([schedules, marks, presets]) => {
+        // Ignore an old reload after a year switch, another reload, or sign-out.
+        if (supabaseState.referenceLoadToken !== loadToken || BID_YEAR !== intakeYear
+          || supabaseState.authUserId !== loadUserId) return;
+        applyIntakeReferenceData(schedules, marks, presets, areaById);
+        if (isMemberAppVisible() && document.querySelector(".page.active")?.dataset.pagePanel === "intake-schedule") {
+          renderIntakeSchedule();
+        }
+      }).catch((error) => console.warn("Background intake data could not load", error));
+    }
+    const intakeReady = deferIntakeData
+      ? Promise.resolve([{ data: null, error: null }, { data: null, error: null }, { data: null, error: null }])
+      : intakeReads;
+
     const [
       holidaysResult,
       rdoLinesResult,
+      publicGhostRdoBidsResult,
       glRdoAssignmentsResult,
       biddingStateResult,
       leaveSlotsResult,
@@ -8748,6 +8813,7 @@ async function loadSupabaseReferenceData() {
         refreshPublicReferenceSection();
         return result;
       }),
+      readReferenceData("ghost RDO labels", () => client.rpc("read_public_ghost_rdo_bids", { requested_bid_year: BID_YEAR })),
       readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
       readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
       readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
@@ -8761,11 +8827,9 @@ async function loadSupabaseReferenceData() {
       }),
       readReferenceData("leave requests", () => supabaseState.authUserId ? loadLeaveRequestsWithWeeks(client) : Promise.resolve({ data: [], error: null })),
       readReferenceData("ghost status", () => supabaseState.authUserId ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: [], error: null })),
-      readReferenceData("intake schedules", () => loadIntakeSchedules(client)),
-      readReferenceData("calendar marks", () => supabaseState.authUserId
-        ? client.from("intake_calendar_marks").select("marked_date,kind").eq("bid_year", BID_YEAR)
-        : Promise.resolve({ data: [], error: null })),
-      readReferenceData("shift presets", () => hasIntakeAccess() ? client.rpc("read_intake_shift_presets") : Promise.resolve({ data: null, error: null })),
+      intakeReady.then((results) => results[0]),
+      intakeReady.then((results) => results[1]),
+      intakeReady.then((results) => results[2]),
       readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
       readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
       readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
@@ -8785,6 +8849,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("roster", rosterResult),
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      supabaseLoadWarning("ghost RDO labels", publicGhostRdoBidsResult),
       isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
@@ -8804,6 +8869,7 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
+    publicGhostRdoBids = publicGhostRdoBidsResult.error ? [] : supabaseRows(publicGhostRdoBidsResult);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
@@ -8823,13 +8889,7 @@ async function loadSupabaseReferenceData() {
       );
     }
     if (!ghostStatusResult.error) applyGhostBiddingStatus(ghostStatusResult.data || []);
-    supabaseState.intakeSchedulesError = intakeSchedulesResult.error?.message || "";
-    if (!intakeSchedulesResult.error) applyIntakeSchedulesFromDatabase(intakeSchedulesResult.data || [], areaById);
-    if (!intakeCalendarMarksResult.error) {
-      intakeCalendarMarks.clear();
-      (intakeCalendarMarksResult.data || []).forEach((row) => intakeCalendarMarks.set(row.marked_date, row.kind));
-    }
-    if (!shiftPresetsResult.error && shiftPresetsResult.data !== null) applyIntakeShiftPresets(shiftPresetsResult.data);
+    if (!deferIntakeData) applyIntakeReferenceData(intakeSchedulesResult, intakeCalendarMarksResult, shiftPresetsResult, areaById);
     if (!bidYearSettingsResult.error) applyBidYearSettings(Array.isArray(bidYearSettingsResult.data) ? bidYearSettingsResult.data[0] : bidYearSettingsResult.data);
     if (!roundRulesResult.error && roundRulesResult.data) applyRoundRules(roundRulesResult.data);
     if (!approvalRulesResult.error && approvalRulesResult.data !== null) applyApprovalRules(approvalRulesResult.data);
@@ -10302,9 +10362,14 @@ function shiftCell(value, isThirdDaySwing = false) {
 }
 
 function lineOccupant(line) {
-  if (line.status === "Taken") return line.cpc || "";
-  if (line.status === "Selected") return line.cpc || currentUser.initials;
-  return "";
+  const occupant = line.status === "Taken" ? line.cpc || ""
+    : line.status === "Selected" ? line.cpc || currentUser.initials : "";
+  const ghostInitials = [...new Set(publicGhostRdoBids
+    .filter((bid) => bid.line === line.line && bid.area === (line.area || "Area A")
+      && !lineGlBids(line).some((entry) => entry.ghostBid && entry.initials === bid.initials))
+    .map((bid) => bid.initials).filter(Boolean))];
+  if (!ghostInitials.length) return escapeHtml(occupant);
+  return `${escapeHtml(occupant || "Open")} · ${ghostInitials.map((initials) => `<span class="ghost-rdo-occupant" title="Ghost bid · source line remains available">*${escapeHtml(initials)}</span>`).join(" · ")}`;
 }
 
 function lineGlBids(line) {
@@ -10315,7 +10380,7 @@ function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
   const occupant = lineOccupant(line);
   const glBids = lineGlBids(line);
   const pieces = [];
-  if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
+  if (occupant) pieces.push(`<span>${occupant}</span>`);
   else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
   glBids.forEach((bid) => {
     pieces.push(`<span class="gl-line-bidder${bid.ghostBid ? " ghost-line-bidder" : ""}" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
@@ -13974,8 +14039,21 @@ function setIntakeScheduleMutationPending(isPending) {
 function syncIntakeScheduleEditorControls() {
   const saveButton = document.querySelector("[data-add-intake-schedule]");
   const cancelButton = document.querySelector("[data-cancel-intake-schedule-edit]");
+  const deleteButton = document.querySelector("[data-delete-selected-intake-shift]");
+  const heading = document.querySelector("[data-intake-editor-heading]");
+  if (heading) heading.textContent = editingIntakeScheduleId ? "Edit shift" : "Admin Scheduling";
+  if (deleteButton) {
+    deleteButton.hidden = !editingIntakeScheduleId;
+    deleteButton.dataset.deleteIntakeSchedule = editingIntakeScheduleId;
+    deleteButton.disabled = intakeScheduleMutationPending;
+  }
+  document.querySelectorAll(".schedule-day-assignment[data-edit-intake-schedule]").forEach((button) => {
+    const selected = button.dataset.editIntakeSchedule === editingIntakeScheduleId;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
   if (saveButton) {
-    saveButton.textContent = editingIntakeScheduleId ? "Update Intake Shift" : "Add Intake Shift";
+    saveButton.textContent = editingIntakeScheduleId ? "Save changes" : "Add Intake Shift";
     saveButton.disabled = intakeScheduleMutationPending;
   }
   if (cancelButton) {
@@ -13996,7 +14074,8 @@ function resetIntakeScheduleEditor(options = {}) {
 }
 
 function beginIntakeScheduleEdit(scheduleId) {
-  if (intakeScheduleMutationPending) return;
+  if (intakeScheduleMutationPending || !hasIntakeAccess()) return;
+  document.querySelector("[data-intake-day-dialog]")?.close();
   const schedule = intakeSchedules.find((entry) => entry.id === scheduleId);
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (!schedule || !form) {
@@ -14014,7 +14093,8 @@ function beginIntakeScheduleEdit(scheduleId) {
   syncIntakeShiftForm(form);
   syncIntakeScheduleEditorControls();
   setScheduleFormStatus(`Editing ${schedule.name}'s ${formatDateRange(schedule.start, schedule.end)} shift.`);
-  form.scrollIntoView({ behavior: "smooth", block: "center" });
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  form.querySelector("[data-schedule-rep]").focus({ preventScroll: true });
 }
 
 async function deleteIntakeSchedule(scheduleId) {
@@ -14106,10 +14186,10 @@ function renderScheduleDayAssignments(schedules) {
   return `
     <span class="schedule-day-assignments">
       ${schedules.map((schedule) => `
-        <span class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}">
+        <${hasIntakeAccess() ? "button" : "span"} class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}" ${hasIntakeAccess() ? `type="button" data-edit-intake-schedule="${escapeHtml(schedule.id)}" aria-label="Edit ${escapeHtml(schedule.name || schedule.initials)} at ${escapeHtml(formatScheduleStartTime(schedule.start))}"` : ""}>
           <b>${escapeHtml(schedule.initials)}</b>
           <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
-        </span>
+        </${hasIntakeAccess() ? "button" : "span"}>
       `).join("")}
     </span>
   `;
@@ -14124,13 +14204,32 @@ function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" type="button" data-intake-calendar-date="${key}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
-      <span class="date-number">${label}</span>
+    <div class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+      <button type="button" class="date-number" data-intake-calendar-date="${key}" aria-label="View shifts for ${escapeHtml(formatCalendarDate(key))}">${label}</button>
       ${markLabel && showAssignments ? `<span class="intake-day-mark-label">${markLabel}</span>` : ""}
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
-    </button>
+    </div>
   `;
+}
+
+function openIntakeScheduleDay(key) {
+  let dialog = document.querySelector("[data-intake-day-dialog]");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.dataset.intakeDayDialog = "";
+    dialog.className = "intake-day-dialog";
+    document.body.append(dialog);
+  }
+  const schedules = schedulesForDateKey(key);
+  dialog.innerHTML = `<h3>${escapeHtml(formatCalendarDate(key))}</h3>
+    <div class="intake-day-shift-list">${schedules.length ? schedules.map((schedule) => `
+      <${hasIntakeAccess() ? "button" : "div"} ${hasIntakeAccess() ? `type="button" data-edit-intake-schedule="${escapeHtml(schedule.id)}"` : ""}>
+        <b>${escapeHtml(schedule.name || schedule.initials)}</b>
+        <span>${escapeHtml(formatScheduleStartTime(schedule.start))} – ${escapeHtml(formatScheduleStartTime(schedule.end))}</span>
+      </${hasIntakeAccess() ? "button" : "div"}>`).join("") : '<p>No shifts scheduled.</p>'}</div>
+    <form method="dialog"><button class="secondary-action small">Close</button></form>`;
+  dialog.showModal();
 }
 
 function renderScheduleMonthCard(monthIndex, year, options = {}) {
@@ -15826,10 +15925,13 @@ function renderIntakeDetailPanel(item, visibleItems) {
   const detailItems = intakeRoundDetailItems(item, visibleItems);
   panel.hidden = false;
   panel.innerHTML = `
-    <div>
-      <span class="intake-type">Round ${round} Bid Detail</span>
-      <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
-      <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+    <div class="intake-detail-header">
+      <div>
+        <span class="intake-type">Round ${round} Bid Detail</span>
+        <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
+        <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+      </div>
+      <button class="secondary-action small" type="button" data-intake-detail-close aria-label="Close bid detail">Close</button>
     </div>
     <div class="intake-detail-list">
       ${detailItems.map((entry) => `
@@ -17344,6 +17446,16 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-detail-close]")) {
+    const detailId = activeIntakeDetailId;
+    activeIntakeDetailId = null;
+    renderIntakeQueue();
+    const returnCard = [...document.querySelectorAll("[data-intake-card]")]
+      .find((card) => card.dataset.intakeCard === detailId);
+    returnCard?.focus({ preventScroll: true });
+    return;
+  }
+
   const leaveSortButton = event.target.closest("[data-bidder-leave-sort]");
   if (leaveSortButton) {
     const column = leaveSortButton.dataset.bidderLeaveSort;
@@ -17537,7 +17649,7 @@ document.addEventListener("click", async (event) => {
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
     if (supabaseState.authUserId) {
-      showLoggedInApp();
+      await restoreSupabaseSession();
       return;
     }
     const shouldOpen = publicLoginMenu.hidden;
@@ -17809,6 +17921,12 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-export-google-sheet]")) {
     downloadBiddingCsv();
+    return;
+  }
+
+  const scheduleDateButton = event.target.closest("[data-intake-calendar-date]");
+  if (scheduleDateButton) {
+    openIntakeScheduleDay(scheduleDateButton.dataset.intakeCalendarDate);
     return;
   }
 
