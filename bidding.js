@@ -9467,6 +9467,12 @@ function publicRdoSectionsMarkup(area, lines = publicRdoFilteredLines(area)) {
   }).join("");
 }
 
+function mobileRdoLineCount(filteredCount, totalCount) {
+  return filteredCount === totalCount
+    ? `${totalCount} ${totalCount === 1 ? "line" : "lines"}`
+    : `${filteredCount} of ${totalCount} lines`;
+}
+
 function updatePublicRdoResults() {
   const sectionsTarget = document.querySelector("[data-public-rdo-sections]");
   if (!sectionsTarget) return;
@@ -9474,6 +9480,7 @@ function updatePublicRdoResults() {
   const lines = publicRdoFilteredLines(publicState.area);
   const lineLabel = lines.length === 1 ? "line" : "lines";
   sectionsTarget.innerHTML = publicRdoSectionsMarkup(publicState.area, lines);
+  setText("[data-public-rdo-mobile-count]", mobileRdoLineCount(lines.length, rdoLinesForArea(publicState.area).length));
   setText("[data-public-rdo-filter-count]", `${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}`);
 }
 
@@ -9486,7 +9493,10 @@ function renderPublicRdoTable(area) {
     <section class="panel rdo-table-panel public-rdo-panel">
       <div class="panel-header">
         <div>
-          <h2>RDO Bid Lines - ${area}</h2>
+          <div class="rdo-heading-row">
+            <h2>RDO Bid Lines - ${area}</h2>
+            <span class="rdo-mobile-count" data-public-rdo-mobile-count>${mobileRdoLineCount(lines.length, areaLines.length)}</span>
+          </div>
           <p>Review the negotiated lines for this area. Sign in to select a line and complete your bid preferences.</p>
         </div>
         <span class="pill open" data-public-rdo-filter-count>${lines.length} ${publicRdoFilters.openOnly ? "open " : ""}${lineLabel}</span>
@@ -10491,6 +10501,7 @@ function renderRdoLines() {
   if (loadMessage) {
     setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${currentViewArea()}`);
     setText("[data-rdo-filter-count]", supabaseState.rdoLinesLoadState === "loading" ? "Loading…" : "Unavailable");
+    setText("[data-member-rdo-mobile-count]", supabaseState.rdoLinesLoadState === "loading" ? "Loading…" : "Unavailable");
     target.innerHTML = `<tr><td colspan="12" role="status">${escapeHtml(loadMessage)}</td></tr>`;
     const mobileCards = document.querySelector("[data-member-rdo-cards]");
     if (mobileCards) mobileCards.innerHTML = `<div class="empty-state" role="status">${escapeHtml(loadMessage)}</div>`;
@@ -10507,6 +10518,7 @@ function renderRdoLines() {
   }
   setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
   const filteredLines = areaLines.filter(rdoLineMatchesFilters);
+  setText("[data-member-rdo-mobile-count]", mobileRdoLineCount(filteredLines.length, areaLines.length));
   const countTarget = document.querySelector("[data-rdo-filter-count]");
   const pendingRequest = pendingCurrentUserRdoRequest();
   const bidderSelectionLocked = Boolean(pendingRequest);
