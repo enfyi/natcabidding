@@ -7016,7 +7016,7 @@ function lineForArea(line, area = currentUser.area) {
 }
 
 function currentViewArea() {
-  return selectedViewArea || currentUser.area;
+  return selectedViewArea || currentUser?.area || "Area A";
 }
 
 function isViewingHomeArea() {
