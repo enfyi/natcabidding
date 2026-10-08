@@ -7,8 +7,8 @@ type DashboardPageProps = {
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { page } = await searchParams
   const frameSrc = isBiddingLandingPage(page)
-    ? `/bidding.html?page=${page}`
-    : '/bidding.html?member=1'
+    ? `/bidding.html?page=${page}&serverSession=1`
+    : '/bidding.html?member=1&serverSession=1'
 
   return (
     <main className="dashboard-app-shell">
