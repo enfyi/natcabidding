@@ -12722,8 +12722,21 @@ function setIntakeScheduleMutationPending(isPending) {
 function syncIntakeScheduleEditorControls() {
   const saveButton = document.querySelector("[data-add-intake-schedule]");
   const cancelButton = document.querySelector("[data-cancel-intake-schedule-edit]");
+  const deleteButton = document.querySelector("[data-delete-selected-intake-shift]");
+  const heading = document.querySelector("[data-intake-editor-heading]");
+  if (heading) heading.textContent = editingIntakeScheduleId ? "Edit shift" : "Admin Scheduling";
+  if (deleteButton) {
+    deleteButton.hidden = !editingIntakeScheduleId;
+    deleteButton.dataset.deleteIntakeSchedule = editingIntakeScheduleId;
+    deleteButton.disabled = intakeScheduleMutationPending;
+  }
+  document.querySelectorAll(".schedule-day-assignment[data-edit-intake-schedule]").forEach((button) => {
+    const selected = button.dataset.editIntakeSchedule === editingIntakeScheduleId;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
   if (saveButton) {
-    saveButton.textContent = editingIntakeScheduleId ? "Update Intake Shift" : "Add Intake Shift";
+    saveButton.textContent = editingIntakeScheduleId ? "Save changes" : "Add Intake Shift";
     saveButton.disabled = intakeScheduleMutationPending;
   }
   if (cancelButton) {
@@ -12745,7 +12758,8 @@ function resetIntakeScheduleEditor(options = {}) {
 }
 
 function beginIntakeScheduleEdit(scheduleId) {
-  if (intakeScheduleMutationPending) return;
+  if (intakeScheduleMutationPending || !hasIntakeAccess()) return;
+  document.querySelector("[data-intake-day-dialog]")?.close();
   const schedule = intakeSchedules.find((entry) => entry.id === scheduleId);
   const form = document.querySelector("[data-schedule-start]")?.closest(".schedule-form");
   if (!schedule || !form) {
@@ -12763,7 +12777,8 @@ function beginIntakeScheduleEdit(scheduleId) {
   syncIntakeShiftForm(form);
   syncIntakeScheduleEditorControls();
   setScheduleFormStatus(`Editing ${schedule.name}'s ${formatDateRange(schedule.start, schedule.end)} shift.`);
-  form.scrollIntoView({ behavior: "smooth", block: "center" });
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  form.querySelector("[data-schedule-rep]").focus({ preventScroll: true });
 }
 
 async function deleteIntakeSchedule(scheduleId) {
@@ -12854,10 +12869,10 @@ function renderScheduleDayAssignments(schedules) {
   return `
     <span class="schedule-day-assignments">
       ${schedules.map((schedule) => `
-        <span class="schedule-day-assignment">
+        <${hasIntakeAccess() ? "button" : "span"} class="schedule-day-assignment ${schedule.initials === currentUser?.initials ? "mine" : ""}" ${hasIntakeAccess() ? `type="button" data-edit-intake-schedule="${escapeHtml(schedule.id)}" aria-label="Edit ${escapeHtml(schedule.name || schedule.initials)} at ${escapeHtml(formatScheduleStartTime(schedule.start))}"` : ""}>
           <b>${escapeHtml(schedule.initials)}</b>
           <small>${escapeHtml(formatScheduleStartTime(schedule.start))}</small>
-        </span>
+        </${hasIntakeAccess() ? "button" : "span"}>
       `).join("")}
     </span>
   `;
@@ -12870,12 +12885,31 @@ function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <button class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" type="button" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
-      <span class="date-number">${label}</span>
+    <div class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+      <button type="button" class="date-number" data-intake-calendar-date="${key}" aria-label="View shifts for ${escapeHtml(formatCalendarDate(key))}">${label}</button>
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
       ${renderScheduleTooltip(key)}
-    </button>
+    </div>
   `;
+}
+
+function openIntakeScheduleDay(key) {
+  let dialog = document.querySelector("[data-intake-day-dialog]");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.dataset.intakeDayDialog = "";
+    dialog.className = "intake-day-dialog";
+    document.body.append(dialog);
+  }
+  const schedules = schedulesForDateKey(key);
+  dialog.innerHTML = `<h3>${escapeHtml(formatCalendarDate(key))}</h3>
+    <div class="intake-day-shift-list">${schedules.length ? schedules.map((schedule) => `
+      <${hasIntakeAccess() ? "button" : "div"} ${hasIntakeAccess() ? `type="button" data-edit-intake-schedule="${escapeHtml(schedule.id)}"` : ""}>
+        <b>${escapeHtml(schedule.name || schedule.initials)}</b>
+        <span>${escapeHtml(formatScheduleStartTime(schedule.start))} – ${escapeHtml(formatScheduleStartTime(schedule.end))}</span>
+      </${hasIntakeAccess() ? "button" : "div"}>`).join("") : '<p>No shifts scheduled.</p>'}</div>
+    <form method="dialog"><button class="secondary-action small">Close</button></form>`;
+  dialog.showModal();
 }
 
 function renderScheduleMonthCard(monthIndex, year, options = {}) {
@@ -15851,6 +15885,12 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-export-google-sheet]")) {
     downloadBiddingCsv();
+    return;
+  }
+
+  const scheduleDateButton = event.target.closest("[data-intake-calendar-date]");
+  if (scheduleDateButton) {
+    openIntakeScheduleDay(scheduleDateButton.dataset.intakeCalendarDate);
     return;
   }
 

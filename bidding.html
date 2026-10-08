@@ -1223,7 +1223,7 @@
                 <p>Intake permissions start 15 minutes before each assigned shift.</p>
               </section>
               <section class="panel" data-admin-schedule-card>
-                <h3>Admin Scheduling</h3>
+                <h3 data-intake-editor-heading>Admin Scheduling</h3>
                 <p>Assign temporary intake access. Access begins 15 minutes before the scheduled shift.</p>
                 <div class="schedule-form">
                   <label>
@@ -1258,7 +1258,8 @@
                   </label>
                   <div class="schedule-form-actions">
                     <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
-                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel Edit</button>
+                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel</button>
+                    <button class="secondary-action small danger-action" type="button" data-delete-selected-intake-shift hidden>Delete shift</button>
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
