@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2-close-bid-detail-dashboard-intake-background" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -1213,7 +1213,7 @@
                 <p>Intake permissions start 60 minutes before each assigned shift.</p>
               </section>
               <section class="panel" data-admin-schedule-card>
-                <h3>Admin Scheduling</h3>
+                <h3 data-intake-editor-heading>Admin Scheduling</h3>
                 <p>Assign temporary intake access. Access begins 60 minutes before the scheduled shift.</p>
                 <div class="schedule-form">
                   <label>
@@ -1248,7 +1248,8 @@
                   </label>
                   <div class="schedule-form-actions">
                     <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
-                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel Edit</button>
+                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel</button>
+                    <button class="secondary-action small danger-action" type="button" data-delete-selected-intake-shift hidden>Delete shift</button>
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
@@ -1906,7 +1907,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261008-public-calendar-cache"></script>
+    <script src="bidding.js?v=20261008-public-calendar-cache-close-bid-detail-dashboard-intake-background"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

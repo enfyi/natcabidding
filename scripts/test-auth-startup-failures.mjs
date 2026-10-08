@@ -19,6 +19,7 @@ function setup(overrides = {}) {
     rejectUnmatchedSupabaseLogin: async () => calls.push('rejected'),
     loadSupabaseReferenceData: async () => {},
     requestedPublicView: () => false,
+    intendedLandingPage: page => page,
     showLoggedInApp: () => calls.push('member'),
     showPublicHome: () => calls.push('public'),
     setAuthStatus: () => {},

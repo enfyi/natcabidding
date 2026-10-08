@@ -11,10 +11,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   if (area) publicParams.set('area', area)
   if (section) publicParams.set('section', section)
   const frameSrc = isBiddingLandingPage(page)
-    ? `/bidding.html?page=${page}`
+    ? `/bidding.html?page=${page}&serverSession=1`
     : page === 'public'
-      ? `/bidding.html?${publicParams}`
-      : '/bidding.html?member=1'
+      ? `/bidding.html?${publicParams}&serverSession=1`
+      : '/bidding.html?member=1&serverSession=1'
 
   const selectedYear = typeof bidYear === 'string' && /^\d{4}$/.test(bidYear) ? `&bidYear=${bidYear}` : ''
 
