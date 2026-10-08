@@ -128,6 +128,7 @@ let pilotState = {
   lastResetAt: null,
 };
 const ghostBidderIds = new Set();
+let publicGhostRdoBids = [];
 const now = Date.now();
 const testAccounts = {
   bue: {
@@ -8240,6 +8241,7 @@ function resetSupabaseBackedData() {
   fullLeaveDates.clear();
   ghostBidderIds.clear();
   intakeBidderSelection.record = null;
+  publicGhostRdoBids = [];
   intakeBidderSelection.error = "";
   intakeBidderSelection.loading = false;
   intakeBidderSelection.generation += 1;
@@ -8726,6 +8728,7 @@ async function loadSupabaseReferenceData() {
     const [
       holidaysResult,
       rdoLinesResult,
+      publicGhostRdoBidsResult,
       glRdoAssignmentsResult,
       biddingStateResult,
       leaveSlotsResult,
@@ -8748,6 +8751,7 @@ async function loadSupabaseReferenceData() {
         refreshPublicReferenceSection();
         return result;
       }),
+      readReferenceData("ghost RDO labels", () => client.rpc("read_public_ghost_rdo_bids", { requested_bid_year: BID_YEAR })),
       readReferenceData("GL assignments", () => loadPublishedGlRdoAssignments(client)),
       readReferenceData("bidding state", () => supabaseState.authUserId ? client.rpc("read_bidding_state", { requested_bid_year: BID_YEAR }) : Promise.resolve({ data: { submissions: [] }, error: null })),
       readReferenceData("leave slots", () => loadPublishedLeaveSlots(client)).then((result) => {
@@ -8785,6 +8789,7 @@ async function loadSupabaseReferenceData() {
       supabaseLoadWarning("roster", rosterResult),
       supabaseLoadWarning("holidays", holidaysResult),
       supabaseLoadWarning("RDO lines", rdoLinesResult),
+      supabaseLoadWarning("ghost RDO labels", publicGhostRdoBidsResult),
       isMissingSupabaseRoutine(glRdoAssignmentsResult.error) ? null : supabaseLoadWarning("GL RDO assignments", glRdoAssignmentsResult),
       supabaseLoadWarning("intake submissions", biddingStateResult),
       supabaseLoadWarning("leave slots", leaveSlotsResult),
@@ -8804,6 +8809,7 @@ async function loadSupabaseReferenceData() {
       if (holiday.holiday_date) holidayOverrides.add(holiday.holiday_date);
     });
 
+    publicGhostRdoBids = publicGhostRdoBidsResult.error ? [] : supabaseRows(publicGhostRdoBidsResult);
     if (!glRdoAssignmentsResult.error) applyGlRdoAssignments(supabaseRows(glRdoAssignmentsResult));
     const biddingStateSubmissions = biddingStateResult.error
       ? []
@@ -10302,9 +10308,14 @@ function shiftCell(value, isThirdDaySwing = false) {
 }
 
 function lineOccupant(line) {
-  if (line.status === "Taken") return line.cpc || "";
-  if (line.status === "Selected") return line.cpc || currentUser.initials;
-  return "";
+  const occupant = line.status === "Taken" ? line.cpc || ""
+    : line.status === "Selected" ? line.cpc || currentUser.initials : "";
+  const ghostInitials = [...new Set(publicGhostRdoBids
+    .filter((bid) => bid.line === line.line && bid.area === (line.area || "Area A")
+      && !lineGlBids(line).some((entry) => entry.ghostBid && entry.initials === bid.initials))
+    .map((bid) => bid.initials).filter(Boolean))];
+  if (!ghostInitials.length) return escapeHtml(occupant);
+  return `${escapeHtml(occupant || "Open")} · ${ghostInitials.map((initials) => `<span class="ghost-rdo-occupant" title="Ghost bid · source line remains available">*${escapeHtml(initials)}</span>`).join(" · ")}`;
 }
 
 function lineGlBids(line) {
@@ -10315,7 +10326,7 @@ function lineBidderMarkup(line, { showOpenWhenShared = false } = {}) {
   const occupant = lineOccupant(line);
   const glBids = lineGlBids(line);
   const pieces = [];
-  if (occupant) pieces.push(`<span>${escapeHtml(occupant)}</span>`);
+  if (occupant) pieces.push(`<span>${occupant}</span>`);
   else if (showOpenWhenShared && glBids.length) pieces.push('<span class="rdo-line-open-label">Open</span>');
   glBids.forEach((bid) => {
     pieces.push(`<span class="gl-line-bidder${bid.ghostBid ? " ghost-line-bidder" : ""}" title="${bid.ghostBid ? "Ghost Bid" : "GL Bid"} · does not occupy this line">*${escapeHtml(bid.initials)}</span>`);
@@ -15826,10 +15837,13 @@ function renderIntakeDetailPanel(item, visibleItems) {
   const detailItems = intakeRoundDetailItems(item, visibleItems);
   panel.hidden = false;
   panel.innerHTML = `
-    <div>
-      <span class="intake-type">Round ${round} Bid Detail</span>
-      <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
-      <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+    <div class="intake-detail-header">
+      <div>
+        <span class="intake-type">Round ${round} Bid Detail</span>
+        <h3>${escapeHtml(item.name)} · ${escapeHtml(item.initials)}</h3>
+        <p>${escapeHtml(item.area)} · Seniority #${escapeHtml(item.seniority)} · Bid as ${escapeHtml(item.bidAs)}</p>
+      </div>
+      <button class="secondary-action small" type="button" data-intake-detail-close aria-label="Close bid detail">Close</button>
     </div>
     <div class="intake-detail-list">
       ${detailItems.map((entry) => `
@@ -17344,6 +17358,16 @@ function logOut() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-intake-detail-close]")) {
+    const detailId = activeIntakeDetailId;
+    activeIntakeDetailId = null;
+    renderIntakeQueue();
+    const returnCard = [...document.querySelectorAll("[data-intake-card]")]
+      .find((card) => card.dataset.intakeCard === detailId);
+    returnCard?.focus({ preventScroll: true });
+    return;
+  }
+
   const leaveSortButton = event.target.closest("[data-bidder-leave-sort]");
   if (leaveSortButton) {
     const column = leaveSortButton.dataset.bidderLeaveSort;
