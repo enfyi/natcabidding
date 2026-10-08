@@ -17649,7 +17649,12 @@ document.addEventListener("click", async (event) => {
   const publicLoginMenu = document.querySelector("[data-public-login-menu]");
   if (publicLoginToggle && publicLoginMenu) {
     if (supabaseState.authUserId) {
-      await restoreSupabaseSession();
+      const dashboardUrl = new URL(window.location.href);
+      dashboardUrl.searchParams.set("page", "dashboard");
+      dashboardUrl.searchParams.delete("area");
+      dashboardUrl.searchParams.delete("section");
+      window.history.replaceState(window.history.state, "", dashboardUrl);
+      await restoreSupabaseSession("dashboard");
       return;
     }
     const shouldOpen = publicLoginMenu.hidden;
