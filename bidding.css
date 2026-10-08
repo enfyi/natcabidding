@@ -12359,3 +12359,35 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   background: #65d52e;
   box-shadow: 0 0 0 3px rgba(101, 213, 46, .2);
 }
+
+/* Keep the desktop count badge; tuck mobile totals beside the area title. */
+.rdo-mobile-count {
+  display: none;
+}
+
+@media screen and (max-width: 720px) {
+  .rdo-table-panel > .panel-header > div {
+    width: 100%;
+  }
+
+  .rdo-table-panel .rdo-heading-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+
+  .rdo-table-panel .rdo-mobile-count {
+    display: inline;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .rdo-table-panel > .panel-header > [data-rdo-filter-count],
+  .rdo-table-panel > .panel-header > [data-public-rdo-filter-count] {
+    display: none;
+  }
+}
