@@ -5918,6 +5918,7 @@ tr.occupied-row .rdo-tag {
   }
 
   .calendar-layout-tabs button {
+    white-space: nowrap;
     min-height: 42px;
   }
 }
