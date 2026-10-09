@@ -12507,3 +12507,14 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     display: none;
   }
 }
+
+/* Keep session identity visible alongside the dashboard destination. */
+.public-session-control { display: grid; gap: 4px; min-width: 0; max-width: 240px; }
+.public-session-control .public-login-button { padding: 0 16px; }
+.public-login-button.is-signed-in { color: #115e59; border-color: #5ba69e; background: #e6f7f3; }
+.public-session-status { color: #115e59; font-size: .75rem; font-weight: 700; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.public-login-button:focus-visible { outline: 3px solid var(--teal-dark); outline-offset: 3px; }
+@media (max-width: 720px) {
+  .mobile-login-slot .public-session-control { max-width: 112px; }
+  .mobile-login-slot .public-session-status { color: #fff; font-size: .65rem; }
+}
