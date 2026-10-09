@@ -2809,7 +2809,7 @@ function showActionFeedback(message, status = "info") {
   if (status !== "info" || !pendingUiActions.size) actionFeedbackTimer = setTimeout(() => { notice.hidden = true; }, status === "error" ? 12000 : 7000);
 }
 
-async function runUiAction(key, button, label, action, { deferPaint = true } = {}) {
+async function runUiAction(key, button, label, action, { deferPaint = true, showFeedback = true } = {}) {
   if (pendingUiActions.has(key)) return;
   pendingUiActions.add(key);
   const originalLabel = button?.tagName === "BUTTON" ? button.textContent : null;
@@ -2820,7 +2820,7 @@ async function runUiAction(key, button, label, action, { deferPaint = true } = {
     if (originalLabel !== null) button.textContent = label;
     button.setAttribute("aria-busy", "true");
   }
-  showActionFeedback(label);
+  if (showFeedback) showActionFeedback(label);
   try {
     // Let the browser paint feedback before expensive synchronous rendering.
     if (deferPaint) await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
@@ -18417,13 +18417,14 @@ document.addEventListener("click", async (event) => {
 
   const calendarModeButton = event.target.closest("[data-calendar-mode]");
   if (calendarModeButton) {
+    const showFeedback = !window.matchMedia("(max-width: 720px)").matches;
     const mode = calendarModeButton.dataset.calendarMode;
     const label = { vacation: "Leave", fatigue: "Fatigue", combined: "Combined" }[mode];
     await runUiAction("calendar-view", calendarModeButton, `Loading ${label} view…`, () => {
       calendarMode = mode;
       renderVisibleCalendars();
-      showActionFeedback(`${label} calendar view ready.`, "success");
-    });
+      if (showFeedback) showActionFeedback(`${label} calendar view ready.`, "success");
+    }, { showFeedback });
     return;
   }
 
@@ -18431,13 +18432,15 @@ document.addEventListener("click", async (event) => {
   if (calendarLayoutButton) {
     const scope = calendarLayoutButton.dataset.calendarScope;
     if (scope && Object.hasOwn(calendarLayouts, scope)) {
+      const showFeedback = !window.matchMedia("(max-width: 720px)").matches;
       const layout = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
       const label = layout === "full" ? "Full" : "Minimal";
-      await runUiAction("calendar-view", calendarLayoutButton, `Loading ${label} view…`, () => {
+      const loadingLabel = layout === "minimal" ? "Loading minimal" : `Loading ${label} view…`;
+      await runUiAction("calendar-view", calendarLayoutButton, loadingLabel, () => {
         calendarLayouts[scope] = layout;
         renderVisibleCalendars();
-        showActionFeedback(`${label} calendar view ready.`, "success");
-      });
+        if (showFeedback) showActionFeedback(`${label} calendar view ready.`, "success");
+      }, { showFeedback });
     }
     return;
   }
