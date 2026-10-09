@@ -16,11 +16,13 @@ const target = {
   classList: { remove() {}, toggle() {} },
 };
 const context = {
-  document: { getElementById: () => target },
+  document: { getElementById: () => target, querySelectorAll: () => [] },
   window: { matchMedia: () => ({ matches: false }) },
   publicState: { area: 'Area A' }, currentUser: { area: 'Area A' },
   calendarRenderRevision: 1, publicCalendarCacheRevision: -1,
   publicCalendarCache: new Map(), ZLA_AREAS: ['Area A', 'Area B'],
+  memberCalendarCache: new Map(), memberCalendarCacheRevision: -1,
+  currentViewArea: () => 'Area A',
   displayedCalendarYear: 2027, calendarMode: 'leave', calendarLayouts: {},
   monthNames: Array(12).fill('month'),
   calendarWorkforceForScope: () => 'cpc',
@@ -47,5 +49,33 @@ assert.equal(builds, 4, 'Layout changes rebuild the calendar');
 context.displayedCalendarYear++;
 render();
 assert.equal(builds, 5, 'Year changes rebuild the calendar');
-assert.ok(context.publicCalendarCache.size <= context.ZLA_AREAS.length);
-console.log('PASS public calendar reuse, data invalidation, view changes, and cache bound');
+assert.ok(context.publicCalendarCache.size <= 12);
+for (const id of ['public-calendar', 'dashboard-calendar', 'leave-calendar']) {
+  const scope = id === 'public-calendar' ? 'public' : id === 'dashboard-calendar' ? 'dashboard' : 'leave';
+  context.calendarRenderRevision++;
+  context.calendarLayouts[scope] = 'minimal';
+  const draw = () => context.makeCalendar(id, { reuseCurrent: true });
+  const before = builds;
+  for (const mode of ['leave', 'fatigue', 'combined', 'leave', 'fatigue', 'combined']) {
+    context.calendarMode = mode;
+    draw();
+  }
+  assert.equal(builds - before, 3, `${id}: repeat mode switches use cached views`);
+  context.calendarLayouts[scope] = 'full';
+  draw();
+  assert.equal(builds - before, 4, `${id}: full layout builds once`);
+  context.calendarLayouts[scope] = 'minimal';
+  draw();
+  assert.equal(builds - before, 4, `${id}: minimal layout is reused`);
+  context.calendarRenderRevision++;
+  draw();
+  assert.equal(builds - before, 5, `${id}: data changes invalidate every view`);
+}
+const refreshStart = source.indexOf('function refreshMemberCalendarDatesWithCache(');
+vm.runInNewContext(source.slice(refreshStart, source.indexOf('\n}', refreshStart) + 2), context);
+context.refreshMemberCalendarDatesWithCache([]);
+assert.equal(context.memberCalendarCache.size, 0, 'Local date edits discard saved member views');
+context.calendarMode = 'leave';
+context.makeCalendar('leave-calendar', { reuseCurrent: true });
+assert.ok(context.memberCalendarCache.size > 0, 'Invalidated hidden views rebuild');
+console.log('PASS public/dashboard/leave view reuse, database and local-edit invalidation, and cache bound');
