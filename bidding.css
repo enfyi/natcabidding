@@ -1929,6 +1929,79 @@ input {
   line-height: 1.35;
 }
 
+.round-rule-trigger {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.round-rule-trigger:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 4px;
+}
+
+.round-rule-popover {
+  width: min(380px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #dbe4ef;
+  border-top: 3px solid #7abdc2;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(122, 189, 194, 0.09), rgba(255, 215, 127, 0.05)), #ffffff;
+  color: #172033;
+  font-family: "Open Sans", Arial, sans-serif;
+  box-shadow: 0 20px 60px rgba(21, 45, 59, 0.18);
+}
+
+.round-rule-popover::backdrop {
+  background: rgba(21, 45, 59, 0.22);
+}
+
+.round-rule-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.round-rule-popover-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-family: Montserrat, Arial, sans-serif;
+  font-weight: 800;
+}
+
+.round-rule-popover-header button {
+  padding: 4px 10px;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  background: #f0f7f7;
+  color: #216b62;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.app-main .round-rule-popover p {
+  margin: 16px 0 0;
+  color: #526273;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.round-rule-popover-header button:hover {
+  background: #deeeee;
+}
+
+.round-rule-popover-header button:focus-visible {
+  outline: 2px solid #216b62;
+  outline-offset: 3px;
+}
+
 .metric-card.area-slots-metric {
   display: grid;
   align-content: start;
@@ -3893,6 +3966,21 @@ tr.occupied-row .rdo-tag {
   background: rgba(122, 189, 194, 0.1);
 }
 
+.intake-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intake-detail-header > div {
+  min-width: 0;
+}
+
+.intake-detail-header > button {
+  flex-shrink: 0;
+}
+
 .intake-detail-panel h3,
 .intake-detail-panel p {
   margin: 0;
@@ -4053,6 +4141,10 @@ tr.occupied-row .rdo-tag {
   background: #f2ebfb;
   border-color: #cfb9ea !important;
   font-weight: 800;
+}
+
+.ghost-rdo-occupant {
+  color: #8b7aaa;
 }
 
 .gl-bid-badge,
@@ -5826,6 +5918,7 @@ tr.occupied-row .rdo-tag {
   }
 
   .calendar-layout-tabs button {
+    white-space: nowrap;
     min-height: 42px;
   }
 }
@@ -5919,14 +6012,16 @@ tr.occupied-row .rdo-tag {
 }
 
 .calendar-panel.full .schedule-calendar .month-grid > span,
-.calendar-panel.full .schedule-calendar .month-grid > button {
+.calendar-panel.full .schedule-calendar .month-grid > button,
+.calendar-panel.full .schedule-calendar .month-grid > .schedule-day {
   min-height: 18px;
   font-size: 0.58rem;
 }
 
 .calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > span,
-.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > button {
-  min-height: 56px;
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > button,
+.calendar-panel.full .schedule-calendar:is(.month-view, .two-month-view) .month-grid > .schedule-day {
+  min-height: 70px;
   font-size: 0.72rem;
 }
 
@@ -5934,7 +6029,7 @@ tr.occupied-row .rdo-tag {
   gap: 6px;
 }
 
-.schedule-calendar.week-view .week-day-column button {
+.schedule-calendar.week-view .week-day-column > .schedule-day {
   min-height: 104px;
   font-size: 0.72rem;
 }
@@ -12341,6 +12436,23 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   display: none;
 }
 
+
+.schedule-day { position: relative; border-radius: 5px; }
+.schedule-day > .date-number { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 3px; }
+.schedule-calendar .schedule-day-assignment { border: 0; border-radius: 4px; background: transparent; padding: 5px 3px; min-height: 28px; text-align: left; }
+.schedule-calendar button.schedule-day-assignment { cursor: pointer; }
+.schedule-calendar button.schedule-day-assignment:is(:hover, :focus-visible, .selected) { background: #ffffffb3; outline: 2px solid #0f766e; outline-offset: -2px; }
+.schedule-day:focus-within .schedule-tooltip { opacity: 1; visibility: visible; }
+.schedule-day:focus-within { z-index: 100; }
+.intake-day-dialog { width: min(420px, 90vw); border: 1px solid #cbd5e1; border-radius: 12px; padding: 24px; color: #172033; }
+.intake-day-dialog::backdrop { background: #0f172a66; }
+.intake-day-shift-list { display: grid; gap: 8px; margin: 16px 0; }
+.intake-day-shift-list > :is(button, div) { display: grid; gap: 6px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #eff6ff; text-align: left; }
+.intake-day-shift-list > button { cursor: pointer; }
+.intake-day-dialog form { margin-top: 16px; }
+
+.schedule-calendar .schedule-day { display: grid; place-items: center; min-height: 20px; color: var(--muted); font-family: "JetBrains Mono", monospace; }
+.schedule-calendar .schedule-day > .date-number { min-height: 0; color: inherit; background: transparent; }
 /* Mark the name as well as the dot so the open window is easy to spot. */
 .current-bid-time-name {
   background: #d9f99d !important;

@@ -48,6 +48,25 @@ await context.runUiAction('rdo-submit', rdoButton, 'Submitting bid…', () => {
 });
 assert.equal(rdoButton.disabled, true, 'Cleanup retains the RDO pending-decision lock');
 assert.equal(rdoButton.textContent, 'Awaiting Intaker Decision');
+const icon = { textContent: '▥' };
+const dashboardText = { textContent: 'Dashboard' };
+let restoredNodes;
+const dashboardButton = {
+  ...button,
+  textContent: '▥ Dashboard',
+  childNodes: [icon, dashboardText],
+  replaceChildren(...nodes) { restoredNodes = nodes; this.textContent = '▥ Dashboard'; },
+};
+let dashboardRendered = false;
+const navigating = context.runUiAction('dashboard-navigation', dashboardButton, 'Opening dashboard…', () => { dashboardRendered = true; });
+assert.equal(dashboardButton.textContent, 'Opening dashboard…');
+assert.equal(dashboardButton.disabled, true);
+assert.equal(dashboardRendered, false, 'Dashboard rendering waits for loading feedback to paint');
+await navigating;
+assert.equal(dashboardRendered, true);
+assert.deepEqual(restoredNodes, [icon, dashboardText], 'Navigation restores the original icon and label nodes');
+assert.equal(dashboardButton.disabled, false);
+assert.match(source, /pageNavigation.dataset.page === "dashboard"[\s\S]*?runUiAction\("dashboard-navigation", pageNavigation, "Opening dashboard…", \(\) => setPage\("dashboard"\)\)/);
 const select = { ...button, tagName: 'SELECT', textContent: 'Area A Area B' };
 await context.runUiAction('area', select, 'Loading…', () => {});
 assert.equal(select.textContent, 'Area A Area B', 'Loading does not replace select options');

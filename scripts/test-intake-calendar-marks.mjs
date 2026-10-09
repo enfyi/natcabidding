@@ -16,6 +16,8 @@ for (const [kind, label] of [
   ['faa_validation', 'FAA Validation'],
 ]) {
   const context = {
+    escapeHtml: (value) => String(value),
+    formatCalendarDate: () => 'October 5, 2026',
     dateKeyFromDate: () => '2026-10-05',
     schedulesForDateKey: () => [{ initials: 'OC' }],
     intakeCalendarMarks: new Map([['2026-10-05', kind]]),

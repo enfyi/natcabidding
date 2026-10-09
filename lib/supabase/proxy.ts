@@ -47,6 +47,11 @@ export async function updateSession(request: NextRequest) {
     response.cookies.getAll().forEach(({ name, value, ...options }) => {
       redirectResponse.cookies.set(name, value, options)
     })
+    for (const name of ['cache-control', 'expires', 'pragma']) {
+      const value = response.headers.get(name)
+      if (value) redirectResponse.headers.set(name, value)
+    }
+    redirectResponse.headers.set('Cache-Control', 'private, no-store')
 
     return redirectResponse
   }
@@ -58,6 +63,11 @@ export async function updateSession(request: NextRequest) {
     response.cookies.getAll().forEach(({ name, value, ...options }) => {
       redirectResponse.cookies.set(name, value, options)
     })
+    for (const name of ['cache-control', 'expires', 'pragma']) {
+      const value = response.headers.get(name)
+      if (value) redirectResponse.headers.set(name, value)
+    }
+    redirectResponse.headers.set('Cache-Control', 'private, no-store')
 
     return redirectResponse
   }

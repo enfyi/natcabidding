@@ -8,6 +8,11 @@
       content="NATCA ZLA annual RDO and leave bidding prototype for Los Angeles Center controllers."
     />
     <title>NATCA ZLA Bidding</title>
+    <style>
+      /* Keep member content hidden even if the stylesheet or app fails to load. */
+      [hidden] { display: none !important; }
+      .member-render-pending .app-shell { visibility: hidden !important; }
+    </style>
     <script>
       const bootParams = new URLSearchParams(location.search);
       if (bootParams.get("member") === "1" || ["dashboard", "seniority", "rdos", "leave", "calendar", "history", "profile", "intake", "intake-schedule", "admin", "admin-tools"].includes(bootParams.get("page"))) {
@@ -21,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2" />
+    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2-close-bid-detail-dashboard-intake-background" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -287,7 +292,7 @@
             <p class="eyebrow" id="bid-year-label">2027 Annual Bidding</p>
             <h1 id="page-title">Dashboard</h1>
           </div>
-          <div class="topbar-user-context" data-user-context>Michael Schoelen · Area A</div>
+          <div class="topbar-user-context" data-user-context>Member account</div>
           <div class="topbar-controls">
             <label class="view-area-control">
               <span>Change View Area</span>
@@ -333,7 +338,7 @@
               <span data-alert-count>2</span>
             </button>
             <button class="account-pill" type="button" aria-label="Open account settings" aria-expanded="false" data-account-toggle>
-              <strong data-user-initials>OC</strong>
+              <strong data-user-initials>—</strong>
             </button>
           </div>
         </header>
@@ -355,12 +360,12 @@
             <div class="panel-header compact">
               <div>
                 <h2>Account Settings</h2>
-                <p>Signed in as <span data-user-initials>OC</span>.</p>
+                <p>Signed in as <span data-user-initials>—</span>.</p>
               </div>
               <button class="secondary-action small" type="button" data-account-close>Close</button>
             </div>
             <dl class="rule-list">
-              <div><dt>Name</dt><dd data-user-name>Michael Schoelen</dd></div>
+              <div><dt>Name</dt><dd data-user-name>Member</dd></div>
               <div><dt>Area</dt><dd data-user-area>Area A</dd></div>
               <div><dt>Access</dt><dd data-user-role>Controller</dd></div>
               <div><dt>Seniority</dt><dd data-user-seniority-long>#5 of 45</dd></div>
@@ -395,7 +400,14 @@
             <article class="metric-card round-rule-card">
               <span>Round Rules</span>
               <strong data-next-bid-window-rule>1 or 2 weeks</strong>
-              <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.</span></small>
+              <small class="round-rule-caption"><span data-next-bid-window-rule-round>Round 1</span><span aria-hidden="true"> · </span><button type="button" class="round-rule-trigger" popovertarget="dashboard-round-rule-details">View rules</button></small>
+              <div id="dashboard-round-rule-details" class="round-rule-popover" popover aria-labelledby="dashboard-round-rule-title">
+                <div class="round-rule-popover-header">
+                  <h2 id="dashboard-round-rule-title">Round Rules</h2>
+                  <button type="button" popovertarget="dashboard-round-rule-details" popovertargetaction="hide" aria-label="Close round rules">×</button>
+                </div>
+                <p data-next-bid-window-rule-detail>Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.</p>
+              </div>
             </article>
             <article class="metric-card area-slots-metric">
               <span>Area Leave Slots Left</span>
@@ -1208,7 +1220,7 @@
                 <p>Intake permissions start 60 minutes before each assigned shift.</p>
               </section>
               <section class="panel" data-admin-schedule-card>
-                <h3>Admin Scheduling</h3>
+                <h3 data-intake-editor-heading>Admin Scheduling</h3>
                 <p>Assign temporary intake access. Access begins 60 minutes before the scheduled shift.</p>
                 <div class="schedule-form">
                   <label>
@@ -1243,7 +1255,8 @@
                   </label>
                   <div class="schedule-form-actions">
                     <button class="primary-action small" type="button" data-add-intake-schedule>Add Intake Shift</button>
-                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel Edit</button>
+                    <button class="secondary-action small" type="button" data-cancel-intake-schedule-edit hidden>Cancel</button>
+                    <button class="secondary-action small danger-action" type="button" data-delete-selected-intake-shift hidden>Delete shift</button>
                   </div>
                   <p class="form-status" data-schedule-status></p>
                 </div>
@@ -1752,11 +1765,11 @@
                 <span class="pill open" data-user-role>Controller</span>
               </div>
               <form class="profile-form">
-                <label>Name <input type="text" value="Michael Schoelen" data-profile-name /></label>
+                <label>Name <input type="text" value="" data-profile-name /></label>
                 <label class="assigned-area-field">Area <span class="assigned-area-value" data-profile-area>Area A</span><small>If this area is incorrect, please contact your rep.</small></label>
-                <label>Initials <input type="text" value="OC" maxlength="4" data-profile-initials /></label>
-                <label>Phone Number <input type="tel" value="(555) 555-0147" data-profile-phone /></label>
-                <label>Contact Email <input type="email" value="m.schoelen@yahoo.com" data-profile-email /></label>
+                <label>Initials <input type="text" value="" maxlength="4" data-profile-initials /></label>
+                <label>Phone Number <input type="tel" value="" data-profile-phone /></label>
+                <label>Contact Email <input type="email" value="" data-profile-email /></label>
                 <p class="profile-form-status" data-profile-form-status role="status" aria-live="polite"></p>
                 <div class="form-actions">
                   <button class="secondary-action" type="button" data-cancel-profile>Cancel</button>
