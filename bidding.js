@@ -603,6 +603,8 @@ const annualMobileCalendars = new Set();
 let calendarRenderRevision = 0;
 const publicCalendarCache = new Map();
 let publicCalendarCacheRevision = -1;
+const memberCalendarCache = new Map();
+let memberCalendarCacheRevision = -1;
 let pendingPageCalendarFrame = 0;
 let publicRdoPresentation = "table";
 let publicBidTimePresentation = "cards";
@@ -6166,13 +6168,6 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   const isPublicCalendar = targetId === "public-calendar";
   const ownerPage = target.closest(".page");
   if (!isPublicCalendar && ownerPage && !ownerPage.classList.contains("active")) return;
-  if (
-    !isPublicCalendar && reuseCurrent &&
-    target.childElementCount > 0 &&
-    Number(target.dataset.calendarRevision) === calendarRenderRevision
-  ) {
-    return;
-  }
   const area = targetId === "public-calendar" ? publicState.area : currentViewArea();
   const showRdo = !isPublicCalendar && area === currentUser.area;
   const showPersonalLeave = !isPublicCalendar && area === currentUser.area;
@@ -6204,25 +6199,28 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   target.classList.remove("month-view", "week-view");
   target.classList.toggle("expanded-slots-calendar", expandedSlots);
 
-  if (isPublicCalendar) {
-    if (publicCalendarCacheRevision !== calendarRenderRevision) {
-      publicCalendarCache.clear();
-      publicCalendarCacheRevision = calendarRenderRevision;
-    }
-    if (reuseCurrent && target.childElementCount > 0
-      && Number(target.dataset.calendarRevision) === calendarRenderRevision
-      && target.dataset.calendarRenderKey === renderKey) {
-      syncMobileCalendarMonths(target);
-      return;
-    }
-    const cached = reuseCurrent && publicCalendarCache.get(renderKey);
-    if (cached) {
-      target.replaceChildren(...cached.map((node) => node.cloneNode(true)));
-      syncMobileCalendarMonths(target);
-      target.dataset.calendarRevision = String(calendarRenderRevision);
-      target.dataset.calendarRenderKey = renderKey;
-      return;
-    }
+  const viewCache = isPublicCalendar ? publicCalendarCache : memberCalendarCache;
+  if (!isPublicCalendar && memberCalendarCacheRevision !== calendarRenderRevision) {
+    memberCalendarCache.clear();
+    memberCalendarCacheRevision = calendarRenderRevision;
+  }
+  if (isPublicCalendar && publicCalendarCacheRevision !== calendarRenderRevision) {
+    publicCalendarCache.clear();
+    publicCalendarCacheRevision = calendarRenderRevision;
+  }
+  if (reuseCurrent && target.childElementCount > 0
+    && Number(target.dataset.calendarRevision) === calendarRenderRevision
+    && target.dataset.calendarRenderKey === renderKey) {
+    syncMobileCalendarMonths(target);
+    return;
+  }
+  const cached = reuseCurrent && viewCache.get(renderKey);
+  if (cached) {
+    target.replaceChildren(...cached.map((node) => node.cloneNode(true)));
+    syncMobileCalendarMonths(target);
+    target.dataset.calendarRevision = String(calendarRenderRevision);
+    target.dataset.calendarRenderKey = renderKey;
+    return;
   }
 
   if (reuseCurrent && !isPublicCalendar) {
@@ -6271,13 +6269,13 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
   syncMobileCalendarMonths(target);
   target.dataset.calendarRevision = String(calendarRenderRevision);
   target.dataset.calendarRenderKey = renderKey;
-  if (isPublicCalendar) {
-    // Bound retained DOM to one calendar per area; view changes evict older entries.
-    publicCalendarCache.delete(renderKey);
-    if (publicCalendarCache.size >= ZLA_AREAS.length) {
-      publicCalendarCache.delete(publicCalendarCache.keys().next().value);
+  {
+    // Retain a bounded set of area/mode/layout combinations for view switching.
+    viewCache.delete(renderKey);
+    if (viewCache.size >= 12) {
+      viewCache.delete(viewCache.keys().next().value);
     }
-    publicCalendarCache.set(renderKey, [...target.childNodes].map((node) => node.cloneNode(true)));
+    viewCache.set(renderKey, [...target.childNodes].map((node) => node.cloneNode(true)));
   }
 }
 
@@ -6559,6 +6557,7 @@ function refreshMemberCalendarDates(dateKeys = [], { includeInactive = false } =
 }
 
 function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = false } = {}) {
+  memberCalendarCache.clear();
   const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
   if (!uniqueKeys.length) return;
 
@@ -6618,6 +6617,7 @@ function refreshMemberCalendarRdoPattern(previousWeekdays = new Set()) {
 }
 
 function syncMemberCalendarSelection(previousPreviewKeys = []) {
+  memberCalendarCache.clear();
   refreshMemberCalendarDates(previousPreviewKeys);
 
   const draftDates = leaveDraftDateSet();
@@ -9861,11 +9861,12 @@ function isMemberAppVisible() {
   return Boolean(appShell && !appShell.hidden);
 }
 
-function renderVisibleCalendars() {
+function renderVisibleCalendars({ reuseCurrent = false } = {}) {
   const memberVisible = isMemberAppVisible();
   renderCalendars({
     includePublic: !memberVisible,
     includeMember: memberVisible,
+    reuseCurrent,
   });
 }
 
@@ -18422,7 +18423,7 @@ document.addEventListener("click", async (event) => {
     const label = { vacation: "Leave", fatigue: "Fatigue", combined: "Combined" }[mode];
     await runUiAction("calendar-view", calendarModeButton, `Loading ${label} view…`, () => {
       calendarMode = mode;
-      renderVisibleCalendars();
+      renderVisibleCalendars({ reuseCurrent: true });
       if (showFeedback) showActionFeedback(`${label} calendar view ready.`, "success");
     }, { showFeedback });
     return;
@@ -18438,7 +18439,7 @@ document.addEventListener("click", async (event) => {
       const loadingLabel = layout === "minimal" ? "Loading minimal" : `Loading ${label} view…`;
       await runUiAction("calendar-view", calendarLayoutButton, loadingLabel, () => {
         calendarLayouts[scope] = layout;
-        renderVisibleCalendars();
+        renderVisibleCalendars({ reuseCurrent: true });
         if (showFeedback) showActionFeedback(`${label} calendar view ready.`, "success");
       }, { showFeedback });
     }
@@ -18451,7 +18452,7 @@ document.addEventListener("click", async (event) => {
       calendarWorkforceButton.dataset.calendarScope,
       calendarWorkforceButton.dataset.calendarWorkforce
     );
-    renderVisibleCalendars();
+    renderVisibleCalendars({ reuseCurrent: true });
     return;
   }
 
