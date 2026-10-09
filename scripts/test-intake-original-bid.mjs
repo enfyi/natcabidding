@@ -9,7 +9,7 @@ const context = vm.createContext({
   rdoBidPreferenceLabel: (value) => value === true || value === 'Yes' ? 'Yes' : value === false || value === 'No' ? 'No' : 'Not selected',
   escapeHtml: (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
 })
-vm.runInContext(['rdoBidSnapshotFromIntakeItem', 'rdoBidSnapshotSummary', 'rdoBidValuesChanged', 'inferRdoBidChanges', 'rdoBidChangeDifferences', 'renderIntakeChangeHistory'].map(extract).join('\n'), context)
+vm.runInContext(['rdoBidSnapshotFromIntakeItem', 'rdoBidSnapshotSummary', 'rdoBidValuesChanged', 'inferRdoBidChanges', 'rdoBidChangeDifferences', 'renderIntakeAdminEditHistory', 'renderIntakeChangeHistory'].map(extract).join('\n'), context)
 const original = {type:'RDO Line',supabaseSubmissionId:'old',bidderId:'a',initials:'AB',area:'Area A',status:'Expired',line:'24',fatigueGroup:'A',flex:true,aws:true,mid:'No',submittedAt:'2026-10-01'}
 const requested = {...original,supabaseSubmissionId:'new',status:'Pending',isChange:true,originalSubmissionId:'old',originalBid:null,flex:false,submittedAt:'2026-10-05',summary:'stale summary'}
 context.items=[requested,original]
