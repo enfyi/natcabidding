@@ -1929,6 +1929,79 @@ input {
   line-height: 1.35;
 }
 
+.round-rule-trigger {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.round-rule-trigger:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 4px;
+}
+
+.round-rule-popover {
+  width: min(380px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #dbe4ef;
+  border-top: 3px solid #7abdc2;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(122, 189, 194, 0.09), rgba(255, 215, 127, 0.05)), #ffffff;
+  color: #172033;
+  font-family: "Open Sans", Arial, sans-serif;
+  box-shadow: 0 20px 60px rgba(21, 45, 59, 0.18);
+}
+
+.round-rule-popover::backdrop {
+  background: rgba(21, 45, 59, 0.22);
+}
+
+.round-rule-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.round-rule-popover-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-family: Montserrat, Arial, sans-serif;
+  font-weight: 800;
+}
+
+.round-rule-popover-header button {
+  padding: 4px 10px;
+  border: 1px solid #cbd8e6;
+  border-radius: 6px;
+  background: #f0f7f7;
+  color: #216b62;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.app-main .round-rule-popover p {
+  margin: 16px 0 0;
+  color: #526273;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.round-rule-popover-header button:hover {
+  background: #deeeee;
+}
+
+.round-rule-popover-header button:focus-visible {
+  outline: 2px solid #216b62;
+  outline-offset: 3px;
+}
+
 .metric-card.area-slots-metric {
   display: grid;
   align-content: start;

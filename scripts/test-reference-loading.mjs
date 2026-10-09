@@ -6,14 +6,14 @@ const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 const code = source.slice(source.indexOf('const referenceLoadDiagnostics = []'), source.indexOf('\nfunction dateFromKey'))
 const ok = data => ({ data, error: null, status: 200 })
 const failure = status => ({ data: null, error: { code: 'TEST_FAILURE' }, status })
-function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate, intakeGate, memberVisible = false } = {}) {
+function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate, intakeGate, memberVisible = false, bidYearGate, onSlotsStart = () => {} } = {}) {
   const applied = new Set()
   const state = { authUserId: '', loading: false }
   const client = {
     rpc: async name => name === 'read_bidding_roster' && rosterFails ? failure(403) : ok([]),
     from: name => {
       const value = name === 'bid_years' ? { id: 'year' } : [{ id: 'area', name: 'Area A' }]
-      const builder = { then: resolve => Promise.resolve(ok(value)).then(resolve) }
+      const builder = { then: resolve => (name === 'bid_years' && bidYearGate ? bidYearGate.then(() => ok(value)) : Promise.resolve(ok(value))).then(resolve) }
       for (const method of ['select', 'eq', 'single', 'order']) builder[method] = () => builder
       return builder
     },
@@ -28,7 +28,7 @@ function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate,
     loadBidYearCatalog: async () => { if (catalogFails) throw Error('catalog failed') },
     isMemberAppVisible: () => memberVisible, renderPublicPage: () => applied.add('render'),
     renderHelpSummary: () => applied.add('help summary'), renderHelpPanel: () => applied.add('help panel'), renderAlerts: () => applied.add('alerts'),
-    loadRdoLines: async () => ok([]), loadPublishedLeaveSlots: () => leaveGate || Promise.resolve(ok([])),
+    loadRdoLines: async () => ok([]), loadPublishedLeaveSlots: () => { onSlotsStart(); return leaveGate || Promise.resolve(ok([])) },
     loadPublishedGlRdoAssignments: async () => ok([]), loadIntakeSchedules: () => intakeGate || Promise.resolve(ok([])),
     loadPublishedBidWindows: async () => ok([]), loadSupabaseHelpThreads: () => helpGate || Promise.resolve(true),
     hasIntakeAccess: () => false, supabaseRows: result => result.data || [],
@@ -183,3 +183,17 @@ for (const staleReason of ['reload', 'sign-out', 'year']) {
   assert.equal(stale.applied.has('intake schedules'), false, staleReason);
 }
 console.log('PASS dashboard becomes ready while intake is pending; background updates and stale-response protection.');
+
+// Slot reads overlap year metadata rather than waiting for its round trip.
+let releaseYear;
+let startedSlots = false;
+const bidYearGate = new Promise(resolve => { releaseYear = resolve });
+const earlySlots = setup({ bidYearGate, onSlotsStart: () => { startedSlots = true } });
+const earlyLoad = earlySlots.context.loadSupabaseReferenceData();
+for (let turn = 0; turn < 20 && !startedSlots; turn++) await Promise.resolve();
+const overlapped = startedSlots;
+releaseYear();
+await earlyLoad;
+assert.equal(overlapped, true, 'Slots begin before year metadata resolves');
+assert.ok(earlySlots.applied.has('calendar'), 'Slots still apply after area definitions are available');
+console.log('PASS slot request overlaps year metadata without skipping application');
