@@ -8002,6 +8002,7 @@ function supabaseRdoSubmissionToIntakeItem(row, areaById = new Map()) {
     ghostBid,
     isChange,
     originalBid,
+    adminEditHistory: Array.isArray(row.adminEditHistory) ? row.adminEditHistory : [],
     originalSubmissionId: row.supersedesSubmissionId || row.supersedes_submission_id || "",
     changeSource,
     changeEnteredBy,
@@ -16061,8 +16062,25 @@ function rdoBidChangeDifferences(original, requested) {
     : [`${label}: ${value(original)} → ${value(requested)}`]);
 }
 
+function renderIntakeAdminEditHistory(item) {
+  return (item?.adminEditHistory || []).map((edit) => {
+    const before = edit.before || {};
+    const after = edit.after || {};
+    const differences = rdoBidChangeDifferences(before, after);
+    if (!differences.length) return "";
+    return `<div class="intake-change-history">
+      <strong>Admin edit</strong>
+      <span><b>Before:</b> ${escapeHtml(rdoBidSnapshotSummary(before))}</span>
+      <span><b>After:</b> ${escapeHtml(rdoBidSnapshotSummary(after))}</span>
+      <span><b>Changed:</b> ${escapeHtml(differences.join(" · "))}</span>
+      <small>${escapeHtml(edit.editedBy || "Intake/admin")} · ${escapeHtml(edit.editedAt ? formatDateTime(new Date(edit.editedAt)) : "Time not recorded")}</small>
+    </div>`;
+  }).join("");
+}
+
 function renderIntakeChangeHistory(item) {
-  if (!item?.isChange) return "";
+  const adminHistory = renderIntakeAdminEditHistory(item);
+  if (!item?.isChange) return adminHistory;
   const differences = rdoBidChangeDifferences(item.originalBid, item);
   const source = item.changeSource === "intake"
     ? `Entered as a change by ${item.changeEnteredBy || "Intake"}`
@@ -16077,6 +16095,7 @@ function renderIntakeChangeHistory(item) {
       ${differences.length ? `<span><b>Changed:</b> ${escapeHtml(differences.join(" · "))}</span>` : ""}
       <small>${escapeHtml(source)}</small>
     </div>
+    ${adminHistory}
   `;
 }
 
