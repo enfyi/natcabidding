@@ -7453,6 +7453,22 @@ async function rejectUnmatchedSupabaseLogin(message = "You are signed in, but no
   setAuthStatus(message, "error");
 }
 
+function syncPublicLoginIndicator() {
+  const button = document.querySelector("[data-public-login-toggle]");
+  const status = document.querySelector("[data-public-session-status]");
+  if (!button) return;
+  const signedIn = Boolean(supabaseState.authUserId && currentUser?.supabaseProfileId);
+  const name = signedIn ? [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") || currentUser.initials || "Member" : "";
+  button.textContent = "Dashboard";
+  button.classList.toggle("is-signed-in", signedIn);
+  button.setAttribute("aria-label", signedIn ? `Open dashboard. Signed in as ${name}` : "Sign in to your dashboard");
+  if (status) {
+    status.hidden = !signedIn;
+    status.textContent = signedIn ? `Signed in · ${name}` : "";
+    status.title = signedIn ? `Signed in as ${name}` : "";
+  }
+}
+
 function showLoggedInApp(page = requestedLandingPage()) {
   if (!currentUser?.supabaseProfileId) {
     showPublicHome();
@@ -7473,6 +7489,7 @@ function showLoggedInApp(page = requestedLandingPage()) {
     // Select the destination first so startup never renders another page's calendar.
     setPage(intendedLandingPage(page), { render: false });
     renderApp();
+    syncPublicLoginIndicator();
     startLiveAlertUpdates();
     document.documentElement.classList.remove("member-boot-pending");
   } catch (error) {
@@ -7494,7 +7511,7 @@ function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SEC
   document.querySelector(".login-screen")?.removeAttribute("hidden");
   const loginToggle = document.querySelector("[data-public-login-toggle]");
   if (loginToggle) {
-    loginToggle.textContent = "Dashboard";
+    syncPublicLoginIndicator();
     loginToggle.setAttribute("aria-expanded", "false");
   }
   document.querySelector("[data-public-login-menu]")?.setAttribute("hidden", "");
@@ -9846,6 +9863,7 @@ function publicRosterArea(area = publicState.area) {
 function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false, reuseCalendar = false } = {}) {
   if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
+  syncPublicLoginIndicator();
   seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
   if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
@@ -17559,8 +17577,7 @@ function logOut() {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-help-menu]")?.setAttribute("hidden", "");
   document.querySelector(".login-screen")?.removeAttribute("hidden");
-  const loginToggle = document.querySelector("[data-public-login-toggle]");
-  if (loginToggle) loginToggle.textContent = "Login";
+  syncPublicLoginIndicator();
   renderPublicPage(publicState.area, publicState.section, { persistNavigation: true });
 }
 

@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2-close-bid-detail-dashboard-intake-background" />
+    <link rel="stylesheet" href="bidding.css?v=20261009-session-indicator" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -126,7 +126,10 @@
             <h1 data-public-heading>Area A Annual Leave Calendar</h1>
           </div>
           <div class="public-login">
-            <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
+            <div class="public-session-control">
+              <button class="public-login-button" type="button" aria-label="Sign in to your dashboard" aria-expanded="false" data-public-login-toggle>Dashboard</button>
+              <span class="public-session-status" role="status" hidden data-public-session-status></span>
+            </div>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
               <h2>Login</h2>
@@ -1914,7 +1917,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261008-calendar-view-cache"></script>
+    <script src="bidding.js?v=20261009-session-indicator"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
