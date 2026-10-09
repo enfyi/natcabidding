@@ -12518,3 +12518,8 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   .mobile-login-slot .public-session-control { max-width: 112px; }
   .mobile-login-slot .public-session-status { color: #fff; font-size: .65rem; }
 }
+
+.public-login-button.is-signing-in { color: #115e59; border-color: #5ba69e; background: #e6f7f3; cursor: wait; }
+@media (max-width: 720px) {
+  .mobile-login-slot .public-login-button.is-signing-in { white-space: normal; padding: 6px 10px; line-height: 1.2; }
+}

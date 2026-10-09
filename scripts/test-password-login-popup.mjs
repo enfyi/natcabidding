@@ -22,6 +22,9 @@ const client = { auth: {
   },
 } };
 const context = vm.createContext({
+  supabaseState: {},
+  syncPublicLoginIndicator() {},
+  async restoreSupabaseSession() { context.showLoggedInApp(); context.setAuthStatus("Signed in.", "success"); },
   document: { querySelector: selector => ({
     '[data-auth-status]': status,
     '[data-public-login-menu]': menu,

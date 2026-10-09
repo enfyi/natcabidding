@@ -647,6 +647,8 @@ const supabaseState = {
   loading: false,
   authInitialized: false,
   authRestorePromise: null,
+  passwordSignInPending: false,
+  sessionRestorePending: false,
   message: "Waiting for Supabase data.",
   loadedAt: null,
   bidYearId: "",
@@ -7457,11 +7459,15 @@ function syncPublicLoginIndicator() {
   const button = document.querySelector("[data-public-login-toggle]");
   const status = document.querySelector("[data-public-session-status]");
   if (!button) return;
-  const signedIn = Boolean(supabaseState.authUserId && currentUser?.supabaseProfileId);
+  const signingIn = Boolean(supabaseState.passwordSignInPending || supabaseState.sessionRestorePending);
+  const signedIn = !signingIn && Boolean(supabaseState.authUserId && currentUser?.supabaseProfileId);
   const name = signedIn ? [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") || currentUser.initials || "Member" : "";
-  button.textContent = "Dashboard";
+  button.textContent = signingIn ? "Signing you in…" : "Dashboard";
+  button.disabled = signingIn;
+  button.setAttribute("aria-busy", String(signingIn));
+  button.classList.toggle("is-signing-in", signingIn);
   button.classList.toggle("is-signed-in", signedIn);
-  button.setAttribute("aria-label", signedIn ? `Open dashboard. Signed in as ${name}` : "Sign in to your dashboard");
+  button.setAttribute("aria-label", signingIn ? "Signing you in. Please wait" : signedIn ? `Open dashboard. Signed in as ${name}` : "Sign in to your dashboard");
   if (status) {
     status.hidden = !signedIn;
     status.textContent = signedIn ? `Signed in · ${name}` : "";
@@ -7594,6 +7600,8 @@ async function openMemberDashboard() {
 
 async function restoreSupabaseSession(page = requestedLandingPage()) {
   if (supabaseState.authRestorePromise) return supabaseState.authRestorePromise;
+  supabaseState.sessionRestorePending = true;
+  syncPublicLoginIndicator();
 
   supabaseState.authRestorePromise = (async () => {
     const startupStarted = Date.now();
@@ -7630,6 +7638,8 @@ async function restoreSupabaseSession(page = requestedLandingPage()) {
       return false;
     } finally {
       supabaseState.authRestorePromise = null;
+      supabaseState.sessionRestorePending = false;
+      syncPublicLoginIndicator();
     }
   })();
 
@@ -7731,29 +7741,37 @@ async function sendSupabasePasswordReset(email) {
 }
 
 async function loginWithSupabasePassword(email, password) {
-  const client = supabaseClient();
-  if (!client) {
-    setAuthStatus("Login is not configured yet.", "error");
-    return;
-  }
-
-  let signInResult;
+  if (supabaseState.passwordSignInPending) return;
+  supabaseState.passwordSignInPending = true;
+  syncPublicLoginIndicator();
   try {
-    await client.auth.signOut();
-    clearSupabaseAccountState();
-    signInResult = await client.auth.signInWithPassword({ email, password });
-  } catch (error) {
-    setAuthStatus(friendlyAuthFailure(error), "error");
-    return;
-  }
+    const client = supabaseClient();
+    if (!client) {
+      setAuthStatus("Login is not configured yet.", "error");
+      return;
+    }
 
-  const { error } = signInResult;
-  if (error) {
-    setAuthStatus(friendlyAuthFailure(error), "error");
-    return;
-  }
+    let signInResult;
+    try {
+      await client.auth.signOut();
+      clearSupabaseAccountState();
+      signInResult = await client.auth.signInWithPassword({ email, password });
+    } catch (error) {
+      setAuthStatus(friendlyAuthFailure(error), "error");
+      return;
+    }
 
-  await restoreSupabaseSession(requestedLandingPage());
+    const { error } = signInResult;
+    if (error) {
+      setAuthStatus(friendlyAuthFailure(error), "error");
+      return;
+    }
+
+    await restoreSupabaseSession(requestedLandingPage());
+  } finally {
+    supabaseState.passwordSignInPending = false;
+    syncPublicLoginIndicator();
+  }
 }
 
 function setProfileFormStatus(message, status = "info") {
