@@ -18417,8 +18417,13 @@ document.addEventListener("click", async (event) => {
 
   const calendarModeButton = event.target.closest("[data-calendar-mode]");
   if (calendarModeButton) {
-    calendarMode = calendarModeButton.dataset.calendarMode;
-    renderVisibleCalendars();
+    const mode = calendarModeButton.dataset.calendarMode;
+    const label = { vacation: "Leave", fatigue: "Fatigue", combined: "Combined" }[mode];
+    await runUiAction("calendar-view", calendarModeButton, `Loading ${label} view…`, () => {
+      calendarMode = mode;
+      renderVisibleCalendars();
+      showActionFeedback(`${label} calendar view ready.`, "success");
+    });
     return;
   }
 
@@ -18426,8 +18431,13 @@ document.addEventListener("click", async (event) => {
   if (calendarLayoutButton) {
     const scope = calendarLayoutButton.dataset.calendarScope;
     if (scope && Object.hasOwn(calendarLayouts, scope)) {
-      calendarLayouts[scope] = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
-      renderVisibleCalendars();
+      const layout = calendarLayoutButton.dataset.calendarLayout === "full" ? "full" : "minimal";
+      const label = layout === "full" ? "Full" : "Minimal";
+      await runUiAction("calendar-view", calendarLayoutButton, `Loading ${label} view…`, () => {
+        calendarLayouts[scope] = layout;
+        renderVisibleCalendars();
+        showActionFeedback(`${label} calendar view ready.`, "success");
+      });
     }
     return;
   }
@@ -18704,7 +18714,7 @@ document.addEventListener("change", async (event) => {
     const section = publicState.section;
     await runUiAction("public-area-switch", areaSelect, "Loading…", () => {
       renderPublicPage(nextArea, section, { persistNavigation: true, reuseCalendar: true });
-      showActionFeedback(`Now viewing ${nextArea} · ${publicState.section}.`, "success");
+      showActionFeedback(`Now viewing ${nextArea}.`, "success");
     }, { deferPaint: false });
     return;
   }
