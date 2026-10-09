@@ -400,7 +400,14 @@
             <article class="metric-card round-rule-card">
               <span>Round Rules</span>
               <strong data-next-bid-window-rule>1 or 2 weeks</strong>
-              <small><span data-next-bid-window-rule-round>Round 1</span> · <span data-next-bid-window-rule-detail>Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.</span></small>
+              <small class="round-rule-caption"><span data-next-bid-window-rule-round>Round 1</span><span aria-hidden="true"> · </span><button type="button" class="round-rule-trigger" popovertarget="dashboard-round-rule-details">View rules</button></small>
+              <div id="dashboard-round-rule-details" class="round-rule-popover" popover aria-labelledby="dashboard-round-rule-title">
+                <div class="round-rule-popover-header">
+                  <h2 id="dashboard-round-rule-title">Round Rules</h2>
+                  <button type="button" popovertarget="dashboard-round-rule-details" popovertargetaction="hide" aria-label="Close round rules">×</button>
+                </div>
+                <p data-next-bid-window-rule-detail>Pick individual dates within up to 2 seven-day bid weeks. Dates between selections may be skipped.</p>
+              </div>
             </article>
             <article class="metric-card area-slots-metric">
               <span>Area Leave Slots Left</span>
