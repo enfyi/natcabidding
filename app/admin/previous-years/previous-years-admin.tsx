@@ -41,6 +41,7 @@ export function PreviousYearsAdmin() {
   const [showArchivePreview, setShowArchivePreview] = useState(false)
   const [viewWorkbook, setViewWorkbook] = useState<ArchiveWebWorkbook | null>(null)
   const [viewKind, setViewKind] = useState<ArchiveKind>('rdo')
+  const [viewLayout, setViewLayout] = useState<ArchiveLayout>('desktop')
   const [viewSheet, setViewSheet] = useState(0)
   const [viewMonth, setViewMonth] = useState(0)
   const [replaceApproved, setReplaceApproved] = useState(false)
@@ -187,7 +188,7 @@ export function PreviousYearsAdmin() {
       const result = await client.from('previous_year_documents').select('rendered_workbook').eq('id', entry.id).single()
       if (result.error) throw result.error
       if (!result.data.rendered_workbook) throw new Error('Reimport this workbook to create its web version.')
-      setViewWorkbook(result.data.rendered_workbook); setViewKind(entry.document_kind); setViewSheet(0); setViewMonth(0)
+      setViewWorkbook(result.data.rendered_workbook); setViewKind(entry.document_kind); setViewLayout(entry.layout); setViewSheet(0); setViewMonth(0)
     } catch (error) { showError(error) }
     finally { setBusy(false) }
   }
@@ -212,7 +213,7 @@ export function PreviousYearsAdmin() {
     <header className="import-hero"><div><p className="eyebrow">Historical bidding records</p><h1>Previous Years</h1><p className="import-lede">Import each area’s Excel workbooks, then publish them in the public archive.</p></div><div className="archive-row-actions"><button className="button secondary" type="button" aria-expanded={showArchivePreview} aria-controls="archive-draft-preview" onClick={() => setShowArchivePreview(!showArchivePreview)}>{showArchivePreview ? 'Hide Preview' : 'Preview Before Publishing'}</button><Link className="button secondary" href="/bidding.html?page=public&area=Previous%20Years">View public archive</Link></div></header>
     <ActionStatus message={status} busy={busy} className={`import-status ${failed ? 'error' : ''}`} />
     {showArchivePreview && <section id="archive-draft-preview" className="import-card archive-draft-preview" aria-label="Draft public archive preview"><p className="archive-preview-label">Admin preview · drafts included · only published files appear publicly</p><ArchivePreviewCards documents={filtered} areas={areas} busy={busy} onView={(entry) => void view(entry)} /></section>}
-    {viewWorkbook && <section className="import-card" aria-label="Saved page preview"><div className="archive-row-actions"><h2>Page preview · {ARCHIVE_KINDS[viewKind]}</h2><button className="button secondary" onClick={() => setViewWorkbook(null)}>Close preview</button></div><label>Worksheet<select value={viewSheet} onChange={(event) => { setViewSheet(Number(event.target.value)); setViewMonth(0) }}>{viewWorkbook.sheets.map((sheet, index) => <option key={index} value={index}>{sheet.name}</option>)}</select></label>{viewKind === 'leave' && viewWorkbook.sheets[viewSheet]?.months.length > 0 && <label>Month<select value={viewMonth} onChange={(event) => setViewMonth(Number(event.target.value))}>{viewWorkbook.sheets[viewSheet].months.map((month, index) => <option key={index} value={index}>{month.label}</option>)}</select></label>}<ArchiveSheet sheet={viewWorkbook.sheets[viewSheet]} calendar={viewKind === 'leave'} month={viewMonth} /></section>}
+    {viewWorkbook && <section className="import-card" aria-label="Saved page preview"><div className="archive-row-actions"><h2>Page preview · {ARCHIVE_KINDS[viewKind]}</h2><button className="button secondary" onClick={() => setViewWorkbook(null)}>Close preview</button></div><label>Worksheet<select value={viewSheet} onChange={(event) => { setViewSheet(Number(event.target.value)); setViewMonth(0) }}>{viewWorkbook.sheets.map((sheet, index) => <option key={index} value={index}>{sheet.name}</option>)}</select></label>{viewKind === 'leave' && viewWorkbook.sheets[viewSheet]?.months.length > 0 && <label>Month<select value={viewMonth} onChange={(event) => setViewMonth(Number(event.target.value))}>{viewWorkbook.sheets[viewSheet].months.map((month, index) => <option key={index} value={index}>{month.label}</option>)}</select></label>}<ArchiveSheet sheet={viewWorkbook.sheets[viewSheet]} layout={viewLayout} calendar={viewKind === 'leave'} month={viewMonth} /></section>}
     <section className="import-card" aria-labelledby="archive-import-heading">
       <div className="import-section-heading"><div><span>1</span><div><h2 id="archive-import-heading">Add previous year</h2><p>Upload desktop and mobile workbooks separately for the same area and document type.</p></div></div></div>
       <form onSubmit={(event) => void previewFile(event)}>
@@ -233,7 +234,7 @@ export function PreviousYearsAdmin() {
         <h3>{year} · {selectedArea?.name} · {ARCHIVE_KINDS[kind]} · {layout === 'mobile' ? 'Mobile' : 'Desktop'}</h3>
         <p>{file?.name} · {preview.sheets.length} worksheet {preview.sheets.length === 1 ? 'tab' : 'tabs'}</p>
         <p className="muted">This is the saved web version visitors will see. Conversion happens once during import.</p>
-        {preview.workbook.sheets.map((sheet, index) => <details key={index} open={index === 0}><summary>{sheet.name}</summary><ArchiveSheet sheet={sheet} calendar={kind === 'leave'} /></details>)}
+        {preview.workbook.sheets.map((sheet, index) => <details key={index} open={index === 0}><summary>{sheet.name}</summary><ArchiveSheet sheet={sheet} layout={layout} calendar={kind === 'leave'} /></details>)}
         {existing && <label className="archive-replace-confirm"><input type="checkbox" checked={replaceApproved} disabled={busy} onChange={(event) => setReplaceApproved(event.target.checked)} />Replace the existing workbook and save the replacement as a draft.</label>}
         <div className="import-actions"><button className="button primary" type="button" disabled={busy || Boolean(existing && !replaceApproved)} onClick={() => void importWorkbook()}>{busy ? 'Working…' : existing ? 'Replace Excel as Draft' : 'Import Excel as Draft'}</button></div>
       </section>}

@@ -8,11 +8,11 @@ export function ArchiveFit({ width, children }: { width: number; children: React
   useLayoutEffect(() => {
     const element = container.current
     if (!element) return
-    const resize = () => setScale(Math.min(1, element.clientWidth / width))
+    const resize = () => setScale(Math.max(0.8, Math.min(1, element.clientWidth / width)))
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(element)
     return () => observer.disconnect()
   }, [width])
-  return <div ref={container} style={{ width: '100%', overflow: 'hidden' }}><div style={{ width, zoom: scale }}>{children}</div></div>
+  return <div ref={container} style={{ width: '100%', overflowX: 'auto' }}><div style={{ width, zoom: scale }}>{children}</div></div>
 }
