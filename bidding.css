@@ -12525,12 +12525,17 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 }
 .public-archive-filters { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0; }
 .public-archive-filters label { display: grid; gap: 8px; font-size: 0.85rem; font-weight: 700; }
-.public-archive-filters select { min-width: 180px; min-height: 44px; padding: 8px 12px; border: 1px solid #d7ddd9; border-radius: 10px; background: #fff; color: #183b2d; font: inherit; }
+.public-archive-filters select { min-width: 180px; min-height: 44px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #0f172a; font: inherit; }
 .public-archive-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 20px; }
-.public-archive-area { border: 1px solid #d7ddd9; border-radius: 14px; padding: 20px; background: #fff; }
+.public-archive-area { border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; background: #fff; }
 .public-archive-area h3 { margin: 0 0 16px; }
-.public-archive-area article { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid #e6ebe7; }
+.public-archive-area article { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid #e2e8f0; }
 .public-archive-area article > div { min-width: 0; flex: 1 1 180px; }
 .public-archive-area h4 { margin: 0 0 6px; }
 .public-archive-area p { margin: 0 0 6px; overflow-wrap: anywhere; }
-.public-archive-area small { display: block; color: #5e6c64; overflow-wrap: anywhere; }
+.public-archive-area small { display: block; color: #64748b; overflow-wrap: anywhere; }
+
+.public-archive-area h3, .public-archive-area h4 { color: #0f172a; font-family: Montserrat, Arial, sans-serif; font-weight: 900; }
+.public-archive-area .secondary-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 1px solid #3d888d; border-radius: 8px; padding: 8px 14px; color: #155e63; background: #e6f7f8; text-decoration: none; }
+.public-archive-area .secondary-action:hover { background: #d3eff1; }
+.public-archive-filters select:focus-visible { outline: 3px solid #7abdc2; outline-offset: 2px; }

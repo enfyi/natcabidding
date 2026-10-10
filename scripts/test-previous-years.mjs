@@ -8,10 +8,21 @@ import JSZip from 'jszip'
 
 const output = await mkdtemp(join(tmpdir(), 'zla-archive-test-'))
 try {
-  execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '--ignoreConfig', '--module', 'commonjs', '--target', 'es2022', '--esModuleInterop', '--skipLibCheck', '--outDir', output, 'lib/archive-workbook.ts', 'lib/previous-years.ts', 'lib/bid-line-import.ts', 'lib/bid-line-import-types.ts'])
+  execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '--ignoreConfig', '--module', 'commonjs', '--target', 'es2022', '--esModuleInterop', '--skipLibCheck', '--outDir', output, 'lib/archive-layout.ts', 'lib/archive-workbook.ts', 'lib/previous-years.ts', 'lib/bid-line-import.ts', 'lib/bid-line-import-types.ts'])
   await symlink(resolve('node_modules'), join(output, 'node_modules'))
   const require = createRequire(join(output, 'test.cjs'))
   const { previewArchiveWorkbook } = require('./archive-workbook.js')
+  const { archiveLayoutForAgent, selectArchiveVariant } = require('./archive-layout.js')
+  assert.equal(archiveLayoutForAgent('Mozilla/5.0 (iPhone)'), 'mobile')
+  assert.equal(archiveLayoutForAgent('Mozilla/5.0 Android Mobile'), 'mobile')
+  assert.equal(archiveLayoutForAgent('Mozilla/5.0 (Macintosh)'), 'desktop')
+  assert.equal(archiveLayoutForAgent('iPhone', 'desktop'), 'desktop')
+  assert.equal(archiveLayoutForAgent('Macintosh', 'mobile'), 'mobile')
+  const versions = [{ layout: 'desktop', id: 'large' }, { layout: 'mobile', id: 'small' }]
+  assert.equal(selectArchiveVariant(versions, 'mobile').id, 'small')
+  assert.equal(selectArchiveVariant(versions.slice(0, 1), 'mobile').id, 'large')
+  assert.equal(selectArchiveVariant(versions.slice(1), 'desktop').id, 'small')
+  assert.equal(selectArchiveVariant([], 'mobile'), undefined)
   const { archiveFileError, archiveYearIsValid, ARCHIVE_MAX_BYTES } = require('./previous-years.js')
 
   assert.equal(archiveYearIsValid(2026), true)
@@ -61,6 +72,18 @@ try {
       assert.ok(!sheet.rows[4].cells.some(cell => /Dec 30/.test(cell.value)), 'blank formatted date cells remain blank')
       assert.ok(sheet.styles.some(style => style.backgroundColor), 'spreadsheet fills are preserved')
       console.log('Calendar sections:', sheet.months.map(month => month.label).join(', '))
+    }
+    if (path.endsWith('A.Cal.26M.xlsx')) {
+      const sheet = preview.workbook.sheets[0]
+      assert.equal(sheet.widths.length, 8)
+      assert.ok(sheet.widths.reduce((a,b) => a+b,0) < 360, 'mobile calendar keeps its narrow source column widths')
+      assert.ok(sheet.months.length >= 12)
+      assert.ok(sheet.rows.some(row => row.cells.some(cell => cell.value === '1/11')), 'mobile dates retain their compact source format')
+    }
+    if (path.endsWith('A.RDO.26M.xlsx')) {
+      const sheet = preview.workbook.sheets[0]
+      assert.ok(sheet.widths.reduce((a,b) => a+b,0) < 650, 'mobile RDO is narrower than the desktop export')
+      assert.ok(sheet.rows.some(row => row.cells.some(cell => cell.value === 'CE')))
     }
     if (path.endsWith('A.RDO.26.xlsx')) {
       const sheet = preview.workbook.sheets[0]
