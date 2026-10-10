@@ -707,8 +707,8 @@ h1 {
 .historical-months a { text-decoration: none; color: #64748b; padding: 7px 12px; border: 1px solid #dbe4ef; border-radius: 6px; font-size: 13px; }
 .historical-months a[aria-current] { color: #276e74; background: #e6f7f8; border-color: #3d888d; font-weight: 700; }
 .historical-sheet { overflow: auto; max-width: 100%; border: 1px solid #dbe4ef; border-radius: 5px; background: white; }
-.historical-sheet table { border-collapse: collapse; table-layout: fixed; font-family: Arial, sans-serif; margin: 0; }
-.historical-sheet td { padding: 3px 5px; white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; vertical-align: middle; line-height: 1.2; color: #171717; border: 1px solid #e3e3e3; }
+.historical-sheet table { border-collapse: collapse; table-layout: auto; width: max-content; font-family: Arial, sans-serif; margin: 0; }
+.historical-sheet td { padding: 3px 5px; white-space: pre; overflow-wrap: normal; text-align: center; vertical-align: middle; line-height: 1.2; color: #171717; border: 1px solid #e3e3e3; }
 .historical-footnote { color: #64748b; font-size: 13px; margin-top: 20px; }
 .archive-admin-shell .archive-import-fields { grid-template-columns: 90px 130px 160px 110px minmax(200px, 1fr); }
 .archive-admin-shell .archive-filter-fields { grid-template-columns: repeat(2, minmax(140px, 240px)); }
@@ -759,3 +759,5 @@ h1 {
 .archive-site-theme a:focus-visible, .archive-site-theme button:focus-visible { outline: 3px solid #3d888d; outline-offset: 3px; }
 .historical-nav > a:last-child:hover { color: #7abdc2; }
 .historical-tabs a:hover, .historical-months a:hover { background: #e6f7f8; border-color: #3d888d; }
+
+.historical-sheet-no-grid td { border: none; }
