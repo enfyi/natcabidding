@@ -79,4 +79,25 @@ capacity = context.testApi.fatigueCapacityForLine(context.rdoLines[0], null, '')
 assert.deepEqual(Array.from(capacity, (item) => item.areaMax), [4, 4, 4])
 assert.deepEqual(Array.from(capacity, (item) => item.crewMax), [2, 2, 2])
 
-console.log('PASS fatigue groups balance CPC and DEV pools by area and RDO set')
+// Selecting an approved line must not subtract it from the counters or
+// move its saved group to a stale selection. Exercise every area and pool.
+for (const area of ['Area A', 'Area B', 'Area C', 'Area D', 'Area E', 'Area F', 'TMU']) {
+  for (const pool of ['CPC', 'DEV']) {
+    context.senioritySource.splice(0)
+    context.rdoLines.splice(0, context.rdoLines.length,
+      ...Array.from({ length: 8 }, (_, index) => ({ ...line(index + 1, pool === 'CPC' ? 'S/S' : 'R-DEV', 'B', 'Taken', pool), area })),
+      { ...line(9, pool === 'CPC' ? 'S/S' : 'D-DEV', 'A', 'Open', pool), area },
+      { ...line(10, 'S/S', 'B', 'Taken', pool === 'CPC' ? 'DEV' : 'CPC'), area },
+    )
+    const selected = context.rdoLines[0]
+    for (const preference of ['', 'A', 'B', 'C', 'No preference']) {
+      capacity = context.testApi.fatigueCapacityForLine(selected, selected.line, preference)
+      assert.deepEqual(Array.from(capacity, (item) => item.areaUsed), [0, 8, 0], `${area} ${pool} approved totals`)
+      assert.deepEqual(Array.from(capacity, (item) => item.crewUsed), [0, 8, 0], `${area} ${pool} approved RDO totals`)
+    }
+    capacity = context.testApi.fatigueCapacityForLine(context.rdoLines[8], '9', 'A')
+    assert.deepEqual(Array.from(capacity, (item) => item.areaUsed), [1, 8, 0], 'open candidate preview remains included')
+  }
+}
+
+console.log('PASS fatigue groups balance CPC and DEV pools by area and RDO set; approved counters include selected lines in every area')

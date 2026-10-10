@@ -857,9 +857,16 @@ function fatigueCapacityForLine(line, candidateLineId = selectedLineId, candidat
   const baseCrewUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, crewLines.filter((item) =>
     item.line !== candidateLineId && item.status === "Taken" && item.group === group
   ).length]));
-  const displayedAreaUsed = { ...baseAreaUsed };
-  const displayedCrewUsed = { ...baseCrewUsed };
-  if (FATIGUE_GROUPS.includes(candidateGroup)) {
+  // Availability excludes the candidate so an existing bid can be changed.
+  // Display totals must still include every approved line, including that candidate.
+  const displayedAreaUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, areaLines.filter((item) =>
+    item.status === "Taken" && item.group === group
+  ).length]));
+  const displayedCrewUsed = Object.fromEntries(FATIGUE_GROUPS.map((group) => [group, crewLines.filter((item) =>
+    item.status === "Taken" && item.group === group
+  ).length]));
+  const candidateLine = areaLines.find((item) => item.line === candidateLineId);
+  if (candidateLine && candidateLine.status !== "Taken" && FATIGUE_GROUPS.includes(candidateGroup)) {
     displayedAreaUsed[candidateGroup] += 1;
     displayedCrewUsed[candidateGroup] += 1;
   }
