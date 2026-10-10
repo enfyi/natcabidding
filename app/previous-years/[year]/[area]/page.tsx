@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { headers } from 'next/headers'
 import Link from 'next/link'
+import { ArchiveLinkLabel } from '@/app/components/archive-link-label'
 import { archiveLayoutForAgent, selectArchiveVariant } from '@/lib/archive-layout'
 import { notFound } from 'next/navigation'
 import { ArchiveBrand } from '@/app/components/archive-brand'
@@ -13,7 +14,7 @@ export const metadata = { title: 'Previous Years | ZLA Bidding' }
 
 export default async function PreviousYearArea({ params, searchParams }: {
   params: Promise<{ year: string; area: string }>
-  searchParams: Promise<{ section?: string; sheet?: string; month?: string; layout?: string }>
+  searchParams: Promise<{ section?: string; sheet?: string; month?: string; layout?: string; calendarSheet?: string; calendarMonth?: string }>
 }) {
   const [{ year, area }, query] = await Promise.all([params, searchParams])
   if (!/^\d{4}$/.test(year) || !archiveYearIsValid(Number(year)) || !/^(area-[a-f]|tmu)$/.test(area)) notFound()
@@ -38,15 +39,18 @@ export default async function PreviousYearArea({ params, searchParams }: {
   const sheetIndex = Math.max(0, Math.min(Math.floor(Number(query.sheet)) || 0, (workbook?.sheets.length || 1) - 1))
   const sheet = workbook?.sheets[sheetIndex]
   const month = Math.max(0, Math.min(Math.floor(Number(query.month)) || 0, (sheet?.months.length || 1) - 1))
+  // Carry calendar navigation in the URL even while another document is selected.
+  const calendarSheet = selectedKind === 'leave' ? sheetIndex : Math.max(0, Math.floor(Number(query.calendarSheet)) || 0)
+  const calendarMonth = selectedKind === 'leave' ? month : Math.max(0, Math.floor(Number(query.calendarMonth)) || 0)
   const path = withBasePath(`/previous-years/${year}/${area}`)
-  const href = (section: string, tab = 0, monthIndex = 0) => `${path}?section=${encodeURIComponent(section)}&sheet=${tab}&month=${monthIndex}&layout=${preferredLayout}`
+  const href = (section: string, tab = section === 'leave' ? calendarSheet : 0, monthIndex = section === 'leave' ? calendarMonth : 0, layout = preferredLayout) => `${path}?section=${encodeURIComponent(section)}&sheet=${tab}&month=${monthIndex}&layout=${layout}&calendarSheet=${section === 'leave' ? tab : calendarSheet}&calendarMonth=${section === 'leave' ? monthIndex : calendarMonth}`
   return <main className="historical-shell">{nav}
     <header className="historical-heading"><div><p className="eyebrow">Previous Years · Historical records</p><h1>{areaName} <span>{year}</span></h1><p>RDO lines and leave calendars from the {year} bidding year.</p></div><span className="historical-readonly">Read-only archive</span></header>
-    <nav className="historical-tabs" aria-label="Archive documents">{kinds.map((kind) => <a key={kind} href={href(kind)} aria-current={selectedKind === kind ? 'page' : undefined}>{ARCHIVE_KINDS[kind as ArchiveKind]}</a>)}</nav>
-    {hasBothLayouts && <nav className="historical-layouts" aria-label="Page layout">{(['desktop', 'mobile'] as const).map((layout) => <a key={layout} href={`${path}?section=${encodeURIComponent(selectedKind)}&layout=${layout}`} aria-current={selected.layout === layout ? 'page' : undefined}>{layout === 'mobile' ? 'Mobile layout' : 'Desktop layout'}</a>)}</nav>}
+    <nav className="historical-tabs" aria-label="Archive documents">{kinds.map((kind) => <Link prefetch={false} key={kind} href={href(kind)} aria-current={selectedKind === kind ? 'page' : undefined}><ArchiveLinkLabel label={ARCHIVE_KINDS[kind as ArchiveKind]} /></Link>)}</nav>
+    {hasBothLayouts && <nav className="historical-layouts" aria-label="Page layout">{(['desktop', 'mobile'] as const).map((layout) => <Link prefetch={false} key={layout} href={href(selectedKind, sheetIndex, month, layout)} aria-current={selected.layout === layout ? 'page' : undefined}><ArchiveLinkLabel label={layout === 'mobile' ? 'Mobile layout' : 'Desktop layout'} /></Link>)}</nav>}
     <section className="historical-document"><div className="historical-document-heading"><h2>{ARCHIVE_KINDS[selected.document_kind as ArchiveKind]}</h2><p>{sheet?.name}</p></div>
-      {workbook && workbook.sheets.length > 1 && <nav className="historical-months" aria-label="Worksheet tabs">{workbook.sheets.map((tab, index) => <a key={index} href={href(selected.document_kind, index)} aria-current={index === sheetIndex ? 'page' : undefined}>{tab.name}</a>)}</nav>}
-      {selected.document_kind === 'leave' && sheet && sheet.months.length > 1 && <nav className="historical-months" aria-label="Calendar months">{sheet.months.map((part, index) => <Link key={index} href={href(selected.document_kind, sheetIndex, index)} scroll={false} prefetch={false} aria-current={index === month ? 'page' : undefined}>{part.label}</Link>)}</nav>}
+      {workbook && workbook.sheets.length > 1 && <nav className="historical-months" aria-label="Worksheet tabs">{workbook.sheets.map((tab, index) => <Link prefetch={false} key={index} href={href(selected.document_kind, index, 0)} aria-current={index === sheetIndex ? 'page' : undefined}><ArchiveLinkLabel label={tab.name} /></Link>)}</nav>}
+      {selected.document_kind === 'leave' && sheet && sheet.months.length > 1 && <nav className="historical-months" aria-label="Calendar months">{sheet.months.map((part, index) => <Link key={index} href={href(selected.document_kind, sheetIndex, index)} scroll={false} prefetch={false} aria-current={index === month ? 'page' : undefined}><ArchiveLinkLabel label={part.label} /></Link>)}</nav>}
       {sheet ? <ArchiveSheet sheet={sheet} calendar={selected.document_kind === 'leave'} month={month} /> : <p>This workbook is awaiting a web version. An administrator can reimport it to make it viewable here.</p>}
     </section><p className="historical-footnote">Historical reference · Current bidding is available from the main website.</p>
   </main>
