@@ -4242,7 +4242,7 @@ function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
 }
 
 function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
-  const bucket = leaveSlotBucketForBidAs(bidAs);
+  const bucket = leaveSlotBucketForBidAs(bidAs, extraItems[0]?.initials || currentUser?.initials, area);
   if (!bucket) return "";
   const total = areaLeaveSlotBudget(area, bucket);
   const used = areaLeaveSlotUsedDays(area, bucket);
@@ -4829,7 +4829,7 @@ async function submitLeaveDraftBatch() {
   const draftsByRange = new Map(leaveDraftQueue.map((draft) => [draft.range, draft]));
   let savedToSupabase = false;
   try {
-    const slotLabel = leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "DEV" : "CPC";
+    const slotLabel = leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) === "dev" ? "DEV" : "CPC";
     setLeaveBuilderStatus(`Checking ${slotLabel} slots, prior-round dates, and bid-line RDOs before submission...`, "info");
     savedToSupabase = await saveSupabaseLeaveRequests(newRequests, draftsByRange);
   } catch (error) {
@@ -5127,7 +5127,16 @@ function datesInLeaveRange(range) {
   return keys;
 }
 
-function leaveSlotBucketForBidAs(bidAs) {
+function leaveSlotBucketForBidAs(bidAs, initials = "", area = "") {
+  if (bidAs === "GL" && initials && typeof intakeQueue !== "undefined" && typeof rdoLines !== "undefined") {
+    const requests = intakeQueue.filter((item) => item.type === "RDO Line"
+      && item.initials === initials && (!area || item.area === area));
+    const request = requests.find((item) => item.status === "Approved")
+      || requests.find((item) => item.status === "Pending");
+    const line = request && rdoLines.find((item) => item.line === request.line
+      && lineForArea(item, request.area || area));
+    if (line) return isCpcLine(line) ? "cpc" : "dev";
+  }
   if (bidAs === "R-DEV" || bidAs === "D-DEV" || bidAs === "DEV") return "dev";
   if (bidAs === "CPC" || bidAs === "GL" || bidAs === "TMC") return "cpc";
   return null;
@@ -5135,7 +5144,7 @@ function leaveSlotBucketForBidAs(bidAs) {
 
 function defaultCalendarWorkforce(scope) {
   if ((scope !== "dashboard" && scope !== "leave") || !currentUser || currentUser.role === "admin" || currentUser.systemAdmin) return "cpc";
-  return leaveSlotBucketForBidAs(currentUserBidAs()) === "dev" ? "dev" : "cpc";
+  return leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) === "dev" ? "dev" : "cpc";
 }
 
 function calendarWorkforceStorageKey(scope) {
@@ -5188,8 +5197,8 @@ function removeInitialsFromLeaveRange(range, initials) {
 function syncApprovedLeaveItem(item) {
   const bid = leaveBidForItem(item);
   if (bid) bid.status = "Approved";
-  if (item.ghostBid) return;
-  const bucket = leaveSlotBucketForBidAs(item.bidAs);
+  if (item.ghostBid || item.bidAs === "GL") return;
+  const bucket = leaveSlotBucketForBidAs(item.bidAs, item.initials, item.area);
   if (!bucket) return;
 
   leaveApprovalDates(item).forEach((key) => {
@@ -5207,7 +5216,7 @@ function syncApprovedLeaveItem(item) {
 }
 
 function leaveApprovalBucket(item) {
-  return leaveSlotBucketForBidAs(item.bidAs) || "cpc";
+  return leaveSlotBucketForBidAs(item.bidAs, item.initials, item.area) || "cpc";
 }
 
 function leaveApprovalConflicts(item) {
