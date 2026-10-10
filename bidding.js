@@ -634,6 +634,60 @@ const publicFaqContent = {
   entries: [],
   documents: [],
 };
+const publicArchive = { documents: [], state: "idle", year: "", area: "all", message: "" };
+let publicArchiveLoad = null;
+
+async function loadPublicArchive() {
+  if (publicArchiveLoad) return publicArchiveLoad;
+  publicArchive.state = "loading";
+  publicArchiveLoad = (async () => {
+    await Promise.resolve();
+    try {
+      const client = supabaseClient();
+      if (!client) throw new Error("The archive is unavailable. Please try again shortly.");
+      const [areasResult, documentsResult] = await Promise.all([
+        client.from("areas").select("id,name,code").order("display_order"),
+        client.from("previous_year_documents").select("id,archive_year,area_id,document_kind,file_name,file_path,sheet_names").eq("published", true).order("archive_year", { ascending: false }).order("area_id").order("document_kind").limit(1000),
+      ]);
+      if (areasResult.error || documentsResult.error) throw new Error("Previous Years could not be loaded. Please try again.");
+      const areaCodes = new Map((areasResult.data || []).map((area) => [area.id, area.code]));
+      const areaNames = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
+      publicArchive.documents = (documentsResult.data || []).map((entry) => ({ ...entry, areaCode: areaCodes.get(entry.area_id), areaName: areaNames.get(entry.area_id) || "Area" }));
+      const years = [...new Set(publicArchive.documents.map((entry) => String(entry.archive_year)))].sort((a, b) => Number(b) - Number(a));
+      if (!years.includes(publicArchive.year)) publicArchive.year = years[0] || "";
+      publicArchive.state = "loaded";
+    } catch (error) {
+      publicArchive.state = "error";
+      publicArchive.message = error.message || "Previous Years could not be loaded.";
+    } finally {
+      publicArchiveLoad = null;
+      if (publicState.area === "Previous Years") updatePublicView();
+    }
+  })();
+  return publicArchiveLoad;
+}
+
+function renderPublicArchive() {
+  if (publicArchive.state === "idle") void loadPublicArchive();
+  if (["idle", "loading"].includes(publicArchive.state)) return '<div class="public-info-card"><p role="status">Loading previous years…</p></div>';
+  if (publicArchive.state === "error") return `<div class="public-info-card"><p role="alert">${escapeHtml(publicArchive.message)}</p><button class="secondary-action" type="button" data-archive-retry>Retry</button></div>`;
+  if (!publicArchive.documents.length) return '<div class="public-info-card"><p>No previous-year workbooks have been published yet. Historical RDO lines, leave calendars, and bid times will appear here as they are added.</p></div>';
+  const years = [...new Set(publicArchive.documents.map((entry) => String(entry.archive_year)))].sort((a, b) => Number(b) - Number(a));
+  const kinds = { rdo: "RDO Lines", leave: "Leave Calendar", bid_times: "Bid Times" };
+  const documents = publicArchive.documents.filter((entry) => String(entry.archive_year) === publicArchive.year && (publicArchive.area === "all" || entry.areaName === publicArchive.area));
+  return `<div class="public-info-card public-archive">
+    <p>Browse historical bidding records by year and area. View historical RDO lines and leave calendars directly on the website.</p>
+    <div class="public-archive-filters"><label>Year<select data-archive-year>${years.map((year) => `<option value="${escapeAttribute(year)}" ${year === publicArchive.year ? "selected" : ""}>${escapeHtml(year)}</option>`).join("")}</select></label>
+    <label>Area<select data-archive-area><option value="all">All areas</option>${ZLA_AREAS.map((area) => `<option value="${escapeAttribute(area)}" ${area === publicArchive.area ? "selected" : ""}>${escapeHtml(area)}</option>`).join("")}</select></label></div>
+    <div class="public-archive-grid">${ZLA_AREAS.map((area) => {
+      const entries = documents.filter((entry) => entry.areaName === area);
+      if (!entries.length) return "";
+      return `<section class="public-archive-area"><h3>${escapeHtml(area)} · ${escapeHtml(publicArchive.year)}</h3>${entries.map((entry) => `<article><div><h4>${escapeHtml(kinds[entry.document_kind] || "Workbook")}</h4><p>${escapeHtml(entry.file_name)}</p><small>Tabs: ${escapeHtml((entry.sheet_names || []).join(", "))}</small></div><a class="secondary-action small" href="previous-years/${escapeAttribute(String(entry.archive_year))}/${escapeAttribute(entry.areaCode || "")}?section=${escapeAttribute(entry.document_kind)}">View Page</a></article>`).join("")}</section>`;
+    }).join("")}</div>
+    ${!documents.length ? '<p>No workbooks are published for this year and area.</p>' : ""}
+    <p data-archive-download-status role="status" aria-live="polite"></p>
+  </div>`;
+}
 
 const ZLA_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
 const LETTERED_AREA_BID_ROLES = ["CPC", "GL", "R-DEV", "D-DEV", "NB"];
@@ -9313,11 +9367,7 @@ function publicInfoText(area, section) {
   }
 
   if (area === "Previous Years") {
-    return `
-      <div class="public-info-card">
-        <p>Historical annual leave calendars, RDO line sheets, and bid-time schedules will live here by bidding year.</p>
-      </div>
-    `;
+    return renderPublicArchive();
   }
 
   if (section === "RDO") {
@@ -17898,6 +17948,11 @@ document.addEventListener("click", async (event) => {
   }
 
   const publicButton = event.target.closest("[data-public-area]");
+  if (event.target.closest("[data-archive-retry]")) {
+    void loadPublicArchive();
+    updatePublicView();
+    return;
+  }
   if (publicButton && !event.target.closest(".app-shell")) {
     renderPublicPage(publicButton.dataset.publicArea, publicButton.dataset.publicSection || "Calendar", { persistNavigation: true, reuseCalendar: true });
     return;
@@ -18711,6 +18766,12 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-archive-year], [data-archive-area]")) {
+    if (event.target.matches("[data-archive-year]")) publicArchive.year = event.target.value;
+    else publicArchive.area = event.target.value;
+    updatePublicView();
+    return;
+  }
   const overrideLine = event.target.closest("[data-override-line]");
   if (overrideLine) {
     const item = intakeReviewItemById(activeOverrideId);
