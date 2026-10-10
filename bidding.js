@@ -7573,7 +7573,7 @@ function showLoggedInApp(page = requestedLandingPage()) {
   }
 }
 
-function showPublicHome(area = DEFAULT_PUBLIC_AREA, section = DEFAULT_PUBLIC_SECTION) {
+function showPublicHome(area = requestedPublicView()?.area || DEFAULT_PUBLIC_AREA, section = requestedPublicView()?.section || DEFAULT_PUBLIC_SECTION) {
   document.querySelector(".app-shell")?.setAttribute("hidden", "");
   document.querySelector("[data-account-menu]")?.setAttribute("hidden", "");
   document.querySelector("[data-account-toggle]")?.setAttribute("aria-expanded", "false");
