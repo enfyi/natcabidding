@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { headers } from 'next/headers'
+import Link from 'next/link'
 import { archiveLayoutForAgent, selectArchiveVariant } from '@/lib/archive-layout'
 import { notFound } from 'next/navigation'
 import { ArchiveBrand } from '@/app/components/archive-brand'
@@ -45,7 +46,7 @@ export default async function PreviousYearArea({ params, searchParams }: {
     {hasBothLayouts && <nav className="historical-layouts" aria-label="Page layout">{(['desktop', 'mobile'] as const).map((layout) => <a key={layout} href={`${path}?section=${encodeURIComponent(selectedKind)}&layout=${layout}`} aria-current={selected.layout === layout ? 'page' : undefined}>{layout === 'mobile' ? 'Mobile layout' : 'Desktop layout'}</a>)}</nav>}
     <section className="historical-document"><div className="historical-document-heading"><h2>{ARCHIVE_KINDS[selected.document_kind as ArchiveKind]}</h2><p>{sheet?.name}</p></div>
       {workbook && workbook.sheets.length > 1 && <nav className="historical-months" aria-label="Worksheet tabs">{workbook.sheets.map((tab, index) => <a key={index} href={href(selected.document_kind, index)} aria-current={index === sheetIndex ? 'page' : undefined}>{tab.name}</a>)}</nav>}
-      {selected.document_kind === 'leave' && sheet && sheet.months.length > 1 && <nav className="historical-months" aria-label="Calendar months">{sheet.months.map((part, index) => <a key={index} href={href(selected.document_kind, sheetIndex, index)} aria-current={index === month ? 'page' : undefined}>{part.label}</a>)}</nav>}
+      {selected.document_kind === 'leave' && sheet && sheet.months.length > 1 && <nav className="historical-months" aria-label="Calendar months">{sheet.months.map((part, index) => <Link key={index} href={href(selected.document_kind, sheetIndex, index)} scroll={false} prefetch={false} aria-current={index === month ? 'page' : undefined}>{part.label}</Link>)}</nav>}
       {sheet ? <ArchiveSheet sheet={sheet} calendar={selected.document_kind === 'leave'} month={month} /> : <p>This workbook is awaiting a web version. An administrator can reimport it to make it viewable here.</p>}
     </section><p className="historical-footnote">Historical reference · Current bidding is available from the main website.</p>
   </main>
