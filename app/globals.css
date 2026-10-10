@@ -761,3 +761,4 @@ h1 {
 .historical-tabs a:hover, .historical-months a:hover { background: #e6f7f8; border-color: #3d888d; }
 
 .historical-sheet-no-grid td { border: none; }
+.historical-sheet-calendar td { white-space: pre-wrap; overflow-wrap: anywhere; }
