@@ -8,11 +8,13 @@ export const ARCHIVE_KINDS = {
 } as const
 
 export type ArchiveKind = keyof typeof ARCHIVE_KINDS
+export type ArchiveLayout = 'desktop' | 'mobile'
 export type ArchiveDocument = {
   id: string
   archive_year: number
   area_id: string
   document_kind: ArchiveKind
+  layout: ArchiveLayout
   file_path: string
   file_name: string
   file_size: number

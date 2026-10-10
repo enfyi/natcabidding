@@ -1,27 +1,43 @@
 # Previous Years archive
 
 The archive is separate from active bid years, rosters, assignments, and leave capacity.
-Apply both migrations, in order, before using it:
+Apply the migrations, in order, before using it:
 
 - `20261010141042_previous_year_documents.sql`
 - `20261010145315_previous_year_web_views.sql`
+- `20261010152025_previous_year_mobile_layouts.sql`
 
-The first requires the existing FAQ admin helpers. Neither migration imports or
-publishes records. The second adds the saved web representation under the same RLS.
+The first requires the existing FAQ admin helpers. These migrations do not import or
+publish records. The second adds the saved web representation under the same RLS.
 
 ## Admin workflow
 
 Open **Admin Console → Previous Years** (`/admin/previous-years`). Choose the year,
-area, and RDO Lines, Leave Calendar, or Bid Times; upload a Google Sheets `.xlsx`
+area, and RDO Lines, Leave Calendar, or Bid Times, plus Desktop or Mobile layout; upload a Google Sheets `.xlsx`
 export (up to 4 MB). **Preview Excel** validates and converts it to a web version.
 **Import Excel as Draft** saves the original file and converted representation.
 **Preview Page** displays saved drafts before **Publish** exposes them publicly.
 Existing records without a web representation need to be reimported.
 
 Replacement requires an inline confirmation, saves a new draft, and uses an
-optimistic timestamp check plus a unique year/area/type constraint to prevent
+optimistic timestamp check plus a unique year/area/type/layout constraint to prevent
 concurrent overwrites. Failed metadata writes clean up new uploads. Old files
 become eligible for cleanup only after a successful replacement.
+
+## Mobile layouts
+
+Import desktop and mobile exports as separate records with the same year, area and
+kind. Existing records default to Desktop. Publish each layout independently;
+replacing one cannot overwrite the other. Examples: the desktop `A.Cal.26.xlsx`
+and mobile `A.Cal.26M.xlsx` both use Leave Calendar, with different Layout choices.
+
+Public pages select Mobile for phone user agents, or Desktop for desktop/tablet
+agents. A missing preferred layout falls back to Desktop, then whichever published
+variant exists. Only published variants are eligible. Layout links allow an explicit
+choice and preserve it through document, worksheet and month navigation. Resizing
+a desktop browser does not automatically switch workbooks; use the layout link.
+Only the selected representation is retrieved and rendered, with no client-side
+device library, resize handler, duplicate hidden tables, or background requests.
 
 ## Public pages and performance
 

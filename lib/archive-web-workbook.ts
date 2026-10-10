@@ -114,7 +114,7 @@ export async function renderArchiveWorkbook(zip: JSZip): Promise<ArchiveWebWorkb
       const min = Number(attr(col, 'min')); const max = Number(attr(col, 'max'))
       for (let c = min - 1; c < Math.min(max, 128); c++) {
         if (attr(col, 'hidden') === '1') hidden.add(c)
-        widths.set(c, Math.max(25, Math.min(280, (Number(attr(col, 'width')) || 12) * 7 + 5)))
+        widths.set(c, Math.max(8, Math.min(280, (Number(attr(col, 'width')) || 12) * 7 + 5)))
       }
     }
     const allRows = blocks(inner(sheetXml, 'sheetData'), 'row')

@@ -647,12 +647,17 @@ async function loadPublicArchive() {
       if (!client) throw new Error("The archive is unavailable. Please try again shortly.");
       const [areasResult, documentsResult] = await Promise.all([
         client.from("areas").select("id,name,code").order("display_order"),
-        client.from("previous_year_documents").select("id,archive_year,area_id,document_kind,file_name,file_path,sheet_names").eq("published", true).order("archive_year", { ascending: false }).order("area_id").order("document_kind").limit(1000),
+        client.from("previous_year_documents").select("id,archive_year,area_id,document_kind,layout,file_name,file_path,sheet_names").eq("published", true).order("archive_year", { ascending: false }).order("area_id").order("document_kind").limit(1000),
       ]);
       if (areasResult.error || documentsResult.error) throw new Error("Previous Years could not be loaded. Please try again.");
       const areaCodes = new Map((areasResult.data || []).map((area) => [area.id, area.code]));
       const areaNames = new Map((areasResult.data || []).map((area) => [area.id, area.name]));
-      publicArchive.documents = (documentsResult.data || []).map((entry) => ({ ...entry, areaCode: areaCodes.get(entry.area_id), areaName: areaNames.get(entry.area_id) || "Area" }));
+      const versions = new Map();
+      for (const entry of documentsResult.data || []) {
+        const key = `${entry.archive_year}/${entry.area_id}/${entry.document_kind}`;
+        if (!versions.has(key) || entry.layout === "desktop") versions.set(key, entry);
+      }
+      publicArchive.documents = [...versions.values()].map((entry) => ({ ...entry, areaCode: areaCodes.get(entry.area_id), areaName: areaNames.get(entry.area_id) || "Area" }));
       const years = [...new Set(publicArchive.documents.map((entry) => String(entry.archive_year)))].sort((a, b) => Number(b) - Number(a));
       if (!years.includes(publicArchive.year)) publicArchive.year = years[0] || "";
       publicArchive.state = "loaded";
