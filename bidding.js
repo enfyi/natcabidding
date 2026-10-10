@@ -8426,7 +8426,7 @@ function applyRosterFromDatabase(rows, areaById = new Map()) {
         seniorityRank: person.rank,
         leaveSlotAllowance: person.leaveSlotAllowance,
       };
-      selectedViewArea = person.area;
+      // Refresh the profile without changing the area selected in the dashboard.
     }
   }
 
@@ -12931,7 +12931,7 @@ function syncCurrentUserFromRoster(previousInitials, nextInitials) {
     email: person.email,
     leaveSlotAllowance: person.leaveSlotAllowance,
   };
-  selectedViewArea = person.area;
+  // Roster edits must preserve the dashboard's selected area.
 }
 
 function rosterSyncRowsForAreas(areas, entryOverrides = new Map()) {
