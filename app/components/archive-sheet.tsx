@@ -30,10 +30,11 @@ export function ArchiveSheet({ sheet, month = 0, calendar = false }: { sheet: Ar
       for (let column = first; column <= last; column++) widths[column] = standard
     }
   }
-  return <div className="historical-sheet historical-sheet-no-grid" tabIndex={0} role="region" aria-label={`${sheet.name}${section ? ` · ${section.label}` : ''}. Scroll horizontally to see all columns.`}>
-    <table style={widths ? { tableLayout: 'fixed', width: widths.reduce((sum, width) => sum + width, 0) } : undefined}>
+  const displayWidths = calendar ? sheet.widths : widths
+  return <div className={`historical-sheet historical-sheet-no-grid${calendar ? ' historical-sheet-calendar' : ''}`} tabIndex={0} role="region" aria-label={`${sheet.name}${section ? ` · ${section.label}` : ''}. Scroll horizontally to see all columns.`}>
+    <table style={displayWidths ? { tableLayout: 'fixed', width: displayWidths.reduce((sum, width) => sum + width, 0) } : undefined}>
       <caption className="sr-only">{sheet.name}{section ? ` · ${section.label}` : ''}</caption>
-      <colgroup>{sheet.widths.map((_, index) => <col key={index} style={widths ? { width: widths[index] } : undefined} />)}</colgroup>
+      <colgroup>{sheet.widths.map((_, index) => <col key={index} style={displayWidths ? { width: displayWidths[index] } : undefined} />)}</colgroup>
       <tbody>{rows.map((row) => <tr key={row.number} style={{ height: row.height }}>{row.cells.map((cell) => <td key={cell.column} rowSpan={cell.rowSpan} colSpan={cell.colSpan} style={{ ...(calendar ? sheet.styles[cell.style] : visibleCellStyle(sheet.styles[cell.style])), ...(widths && (row.number < rdoHeader!.number || (cell.colSpan || 1) > 1) ? { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } : {}) }}>{cell.value}</td>)}</tr>)}</tbody>
     </table>
   </div>
