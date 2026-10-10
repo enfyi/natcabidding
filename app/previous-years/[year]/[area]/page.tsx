@@ -21,7 +21,7 @@ export default async function PreviousYearArea({ params, searchParams }: {
   // Always anonymous and uncached: publication status is checked on every page request.
   const client = createClient(url, publishableKey, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }) } })
   const records = await client.from('previous_year_documents').select('id,document_kind,layout,sheet_names,areas!inner(name,code)').eq('archive_year', Number(year)).eq('areas.code', area).eq('published', true).order('document_kind')
-  const nav = <nav className="historical-nav"><a className="brand" aria-label="ZLA Bidding" href={withBasePath('/bidding.html')}><ArchiveBrand /></a><a href={withBasePath('/bidding.html?area=Previous%20Years')}>← Previous Years</a></nav>
+  const nav = <nav className="historical-nav"><a className="brand" aria-label="ZLA Bidding" href={withBasePath('/bidding.html')}><ArchiveBrand /></a><a href={withBasePath('/bidding.html?page=public&area=Previous%20Years')}>← Previous Years</a></nav>
   if (records.error) return <main className="historical-shell">{nav}<h1>Previous Years</h1><p>The archive is temporarily unavailable. Please try again shortly.</p></main>
   if (!records.data?.length) notFound()
   const entries = records.data
