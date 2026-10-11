@@ -10620,7 +10620,7 @@ function renderLatestRdoDenialReason() {
 }
 
 
-function savedRdoPreferencesMarkup(assignment) {
+function savedRdoPreferencesMarkup(assignment, fatigueCapacity = null) {
   const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
   const flex = rdoAssignmentValue(assignment, "flex");
   const aws = rdoAssignmentValue(assignment, "aws");
@@ -10634,7 +10634,20 @@ function savedRdoPreferencesMarkup(assignment) {
 
   return fatigueGroup || preferences.length
     ? `
-        ${fatigueGroup ? `
+        ${fatigueCapacity ? `
+          <span class="fatigue-picker">
+            <em>Fatigue Group</em>
+            <span class="fatigue-options">
+              ${fatigueCapacity.map((item) => `
+                <button class="fatigue-option ${groupClass(item.group)} ${fatigueGroup === item.group ? "active" : ""}" type="button" disabled aria-pressed="${fatigueGroup === item.group}" title="Area ${item.areaUsed}/${item.areaMax}, RDO set ${item.crewUsed}/${item.crewMax}">
+                  <strong>${item.group}</strong>
+                  <small>Area ${item.areaUsed}/${item.areaMax} · RDO ${item.crewUsed}/${item.crewMax}</small>
+                </button>
+              `).join("")}
+              ${!fatigueGroup ? '<span class="rdo-preference-card"><em>Fatigue Group</em><b>No preference</b></span>' : ""}
+            </span>
+          </span>
+        ` : fatigueGroup ? `
           <span class="fatigue-summary-card">
             <em>Fatigue Group</em>
             <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
@@ -10947,7 +10960,9 @@ function updateSelectedLine() {
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;
     if (lockedLine) {
-      element.innerHTML = savedRdoPreferencesMarkup(dashboardAssignment || { line: lockedLine });
+      const assignment = dashboardAssignment || { line: lockedLine };
+      const savedGroup = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
+      element.innerHTML = savedRdoPreferencesMarkup(assignment, fatigueCapacityForLine(lockedLine, lockedLine.line, savedGroup));
       return;
     }
     element.innerHTML = `

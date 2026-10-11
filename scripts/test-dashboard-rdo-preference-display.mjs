@@ -53,4 +53,18 @@ assert.doesNotMatch(assigned, /data-(?:fatigue-group|flex-choice|aws-choice|mid-
 const noPreference = context.savedRdoPreferencesMarkup({ request: { fatigueGroup: "", flex: false, aws: false, mid: "BID" } });
 assert.match(noPreference, /<em>Fatigue Group<\/em><b>No preference<\/b>/);
 
+const capacity = context.savedRdoPreferencesMarkup({
+  request: { fatigueGroup: "B", flex: false, aws: true, mid: "BID" },
+}, [
+  { group: "A", areaUsed: 3, areaMax: 10, crewUsed: 1, crewMax: 4 },
+  { group: "B", areaUsed: 5, areaMax: 10, crewUsed: 2, crewMax: 4 },
+  { group: "C", areaUsed: 4, areaMax: 10, crewUsed: 1, crewMax: 4 },
+]);
+assert.match(capacity, /fatigue-option b active[^>]*disabled aria-pressed="true"/);
+assert.match(capacity, /Area 5\/10 · RDO 2\/4/);
+assert.match(capacity, /Area 3\/10 · RDO 1\/4/);
+assert.match(capacity, /Area 4\/10 · RDO 1\/4/);
+assert.match(capacity, /<em>Flex<\/em><b>No<\/b>/);
+assert.doesNotMatch(capacity, /data-fatigue-group/, "Closed-window capacity cards do not enable bid changes");
+
 console.log("PASS dashboard RDO preferences display as Yes, No, or Bid Line");

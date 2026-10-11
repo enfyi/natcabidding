@@ -8975,6 +8975,34 @@ body {
   background: #f8fafc;
 }
 
+.app-main .selected-line-card .fatigue-option.a.active {
+  --selected-fatigue-color: var(--fatigue-a);
+  background: #bce9eb;
+}
+
+.app-main .selected-line-card .fatigue-option {
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.app-main .selected-line-card .fatigue-option.b.active {
+  --selected-fatigue-color: var(--fatigue-b);
+  background: #ffe3a1;
+}
+
+.app-main .selected-line-card .fatigue-option.c.active {
+  --selected-fatigue-color: var(--fatigue-c);
+  background: #f6cce1;
+}
+
+.app-main .selected-line-card .fatigue-option.active {
+  border: 2px solid var(--selected-fatigue-color, var(--teal));
+  box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px var(--selected-fatigue-color, var(--teal));
+  opacity: 1;
+}
+
 .app-main .priority-ring {
   border-color: #d9e3ef;
   border-top-color: #2b7f86;
