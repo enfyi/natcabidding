@@ -21,7 +21,7 @@ const context = vm.createContext({
   renderLatestRdoDenialReason: () => {},
 });
 
-for (const name of ["rdoBidPreferenceLabel", "rdoAssignmentValue", "renderDashboardSelectedLineCard"]) {
+for (const name of ["rdoBidPreferenceLabel", "rdoAssignmentValue", "savedRdoPreferencesMarkup", "renderDashboardSelectedLineCard"]) {
   const start = source.indexOf(`function ${name}(`);
   assert.ok(start >= 0, `${name} should exist`);
   vm.runInContext(source.slice(start, source.indexOf("\n}", start) + 2), context);
@@ -40,5 +40,17 @@ assert.match(attributes.innerHTML, /class="fatigue-summary-card"/);
 assert.match(attributes.innerHTML, /aria-label="Fatigue Group B selected"/);
 assert.match(attributes.innerHTML, /fatigue-summary-segment b active[^>]*>B<\/strong>/);
 assert.match(attributes.innerHTML, /class="rdo-preference-card"><em>Flex<\/em><b>No<\/b>/);
+
+const assigned = context.savedRdoPreferencesMarkup({
+  line: { group: "C", flex: true, aws: false, mid: "No" },
+});
+assert.match(assigned, /aria-label="Fatigue Group C selected"/);
+assert.match(assigned, /<em>Flex<\/em><b>Yes<\/b>/);
+assert.match(assigned, /<em>AWS<\/em><b>No<\/b>/);
+assert.match(assigned, /<em>Mid<\/em><b>No<\/b>/);
+assert.doesNotMatch(assigned, /data-(?:fatigue-group|flex-choice|aws-choice|mid-choice)/,
+  "Saved preferences are a static summary and cannot change the bid");
+const noPreference = context.savedRdoPreferencesMarkup({ request: { fatigueGroup: "", flex: false, aws: false, mid: "BID" } });
+assert.match(noPreference, /<em>Fatigue Group<\/em><b>No preference<\/b>/);
 
 console.log("PASS dashboard RDO preferences display as Yes, No, or Bid Line");

@@ -10620,6 +10620,33 @@ function renderLatestRdoDenialReason() {
 }
 
 
+function savedRdoPreferencesMarkup(assignment) {
+  const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
+  const flex = rdoAssignmentValue(assignment, "flex");
+  const aws = rdoAssignmentValue(assignment, "aws");
+  const mid = rdoAssignmentValue(assignment, "mid");
+  const preferences = [
+    ["Flex", flex],
+    ["AWS", aws],
+    ["Mid", mid],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+  const fatigueGroup = String(group || "").trim().toUpperCase();
+
+  return fatigueGroup || preferences.length
+    ? `
+        ${fatigueGroup ? `
+          <span class="fatigue-summary-card">
+            <em>Fatigue Group</em>
+            <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
+              ${FATIGUE_GROUPS.map((value) => `<strong class="fatigue-summary-segment ${groupClass(value)} ${fatigueGroup === value ? "active" : ""}" aria-hidden="true">${value}</strong>`).join("")}
+            </span>
+          </span>
+        ` : '<span class="rdo-preference-card"><em>Fatigue Group</em><b>No preference</b></span>'}
+        ${preferences.map(([label, value]) => `<span class="rdo-preference-card"><em>${label}</em><b>${rdoBidPreferenceLabel(value)}</b></span>`).join("")}
+      `
+    : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
+}
+
 function renderDashboardSelectedLineCard(assignment) {
   const line = assignment?.line;
   const request = assignment?.request;
@@ -10638,30 +10665,7 @@ function renderDashboardSelectedLineCard(assignment) {
     element.classList.toggle("approved", status === "Approved");
   });
   document.querySelectorAll("#dashboard-page [data-selected-attributes]").forEach((element) => {
-    const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
-    const flex = rdoAssignmentValue(assignment, "flex");
-    const aws = rdoAssignmentValue(assignment, "aws");
-    const mid = rdoAssignmentValue(assignment, "mid");
-    const preferences = [
-      ["Flex", flex],
-      ["AWS", aws],
-      ["Mid", mid],
-    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
-    const fatigueGroup = String(group || "").trim().toUpperCase();
-
-    element.innerHTML = fatigueGroup || preferences.length
-      ? `
-          ${fatigueGroup ? `
-            <span class="fatigue-summary-card">
-              <em>Fatigue Group</em>
-              <span class="fatigue-summary-segments" role="img" aria-label="Fatigue Group ${fatigueGroup} selected">
-                ${FATIGUE_GROUPS.map((value) => `<strong class="fatigue-summary-segment ${groupClass(value)} ${fatigueGroup === value ? "active" : ""}" aria-hidden="true">${value}</strong>`).join("")}
-              </span>
-            </span>
-          ` : ""}
-          ${preferences.map(([label, value]) => `<span class="rdo-preference-card"><em>${label}</em><b>${rdoBidPreferenceLabel(value)}</b></span>`).join("")}
-        `
-      : '<span class="empty-attribute-message">RDO details will populate from the database after this user bids.</span>';
+    element.innerHTML = savedRdoPreferencesMarkup(assignment);
   });
 
   const weekTarget = document.getElementById("selected-week");
@@ -10942,6 +10946,10 @@ function updateSelectedLine() {
   });
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;
+    if (lockedLine) {
+      element.innerHTML = savedRdoPreferencesMarkup(dashboardAssignment || { line: lockedLine });
+      return;
+    }
     element.innerHTML = `
       <span class="fatigue-picker">
         <em>Fatigue Group</em>
