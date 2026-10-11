@@ -1941,6 +1941,7 @@ let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
 let intakeSearchQuery = "";
 let intakeSearchEmployeeInitials = "";
+let intakeSearchRenderTimer = null;
 const intakeBidderSelection = {
   initials: "",
   profileId: "",
@@ -16119,6 +16120,17 @@ function compareIntakeActionItems(left, right) {
   return pendingDifference || compareIntakeItems(left, right);
 }
 
+function intakeEmployeeSearchMatches(query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  const roster = bueRoster();
+  const exactInitials = roster.filter((person) => person.initials?.toLowerCase() === normalized);
+  if (exactInitials.length) return exactInitials;
+  return roster.filter((person) =>
+    `${person.firstName} ${person.lastName} ${person.initials}`.toLowerCase().includes(normalized)
+  );
+}
+
 function renderIntakeEmployeeSearch() {
   const input = document.querySelector("[data-intake-search]");
   const results = document.querySelector("[data-intake-employee-results]");
@@ -16127,7 +16139,7 @@ function renderIntakeEmployeeSearch() {
   const query = intakeSearchQuery.trim();
   const selected = bueByInitials(intakeSearchEmployeeInitials);
   const matches = query && !selected
-    ? bueRoster().filter((person) => manualBidControllerMatches(person, query))
+    ? intakeEmployeeSearchMatches(query)
     : [];
   results.innerHTML = matches.map((person) => `
     <button type="button" data-intake-employee-result="${escapeHtml(person.initials)}">
@@ -16796,7 +16808,19 @@ async function refreshIntakeQueue() {
 }
 
 function renderIntakeQueue() {
+  clearTimeout(intakeSearchRenderTimer);
+  intakeSearchRenderTimer = null;
   return withLeaveReadCache(() => renderIntakeQueueWithCache());
+}
+
+function updateIntakeSearch(query) {
+  intakeSearchQuery = query;
+  intakeSearchEmployeeInitials = "";
+  // Suggestions only need the loaded roster; rebuilding bid cards can wait
+  // until typing pauses, without delaying employee selection.
+  renderIntakeEmployeeSearch();
+  clearTimeout(intakeSearchRenderTimer);
+  intakeSearchRenderTimer = setTimeout(() => renderIntakeQueue(), 200);
 }
 
 function renderIntakeQueueWithCache() {
@@ -18815,9 +18839,7 @@ document.addEventListener("input", (event) => {
 
   const intakeSearch = event.target.closest("[data-intake-search]");
   if (intakeSearch) {
-    intakeSearchQuery = intakeSearch.value;
-    intakeSearchEmployeeInitials = "";
-    renderIntakeQueue();
+    updateIntakeSearch(intakeSearch.value);
     return;
   }
 
