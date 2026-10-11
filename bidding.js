@@ -10635,6 +10635,7 @@ function renderDashboardSelectedLineCard(assignment) {
   document.querySelectorAll("#dashboard-page [data-selected-status]").forEach((element) => {
     element.innerHTML = `<em>Status</em><b>${status || "Not Bid"}</b>`;
     element.classList.toggle("closed", !status);
+    element.classList.toggle("approved", status === "Approved");
   });
   document.querySelectorAll("#dashboard-page [data-selected-attributes]").forEach((element) => {
     const group = rdoAssignmentValue(assignment, "fatigueGroup") || rdoAssignmentValue(assignment, "group");
@@ -10924,8 +10925,11 @@ function updateSelectedLine() {
   });
   document.querySelectorAll("[data-selected-status]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;
-    element.innerHTML = `<em>Status</em><b>${selectedLineStatus(line)}</b>`;
-    element.classList.toggle("closed", line.status === "Taken");
+    const status = selectedLineStatus(line);
+    const approved = status === "Approved" || status === "Ghost Line · Approved";
+    element.innerHTML = `<em>Status</em><b>${status}</b>`;
+    element.classList.toggle("closed", status === "Taken");
+    element.classList.toggle("approved", approved);
   });
   document.querySelectorAll("[data-selected-attributes]").forEach((element) => {
     if (element.closest("#dashboard-page")) return;

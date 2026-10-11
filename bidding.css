@@ -2967,6 +2967,10 @@ input {
   color: var(--red);
 }
 
+.selected-status-card.approved b {
+  color: var(--green);
+}
+
 .empty-attribute-message {
   grid-column: 1 / -1;
   color: var(--muted);
