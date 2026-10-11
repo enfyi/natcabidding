@@ -2968,7 +2968,7 @@ input {
 }
 
 .selected-status-card.approved b {
-  color: var(--green);
+  color: #15803d;
 }
 
 .empty-attribute-message {
