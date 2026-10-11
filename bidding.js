@@ -10757,12 +10757,21 @@ function isCurrentUserRdoLine(line) {
   );
 }
 
+function submittedRdoLineAfterWindow(date = new Date()) {
+  const line = submittedRdoLineForInitials(currentUser.initials);
+  if (!line) return null;
+  if (pilotState.database) {
+    return activeTestBidRound() > 1 ? line : null;
+  }
+  const window = currentUserBidWindowForRound(1, currentUser.area);
+  if (!window) return null;
+  const closesAt = Math.min(window.end.getTime(), window.start.getTime() + 2 * 60 * 60 * 1000);
+  return date.getTime() >= closesAt ? line : null;
+}
+
 function lockedSubmittedRdoLine(date = new Date()) {
   if (!isViewingHomeArea()) return null;
-  const line = submittedRdoLineForInitials(currentUser.initials);
-  return line && (rdoChangeWindowErrorMessage(date) || bidWindowErrorMessage("RDO bids", date))
-    ? line
-    : null;
+  return submittedRdoLineAfterWindow(date);
 }
 
 function syncLockedRdoSelection() {
@@ -10879,7 +10888,7 @@ function renderRdoLines() {
 }
 
 function updateSelectedLine() {
-  const lockedLine = syncLockedRdoSelection();
+  const lockedLine = submittedRdoLineAfterWindow() || syncLockedRdoSelection();
   const viewArea = currentViewArea();
   const areaLines = isViewingHomeArea()
     ? rdoLinesForBidder(currentUserBidAs(), viewArea)
@@ -10898,7 +10907,7 @@ function updateSelectedLine() {
   const lineSchedule = lineScheduleLabel(line);
   const isFourTenLine = lineSchedule === "4-10";
   const pendingRequest = pendingCurrentUserRdoRequest();
-  const bidderSelectionLocked = Boolean(pendingRequest);
+  const bidderSelectionLocked = Boolean(pendingRequest || lockedLine);
   const lineRequest = selectedLineRequest(line);
   const displayedFatiguePreference = selectedFatigueGroup
     || (lineRequest ? (lineRequest.fatigueGroup || NO_FATIGUE_PREFERENCE) : "");
@@ -10914,7 +10923,7 @@ function updateSelectedLine() {
     const request = selectedLineRequest(line);
     const approvedRequest = currentUserRdoRequest();
     element.textContent =
-      !isViewingHomeArea()
+      !isViewingHomeArea() && !lockedLine
         ? `Viewing ${currentViewArea()} for reference. Bidding actions stay limited to your home area.`
         : request ? request.ghostBid
           ? `Ghost Line ${line.line} is pending intake review and will not consume the source line.`
