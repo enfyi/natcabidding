@@ -28,6 +28,7 @@ for (const authUserId of ['', 'member-id']) {
     selectedLineId: '',
     rdoLineMatchesFilters: () => true,
     pendingCurrentUserRdoRequest: () => null,
+    syncLockedRdoSelection: () => null,
     memberRdoPresentation: 'cards',
   })
   vm.runInContext(functions, context)
