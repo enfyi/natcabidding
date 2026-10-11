@@ -10756,6 +10756,23 @@ function isCurrentUserRdoLine(line) {
   );
 }
 
+function lockedSubmittedRdoLine(date = new Date()) {
+  if (!isViewingHomeArea()) return null;
+  const line = submittedRdoLineForInitials(currentUser.initials);
+  return line && (rdoChangeWindowErrorMessage(date) || bidWindowErrorMessage("RDO bids", date))
+    ? line
+    : null;
+}
+
+function syncLockedRdoSelection() {
+  const line = lockedSubmittedRdoLine();
+  if (line) {
+    selectedLineId = line.line;
+    selectedFatigueGroup = "";
+  }
+  return line;
+}
+
 function renderRdoLines() {
   const target = document.getElementById("rdo-line-rows");
   if (!target) return;
@@ -10776,7 +10793,8 @@ function renderRdoLines() {
   const viewArea = currentViewArea();
   const areaLines = rdoLinesForArea(viewArea);
   const eligibleLines = rdoLinesForBidder(currentUserBidAs(), viewArea);
-  if (isViewingHomeArea() && !eligibleLines.some((line) => line.line === selectedLineId)) {
+  const lockedLine = syncLockedRdoSelection();
+  if (!lockedLine && isViewingHomeArea() && !eligibleLines.some((line) => line.line === selectedLineId)) {
     selectedLineId = eligibleLines[0]?.line || "";
   }
   setText("[data-rdo-lines-heading]", `RDO Bid Lines - ${viewArea}`);
@@ -10784,7 +10802,7 @@ function renderRdoLines() {
   setText("[data-member-rdo-mobile-count]", mobileRdoLineCount(filteredLines.length, areaLines.length));
   const countTarget = document.querySelector("[data-rdo-filter-count]");
   const pendingRequest = pendingCurrentUserRdoRequest();
-  const bidderSelectionLocked = Boolean(pendingRequest);
+  const bidderSelectionLocked = Boolean(pendingRequest || lockedLine);
 
   if (countTarget) {
     const lineLabel = filteredLines.length === 1 ? "line" : "lines";
@@ -10860,11 +10878,12 @@ function renderRdoLines() {
 }
 
 function updateSelectedLine() {
+  const lockedLine = syncLockedRdoSelection();
   const viewArea = currentViewArea();
   const areaLines = isViewingHomeArea()
     ? rdoLinesForBidder(currentUserBidAs(), viewArea)
     : rdoLinesForArea(viewArea);
-  const line = areaLines.find((item) => item.line === selectedLineId)
+  const line = lockedLine || areaLines.find((item) => item.line === selectedLineId)
     || areaLines[0]
     || (isViewingHomeArea() ? null : rdoLines[0]);
   const dashboardAssignment = currentUserRdoAssignment();
@@ -18487,7 +18506,7 @@ document.addEventListener("click", async (event) => {
     const previousLineId = selectedLineId;
     const previousRdoWeekdays = selectedRdoWeekdays();
     const selectedLine = rdoLinesForBidder(currentUserBidAs(), currentUser.area).find((item) => item.line === row.dataset.lineId);
-    if (!selectedLine || selectedLine.status === "Taken" || !isViewingHomeArea() || pendingCurrentUserRdoRequest()) return;
+    if (!selectedLine || selectedLine.status === "Taken" || !isViewingHomeArea() || pendingCurrentUserRdoRequest() || lockedSubmittedRdoLine()) return;
     selectedLineId = selectedLine.line;
     if (selectedLineId !== previousLineId && !submittedRdoLineForInitials(currentUser.initials)) {
       reconcileUnsubmittedLeaveForRdoLine(selectedLine);
