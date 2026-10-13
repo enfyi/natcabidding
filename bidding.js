@@ -846,7 +846,7 @@ const FATIGUE_GROUPS = ["A", "B", "C"];
 function fatiguePoolForBidRole(bidAs, area) {
   const role = normalizeBidRoleForArea(bidAs, area);
   if (["CPC", "TMC"].includes(role)) return "CPC";
-  if (["R-DEV", "D-DEV", "DEV"].includes(role)) return "DEV";
+  if (["R-DEV", "D-DEV", "DEV"].includes(role)) return role;
   return null;
 }
 
@@ -859,7 +859,9 @@ function rdoPreferenceForBidRole(bidAs, area, preference) {
 }
 
 function fatiguePoolForLine(line) {
-  return isCpcLine(line) ? "CPC" : "DEV";
+  if (isCpcLine(line)) return "CPC";
+  const pattern = String(line.pattern || "").trim().toUpperCase();
+  return ["R-DEV", "D-DEV"].includes(pattern) ? pattern : "DEV";
 }
 
 function fatigueRdoSetForLine(line) {
