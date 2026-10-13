@@ -61,7 +61,12 @@ begin
     and line.bid_year_id = requested_bid_year_id
     and line.area_id = requested_area_id;
 
-  pool_type := case when line_row.line_type = 'CPC' then 'CPC' else 'DEV' end;
+  -- R-DEV and D-DEV balance independently, including within each RDO set.
+  pool_type := case
+    when line_row.line_type = 'CPC' then 'CPC'
+    when upper(trim(line_row.pattern)) in ('R-DEV', 'D-DEV') then upper(trim(line_row.pattern))
+    else 'DEV'
+  end;
   rdo_set := private.rdo_line_fatigue_set(line_row.id);
 
   select count(*) into area_total
@@ -70,7 +75,7 @@ begin
     and bidder.active
     and case
       when pool_type = 'CPC' then bidder.bid_role in ('CPC', 'TMC')
-      else bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV')
+      else bidder.bid_role = pool_type
     end;
 
   if area_total = 0 then
@@ -78,14 +83,22 @@ begin
     from public.rdo_lines line
     where line.bid_year_id = requested_bid_year_id
       and line.area_id = requested_area_id
-      and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end;
+      and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end;
   end if;
 
   select count(*) into rdo_total
   from public.rdo_lines line
   where line.bid_year_id = requested_bid_year_id
     and line.area_id = requested_area_id
-    and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end
+    and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end
     and private.rdo_line_fatigue_set(line.id) = rdo_set;
 
   area_base := floor(area_total::numeric / 3)::integer;
@@ -97,7 +110,11 @@ begin
   from public.rdo_lines line
   where line.bid_year_id = requested_bid_year_id
     and line.area_id = requested_area_id
-    and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end
+    and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end
     and line.status = 'taken'
     and line.fatigue_group = requested_group
     and line.assigned_bidder_id is distinct from excluded_bidder_id;
@@ -106,7 +123,11 @@ begin
   from public.rdo_lines line
   where line.bid_year_id = requested_bid_year_id
     and line.area_id = requested_area_id
-    and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end
+    and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end
     and private.rdo_line_fatigue_set(line.id) = rdo_set
     and line.status = 'taken'
     and line.fatigue_group = requested_group
@@ -118,7 +139,11 @@ begin
     from public.rdo_lines line
     where line.bid_year_id = requested_bid_year_id
       and line.area_id = requested_area_id
-      and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end
+      and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end
       and line.status = 'taken'
       and line.fatigue_group in ('A', 'B', 'C')
       and line.assigned_bidder_id is distinct from excluded_bidder_id
@@ -132,7 +157,11 @@ begin
     from public.rdo_lines line
     where line.bid_year_id = requested_bid_year_id
       and line.area_id = requested_area_id
-      and case when pool_type = 'CPC' then line.line_type = 'CPC' else line.line_type <> 'CPC' end
+      and case
+      when pool_type = 'CPC' then line.line_type = 'CPC'
+      when pool_type in ('R-DEV', 'D-DEV') then line.line_type <> 'CPC' and upper(trim(line.pattern)) = pool_type
+      else line.line_type <> 'CPC' and upper(trim(line.pattern)) not in ('R-DEV', 'D-DEV')
+    end
       and private.rdo_line_fatigue_set(line.id) = rdo_set
       and line.status = 'taken'
       and line.fatigue_group in ('A', 'B', 'C')
