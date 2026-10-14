@@ -533,11 +533,27 @@ button.seniority-pill {
 .public-faq-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-  gap: 18px;
+  grid-template-rows: min-content 1fr;
+  align-items: start;
+  gap: 24px 18px;
 }
 
 .public-faq-section {
   min-width: 0;
+}
+
+.public-general-mou-section {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.public-area-mou-section {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.public-area-mou-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
 }
 
 .public-faq-list,
@@ -641,6 +657,13 @@ button.seniority-pill {
 @media (max-width: 720px) {
   .public-faq-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .public-general-mou-section,
+  .public-area-mou-section {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 
@@ -12584,3 +12607,51 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .needs-review .intake-date-check-status { color: #915d13; }
 .intake-date-check-slots { font-size: 13px; margin: 7px 0 4px; }
 .intake-date-check-note { font-size: 12px; margin: 12px 0 0; color: #50647a; }
+
+/* Keep mobile FAQ content directly inside the references panel. */
+@media screen and (max-width: 720px) {
+  .public-main .public-calendar-panel.faq-view {
+    width: calc(100% - 16px) !important;
+    padding: 12px;
+  }
+
+  .public-calendar-panel.faq-view [data-public-info] {
+    margin: 18px 0 0;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .faq-view .public-faq-list,
+  .faq-view .public-mou-list {
+    gap: 0;
+  }
+
+  .faq-view .public-faq-item,
+  .faq-view .public-mou-link,
+  .faq-view .public-empty-note {
+    border: 0;
+    border-bottom: 1px solid #d7e0dd;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .faq-view .public-faq-item summary,
+  .faq-view .public-mou-link,
+  .faq-view .public-empty-note {
+    padding: 14px 0;
+    overflow-wrap: anywhere;
+  }
+
+  .faq-view .public-faq-item > div {
+    border-top: 0;
+    padding: 0 0 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .faq-view .public-area-mou-list {
+    grid-template-columns: 1fr;
+  }
+}
