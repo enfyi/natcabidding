@@ -1938,6 +1938,7 @@ let intakeQueue = [
 let activeOverrideId = null;
 let activeDenialId = null;
 let activeIntakeDetailId = null;
+const intakeDateChecksOpen = new Set();
 let intakeEditorReturnFocus = null;
 let intakeLeaveRemovalPendingId = null;
 let memberRdoPresentation = "table";
@@ -16665,6 +16666,32 @@ function intakeReviewConflicts(item, check) {
   return [...new Set((item.members || [item]).flatMap(check))].sort();
 }
 
+function renderIntakeDateCheck(item) {
+  const area = item.area || currentUser.area;
+  const slotMap = leaveSlotMap(area);
+  const members = item.members || [item];
+  const dates = [...new Set(members.flatMap(leaveApprovalDates))].sort();
+  const full = new Set(intakeReviewConflicts(item, leaveApprovalConflicts));
+  const rdos = new Set(intakeReviewConflicts(item, leaveRdoConflicts));
+  const exempt = item.ghostBid || isGlLeaveItem(item);
+  const bucket = leaveApprovalBucket(item);
+  return `<div class="intake-date-check-header"><strong>${escapeHtml(area)} · ${escapeHtml(item.bidAs)} · Round ${intakeItemRound(item)}</strong><small>Current loaded availability · approval rechecks capacity</small></div>
+    <div class="intake-date-check-list">${dates.map((key) => {
+      const details = leaveSlotsForDateFromMap(key, area, slotMap, { includePersonalHolidays: false });
+      const loaded = leaveSlotDataIsLoaded(details);
+      const status = rdos.has(key) ? "RDO conflict" : exempt ? "No slot used" : !loaded ? "Availability unavailable" : full.has(key) ? "Full · override required" : (details[bucket] || []).includes(item.initials) ? "Already holds a slot" : "Slot available";
+      const warning = rdos.has(key) || (!exempt && (!loaded || full.has(key)));
+      const occupants = [...(details.cpc || []).map((initials) => `${initials} (CPC)`), ...(details.dev || []).map((initials) => `${initials} (DEV)`)];
+      return `<article class="intake-date-check-row${warning ? " needs-review" : ""}"><div><time datetime="${escapeHtml(key)}">${escapeHtml(dateFromKey(key).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }))}</time><span class="intake-date-check-status">${escapeHtml(status)}</span></div><div class="intake-date-check-slots">${loaded ? `CPC: ${leaveSlotOpenCountForDetails(details, "cpc")} / ${leaveSlotCapacityForDetails(details, "cpc")} open · DEV: ${leaveSlotOpenCountForDetails(details, "dev")} / ${leaveSlotCapacityForDetails(details, "dev")} open` : "Slot counts unavailable"}</div><small>Approved leave: ${escapeHtml(occupants.join(", ") || (loaded ? "None" : "Unavailable"))}</small></article>`;
+    }).join("")}</div><p class="intake-date-check-note">${intakeLeaveRoundIsOpen(item) ? "Round open" : "Round closed"} · Check bidder rules before approving.</p>`;
+}
+
+function renderIntakeDateCheckControl(item) {
+  if (item.type !== "Leave") return "";
+  const open = intakeDateChecksOpen.has(item.id);
+  return `<div class="intake-date-check"><button type="button" class="secondary-action small" data-intake-check-dates="${escapeHtml(item.id)}" aria-expanded="${open}">${open ? "Hide date check" : "Check dates"}</button><div data-intake-date-check-content ${open ? "" : "hidden"}>${open ? renderIntakeDateCheck(item) : ""}</div></div>`;
+}
+
 function renderIntakeGroupDates(item, canReview) {
   if (!item.members) return "";
   return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
@@ -16850,6 +16877,7 @@ function renderIntakeQueueWithCache() {
           <p>${escapeHtml(intakeBidSummary(item))}</p>
           ${renderIntakeChangeHistory(item)}
           ${renderIntakeGroupDates(item, canReview)}
+          ${renderIntakeDateCheckControl(item)}
           ${item.reviewNote ? `<p class="intake-warning">${escapeHtml(item.reviewNote)}</p>` : ""}
           ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveRdoConflicts).length ? `<p class="intake-warning">Cannot approve: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveRdoConflicts))} ${intakeReviewConflicts(item, leaveRdoConflicts).length === 1 ? "is" : "are"} the bidder's RDO.</p>` : ""}
           ${item.type === "Leave" && item.status === "Pending" && intakeReviewConflicts(item, leaveApprovalConflicts).length ? `<p class="intake-warning">Requires override before approval: ${formatLeaveConflictDates(intakeReviewConflicts(item, leaveApprovalConflicts))} is full.</p>` : ""}
@@ -18627,6 +18655,22 @@ document.addEventListener("click", async (event) => {
   const intakeSaveOverride = event.target.closest("[data-intake-save-override]");
   if (intakeSaveOverride) {
     await runUiAction("intake-edit", intakeSaveOverride, "Saving changes…", () => saveIntakeOverride(intakeSaveOverride.dataset.intakeSaveOverride));
+    return;
+  }
+
+  const intakeCheckDates = event.target.closest("[data-intake-check-dates]");
+  if (intakeCheckDates) {
+    const id = intakeCheckDates.dataset.intakeCheckDates;
+    const item = intakeReviewItemById(id);
+    const content = intakeCheckDates.parentElement.querySelector("[data-intake-date-check-content]");
+    if (!item || !content) return;
+    const open = !intakeDateChecksOpen.has(id);
+    if (open) intakeDateChecksOpen.add(id);
+    else intakeDateChecksOpen.delete(id);
+    content.innerHTML = open ? withLeaveReadCache(() => renderIntakeDateCheck(item)) : "";
+    content.hidden = !open;
+    intakeCheckDates.setAttribute("aria-expanded", String(open));
+    intakeCheckDates.textContent = open ? "Hide date check" : "Check dates";
     return;
   }
 
