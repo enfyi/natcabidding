@@ -12626,28 +12626,18 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 
   .faq-view .public-faq-list,
   .faq-view .public-mou-list {
-    gap: 0;
-  }
-
-  .faq-view .public-faq-item,
-  .faq-view .public-mou-link,
-  .faq-view .public-empty-note {
-    border: 0;
-    border-bottom: 1px solid #d7e0dd;
-    border-radius: 0;
-    background: transparent;
+    gap: 10px;
   }
 
   .faq-view .public-faq-item summary,
   .faq-view .public-mou-link,
   .faq-view .public-empty-note {
-    padding: 14px 0;
+    padding: 14px 12px;
     overflow-wrap: anywhere;
   }
 
   .faq-view .public-faq-item > div {
-    border-top: 0;
-    padding: 0 0 16px;
+    padding: 0 12px 14px;
     overflow-wrap: anywhere;
   }
 
