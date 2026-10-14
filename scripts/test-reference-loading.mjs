@@ -44,7 +44,9 @@ function setup({ catalogFails = false, rosterFails = false, helpGate, leaveGate,
     upsertRdoSubmissionsFromDatabase() {}, upsertLeaveRequestsFromDatabase() {},
     attachSubmissionIdsToLeaveRequests: rows => rows, attachLeaveRequestWeekBuckets: async (_, rows) => rows,
   })
-  vm.runInContext(code, context)
+  const handlerStart = source.indexOf('function applyPublishedBidWindowResult(')
+  const handler = source.slice(handlerStart, source.indexOf('\n}', handlerStart) + 2)
+  vm.runInContext(handler + '\n' + code, context)
   return { context, state, applied }
 }
 
