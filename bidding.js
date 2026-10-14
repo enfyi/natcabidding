@@ -17064,6 +17064,152 @@ function updateSelectedBidYear(year) {
   }
 }
 
+// Validation uses saved exact dates, never reconstructed date ranges.
+const VALIDATION_EXPORT_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
+
+function validationExportSheets(records, areas, year, startKey, endKey, exportedAt) {
+  const sheets = [];
+  const detail = [["Area", "First", "Last", "Ini", "Round", "Priority", "Date", "Status", "Charged", "RDO", "Holiday", "In lieu", "Ghost Bid", "Request ID", "Verified", "Notes"]];
+  const notes = [["Validation export", `${year} · ${startKey} through ${endKey}`],
+    ["Exported at", exportedAt],
+    ["Round sheets", "Approved non-RDO dates only. R1–R4 count dates within the bidding year, including holidays, matching the reference sheet."],
+    ["Hours", "Hrs and Hrs Left follow the reference: date count × 8/10 hours. Website Charged Hrs uses saved charged_days and can differ for holiday credits."],
+    ["Schedule", "CWS? is hours per day from the approved line. Missing approved lines leave hour calculations blank and appear in Review."],
+    ["Date detail", "All saved dates and statuses in rounds 1–4, including RDOs, ghost bids and uncharged holidays. Enter your manual checks in Verified and Notes."],
+    ["Extra dates", "Date columns expand beyond ten when needed. No approved dates are dropped. Duplicate and out-of-year dates appear in Review."],
+    ["Scope", "Active bidders visible to your account in the selected areas. Rounds 5–6 are outside this export."]];
+  const sorted = [...records].sort((a, b) => (a.person.seniority_rank ?? Infinity) - (b.person.seniority_rank ?? Infinity)
+    || `${a.person.last_name} ${a.person.first_name}`.localeCompare(`${b.person.last_name} ${b.person.first_name}`));
+  const formula = (text) => ({ formula: text });
+  const excelDate = (key) => ({ date: key });
+  for (const area of areas) {
+    const people = sorted.filter(record => record.person.area === area);
+    const prefix = area.replace("Area ", "");
+    const roundDates = people.map(record => [1, 2, 3, 4].map(round => record.snapshot.leave
+      .filter(row => row.round_number === round && row.status === "approved")
+      .flatMap(row => (row.dates || []).filter(day => !day.is_rdo).map(day => day.leave_date)).sort()));
+    for (let round = 1; round <= 4; round += 1) {
+      const dateCount = Math.max(10, ...roundDates.map(dates => dates[round - 1].length));
+      const dateStart = round + 7;
+      const hourColumn = dateStart + dateCount;
+      const scheduleColumn = hourColumn + 1;
+      const header = [`${year} Hrs`, ...Array.from({ length: round }, (_, i) => `R${i + 1}`), "Hrs Left", "First", "Last", "Ini", "RDOs", "Line",
+        ...Array.from({ length: dateCount }, (_, i) => `R${round} ${String((round - 1) * 10 + i + 1).padStart(2, "0")}`), "Hrs", "CWS?", "Website Charged Hrs", "Ghost Bid", "Bid As", "Verified", "Notes", "Review"];
+      const rows = [[`${area.toUpperCase()} ROUND ${round} · ${year} · Approved dates`], header];
+      people.forEach((record, index) => {
+        const person = record.person;
+        const snapshot = record.snapshot;
+        const assignment = snapshot.assignment;
+        // Ghost lines do not consume inventory, so use their approved saved selection.
+        const ghostLine = snapshot.rdo?.status === "approved"
+          ? record.lines?.find(line => line.id === snapshot.rdo.rdo_line_id) : null;
+        const line = assignment || ghostLine;
+        const hours = line ? (line.four_ten ? 10 : 8) : "";
+        const dates = roundDates[index][round - 1];
+        const rowNumber = index + 3;
+        const dateRange = `${spreadsheetColumnName(dateStart)}${rowNumber}:${spreadsheetColumnName(hourColumn - 1)}${rowNumber}`;
+        const scheduleRef = `${spreadsheetColumnName(scheduleColumn)}${rowNumber}`;
+        const counts = Array.from({ length: round }, (_, i) => i + 1 === round
+          ? formula(`COUNTIFS(${dateRange},">="&DATE(${startKey.split("-").map(Number).join(",")}),${dateRange},"<="&DATE(${endKey.split("-").map(Number).join(",")}))`)
+          : formula(`'${prefix} Round ${i + 1}'!${spreadsheetColumnName(i + 1)}${rowNumber}`));
+        const chargedDays = snapshot.leave.filter(row => row.round_number === round && row.status === "approved")
+          .reduce((sum, row) => sum + Number(row.charged_days || 0), 0);
+        const duplicates = dates.length !== new Set(dates).size;
+        const outside = dates.some(key => key < startKey || key > endKey);
+        const rdos = Array.isArray(assignment?.week) ? assignment.week.map((shift, day) => shift === "RDO" ? ["Su", "M", "Tu", "W", "Th", "F", "Sa"][day] : null).filter(Boolean).join("/") : line?.pattern || "";
+        rows.push([person.leave_slot_allowance ?? "", ...counts,
+          formula(`IF(OR(${scheduleRef}="",A${rowNumber}=""),"",A${rowNumber}-SUM(B${rowNumber}:${spreadsheetColumnName(round)}${rowNumber})*${scheduleRef})`),
+          person.first_name, person.last_name, person.initials, rdos, line?.line_code || "",
+          ...Array.from({ length: dateCount }, (_, i) => dates[i] ? excelDate(dates[i]) : ""),
+          formula(`IF(${scheduleRef}="","",${spreadsheetColumnName(round)}${rowNumber}*${scheduleRef})`), hours,
+          hours === "" ? "" : chargedDays * hours, snapshot.is_ghost_bidder ? "Yes" : "No", person.bid_role, "", "",
+          [!line && "Missing approved line", duplicates && "Duplicate dates", outside && "Date outside bidding year", person.leave_slot_allowance == null && "Missing allowance"].filter(Boolean).join("; ")]);
+      });
+      sheets.push({ name: `${prefix} Round ${round}`, rows, freezeColumns: dateStart });
+    }
+    for (const record of people) {
+      for (const request of record.snapshot.leave.filter(row => row.round_number >= 1 && row.round_number <= 4)) {
+        const dates = request.dates || [];
+        if (!dates.length) detail.push([area, record.person.first_name, record.person.last_name, record.person.initials, request.round_number, request.priority, "", request.status, "", "", "", "", request.is_ghost_bid ? "Yes" : "No", request.id, "", "Missing saved dates"]);
+        for (const day of dates) detail.push([area, record.person.first_name, record.person.last_name, record.person.initials, request.round_number, request.priority, excelDate(day.leave_date), request.status,
+          day.charged ? "Yes" : "No", day.is_rdo ? "Yes" : "No", day.is_holiday ? "Yes" : "No", day.is_holiday_in_lieu ? "Yes" : "No", request.is_ghost_bid ? "Yes" : "No", request.id, "", ""]);
+      }
+    }
+  }
+  sheets.push({ name: "Date Detail", rows: [[`Saved dates · ${year} · ${exportedAt}`], ...detail], freezeColumns: 4 });
+  sheets.push({ name: "Export Notes", rows: notes, freezeColumns: 0 });
+  return sheets;
+}
+
+function validationWorksheetXml(sheet) {
+  const columns = Math.max(...sheet.rows.map(row => row.length));
+  const rows = sheet.rows.map((row, r) => `<row r="${r + 1}" ht="${r === 1 ? 32 : sheet.name === "Export Notes" ? 48 : 22}" customHeight="1">${row.map((value, c) => {
+    const ref = `${spreadsheetColumnName(c)}${r + 1}`;
+    if (value && typeof value === "object" && value.formula) return `<c r="${ref}"><f>${escapeXml(value.formula)}</f></c>`;
+    if (value && typeof value === "object" && value.date) return `<c r="${ref}" s="2"><v>${(Date.parse(`${value.date}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86400000}</v></c>`;
+    if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
+    return `<c r="${ref}" s="${r === 1 && sheet.name !== "Export Notes" ? 1 : sheet.name === "Export Notes" ? 3 : 0}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+  }).join("")}</row>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="${sheet.freezeColumns}" ySplit="2" topLeftCell="${spreadsheetColumnName(sheet.freezeColumns)}3" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols>${Array.from({ length: columns }, (_, i) => `<col min="${i + 1}" max="${i + 1}" width="${sheet.name === "Export Notes" ? (i === 0 ? 24 : 125) : (String(sheet.rows[1]?.[i]) === "Notes" || String(sheet.rows[1]?.[i]) === "Review" ? 42 : 16)}" customWidth="1"/>`).join("")}</cols><sheetData>${rows}</sheetData>${sheet.name !== "Export Notes" ? `<autoFilter ref="A2:${spreadsheetColumnName(columns - 1)}${sheet.rows.length}"/>` : ""}</worksheet>`;
+}
+
+function validationWorkbookFiles(sheets) {
+  const ns = "http://schemas.openxmlformats.org";
+  return [
+    { name: "[Content_Types].xml", content: `<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>` },
+    { name: "_rels/.rels", content: `<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: "xl/workbook.xml", content: `<workbook xmlns="${ns}/spreadsheetml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><sheets>${sheets.map((sheet, i) => `<sheet name="${escapeXml(sheet.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", content: `<Relationships xmlns="${ns}/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${ns}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="styles" Type="${ns}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+    { name: "xl/styles.xml", content: `<styleSheet xmlns="${ns}/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="mm/dd/yy"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF243746"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
+    ...sheets.map((sheet, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, content: validationWorksheetXml(sheet) })),
+  ];
+}
+
+async function downloadValidationXlsx(form) {
+  const status = form.querySelector("[data-validation-export-status]");
+  try {
+    const client = supabaseClient();
+    if (!client || !supabaseState.connected || !hasIntakeAccess()) throw new Error("Sign in with intake or administrator access before exporting validation data.");
+    const selected = form.elements["validation-area"].value;
+    const areas = selected === "all" ? VALIDATION_EXPORT_AREAS : VALIDATION_EXPORT_AREAS.filter(area => area === selected);
+    if (!areas.length) throw new Error("Choose a valid area.");
+    const year = BID_YEAR;
+    const userId = supabaseState.authUserId;
+    const start = BID_LEAVE_YEAR_START_KEY;
+    const end = BID_LEAVE_YEAR_END_KEY;
+    const { data: roster, error } = await client.rpc("read_bidding_roster");
+    if (error) throw error;
+    const people = (roster || []).filter(person => person.active !== false && person.bid_role !== "ADM" && areas.includes(person.area_name));
+    if (!people.length) throw new Error("No active bidders are available in the selected area(s).");
+    const records = [];
+    for (let i = 0; i < people.length; i += 5) {
+      status.textContent = `Reading saved bids: ${i} of ${people.length} bidders…`;
+      const results = await Promise.all(people.slice(i, i + 5).map(async person => {
+        const { data, error: readError } = await client.rpc("read_admin_bidder_editor", { requested_bid_year: year, target_bidder_id: person.profile_id });
+        if (readError) throw readError;
+        if (!data?.person || !Array.isArray(data.snapshot?.leave)) throw new Error("Saved bidding details are incomplete. Try refreshing and exporting again.");
+        if (data.snapshot.leave.some(row => row.status === "approved" && row.round_number >= 1 && row.round_number <= 4 && !row.dates?.length)) throw new Error(`${person.initials}: an approved bid has no saved exact dates. Correct the bid before exporting.`);
+        return data;
+      }));
+      records.push(...results);
+    }
+    if (BID_YEAR !== year || userId !== supabaseState.authUserId || !hasIntakeAccess()) throw new Error("Your bidding year or session changed. Export again.");
+    const sheets = validationExportSheets(records, areas, year, start, end, new Date().toISOString());
+    downloadBlob(`zla-validation-${selected === "all" ? "all-areas" : selected.toLowerCase().replace(/ /g, "-")}-${year}.xlsx`, createZip(validationWorkbookFiles(sheets)));
+    status.textContent = `Exported ${people.length} bidders for ${year}. Round sheets show approved dates; Date Detail includes all statuses for review.`;
+  } catch (error) {
+    status.textContent = error.message || "Validation data could not be exported.";
+    showActionFeedback(status.textContent, "error");
+  }
+}
+
+document.addEventListener("submit", event => {
+  if (!event.target.matches("[data-validation-export-form]")) return;
+  event.preventDefault();
+  const form = event.target;
+  void runUiAction("validation-export", event.submitter || form.querySelector("button"), "Exporting validation…", () => downloadValidationXlsx(form));
+});
+
 function biddingExportActionBy(item) {
   if (item.status === "Approved") return item.approvedBy || "";
   if (item.status === "Denied") return item.deniedBy || "";
