@@ -1178,6 +1178,15 @@
               <section class="panel">
                 <h3>Data Export</h3>
                 <p>Download prototype bidding data for reconciliation.</p>
+                <form data-validation-export-form>
+                  <label>Validation area
+                    <select name="validation-area">
+                      <option value="Area A">Area A</option><option value="Area B">Area B</option><option value="Area C">Area C</option><option value="Area D">Area D</option><option value="Area E">Area E</option><option value="Area F">Area F</option><option value="TMU">TMU</option><option value="all">All areas</option>
+                    </select>
+                  </label>
+                  <button class="secondary-action small" type="submit">Download Round 1–4 Validation Excel</button>
+                  <p class="form-status" data-validation-export-status role="status" aria-live="polite"></p>
+                </form>
                 <div class="export-actions">
                   <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
@@ -1703,6 +1712,15 @@
               <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
                 <h3>Database Export</h3>
                 <p>Download everything captured in this prototype.</p>
+                <form data-validation-export-form>
+                  <label>Validation area
+                    <select name="validation-area">
+                      <option value="Area A">Area A</option><option value="Area B">Area B</option><option value="Area C">Area C</option><option value="Area D">Area D</option><option value="Area E">Area E</option><option value="Area F">Area F</option><option value="TMU">TMU</option><option value="all">All areas</option>
+                    </select>
+                  </label>
+                  <button class="secondary-action small" type="submit">Download Round 1–4 Validation Excel</button>
+                  <p class="form-status" data-validation-export-status role="status" aria-live="polite"></p>
+                </form>
                 <div class="export-actions">
                   <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
