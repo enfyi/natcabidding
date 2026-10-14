@@ -8907,7 +8907,7 @@ async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
   const rosterRequest = readReferenceData("roster", () => client.rpc("read_bidding_roster"));
   const faqReads = Promise.all([
     readReferenceData("FAQ entries", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
-    readReferenceData("MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+    readReferenceData("MOU documents", () => client.from("mou_documents").select("title,description,file_path,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
   ]).then(([entries, documents]) => {
     if (!entries.error) publicFaqContent.entries = entries.data || [];
     if (!documents.error) publicFaqContent.documents = documents.data || [];
@@ -9470,6 +9470,8 @@ function richTextMarkup(value = "") {
 function renderPublicFaq() {
   const entries = publicFaqContent.entries || [];
   const documents = publicFaqContent.documents || [];
+  const areaDocuments = documents.filter((document) => (document.file_path || "").startsWith("mous/areas/"));
+  const generalDocuments = documents.filter((document) => !(document.file_path || "").startsWith("mous/areas/"));
 
   if (!entries.length && !documents.length) {
     const message = ["idle", "loading"].includes(supabaseState.faqLoadState)
@@ -9500,20 +9502,38 @@ function renderPublicFaq() {
           `).join("") || '<p class="public-empty-note">No FAQ items are published yet.</p>'}
         </div>
       </section>
-      <section class="public-faq-section" aria-labelledby="public-mou-heading">
+
+      <section class="public-faq-section public-general-mou-section" aria-labelledby="public-mou-heading">
         <div class="public-table-heading flat">
           <strong id="public-mou-heading">MOUs and References</strong>
           <small>Click on the article to download the MOU.</small>
         </div>
         <div class="public-mou-list">
-          ${documents.map((document) => `
+          ${generalDocuments.map((document) => `
             <article class="public-mou-link">
               <a class="public-mou-title" href="${escapeAttribute(document.file_url || "")}" target="_blank" rel="noreferrer">${escapeHtml(document.title)}</a>
               ${document.description ? `<div class="public-rich-text">${richTextMarkup(document.description)}</div>` : ""}
             </article>
           `).join("") || '<p class="public-empty-note">No MOU documents are published yet.</p>'}
         </div>
+
       </section>
+        ${areaDocuments.length ? `
+          <section class="public-faq-section public-area-mou-section" aria-labelledby="public-area-mou-heading">
+          <div class="public-table-heading flat">
+            <strong id="public-area-mou-heading">Area MOUs</strong>
+            <small>Download the MOU for your area.</small>
+          </div>
+          <div class="public-mou-list public-area-mou-list">
+            ${areaDocuments.map((document) => `
+              <article class="public-mou-link">
+                <a class="public-mou-title" href="${escapeAttribute(document.file_url || "")}" target="_blank" rel="noreferrer">${escapeHtml(document.title)}</a>
+                ${document.description ? `<div class="public-rich-text">${richTextMarkup(document.description)}</div>` : ""}
+              </article>
+            `).join("")}
+          </div>
+          </section>
+        ` : ""}
     </div>
   `;
 }
@@ -9917,6 +9937,7 @@ function updatePublicView(area = publicState.area, section = publicState.section
 
   if (publicPanel) {
     publicPanel.classList.toggle("table-view", isTableView);
+    publicPanel.classList.toggle("faq-view", area === "FAQ");
   }
 
   if (tabs) {
@@ -15136,7 +15157,7 @@ async function readLiveDataGroup(group, client, areaById, member) {
   } else if (group === "faq") {
     results = await Promise.all([
       read("live FAQ", () => client.from("faq_entries").select("question,answer,display_order").eq("published", true).order("display_order").order("created_at")),
-      read("live MOU documents", () => client.from("mou_documents").select("title,description,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
+      read("live MOU documents", () => client.from("mou_documents").select("title,description,file_path,file_url,display_order").eq("published", true).order("display_order").order("created_at")),
     ]);
     apply = () => {
       publicFaqContent.entries = results[0].data || [];
