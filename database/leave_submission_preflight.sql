@@ -109,6 +109,11 @@ begin
   if actor.id is null then
     raise exception 'Authenticated bidder profile required.';
   end if;
+  manual_entry := coalesce(manual_entry, false);
+  if manual_entry and actor.role not in ('admin', 'intake') then
+    raise exception 'Manual entry requires bidding reviewer access.' using errcode = '42501';
+  end if;
+
 
   select bys.*
   into strict year_row
