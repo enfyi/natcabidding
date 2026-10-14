@@ -17131,6 +17131,97 @@ function updateSelectedBidYear(year) {
 // Validation uses saved exact dates, never reconstructed date ranges.
 const VALIDATION_EXPORT_AREAS = ["Area A", "Area B", "Area C", "Area D", "Area E", "Area F", "TMU"];
 
+function validationAreaSlotsSheet(area, people, rounds, detailRowCount, year) {
+  const formula = text => ({ formula: text });
+  const rows = Array.from({ length: 4 }, () => Array(25).fill(""));
+  rows[0][1] = `${area} · ${year}`;
+  rows[2][1] = "Employee Hours";
+  rows[2][10] = "CPC Slots";
+  rows[2][18] = "Developmental Slots";
+  const hoursHeader = [`${year} Hrs`, "R1", "R2", "R3", "R4", "Hrs Left", "Initial", "Holidays"];
+  const slotsHeader = [`${year} Slots`, "R1", "R2", "R3", "R4", "Slot Left", "Initial"];
+  rows[3].splice(1, 8, ...hoursHeader);
+  rows[3].splice(10, 7, ...slotsHeader);
+  rows[3].splice(18, 7, ...slotsHeader);
+  const put = (r, c, value) => {
+    while (rows.length < r) rows.push(Array(25).fill(""));
+    rows[r - 1][c] = value;
+  };
+  const ghost = record => record.snapshot.is_ghost_bidder || record.person.bid_role === "GL";
+  const regular = people.filter(record => !ghost(record));
+  const cpc = regular.filter(record => ["CPC", "TMC"].includes(record.person.bid_role));
+  const dev = regular.filter(record => ["DEV", "R-DEV", "D-DEV"].includes(record.person.bid_role));
+  // Match by initials within this area, so summary rows need not share round-sheet order.
+  const lookup = (round, label, key) => {
+    const sheet = rounds[round - 1];
+    const initialColumn = spreadsheetColumnName(sheet.rows[1].indexOf("Ini"));
+    const valueColumn = spreadsheetColumnName(sheet.rows[1].indexOf(label));
+    const end = Math.max(4, sheet.rows.length);
+    const value = `INDEX('${sheet.name}'!$${valueColumn}$3:$${valueColumn}$${end},MATCH(${key},'${sheet.name}'!$${initialColumn}$3:$${initialColumn}$${end},0),1)`;
+    return `IF(COUNT(${value})=0,"",${value})`;
+  };
+  const total = (column, start, count) => count
+    ? formula(`IF(COUNT(${column}${start}:${column}${start + count - 1})<${count},"n.a.",SUM(${column}${start}:${column}${start + count - 1}))`)
+    : 0;
+  const fillHours = (group, start, column) => {
+    const initialColumn = spreadsheetColumnName(column + 6);
+    group.forEach((record, index) => {
+      const r = start + index;
+      const key = `${initialColumn}${r}`;
+      put(r, column + 6, record.person.initials);
+      put(r, column, formula(lookup(1, `${year} Hrs`, key)));
+      for (let round = 1; round <= 4; round++) put(r, column + round, formula(lookup(round, "Hrs", key)));
+      const range = `${spreadsheetColumnName(column)}${r}:${spreadsheetColumnName(column + 4)}${r}`;
+      put(r, column + 5, formula(`IF(COUNT(${range})<5,"",${spreadsheetColumnName(column)}${r}-SUM(${spreadsheetColumnName(column + 1)}${r}:${spreadsheetColumnName(column + 4)}${r}))`));
+    });
+    const end = start + group.length;
+    for (let c = 0; c < 6; c++) put(end, column + c, total(spreadsheetColumnName(column + c), start, group.length));
+    put(end, column + 6, "Total");
+  };
+  fillHours(regular, 5, 1);
+  regular.forEach((record, index) => {
+    const r = index + 5;
+    put(r, 0, index + 1);
+    const end = Math.max(3, detailRowCount);
+    const base = `'Date Detail'!$A$3:$A$${end},"${area}",'Date Detail'!$D$3:$D$${end},H${r},'Date Detail'!$H$3:$H$${end},"approved",'Date Detail'!$J$3:$J$${end},"No"`;
+    put(r, 8, formula(`COUNTIFS(${base},'Date Detail'!$K$3:$K$${end},"Yes")+COUNTIFS(${base},'Date Detail'!$K$3:$K$${end},"No",'Date Detail'!$L$3:$L$${end},"Yes")`));
+  });
+  put(regular.length + 5, 8, total("I", 5, regular.length));
+  const fillSlots = (group, column) => {
+    group.forEach((record, index) => {
+      const r = index + 5;
+      const key = `${spreadsheetColumnName(column + 6)}${r}`;
+      put(r, column + 6, record.person.initials);
+      put(r, column, formula(`IF(COUNT(${lookup(1, `${year} Hrs`, key)})=0,"",(${lookup(1, `${year} Hrs`, key)})/8)`));
+      // Round counts are the same as round hours / the saved schedule, without assuming a missing schedule.
+      for (let round = 1; round <= 4; round++) put(r, column + round, formula(lookup(round, `R${round}`, key)));
+      const range = `${spreadsheetColumnName(column)}${r}:${spreadsheetColumnName(column + 4)}${r}`;
+      put(r, column + 5, formula(`IF(COUNT(${range})<5,"",${spreadsheetColumnName(column)}${r}-SUM(${spreadsheetColumnName(column + 1)}${r}:${spreadsheetColumnName(column + 4)}${r}))`));
+    });
+    for (let c = 0; c < 6; c++) put(group.length + 5, column + c, total(spreadsheetColumnName(column + c), 5, group.length));
+    put(group.length + 5, column + 6, "Total");
+  };
+  fillSlots(cpc, 10);
+  fillSlots(dev, 18);
+  rows[1][10] = "CPC Total Slots:";
+  rows[1][12] = formula(`K${cpc.length + 5}`);
+  rows[1][14] = "Slots Left:";
+  rows[1][15] = formula(`P${cpc.length + 5}`);
+  rows[1][18] = "DEV Total Slots:";
+  rows[1][20] = formula(`S${dev.length + 5}`);
+  rows[1][22] = "Slots Left:";
+  rows[1][23] = formula(`X${dev.length + 5}`);
+  const ghosts = people.filter(ghost);
+  const ghostTitle = dev.length + 8;
+  put(ghostTitle, 18, "Ghost Bids (excluded from slot totals)");
+  hoursHeader.slice(0, 7).forEach((header, index) => put(ghostTitle + 1, 18 + index, header));
+  fillHours(ghosts, ghostTitle + 2, 18);
+  const noteRow = rows.length + 2;
+  put(noteRow, 1, "Slot allocation = allowance hours / 8; slot usage = approved round days. Ghost bids do not reduce CPC or DEV totals.");
+  return { name: `${area} Slots`, rows, freezeColumns: 2, headerRow: 4, noFilter: true,
+    extraHeaderRows: [ghostTitle + 1], mergeRanges: [`B1:Y1`, `S${ghostTitle}:Y${ghostTitle}`, `B${noteRow}:Y${noteRow}`] };
+}
+
 function validationExportSheets(records, areas, year, startKey, endKey, exportedAt) {
   const sheets = [];
   const detail = [["Area", "First", "Last", "Ini", "Round", "Priority", "Date", "Status", "Charged", "RDO", "Holiday", "In lieu", "Ghost Bid", "Request ID", "Verified", "Notes"]];
@@ -17139,6 +17230,7 @@ function validationExportSheets(records, areas, year, startKey, endKey, exported
     ["Round sheets", "Approved non-RDO dates only. R1–R4 count dates within the bidding year, including holidays, matching the reference sheet."],
     ["Hours", "Hrs and Hrs Left follow the reference: date count × 8/10 hours. Website Charged Hrs uses saved charged_days and can differ for holiday credits."],
     ["Schedule", "CWS? is hours per day from the approved line. Missing approved lines leave hour calculations blank and appear in Review."],
+    ["Area Slots", "Front tabs link hours and round usage by initials. Slot allocation follows the reference (allowance / 8); website budgets may differ. Ghost bids are separate. Historical manual adjustments are not carried into this year's export."],
     ["Date detail", "All saved dates and statuses in rounds 1–4, including RDOs, ghost bids and uncharged holidays. Enter your manual checks in Verified and Notes."],
     ["Extra dates", "Date columns expand beyond ten when needed. No approved dates are dropped. Duplicate and out-of-year dates appear in Review."],
     ["Scope", "Active bidders visible to your account in the selected areas. Rounds 5–6 are outside this export."]];
@@ -17202,19 +17294,23 @@ function validationExportSheets(records, areas, year, startKey, endKey, exported
   }
   sheets.push({ name: "Date Detail", rows: [[`Saved dates · ${year} · ${exportedAt}`], ...detail], freezeColumns: 4 });
   sheets.push({ name: "Export Notes", rows: notes, freezeColumns: 0 });
-  return sheets;
+  const slotSheets = areas.map(area => validationAreaSlotsSheet(area,
+    sorted.filter(record => record.person.area === area),
+    sheets.filter(sheet => sheet.name.startsWith(`${area.replace("Area ", "")} Round `)), detail.length + 1, year));
+  return [...slotSheets, ...sheets];
 }
 
 function validationWorksheetXml(sheet) {
   const columns = Math.max(...sheet.rows.map(row => row.length));
+  const headerRow = sheet.headerRow || 2;
   const rows = sheet.rows.map((row, r) => `<row r="${r + 1}" ht="${r === 1 ? 32 : sheet.name === "Export Notes" ? 48 : 22}" customHeight="1">${row.map((value, c) => {
     const ref = `${spreadsheetColumnName(c)}${r + 1}`;
     if (value && typeof value === "object" && value.formula) return `<c r="${ref}"><f>${escapeXml(value.formula)}</f></c>`;
     if (value && typeof value === "object" && value.date) return `<c r="${ref}" s="2"><v>${(Date.parse(`${value.date}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86400000}</v></c>`;
     if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
-    return `<c r="${ref}" s="${r === 1 && sheet.name !== "Export Notes" ? 1 : sheet.name === "Export Notes" ? 3 : 0}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+    return `<c r="${ref}" s="${(r + 1 === headerRow || sheet.extraHeaderRows?.includes(r + 1)) && sheet.name !== "Export Notes" ? 1 : sheet.name === "Export Notes" ? 3 : 0}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
   }).join("")}</row>`).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="${sheet.freezeColumns}" ySplit="2" topLeftCell="${spreadsheetColumnName(sheet.freezeColumns)}3" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols>${Array.from({ length: columns }, (_, i) => `<col min="${i + 1}" max="${i + 1}" width="${sheet.name === "Export Notes" ? (i === 0 ? 24 : 125) : (String(sheet.rows[1]?.[i]) === "Notes" || String(sheet.rows[1]?.[i]) === "Review" ? 42 : 16)}" customWidth="1"/>`).join("")}</cols><sheetData>${rows}</sheetData>${sheet.name !== "Export Notes" ? `<autoFilter ref="A2:${spreadsheetColumnName(columns - 1)}${sheet.rows.length}"/>` : ""}</worksheet>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="${sheet.freezeColumns}" ySplit="${headerRow}" topLeftCell="${spreadsheetColumnName(sheet.freezeColumns)}${headerRow + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols>${Array.from({ length: columns }, (_, i) => `<col min="${i + 1}" max="${i + 1}" width="${sheet.name === "Export Notes" ? (i === 0 ? 24 : 125) : (String(sheet.rows[1]?.[i]) === "Notes" || String(sheet.rows[1]?.[i]) === "Review" ? 42 : 16)}" customWidth="1"/>`).join("")}</cols><sheetData>${rows}</sheetData>${sheet.name !== "Export Notes" && !sheet.noFilter ? `<autoFilter ref="A${headerRow}:${spreadsheetColumnName(columns - 1)}${sheet.rows.length}"/>` : ""}${sheet.mergeRanges?.length ? `<mergeCells count="${sheet.mergeRanges.length}">${sheet.mergeRanges.map(ref => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : ""}</worksheet>`;
 }
 
 function validationWorkbookFiles(sheets) {
