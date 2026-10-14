@@ -11945,6 +11945,11 @@ function normalizeApprovalRules(value) {
   return value
     .filter((rule) => typeof rule === "string")
     .map((rule) => rule.trim())
+    .map((rule) => rule === "Intake or an administrator may enter bids manually at any time, including before a round opens or after it closes."
+      ? MANUAL_AFTER_WINDOW_RULE
+      : rule === "BUEs must submit during their assigned bid window. Authorized intake and administrators may submit manually outside bid windows and closed rounds."
+        ? CLOSED_ROUND_RULE
+        : rule)
     .map((rule) => rule === "BUEs may bid after their window has closed when bidding during Intake Hours: 7a-7p Monday-Sunday, excluding holidays."
       ? MANUAL_AFTER_WINDOW_RULE
       : rule === "Once the round is closed, BUEs may not make bids or adjustments for that round."
