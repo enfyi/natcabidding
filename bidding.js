@@ -8540,6 +8540,11 @@ function applyBidWindowsFromDatabase(rows) {
   seniority = buildSeniority();
 }
 
+function applyPublishedBidWindowResult(result) {
+  supabaseState.bidTimesLoadState = result?.error ? "error" : "loaded";
+  applyBidWindowsFromDatabase(supabaseRows(result));
+}
+
 function supabaseLoadWarning(label, result) {
   if (!result?.error) return "";
   const message = result.error.message || String(result.error);
@@ -9009,8 +9014,8 @@ async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
         ? client.rpc("read_pilot_settings", { requested_bid_year: BID_YEAR })
         : Promise.resolve({ data: null, error: null })),
       Promise.all([readReferenceData("bid windows", () => loadPublishedBidWindows(client, bidYear.id)), rosterReady]).then(([result]) => {
-        supabaseState.bidTimesLoadState = result.error || rosterResult.error ? "error" : "loaded";
-        if (!result.error) applyBidWindowsFromDatabase(supabaseRows(result));
+        applyPublishedBidWindowResult(result);
+        if (rosterResult.error) supabaseState.bidTimesLoadState = "error";
         refreshPublicReferenceSection();
         return result;
       }),
@@ -15096,7 +15101,7 @@ async function readLiveDataGroup(group, client, areaById, member) {
     apply = () => applyLeaveSlotScheduleFromDatabase(supabaseRows(results[0]), areaById);
   } else if (group === "windows") {
     results = [await read("live bid windows", () => loadPublishedBidWindows(client, supabaseState.bidYearId))];
-    apply = () => applyBidWindowsFromDatabase(supabaseRows(results[0]));
+    apply = () => applyPublishedBidWindowResult(results[0]);
   } else if (group === "schedules") {
     results = await Promise.all([
       read("live intake schedules", () => loadIntakeSchedules(client)),
@@ -15208,6 +15213,11 @@ async function refreshLiveData() {
     const previousSlots = JSON.stringify(extraLeaveSlotData);
     updates.forEach((update, index) => {
       if (!update.apply || update.results.some((result) => result.error)) {
+        if (groups[index] === "windows") {
+          applyPublishedBidWindowResult({ error: { message: "Bid windows could not be refreshed." } });
+          liveDataSnapshots.delete("windows");
+          changed.add("windows");
+        }
         liveDataDirtyGroups.add(groups[index]);
         return;
       }

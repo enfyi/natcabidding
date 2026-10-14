@@ -21,6 +21,7 @@ const upcomingWindow = { round: 2, start: new Date("2026-10-02T08:00:00Z"), end:
 const windows = new Map([[1, closedWindow], [2, upcomingWindow]]);
 const context = vm.createContext({
   Date,
+  selectedBidYearErrorMessage: () => "",
   currentUser: { area: "Area A" },
   pilotState: { database: false },
   pilotSubmissionErrorMessage: () => "",
@@ -28,7 +29,7 @@ const context = vm.createContext({
   isViewingHomeArea: () => true,
   currentUserSeniorityRank: () => 1,
   areaBidRoundState: () => ({ round: 1 }),
-  bidWindowForRankRound: (_rank, round) => windows.get(round) || null,
+  currentUserBidWindowForRound: (round) => windows.get(round) || null,
   roundDateBlocksForArea: () => [["Round 1", "Round 2"]],
   formatDateTime: (date) => date.toISOString(),
 });

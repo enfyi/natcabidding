@@ -114,7 +114,7 @@ rdoOverlayContext.applyGlRdoAssignments([
 ]);
 assert.deepEqual(
   JSON.parse(JSON.stringify(rdoLines[0].glBids)),
-  [{ initials: 'G2', status: 'Pending' }, { initials: 'GL', status: 'Approved' }],
+  [{ initials: 'G2', status: 'Pending', ghostBid: false }, { initials: 'GL', status: 'Approved', ghostBid: false }],
   'Multiple GL bidders can share one real RDO line',
 );
 
@@ -122,6 +122,7 @@ const rdoMarkupStart = source.indexOf('function lineOccupant(');
 const rdoMarkupEnd = source.indexOf('function selectedMidValue(', rdoMarkupStart);
 const rdoMarkupContext = {
   currentUser: { initials: 'AC' },
+  publicGhostRdoBids: [],
   escapeHtml: (value) => String(value),
 };
 vm.createContext(rdoMarkupContext);
