@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=admin-leave-print-intake-panels-20261002-profile-mobile-scroll-rdo-denial-notification-current-bidder-highlight-v2-close-bid-detail-dashboard-intake-background" />
+    <link rel="stylesheet" href="bidding.css?v=20261009-signing-in-indicator" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -126,7 +126,10 @@
             <h1 data-public-heading>Area A Annual Leave Calendar</h1>
           </div>
           <div class="public-login">
-            <button class="public-login-button" type="button" aria-expanded="false" data-public-login-toggle>Login</button>
+            <div class="public-session-control">
+              <button class="public-login-button" type="button" aria-label="Sign in to your dashboard" aria-expanded="false" data-public-login-toggle>Dashboard</button>
+              <span class="public-session-status" role="status" hidden data-public-session-status></span>
+            </div>
             <div class="login-card" hidden data-public-login-menu>
               <p class="eyebrow">Member Access</p>
               <h2>Login</h2>
@@ -189,7 +192,7 @@
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
               <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
-              <button type="button" data-calendar-year-action="today">Today</button>
+
             </div>
             <div class="year-calendar" id="public-calendar"></div>
             <div class="legend">
@@ -410,12 +413,12 @@
               </div>
             </article>
             <article class="metric-card area-slots-metric">
-              <span>Area Leave Slots Left</span>
+              <span>Area Leave Remaining</span>
               <dl>
-                <div><dt>CPC</dt><dd data-cpc-leave-remaining>--</dd></div>
-                <div><dt>DEV</dt><dd data-dev-leave-remaining>--</dd></div>
+                <div><dt>CPC</dt><dd data-cpc-leave-remaining>--</dd><dd class="area-slots-detail" data-cpc-leave-detail>Loading usage</dd></div>
+                <div><dt>DEV</dt><dd data-dev-leave-remaining>--</dd><dd class="area-slots-detail" data-dev-leave-detail>Loading usage</dd></div>
               </dl>
-              <small><span data-cpc-leave-detail>Area CPC bucket</span> · <span data-dev-leave-detail>Developmental bucket</span></small>
+              <small class="area-slots-caption">Estimated availability</small>
             </article>
             <article class="metric-card allowance-summary-metric">
               <span>Leave Allowance Summary</span>
@@ -457,7 +460,7 @@
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong id="dashboard-calendar-year" data-calendar-year-label>2027</strong>
                 <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
-                <button type="button" data-calendar-year-action="today">Today</button>
+
               </div>
               <div class="year-calendar" id="dashboard-calendar"></div>
               <div class="legend">
@@ -718,7 +721,7 @@
                 <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
                 <strong data-calendar-year-label>2027</strong>
                 <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
-                <button type="button" data-calendar-year-action="today">Today</button>
+
               </div>
               <div class="year-calendar large" id="leave-calendar"></div>
               <div class="legend">
@@ -877,7 +880,7 @@
               <button type="button" aria-label="Previous year" data-calendar-year-action="previous">‹</button>
               <strong data-calendar-year-label>2027</strong>
               <button type="button" aria-label="Next year" data-calendar-year-action="next">›</button>
-              <button type="button" data-calendar-year-action="today">Today</button>
+
             </div>
             <div class="year-calendar large" id="full-calendar"></div>
             <div class="legend">
@@ -1175,6 +1178,15 @@
               <section class="panel">
                 <h3>Data Export</h3>
                 <p>Download prototype bidding data for reconciliation.</p>
+                <form data-validation-export-form>
+                  <label>Validation area
+                    <select name="validation-area">
+                      <option value="Area A">Area A</option><option value="Area B">Area B</option><option value="Area C">Area C</option><option value="Area D">Area D</option><option value="Area E">Area E</option><option value="Area F">Area F</option><option value="TMU">TMU</option><option value="all">All areas</option>
+                    </select>
+                  </label>
+                  <button class="secondary-action small" type="submit">Download Round 1–4 Validation Excel</button>
+                  <p class="form-status" data-validation-export-status role="status" aria-live="polite"></p>
+                </form>
                 <div class="export-actions">
                   <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
@@ -1313,6 +1325,7 @@
                 </div>
                 <div class="admin-header-actions">
                   <a class="secondary-action small" href="/admin/faq" target="_top">Edit FAQ & MOUs</a>
+                  <a class="secondary-action small" href="/admin/previous-years" target="_top">Previous Years</a>
                   <a class="secondary-action small" href="/admin/bid-lines" target="_top">Import Bid Lines</a>
                   <a class="secondary-action small" href="/admin/bid-times" target="_top">Import Bid Times</a>
                   <span class="pill open">System Admin</span>
@@ -1583,6 +1596,7 @@
             <button type="button" data-admin-section-target="admin-rules-section">Rules</button>
             <button type="button" data-admin-section-target="admin-export-section">Data</button>
             <button type="button" data-admin-section-target="admin-backup-section">Backups</button>
+            <a class="secondary-action small" href="/admin/previous-years" target="_top">Previous Years</a>
           </nav>
           <div class="admin-tools-page-grid">
               <section class="panel admin-section-target" id="admin-bid-year-section" data-system-admin-only hidden>
@@ -1698,6 +1712,15 @@
               <section class="panel admin-section-target" id="admin-export-section" tabindex="-1">
                 <h3>Database Export</h3>
                 <p>Download everything captured in this prototype.</p>
+                <form data-validation-export-form>
+                  <label>Validation area
+                    <select name="validation-area">
+                      <option value="Area A">Area A</option><option value="Area B">Area B</option><option value="Area C">Area C</option><option value="Area D">Area D</option><option value="Area E">Area E</option><option value="Area F">Area F</option><option value="TMU">TMU</option><option value="all">All areas</option>
+                    </select>
+                  </label>
+                  <button class="secondary-action small" type="submit">Download Round 1–4 Validation Excel</button>
+                  <p class="form-status" data-validation-export-status role="status" aria-live="polite"></p>
+                </form>
                 <div class="export-actions">
                   <button class="secondary-action small" type="button" data-export-xlsx>XLSX Export</button>
                   <button class="secondary-action small" type="button" data-export-google-sheet>Google Sheet CSV</button>
@@ -1914,7 +1937,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261008-calendar-view-cache"></script>
+    <script src="bidding.js?v=20261010-public-archive-session-navigation"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

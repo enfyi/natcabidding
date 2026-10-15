@@ -60,6 +60,7 @@ const people = [
   { initials: 'DV', area: 'Area A', bidAs: 'DEV', leaveSlotAllowance: 80 },
 ];
 const budgetContext = {
+  LEAVE_SLOT_HOURS_PER_DAY: 8,
   normalizeLeaveSlotAllowance: Number,
   leaveHoursPerDayForInitials: (initials) => initials === 'CW' ? 10 : 8,
   estimatedLeaveDaysFromHours: (hours, hoursPerDay) => hours / hoursPerDay,
@@ -73,9 +74,16 @@ vm.runInContext(source.slice(budgetStart, budgetEnd), budgetContext);
 
 assert.equal(
   budgetContext.areaLeaveSlotBudget('Area A', 'cpc'),
-  43,
-  'Area totals add 21 eight-hour days and 22 rounded-up ten-hour days',
+  48,
+  'Area totals add 21 days and 27 days using eight-hour units even for CWS',
 );
+assert.equal(budgetContext.leaveBidDayAllowanceForPerson(people[1]), 22, 'Individual CWS allowance still divides 211 hours by ten and rounds up');
+assert.equal(budgetContext.leaveBidDayAllowanceForPerson(people[0]), 21, 'Individual standard allowance still uses eight hours');
+people.push(
+  { initials: 'F1', area: 'Area B', bidAs: 'CPC', leaveSlotAllowance: 9 },
+  { initials: 'F2', area: 'Area B', bidAs: 'CPC', leaveSlotAllowance: 9 },
+);
+assert.equal(budgetContext.areaLeaveSlotBudget('Area B', 'cpc'), 4, 'Round each bidder before summing, rather than rounding pooled hours');
 assert.equal(
   budgetContext.areaLeaveSlotBudget('Area A', 'dev'),
   10,
@@ -84,7 +92,7 @@ assert.equal(
 assert.match(
   source,
   /const total = areaLeaveSlotBudget\(area, bucket\)/,
-  'Capacity checks consume the employee-day total directly',
+  'Capacity checks consume the area eight-hour budget directly',
 );
 assert.doesNotMatch(
   source,
@@ -92,4 +100,18 @@ assert.doesNotMatch(
   'Area cards no longer divide pooled CPC hours by eight',
 );
 
-console.log('PASS employee and area leave balances use rounded per-employee bid days');
+console.log('PASS individual allowances use schedule hours and area totals sum rounded eight-hour allowances');
+
+// CE: 208 hours on CWS permits 21 personal days and contributes 26 area days.
+const ce = { initials: 'CW', area: 'Area CWS Example', bidAs: 'CPC', leaveSlotAllowance: 208 };
+people.push(ce);
+assert.equal(budgetContext.leaveBidDayAllowanceForPerson(ce), 21);
+assert.equal(budgetContext.areaLeaveSlotBudget(ce.area, 'cpc'), 26);
+const personalStart = source.indexOf('function currentUserBaseLeaveAllowanceDays(');
+const personalEnd = source.indexOf('\nfunction ', personalStart + 1);
+vm.runInContext(source.slice(personalStart, personalEnd), budgetContext);
+budgetContext.currentUserLeaveAllowanceHours = () => 208;
+budgetContext.leaveHoursPerDayForInitials = () => 10;
+assert.equal(budgetContext.currentUserBaseLeaveAllowanceDays(), 21, 'The actual personal bid-limit helper retains the CWS divisor');
+assert.equal(budgetContext.areaLeaveSlotBudget(ce.area, 'cpc') - budgetContext.currentUserBaseLeaveAllowanceDays(), 5);
+console.log('PASS CE: 21 personal CWS days, 26 area days, and five additional area days');

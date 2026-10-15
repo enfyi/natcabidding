@@ -94,6 +94,12 @@ for (const relativePath of requiredSqlFiles) {
 
 const preflightSql = await readFile(new URL("../database/leave_submission_preflight.sql", import.meta.url), "utf8");
 assert.match(preflightSql, /if not manual_entry and enforce_bid_windows then\s+select bw\.id/, "Production BUE leave submissions must require the personal window");
+assert.match(preflightSql, /manual_entry := coalesce\(manual_entry, false\)/, "Null manual flags must behave as self-service");
+assert.match(preflightSql, /if manual_entry and actor\.role not in \('admin', 'intake'\)/, "Only intake and admin can claim manual access, including self-targeted requests");
+const manualLeaveStart = source.indexOf("function prepareManualLeaveEntries(");
+const manualLeaveEnd = source.indexOf("\nasync function", manualLeaveStart);
+assert.match(source.slice(manualLeaveStart, manualLeaveEnd), /if \(round !== openRound\) throw new Error/, "Manual leave must target the open facility round");
+assert.match(source, /round: openRound/, "Manual RDO entry must target the open round");
 
 const globalRoundSql = await readFile(new URL("../supabase/migrations/20261002180000_global_bid_round_windows.sql", import.meta.url), "utf8");
 assert.doesNotMatch(globalRoundSql, /scheduled_bidder\.area_id\s*=\s*requested_area_id/, "Global round bounds must not be limited to one area");

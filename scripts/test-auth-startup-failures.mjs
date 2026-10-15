@@ -10,6 +10,7 @@ const profile = { supabaseProfileId: 'own-profile', systemAdmin: false };
 function setup(overrides = {}) {
   const calls = [];
   const context = {
+    syncPublicLoginIndicator: () => {},
     currentUser: null,
     supabaseState: { authRestorePromise: null, authUserId: 'own-user' },
     requestedLandingPage: () => 'dashboard',

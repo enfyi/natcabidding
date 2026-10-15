@@ -1329,7 +1329,7 @@ begin
   where lrd.leave_request_id = lr.id
     and lr.bid_year_id = new.bid_year_id
     and lr.bidder_id = new.assigned_bidder_id
-    and lr.status = 'pending';
+    and lr.status in ('pending', 'approved');
 
   update public.leave_requests lr
   set charged_days = coalesce((
@@ -1341,7 +1341,18 @@ begin
       updated_at = now()
   where lr.bid_year_id = new.bid_year_id
     and lr.bidder_id = new.assigned_bidder_id
-    and lr.status = 'pending';
+    and lr.status in ('pending', 'approved');
+
+  -- Intake payloads also expose the charged-day count.
+  update public.intake_submissions submission
+  set payload = jsonb_set(coalesce(submission.payload, '{}'::jsonb), '{days}', to_jsonb(request.charged_days)),
+      updated_at = now()
+  from public.leave_requests request
+  where submission.leave_request_id = request.id
+    and request.bid_year_id = new.bid_year_id
+    and request.bidder_id = new.assigned_bidder_id
+    and request.status in ('pending', 'approved')
+    and submission.payload->>'days' is distinct from request.charged_days::text;
 
   return new;
 end

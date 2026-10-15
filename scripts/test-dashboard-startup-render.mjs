@@ -4,7 +4,7 @@ import vm from 'node:vm';
 const source=readFileSync(new URL('../bidding.js',import.meta.url),'utf8');
 const extract=name=>{const start=source.indexOf(`function ${name}(`);return source.slice(start,source.indexOf('\n}',start)+2);};
 const calls=[];
-const context={currentUser:{area:'F',supabaseProfileId:'own-profile'},document:{querySelector:()=>null,documentElement:{classList:{add(){},remove(name){if(name === 'member-boot-pending') calls.push('ready');}}}},intendedLandingPage:p=>p,setPage:(p,options)=>calls.push(['page',p,options.render]),renderApp:()=>calls.push('render'),startLiveAlertUpdates:()=>calls.push('live')};
+const context={currentUser:{area:'F',supabaseProfileId:'own-profile'},document:{querySelector:()=>null,documentElement:{classList:{add(){},remove(name){if(name === 'member-boot-pending') calls.push('ready');}}}},intendedLandingPage:p=>p,setPage:(p,options)=>calls.push(['page',p,options.render]),renderApp:()=>calls.push('render'),syncPublicLoginIndicator:()=>{},startLiveAlertUpdates:()=>calls.push('live')};
 vm.runInNewContext(extract('showLoggedInApp'),context);
 context.showLoggedInApp('leave');
 assert.deepEqual(calls,[['page','leave',false],'render','live','ready']);

@@ -195,6 +195,11 @@ begin
     and lower(email) = lower(auth.jwt() ->> 'email') and active
   for update;
   if actor.id is null then raise exception 'Authenticated bidder profile required.'; end if;
+  manual_entry := coalesce(manual_entry, false);
+  if manual_entry and actor.role not in ('admin', 'intake') then
+    raise exception 'Manual entry requires bidding reviewer access.' using errcode = '42501';
+  end if;
+
 
   select * into strict year_row from public.bid_years where bid_year = requested_bid_year;
   select coalesce(settings.enforce_bid_windows, true), settings.test_bid_round

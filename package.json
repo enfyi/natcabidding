@@ -26,6 +26,7 @@
     "test:intake-bidder-summary": "node scripts/test-intake-bidder-summary.mjs",
     "test:intake-team-search": "node scripts/test-intake-team-search.mjs",
     "test:admin-tools-page": "node scripts/test-admin-tools-page.mjs",
+    "test:previous-years": "node scripts/test-previous-years.mjs",
     "test:intake-schedule": "node scripts/test-intake-schedule-mutations.mjs",
     "test:intake-schedule-calendar": "node scripts/test-intake-schedule-calendar.mjs",
     "test:pending-rdo-lock": "node scripts/test-pending-rdo-lock.mjs",

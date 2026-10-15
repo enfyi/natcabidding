@@ -216,3 +216,9 @@ Run `pnpm test:reference-loading` to verify retry limits, timeout recovery,
 permission failures, section independence, and 100 simulated concurrent readers.
 The simulated concurrency check does not measure production server capacity;
 a separate approved staging load test is needed for that.
+
+## Bid windows and manual entry
+
+Apply `database/bidder_windows_with_manual_override.sql`, then `database/restrict_manual_bids_to_open_round.sql` after bidding installers. The second upgrade supersedes the earlier unrestricted manual-entry exception while preserving installed business rules and the explicit intake/admin role check. Bidders require their own scheduled window. Intake/admin may submit outside that personal window only while the requested round is open across ZLA. Future and closed rounds cannot accept new manual submissions. Corrections to other rounds must use **Edit Bidder Info**; that editor retains its own authorization and validation rules.
+
+Run `scripts/test-manual-round-override.sql` against pilot and production to verify manual authorization and round boundaries; it rolls back all test work. The manual-entry interface restricts its round selector to the currently open round.
