@@ -12794,3 +12794,11 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   .mobile-calendar-actions { grid-template-columns: 1fr; }
 }
 .calendar-navigation-actions:has(> [data-navigation-annual]:only-child) { gap: 0; }
+
+@media (max-width: 900px) {
+  .public-main:has(#public-calendar.mobile-single-month) { overflow-anchor: none; }
+  #public-calendar.mobile-single-month {
+    overflow-anchor: none;
+    align-content: start;
+  }
+}
