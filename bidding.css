@@ -10237,6 +10237,11 @@ video {
     display: none !important;
   }
 
+  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
+  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule {
+    background: #94a3b8 !important;
+  }
+
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows,
   :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rows {
     align-content: start;
