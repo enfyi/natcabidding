@@ -12802,3 +12802,57 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     align-content: start;
   }
 }
+
+/* Shared public and member round announcement. */
+.round-announcement {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 24px;
+  border: 1px solid #d7b666;
+  border-left: 4px solid #bd861d;
+  border-radius: 10px;
+  background: #fff6dd;
+  color: #513b13;
+  margin: 16px 24px;
+}
+.app-main > .round-announcement { margin: 0 0 20px; }
+.round-announcement-badge {
+  flex-shrink: 0;
+  padding: 6px 9px;
+  border-radius: 5px;
+  background: #f3dfaa;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.round-announcement-copy { display: grid; gap: 4px; }
+.round-announcement-copy strong { font-size: 14px; line-height: 1.5; }
+.round-announcement-copy > span { font-size: 12px; line-height: 1.5; }
+.round-announcement a, .round-announcement button {
+  margin-left: auto;
+  color: #513b13;
+  background: transparent;
+  border: 0;
+  padding: 8px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.round-announcement a:focus-visible, .round-announcement button:focus-visible { outline: 2px solid #513b13; outline-offset: 4px; }
+@media (max-width: 760px) {
+  .round-announcement { flex-wrap: wrap; gap: 10px; padding: 14px 16px; margin: 12px; }
+  .round-announcement-copy { flex: 1; min-width: 180px; }
+  .round-announcement a, .round-announcement button { margin-left: 0; width: 100%; text-align: left; }
+}
+.app-main > [data-round-announcements] .round-announcement { margin: 0 0 20px; }
+.round-announcement-blue { background: #eaf3ff; border-color: #a9c7e9; border-left-color: #356da8; color: #193f68; }
+.round-announcement-blue .round-announcement-badge { background: #cfe2f8; }
+.round-announcement-blue a { color: #193f68; }
+.round-announcement-copy { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.round-announcement-copy > span { white-space: pre-wrap; }
+.round-announcement a { flex-shrink: 1; overflow-wrap: anywhere; }

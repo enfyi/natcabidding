@@ -1,3 +1,7 @@
+let roundAnnouncementState = { items: [], schedule: [], year: null };
+let roundAnnouncementHelpers = null;
+let roundAnnouncementTimer = null;
+let roundAnnouncementBusy = false;
 let leaveReadCache = null;
 
 const monthNames = [
@@ -2342,6 +2346,7 @@ async function loadBidYearCatalog(client) {
     }
     if (year !== BID_YEAR) {
       BID_YEAR = year;
+      renderRoundAnnouncements();
       BID_LEAVE_YEAR_START_KEY = dateKey(year, 1, 10);
       BID_LEAVE_YEAR_END_KEY = dateKey(year + 1, 1, 8);
       FATIGUE_WEEK_ANCHOR_UTC = Date.UTC(year, 0, 10);
@@ -10128,6 +10133,7 @@ function publicRosterArea(area = publicState.area) {
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false, reuseCalendar = false } = {}) {
+  renderRoundAnnouncements();
   if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   syncPublicLoginIndicator();
@@ -18235,6 +18241,7 @@ function renderMemberLeaveContent(pageName) {
 }
 
 function renderApp() {
+  renderRoundAnnouncements();
   return withLeaveReadCache(() => renderAppWithCache());
 }
 
@@ -19729,3 +19736,78 @@ document.addEventListener('click', event => {
   if (event.target.closest('[data-backup-now]')) void runUiAction('backup', event.target.closest('[data-backup-now]'), 'Backing up…', () => performBiddingBackupAction('now'));
   if (event.target.closest('[data-backup-download]')) void runUiAction('backup', event.target.closest('[data-backup-download]'), 'Downloading…', () => performBiddingBackupAction('download'));
 });
+
+// Round announcements are shared with the FAQ administration editor.
+function renderRoundAnnouncements() {
+  const helpers = roundAnnouncementHelpers;
+  const items = helpers && roundAnnouncementState?.year === BID_YEAR
+    ? helpers.activeAnnouncements(roundAnnouncementState.items, roundAnnouncementState.schedule, Date.now()) : [];
+  clearTimeout(roundAnnouncementTimer);
+  if (helpers) {
+    const now = Date.now();
+    const boundaries = roundAnnouncementState.items.filter(item => item.enabled)
+      .flatMap(item => { const range = helpers.announcementWindow(item, roundAnnouncementState.schedule); return range ? [range.start, range.end] : []; })
+      .filter(time => time > now);
+    if (boundaries.length) roundAnnouncementTimer = setTimeout(renderRoundAnnouncements, Math.min(Math.min(...boundaries) - now, 2147483647));
+  }
+  document.querySelectorAll('[data-round-announcements]').forEach(container => {
+    const surface = container.dataset.roundAnnouncements;
+    container.replaceChildren(...items.map(item => {
+      const banner = document.createElement('aside');
+      banner.className = `round-announcement${item.color === 'blue' ? ' round-announcement-blue' : ''}`;
+      banner.setAttribute('aria-label', `Round ${item.round_number} bidding announcement`);
+      const badge = document.createElement('span');
+      badge.className = 'round-announcement-badge';
+      badge.textContent = `ROUND ${item.round_number}`;
+      const copy = document.createElement('div');
+      copy.className = 'round-announcement-copy';
+      const title = document.createElement('strong');
+      title.textContent = helpers.announcementTitle(item, roundAnnouncementState.schedule);
+      const body = document.createElement('span');
+      body.textContent = item.body;
+      copy.append(title, body);
+      banner.append(badge, copy);
+      const url = item[`${surface}_link_url`];
+      if (helpers.safeAnnouncementUrl(url)) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_top';
+        link.textContent = `${item[`${surface}_link_label`]} →`;
+        banner.append(link);
+      }
+      return banner;
+    }));
+  });
+}
+async function refreshRoundAnnouncements() {
+  if (roundAnnouncementBusy) return;
+  const client = supabaseClient();
+  if (!client) return;
+  roundAnnouncementBusy = true;
+  try {
+    roundAnnouncementHelpers ||= await import('./round-announcements.mjs');
+    const { data: catalog, error: catalogError } = await client.rpc('read_bid_year_catalog');
+    if (catalogError) throw catalogError;
+    const year = catalog?.find(row => row.is_active)?.bid_year;
+    if (!year) {
+      roundAnnouncementState = { items: [], schedule: [], year: null };
+      return;
+    }
+    const [settings, schedule] = await Promise.all([
+      client.from('round_announcements').select('*').eq('bid_year', year).eq('enabled', true),
+      client.rpc('read_round_announcement_schedule', { requested_bid_year: year }),
+    ]);
+    if (settings.error || schedule.error) throw settings.error || schedule.error;
+    roundAnnouncementState = { items: settings.data || [], schedule: schedule.data || [], year };
+  } catch (error) {
+    // Missing installation or a failed refresh must not leave an obsolete announcement visible.
+    roundAnnouncementState = { items: [], schedule: [], year: null };
+    console.warn('Round announcements could not be loaded.', error.message);
+  } finally {
+    roundAnnouncementBusy = false;
+    renderRoundAnnouncements();
+  }
+}
+void refreshRoundAnnouncements();
+setInterval(() => { if (!document.hidden) void refreshRoundAnnouncements(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshRoundAnnouncements(); });

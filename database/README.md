@@ -340,3 +340,32 @@ data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an inst
 `@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
 
 The combined migration `supabase/migrations/20261004224619_fatigue_group_manual_round_down_fix.sql` installs both fatigue fixes while preserving each environment's deployed RPC logic. Run `scripts/test-manual-fatigue-override.sql` for rollback-only database verification.
+
+## Round announcements
+
+Apply `supabase/migrations/20261015163256_round_announcements.sql` after the FAQ,
+active bid year, and public bid-window reader installations. It adds admin-only
+announcement edits and public reads of enabled announcements. The aggregate
+schedule reader reuses `read_public_bid_windows`; it exposes no private bidder
+fields and does not create a new privileged function.
+
+Open **Admin Console → Edit FAQs and MOUs → Round announcements**. Select a bid
+year and round, enable the announcement, edit its wording, choose amber or blue,
+and set the public and dashboard link labels and destinations. Relative links
+resolve beside `bidding.html`, including the configured self-hosted base path.
+`{round}` and `{start}` in the heading use the round number and published start
+date. `{start}` includes “tomorrow” or “today” where appropriate; without a
+published start it reads “soon.” Text is rendered as plain text.
+
+Automatic mode shows the announcement from the last published bid window’s end
+in the previous round until the first window’s start in the selected round,
+across all areas. No gap or missing schedules means no automatic announcement.
+Round 1 requires a chosen start time because it has no previous round. Manual
+mode uses the chosen show/hide times independently of the round schedule. All
+inputs use Los Angeles time, including daylight saving time. Banners appear only
+for the active bid year. Website settings refresh every 30 seconds and scheduled
+visibility changes happen at the configured boundaries.
+
+Run `pnpm test:round-announcements` for scheduling and rendering tests. For
+isolated Postgres/RLS integration tests, install `@electric-sql/pglite` outside
+the repository and run `PGLITE_MODULE=/absolute/path/to/node_modules/@electric-sql/pglite node scripts/test-round-announcement-database.mjs`.
