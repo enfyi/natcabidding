@@ -10,6 +10,7 @@
     "package:self-host": "pnpm build:self-host && node scripts/package-self-host.mjs",
     "build:pilot": "node scripts/run-with-pilot-env.mjs build",
     "start": "next start",
+    "test:round-announcements": "node scripts/test-round-announcements.mjs",
     "test:fatigue": "node scripts/test-fatigue-group-balancing.mjs && node scripts/test-fatigue-installer-consistency.mjs && node scripts/test-manual-fatigue-override.mjs",
     "test:bid-line-import": "node scripts/test-bid-line-import.mjs",
     "test:bid-time-import": "node scripts/test-bid-time-import-ranking.mjs",

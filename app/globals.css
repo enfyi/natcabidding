@@ -767,3 +767,24 @@ h1 {
 .archive-link-label.is-pending .archive-link-text { visibility: hidden; }
 .archive-link-progress { position: absolute; inset: 0; display: grid; place-items: center; white-space: nowrap; }
 .historical-shell a:has(.archive-link-label.is-pending) { background: #276e74; border-color: #276e74; color: white; cursor: progress; }
+
+.announcement-editor fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 18px; min-width: 0; }
+.announcement-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.announcement-editor label { display: grid; gap: 7px; }
+.announcement-editor label.faq-checkbox { display: flex; }
+.announcement-editor small { line-height: 1.5; }
+.announcement-editor select, .announcement-editor textarea { width: 100%; padding: 12px; border: 1px solid #cbd5d1; border-radius: 8px; background: #fff; color: #182820; font: inherit; }
+.announcement-window { padding: 12px 16px; background: #f0f5f2; border-radius: 8px; }
+.announcement-preview { display: flex; gap: 16px; align-items: center; padding: 18px 22px; margin-top: 8px; border: 1px solid #d7b666; border-left: 4px solid #bd861d; border-radius: 10px; background: #fff6dd; color: #513b13; }
+.announcement-preview-blue { background: #eaf3ff; border-color: #a9c7e9; border-left-color: #356da8; color: #193f68; }
+.announcement-preview strong { font-size: 14px; }
+.announcement-preview p { margin: 5px 0 0; font-size: 12px; color: inherit; white-space: pre-wrap; }
+.announcement-preview-badge { font-size: 11px; font-weight: 800; letter-spacing: .08em; flex-shrink: 0; }
+.announcement-preview-link { margin-left: auto; font-size: 12px; font-weight: 700; text-decoration: underline; }
+@media (max-width: 760px) {
+  .announcement-fields { grid-template-columns: 1fr; }
+  .announcement-preview { flex-wrap: wrap; padding: 14px; }
+  .announcement-preview-link { width: 100%; margin-left: 0; }
+}
+.announcement-preview > div { min-width: 0; overflow-wrap: anywhere; }
+.announcement-preview-link { overflow-wrap: anywhere; }

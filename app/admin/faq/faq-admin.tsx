@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { RoundAnnouncementEditor } from './round-announcement-editor'
 import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
@@ -710,13 +711,15 @@ export function FaqAdmin() {
         <div>
           <p className="eyebrow">System administration</p>
           <h1>FAQ & MOUs.</h1>
-          <p className="import-lede">Publish frequently asked questions and upload MOU documents for the public bidding FAQ page.</p>
+          <p className="import-lede">Manage round announcements, publish frequently asked questions, and upload MOU documents.</p>
         </div>
         <div className="faq-admin-stats" aria-label="Published content summary">
           <div><strong>{publishedEntries}</strong><span>FAQs live</span></div>
           <div><strong>{publishedDocuments}</strong><span>MOUs live</span></div>
         </div>
       </header>
+
+      {supabase ? <RoundAnnouncementEditor client={supabase} /> : null}
 
       <div className="faq-admin-grid">
         <section className="import-card faq-editor-card" aria-labelledby="faq-add-heading">
