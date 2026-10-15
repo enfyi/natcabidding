@@ -16,7 +16,7 @@ await db.exec(`
   create function public.is_current_admin() returns boolean language sql stable as $$ select coalesce(current_setting('test.admin', true), 'false') = 'true' $$;
   create function public.read_public_bid_windows(integer) returns jsonb language sql stable as $$ select '[{"round_number":1,"opens_at":"2026-10-01T15:00:00Z","closes_at":"2026-10-15T23:00:00Z"},{"round_number":2,"opens_at":"2026-10-16T16:00:00Z","closes_at":"2026-10-22T23:00:00Z"},{"round_number":2,"opens_at":"2026-10-16T15:00:00Z","closes_at":"2026-10-23T01:00:00Z"}]'::jsonb $$;
 `)
-await db.exec(await readFile(`${root}/supabase/migrations/20261015163256_round_announcements.sql`, 'utf8'))
+await db.exec(await readFile(`${root}/supabase/migrations/20261015164831_round_announcements.sql`, 'utf8'))
 await db.exec(`insert into public.round_announcements select bid_year, 3, false, color, mode, title, body, public_link_label, public_link_url, member_link_label, member_link_url, starts_at, ends_at from public.round_announcements where round_number = 2`)
 await db.exec('set role anon')
 assert.equal((await db.query('select * from public.round_announcements')).rows.length, 1)

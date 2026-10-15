@@ -343,7 +343,7 @@ The combined migration `supabase/migrations/20261004224619_fatigue_group_manual_
 
 ## Round announcements
 
-Apply `supabase/migrations/20261015163256_round_announcements.sql` after the FAQ,
+Apply `supabase/migrations/20261015164831_round_announcements.sql` after the FAQ,
 active bid year, and public bid-window reader installations. It adds admin-only
 announcement edits and public reads of enabled announcements. The aggregate
 schedule reader reuses `read_public_bid_windows`; it exposes no private bidder
