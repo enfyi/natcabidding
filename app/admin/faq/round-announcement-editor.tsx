@@ -93,11 +93,8 @@ export function RoundAnnouncementEditor({ client }: { client: SupabaseClient }) 
 
   async function save() {
     if (!draft || !preview || timeError) { setMessage(timeError || 'Check the announcement.'); return }
-    if (!draft.title.trim() || !draft.public_link_label.trim() || !draft.member_link_label.trim()) {
-      setMessage('Enter a heading and both link labels.'); return
-    }
-    if (!safeAnnouncementUrl(draft.public_link_url) || !safeAnnouncementUrl(draft.member_link_url)) {
-      setMessage('Use a relative site path or an absolute http:// or https:// URL for both links.'); return
+    if ((draft.public_link_url && !safeAnnouncementUrl(draft.public_link_url)) || (draft.member_link_url && !safeAnnouncementUrl(draft.member_link_url)) || (draft.public_link_label.trim() && !draft.public_link_url) || (draft.member_link_label.trim() && !draft.member_link_url)) {
+      setMessage('Use a relative site path or an absolute http:// or https:// URL. A destination is required for each visible link.'); return
     }
     if (draft.enabled && !displayWindow) {
       setMessage(draft.mode === 'manual' ? 'Choose a start and end time, with the end after the start.' : 'Automatic timing needs the previous and selected round schedules, with a gap between them. Round 1 also needs a start time.'); return
@@ -133,7 +130,7 @@ export function RoundAnnouncementEditor({ client }: { client: SupabaseClient }) 
             <label>Color scheme<select value={draft.color} onChange={event => change('color', event.target.value as Announcement['color'])}><option value="amber">Amber</option><option value="blue">Blue</option></select></label>
             <label>Display schedule<select value={draft.mode} onChange={event => change('mode', event.target.value as Announcement['mode'])}><option value="automatic">Automatic · Between rounds</option><option value="manual">Manual · Choose dates and times</option></select></label>
           </div>
-          <label>Heading<input maxLength={300} value={draft.title} onChange={event => change('title', event.target.value)} /><small>Use {'{round}'} for the round number and {'{start}'} for the scheduled start date, including “tomorrow” or “today” when applicable.</small></label>
+          <label>Heading (optional)<input maxLength={300} value={draft.title} onChange={event => change('title', event.target.value)} /><small>Leave blank to hide the heading. Use {'{round}'} for the round number and {'{start}'} for the scheduled start date, including “tomorrow” or “today” when applicable.</small></label>
           <label>Message<textarea rows={2} maxLength={1000} value={draft.body} onChange={event => change('body', event.target.value)} /></label>
           {draft.mode === 'automatic' ? <p>{round === 1 ? 'Round 1 appears at the start time you choose below.' : `Appears when the final bid window of Round ${round - 1} ends, across all areas.`} Disappears as soon as the first bid window of Round {round} begins. Changes to published bid times update this schedule automatically.</p> : null}
           <div className="announcement-fields">
@@ -142,10 +139,10 @@ export function RoundAnnouncementEditor({ client }: { client: SupabaseClient }) 
           </div>
           <p className="announcement-window">{timeError || (displayWindow ? `Scheduled: ${formatTime(displayWindow.start)} → ${formatTime(displayWindow.end)} (Los Angeles)` : 'No valid display window. Add published bid times or choose a manual schedule.')}</p>
           <div className="announcement-fields">
-            <label>Public link wording<input maxLength={100} value={draft.public_link_label} onChange={event => change('public_link_label', event.target.value)} /></label>
-            <label>Public link destination<input maxLength={2000} value={draft.public_link_url} onChange={event => change('public_link_url', event.target.value)} /><small>Example: login or https://example.com/sign-in</small></label>
-            <label>Dashboard link wording<input maxLength={100} value={draft.member_link_label} onChange={event => change('member_link_label', event.target.value)} /></label>
-            <label>Dashboard link destination<input maxLength={2000} value={draft.member_link_url} onChange={event => change('member_link_url', event.target.value)} /><small>Example: bidding.html?page=seniority</small></label>
+            <label>Public link wording (optional)<input maxLength={100} value={draft.public_link_label} onChange={event => change('public_link_label', event.target.value)} /></label>
+            <label>Public link destination<input maxLength={2000} value={draft.public_link_url} onChange={event => change('public_link_url', event.target.value)} /><small>Leave the link wording blank to hide this link. Example destination: login or https://example.com/sign-in</small></label>
+            <label>Dashboard link wording (optional)<input maxLength={100} value={draft.member_link_label} onChange={event => change('member_link_label', event.target.value)} /></label>
+            <label>Dashboard link destination<input maxLength={2000} value={draft.member_link_url} onChange={event => change('member_link_url', event.target.value)} /><small>Leave the link wording blank to hide this link. Example destination: bidding.html?page=seniority</small></label>
           </div>
         </fieldset>
         <h3>Banner preview</h3>
@@ -154,8 +151,8 @@ export function RoundAnnouncementEditor({ client }: { client: SupabaseClient }) 
           <small>{surface === 'public' ? 'Public website' : 'Member dashboard'}</small>
           <aside className={`announcement-preview announcement-preview-${draft.color}`}>
             <span className="announcement-preview-badge">ROUND {round}</span>
-            <div><strong>{announcementTitle(draft, schedule)}</strong><p>{draft.body}</p></div>
-            <span className="announcement-preview-link">{draft[`${surface}_link_label`]} →</span>
+            <div>{draft.title.trim() ? <strong>{announcementTitle(draft, schedule)}</strong> : null}<p>{draft.body}</p></div>
+            {draft[`${surface}_link_label`].trim() ? <span className="announcement-preview-link">{draft[`${surface}_link_label`]} →</span> : null}
           </aside>
         </div>)}
         <button className="button primary" type="button" disabled={busy || !dirty} onClick={() => void save()}>{busy ? 'Saving…' : `Save Round ${round} announcement`}</button>

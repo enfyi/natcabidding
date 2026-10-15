@@ -17,6 +17,7 @@ await db.exec(`
   create function public.read_public_bid_windows(integer) returns jsonb language sql stable as $$ select '[{"round_number":1,"opens_at":"2026-10-01T15:00:00Z","closes_at":"2026-10-15T23:00:00Z"},{"round_number":2,"opens_at":"2026-10-16T16:00:00Z","closes_at":"2026-10-22T23:00:00Z"},{"round_number":2,"opens_at":"2026-10-16T15:00:00Z","closes_at":"2026-10-23T01:00:00Z"}]'::jsonb $$;
 `)
 await db.exec(await readFile(`${root}/supabase/migrations/20261015164831_round_announcements.sql`, 'utf8'))
+await db.exec(await readFile(`${root}/supabase/migrations/20261015172421_optional_round_announcement_labels.sql`, 'utf8'))
 await db.exec(`insert into public.round_announcements select bid_year, 3, false, color, mode, title, body, public_link_label, public_link_url, member_link_label, member_link_url, starts_at, ends_at from public.round_announcements where round_number = 2`)
 await db.exec('set role anon')
 assert.equal((await db.query('select * from public.round_announcements')).rows.length, 1)
@@ -35,6 +36,8 @@ await assert.rejects(db.query(`update public.round_announcements set member_link
 await assert.rejects(db.query(`update public.round_announcements set public_link_url = '//evil.test' where round_number = 2`), /check constraint/)
 await assert.rejects(db.query(`update public.round_announcements set ends_at = starts_at where round_number = 2`), /check constraint/)
 await assert.rejects(db.query(`update public.round_announcements set round_number = 7 where round_number = 2`), /check constraint/)
+assert.equal((await db.query(`update public.round_announcements set title = '', public_link_label = '', member_link_label = '', public_link_url = '', member_link_url = '' where round_number = 2 returning *`)).rows[0].title, '')
+await assert.rejects(db.query(`update public.round_announcements set public_link_label = 'Visible link' where round_number = 2`), /check constraint/)
 await db.exec("set test.admin = 'false'")
 assert.equal((await db.query('delete from public.round_announcements returning *')).rows.length, 0)
 await db.close()

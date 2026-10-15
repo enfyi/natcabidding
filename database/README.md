@@ -369,3 +369,9 @@ visibility changes happen at the configured boundaries.
 Run `pnpm test:round-announcements` for scheduling and rendering tests. For
 isolated Postgres/RLS integration tests, install `@electric-sql/pglite` outside
 the repository and run `PGLITE_MODULE=/absolute/path/to/node_modules/@electric-sql/pglite node scripts/test-round-announcement-database.mjs`.
+
+Apply `supabase/migrations/20261015172421_optional_round_announcement_labels.sql`
+to make announcement headings and both link labels optional. Blank headings are
+hidden; a blank link label hides that surface’s entire link, including its arrow.
+Hidden links may also have a blank destination. Visible links still require a safe
+destination. Existing saved wording is preserved.
