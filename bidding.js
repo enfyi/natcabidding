@@ -12365,10 +12365,10 @@ function renderLeaveBucketCards() {
   const cpcLeft = Math.max(0, cpcTotalDays - cpcUsedDays);
   const devLeft = Math.max(0, devTotalDays - devUsedDays);
 
-  setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDays(cpcLeft));
-  setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDays(devLeft));
-  setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} used of ${formatRoundedUpLeaveDays(cpcTotalDays)} estimated days`);
-  setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} used of ${formatRoundedUpLeaveDays(devTotalDays)} estimated days`);
+  setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDaysLabel(cpcLeft));
+  setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDaysLabel(devLeft));
+  setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} of ${formatRoundedUpLeaveDays(cpcTotalDays)} used`);
+  setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} of ${formatRoundedUpLeaveDays(devTotalDays)} used`);
 }
 
 function setIntakeTeamStatus(message, status = "info") {

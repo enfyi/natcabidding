@@ -2063,6 +2063,27 @@ input {
   line-height: 1.32;
 }
 
+.area-slots-metric dd {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-main .area-slots-metric dd.area-slots-detail {
+  margin-top: 6px;
+  color: #64748b;
+  font-family: "Open Sans", Arial, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.area-slots-metric .area-slots-caption {
+  margin-top: 5px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .metric-card.allowance-summary-metric {
   display: grid;
   align-content: start;
