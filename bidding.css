@@ -10227,11 +10227,9 @@ video {
   }
 
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
-  #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
   #public-calendar.expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty,
   :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-heading,
-  :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-rule,
   :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-name,
   :is(#dashboard-calendar, #leave-calendar).expanded-slots-calendar .permanent-slot-summary .tooltip-slot-row.empty {
     display: none !important;
