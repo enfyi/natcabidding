@@ -6219,6 +6219,15 @@ function updateCalendarMonthNavigation(target, month) {
 function jumpToCalendarMonth(target, month) {
   const card = [...target.querySelectorAll("[data-calendar-month]")].find((item) => calendarNavigationIndex(item) === month);
   if (!card) return;
+  const keepPublicPosition = target.id === "public-calendar"
+    && window.matchMedia("(max-width: 900px)").matches
+    && target.classList.contains("mobile-single-month");
+  const scrollTop = window.scrollY;
+  if (keepPublicPosition) {
+    // Retain enough space for the tallest month visited so shorter months cannot
+    // clamp the page scroll position and pull the sticky controls downward.
+    target.style.minHeight = `${target.getBoundingClientRect().height}px`;
+  }
   // Reveal the requested month on mobile without rebuilding any dates or slots.
   target.querySelectorAll("[data-calendar-month]").forEach((item) => {
     item.classList.toggle("mobile-current-month", item === card);
@@ -6226,7 +6235,14 @@ function jumpToCalendarMonth(target, month) {
   updateCalendarMonthNavigation(target, month);
   const mobileSelect = document.querySelector(`[data-mobile-calendar="${target.id}"] select`);
   if (mobileSelect) mobileSelect.value = String(month);
-  card.scrollIntoView({ behavior: "instant", block: "start" });
+  if (keepPublicPosition) {
+    window.scrollTo({ top: scrollTop, behavior: "instant" });
+    requestAnimationFrame(() => {
+      if (window.scrollY !== scrollTop) window.scrollTo({ top: scrollTop, behavior: "instant" });
+    });
+  } else {
+    card.scrollIntoView({ behavior: "instant", block: "start" });
+  }
 }
 
 function syncCalendarMonthNavigation(target) {
@@ -6316,6 +6332,7 @@ document.addEventListener("change", (event) => {
 });
 
 function syncMobileCalendarMonths(target) {
+  target.style.removeProperty("min-height");
   target.classList.toggle("mobile-single-month", !annualMobileCalendars.has(target.id));
   const lastCard = [...target.querySelectorAll("[data-calendar-month]")].at(-1);
   const selectedMonth = Math.min(lastCard ? calendarNavigationIndex(lastCard) : 11, calendarNavigationMonths.get(target.id) ?? displayedCalendarMonth);
