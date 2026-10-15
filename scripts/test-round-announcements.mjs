@@ -75,3 +75,19 @@ now = bounds.end
 context.renderRoundAnnouncements()
 assert.equal(memberContainer.children.length, 0, 'Remove announcement at the selected round start')
 console.log('Public and dashboard rendering, editable links, text escaping, colors, archived years, and exact removal timer checks passed.')
+
+now = bounds.start
+context.roundAnnouncementState.items[0] = { ...item, title: '   ', public_link_label: '', member_link_label: '   ', public_link_url: '', member_link_url: '' }
+context.renderRoundAnnouncements()
+for (const container of [publicContainer, memberContainer]) {
+  const banner = container.children[0]
+  assert.equal(banner.children.length, 2, 'Blank labels omit the whole link, including its arrow')
+  assert.equal(banner.children[1].children.length, 1, 'Blank headings omit the heading element')
+  assert.equal(banner.children[1].children[0].tag, 'span', 'Message remains visible')
+}
+context.roundAnnouncementState.items[0].member_link_label = 'My bid time'
+context.roundAnnouncementState.items[0].member_link_url = 'bidding.html?page=seniority'
+context.renderRoundAnnouncements()
+assert.equal(publicContainer.children[0].children.length, 2)
+assert.equal(memberContainer.children[0].children.length, 3, 'Link labels are optional independently on each surface')
+console.log('Optional heading and independent public/dashboard link label checks passed.')

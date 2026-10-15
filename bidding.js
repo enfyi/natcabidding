@@ -19765,10 +19765,11 @@ function renderRoundAnnouncements() {
       title.textContent = helpers.announcementTitle(item, roundAnnouncementState.schedule);
       const body = document.createElement('span');
       body.textContent = item.body;
-      copy.append(title, body);
+      if (item.title.trim()) copy.append(title);
+      copy.append(body);
       banner.append(badge, copy);
       const url = item[`${surface}_link_url`];
-      if (helpers.safeAnnouncementUrl(url)) {
+      if (item[`${surface}_link_label`].trim() && helpers.safeAnnouncementUrl(url)) {
         const link = document.createElement('a');
         link.href = url;
         link.target = '_top';
