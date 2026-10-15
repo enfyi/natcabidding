@@ -9203,9 +9203,11 @@ body {
   background: #ffffff !important;
 }
 
-.month-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.filled .tooltip-slot-value,
-.week-calendar-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.filled .tooltip-slot-value {
-  background: #e2e8f0 !important;
+.month-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value,
+.week-calendar-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value {
+  border-color: #475569 !important;
+  color: #ffffff !important;
+  background: #475569 !important;
 }
 
 .month-grid .leave-date-tooltip.slot-summary .tooltip-slot-rule,
@@ -12357,13 +12359,6 @@ body:has(.leave-slot-modal:not([hidden])) .leave-date-tooltip {
 .leave-sort-button:hover { text-decoration: underline; }
 .leave-sort-button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 
-/* Make occupied TMU slots distinct from white open slots. */
-.month-grid .leave-date-tooltip.slot-summary.tmu-slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value,
-.week-calendar-grid .leave-date-tooltip.slot-summary.tmu-slot-summary .tooltip-slot-row.filled:not(.gl-bid-row) .tooltip-slot-value {
-  border-color: #334155 !important;
-  color: #ffffff !important;
-  background: #334155 !important;
-}
 .public-main .public-rdo-panel tr.occupied-row .rdo-line-bidders {
   color: #334155;
 }
