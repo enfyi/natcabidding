@@ -6224,11 +6224,11 @@ function updateCalendarMonthNavigation(target, month) {
 function jumpToCalendarMonth(target, month) {
   const card = [...target.querySelectorAll("[data-calendar-month]")].find((item) => calendarNavigationIndex(item) === month);
   if (!card) return;
-  const keepPublicPosition = target.id === "public-calendar"
+  const keepMobilePosition = ["public-calendar", "dashboard-calendar", "leave-calendar"].includes(target.id)
     && window.matchMedia("(max-width: 900px)").matches
     && target.classList.contains("mobile-single-month");
   const scrollTop = window.scrollY;
-  if (keepPublicPosition) {
+  if (keepMobilePosition) {
     // Retain enough space for the tallest month visited so shorter months cannot
     // clamp the page scroll position and pull the sticky controls downward.
     target.style.minHeight = `${target.getBoundingClientRect().height}px`;
@@ -6240,7 +6240,7 @@ function jumpToCalendarMonth(target, month) {
   updateCalendarMonthNavigation(target, month);
   const mobileSelect = document.querySelector(`[data-mobile-calendar="${target.id}"] select`);
   if (mobileSelect) mobileSelect.value = String(month);
-  if (keepPublicPosition) {
+  if (keepMobilePosition) {
     window.scrollTo({ top: scrollTop, behavior: "instant" });
     requestAnimationFrame(() => {
       if (window.scrollY !== scrollTop) window.scrollTo({ top: scrollTop, behavior: "instant" });
