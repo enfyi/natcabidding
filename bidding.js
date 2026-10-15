@@ -6188,22 +6188,141 @@ function syncMobileCalendarControls(target) {
         <label><span class="visually-hidden">Month</span><select data-mobile-month aria-label="Calendar month">${monthNames.map((name, index) => `<option value="${index}">${name}</option>`).join("")}</select></label>
         <button type="button" data-mobile-month-step="1" aria-label="Next month">›</button>
       </div>
-      <div class="mobile-calendar-actions"><button type="button" data-mobile-calendar-annual aria-pressed="false">Show full year</button><button type="button" data-calendar-year-action="today">Bid year</button></div>`;
+      <div class="mobile-calendar-actions"><button type="button" data-mobile-calendar-annual aria-pressed="false">Show full year</button></div>`;
     target.before(controls);
   }
   controls.querySelectorAll("[data-mobile-month] option").forEach((option, index) => { option.textContent = `${monthNames[index]} ${displayedCalendarYear}`; });
-  controls.querySelector("[data-mobile-month]").value = String(displayedCalendarMonth);
+  controls.querySelector("[data-mobile-month]").value = String(Math.min(11, calendarNavigationMonths.get(target.id) ?? displayedCalendarMonth));
   const annual = annualMobileCalendars.has(target.id);
   const toggle = controls.querySelector("[data-mobile-calendar-annual]");
   toggle.setAttribute("aria-pressed", String(annual));
   toggle.textContent = annual ? "Show one month" : "Show full year";
 }
 
+const calendarMonthObservers = new WeakMap();
+const calendarNavigationMonths = new Map();
+const calendarNavigationSizes = new WeakMap();
+
+function calendarNavigationIndex(card) {
+  return Number(card.dataset.calendarMonth) + (Number(card.dataset.calendarYear) - displayedCalendarYear) * 12;
+}
+
+function updateCalendarMonthNavigation(target, month) {
+  calendarNavigationMonths.set(target.id, month);
+  const nav = target.querySelector("[data-calendar-month-navigation]");
+  if (!nav) return;
+  nav.querySelector("select").value = String(month);
+  nav.querySelector('[data-month-jump="previous"]').disabled = month === 0;
+  nav.querySelector('[data-month-jump="next"]').disabled = month === Number(nav.querySelector('select').lastElementChild.value);
+}
+
+function jumpToCalendarMonth(target, month) {
+  const card = [...target.querySelectorAll("[data-calendar-month]")].find((item) => calendarNavigationIndex(item) === month);
+  if (!card) return;
+  // Reveal the requested month on mobile without rebuilding any dates or slots.
+  target.querySelectorAll("[data-calendar-month]").forEach((item) => {
+    item.classList.toggle("mobile-current-month", item === card);
+  });
+  updateCalendarMonthNavigation(target, month);
+  const mobileSelect = document.querySelector(`[data-mobile-calendar="${target.id}"] select`);
+  if (mobileSelect) mobileSelect.value = String(month);
+  card.scrollIntoView({ behavior: "instant", block: "start" });
+}
+
+function syncCalendarMonthNavigation(target) {
+  calendarMonthObservers.get(target)?.disconnect();
+  calendarNavigationSizes.get(target)?.disconnect();
+  if (!["public-calendar", "dashboard-calendar", "leave-calendar"].includes(target.id)) return;
+  const expanded = target.classList.contains("expanded-slots-calendar");
+  let nav = target.querySelector("[data-calendar-month-navigation]");
+  if (!expanded && !window.matchMedia("(max-width: 900px)").matches) { nav?.remove(); return; }
+  if (!nav) {
+    nav = document.createElement("nav");
+    nav.className = "calendar-month-navigation";
+    nav.dataset.calendarMonthNavigation = "";
+    nav.setAttribute("aria-label", "Calendar navigation");
+    nav.innerHTML = `<div class="calendar-month-navigation-group"><button type="button" data-month-jump="previous" aria-label="Previous month"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6" /></svg></button>
+      <label><span class="visually-hidden">Jump to month</span><select data-month-jump-select>${monthNames.map((name, index) => `<option value="${index}">${name} ${displayedCalendarYear}</option>`).join("")}</select></label>
+      <button type="button" data-month-jump="next" aria-label="Next month"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6" /></svg></button>
+      </div><div class="calendar-navigation-actions">
+      <button type="button" data-navigation-annual></button>
+      </div>`;
+    target.prepend(nav);
+  }
+  const monthCards = [...target.querySelectorAll("[data-calendar-month]")];
+  nav.querySelector("select").innerHTML = monthCards.map((card) => `<option value="${calendarNavigationIndex(card)}">${monthNames[Number(card.dataset.calendarMonth)]} ${card.dataset.calendarYear}</option>`).join("");
+  const annualButton = nav.querySelector("[data-navigation-annual]");
+  annualButton.textContent = annualMobileCalendars.has(target.id) ? "Show one month" : "Show full year";
+  annualButton.setAttribute("aria-pressed", String(annualMobileCalendars.has(target.id)));
+  const header = target.id === "public-calendar" && window.matchMedia("(max-width: 900px)").matches
+    ? document.querySelector(".public-rail")
+    : target.closest(".app-main, .public-main")?.querySelector(".topbar, .public-topbar");
+  let observerInset = 150;
+  const updateOffsets = () => {
+    const offset = header && getComputedStyle(header).position === "sticky" ? header.getBoundingClientRect().height : 0;
+    target.style.setProperty("--calendar-navigation-top", `${offset}px`);
+    observerInset = offset + nav.getBoundingClientRect().height + 12;
+    target.style.setProperty("--calendar-month-offset", `${observerInset}px`);
+  };
+  const sizes = new ResizeObserver(updateOffsets);
+  if (header) sizes.observe(header);
+  sizes.observe(nav);
+  calendarNavigationSizes.set(target, sizes);
+  updateOffsets();
+
+  updateCalendarMonthNavigation(target, Math.min(calendarNavigationIndex(monthCards[monthCards.length - 1]), calendarNavigationMonths.get(target.id) ?? displayedCalendarMonth));
+  // A one-pixel observation line updates only at month boundaries, rather
+  // than on every scroll frame. Use the main viewing area below the controls.
+  const trackingLine = Math.min(window.innerHeight - 1, Math.max(observerInset + 1, Math.round(window.innerHeight * 0.4)));
+  const observer = new IntersectionObserver(() => {
+    if (calendarMonthObservers.get(target) !== observer) return;
+    if (window.matchMedia("(max-width: 900px)").matches && target.classList.contains("mobile-single-month")) return;
+    const first = monthCards.find((card) => {
+      const rect = card.getBoundingClientRect();
+      return rect.height > 0 && rect.bottom > trackingLine && rect.top < window.innerHeight;
+    });
+    if (first) {
+      const month = calendarNavigationIndex(first);
+      if (calendarNavigationMonths.get(target.id) !== month) updateCalendarMonthNavigation(target, month);
+    }
+  }, { rootMargin: `-${trackingLine}px 0px -${Math.max(0, window.innerHeight - trackingLine - 1)}px 0px`, threshold: 0 });
+  monthCards.forEach((card) => observer.observe(card));
+  calendarMonthObservers.set(target, observer);
+}
+
+// Delegated controls also work when cached calendar nodes are restored.
+document.addEventListener("click", (event) => {
+  const annual = event.target.closest("[data-navigation-annual]");
+  if (annual) {
+    const target = annual.closest(".year-calendar");
+    if (annualMobileCalendars.has(target.id)) annualMobileCalendars.delete(target.id);
+    else annualMobileCalendars.add(target.id);
+    const month = Number(target.querySelector("[data-month-jump-select]").value);
+    syncMobileCalendarMonths(target);
+    jumpToCalendarMonth(target, month);
+    return;
+  }
+  const button = event.target.closest("[data-month-jump]");
+  if (!button) return;
+  const target = button.closest(".year-calendar");
+  const current = Number(target.querySelector("[data-month-jump-select]").value);
+  const month = current + (button.dataset.monthJump === "next" ? 1 : -1);
+  if (target.querySelector(`[data-month-jump-select] option[value="${month}"]`)) jumpToCalendarMonth(target, month);
+});
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-month-jump-select]")) {
+    jumpToCalendarMonth(event.target.closest(".year-calendar"), Number(event.target.value));
+  }
+});
+
 function syncMobileCalendarMonths(target) {
   target.classList.toggle("mobile-single-month", !annualMobileCalendars.has(target.id));
+  const lastCard = [...target.querySelectorAll("[data-calendar-month]")].at(-1);
+  const selectedMonth = Math.min(lastCard ? calendarNavigationIndex(lastCard) : 11, calendarNavigationMonths.get(target.id) ?? displayedCalendarMonth);
   target.querySelectorAll("[data-calendar-month]").forEach((month) => {
-    month.classList.toggle("mobile-current-month", Number(month.dataset.calendarMonth) === displayedCalendarMonth && Number(month.dataset.calendarYear) === displayedCalendarYear);
+    month.classList.toggle("mobile-current-month", calendarNavigationIndex(month) === selectedMonth);
   });
+  syncCalendarMonthNavigation(target);
 }
 
 function initializeMobilePublicNavigation() {
@@ -6396,14 +6515,14 @@ function renderMonthCard(monthIndex, year, options = {}) {
 
   return `
     <article class="month-card" data-calendar-month="${monthIndex}" data-calendar-year="${year}">
-      <h3>${expandedSlots ? `${name} ${year}` : name}</h3>
+      <h3>${expandedSlots || year !== displayedCalendarYear ? `${name} ${year}` : name}</h3>
       <div class="month-grid">${cells.join("")}</div>
     </article>
   `;
 }
 
 function renderLeaveYearContinuation(year, options = {}) {
-  if (year !== BID_YEAR || !options.expandedSlots) return "";
+  if (year !== BID_YEAR) return "";
   return renderMonthCard(0, BID_YEAR + 1, options);
 }
 
@@ -18249,9 +18368,10 @@ document.addEventListener("click", async (event) => {
   const mobileCalendar = event.target.closest("[data-mobile-calendar]");
   const monthStep = event.target.closest("[data-mobile-month-step]");
   if (monthStep) {
-    const next = new Date(displayedCalendarYear, displayedCalendarMonth + Number(monthStep.dataset.mobileMonthStep), 1);
+    const next = new Date(displayedCalendarYear, (calendarNavigationMonths.get(mobileCalendar.dataset.mobileCalendar) ?? displayedCalendarMonth) + Number(monthStep.dataset.mobileMonthStep), 1);
     displayedCalendarYear = next.getFullYear();
     displayedCalendarMonth = next.getMonth();
+    calendarNavigationMonths.set(mobileCalendar.dataset.mobileCalendar, displayedCalendarMonth);
     setSelectedDateYear(displayedCalendarYear);
     annualMobileCalendars.delete(mobileCalendar.dataset.mobileCalendar);
     renderVisibleCalendars();
@@ -19323,6 +19443,7 @@ document.addEventListener("change", async (event) => {
   }
   if (event.target.matches("[data-mobile-month]")) {
     displayedCalendarMonth = Number(event.target.value);
+    calendarNavigationMonths.set(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar, displayedCalendarMonth);
     annualMobileCalendars.delete(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar);
     renderVisibleCalendars();
     return;
