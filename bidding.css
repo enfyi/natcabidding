@@ -12666,3 +12666,133 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Keep expanded calendar navigation within its calendar, below the page header. */
+.calendar-month-navigation {
+  position: sticky;
+  top: var(--calendar-navigation-top, 0px);
+  z-index: 9;
+  grid-column: 1 / -1;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #bdcfd7;
+  border-radius: 10px;
+  background: #f3f8fa;
+  box-shadow: 0 3px 10px #0f172a18;
+}
+.calendar-month-navigation button,
+.calendar-month-navigation select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #a6c6ca;
+  border-radius: 8px;
+  color: #19464b;
+  background: white;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+}
+.calendar-month-navigation,
+.calendar-month-navigation button,
+.calendar-month-navigation select { box-sizing: border-box; }
+.calendar-month-navigation { min-width: 0; width: 100%; }
+.calendar-month-navigation label { display: block; margin: 0; }
+.calendar-month-navigation select { height: 44px; }
+.calendar-month-navigation button[data-month-jump="previous"],
+.calendar-month-navigation button[data-month-jump="next"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+  transform: none;
+}
+.calendar-month-navigation button svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.calendar-month-navigation button:disabled { opacity: .4; cursor: default; }
+.calendar-month-navigation label { flex: 1; max-width: 260px; min-width: 0; }
+.calendar-month-navigation select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2319464b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px 18px;
+}
+.year-calendar:has(> .calendar-month-navigation) > [data-calendar-month] {
+  scroll-margin-top: var(--calendar-month-offset, 80px);
+}
+@media print {
+  .calendar-month-navigation { display: none !important; }
+}
+@media (max-width: 900px) {
+  .mobile-calendar-controls:has(+ .expanded-slots-calendar > .calendar-month-navigation) .mobile-month-navigation {
+    display: none;
+  }
+}
+.calendar-month-navigation-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.calendar-month-navigation-group > label { flex: 1; }
+.calendar-navigation-actions { display: flex; gap: 8px; }
+.calendar-navigation-actions [data-navigation-annual] { display: none; }
+.calendar-toolbar:has(~ .year-calendar.expanded-slots-calendar > .calendar-month-navigation) { display: none; }
+@media (max-width: 900px) {
+  .mobile-calendar-controls:has(+ .year-calendar > .calendar-month-navigation) { display: none; }
+  .calendar-month-navigation { flex-wrap: wrap; gap: 8px; }
+  .calendar-month-navigation-group { flex: 1 0 100%; width: 100%; }
+  .calendar-month-navigation-group > label { max-width: none; }
+  .calendar-navigation-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; gap: 8px; }
+  .calendar-navigation-actions [data-navigation-annual] { display: block; }
+  .calendar-navigation-actions button { font-size: 14px; background: #eff7f7; }
+  .calendar-panel .calendar-view-row { display: flex; flex-wrap: nowrap; justify-content: space-between; gap: 8px; }
+  .calendar-panel .calendar-view-row > .calendar-layout-tabs,
+  .calendar-panel .calendar-view-row > .calendar-workforce-tabs {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    gap: 0;
+    padding: 3px;
+    margin: 0;
+    box-sizing: border-box;
+  }
+  .calendar-panel .calendar-view-row > .calendar-layout-tabs button,
+  .calendar-panel .calendar-view-row > .calendar-workforce-tabs button {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    padding: 8px 6px;
+    font-size: 14px;
+    margin: 0;
+  }
+  .calendar-panel .calendar-workforce-description,
+  .calendar-panel .calendar-layout-description,
+  .calendar-panel > .panel-header p { display: none; }
+}
+
+@media (max-width: 900px) {
+  .year-calendar:has(> .calendar-month-navigation) { margin-top: 12px; }
+}
+
+/* The display toggle fills the actions row while Today is deferred. */
+@media (max-width: 900px) {
+  .calendar-navigation-actions,
+  .mobile-calendar-actions { grid-template-columns: 1fr; }
+}
+.calendar-navigation-actions:has(> [data-navigation-annual]:only-child) { gap: 0; }
