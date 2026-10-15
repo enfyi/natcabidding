@@ -4134,19 +4134,31 @@ function leaveBidDayAllowanceForPerson(person) {
 function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
   return bueRoster()
     .filter((person) => !isAreaLeaveBalanceExemptPerson(person) && person.area === area && leaveSlotBucketForBidAs(person.bidAs) === bucket)
-    .reduce((total, person) => total + leaveBidDayAllowanceForPerson(person), 0);
+    // Area capacity uses eight-hour units, rounded separately for each bidder.
+    // Individual allowances still use the bidder's eight- or ten-hour schedule.
+    .reduce((total, person) => total + Math.ceil(estimatedLeaveDaysFromHours(
+      normalizeLeaveSlotAllowance(person.leaveSlotAllowance), LEAVE_SLOT_HOURS_PER_DAY
+    )), 0);
 }
 
 function areaCommittedLeaveItems() {
   const byRequest = new Map();
-  // Intake contains the area's saved bids; leaveBids contains personal/local bids.
-  // Process intake last so saved status replaces a stale personal copy.
-  [...leaveBids, ...intakeQueue.filter((item) => item.type === "Leave")].forEach((item) => {
+  const addItem = (item, saved = false) => {
     const round = leaveRoundForItem(item);
     const initials = String(item.initials || currentUser.initials).trim().toUpperCase();
-    const key = JSON.stringify([leaveItemArea(item), initials, round, leaveDateKeysForItem(item)]);
+    const dateKey = JSON.stringify([leaveItemArea(item), initials, round, leaveDateKeysForItem(item)]);
+    // Local drafts may not have a saved request ID. Replace that fallback copy
+    // with intake's saved status, including cancellations.
+    if (saved) byRequest.delete(dateKey);
+    // Separate requests can share dates (for example, a denied bid followed by
+    // an approved resubmission). Their decisions must never overwrite each other.
+    const key = item.supabaseRequestId
+      ? JSON.stringify(["request", item.supabaseRequestId])
+      : saved && item.id ? JSON.stringify(["intake", item.id]) : dateKey;
     byRequest.set(key, { ...item, initials, round });
-  });
+  };
+  leaveBids.forEach((item) => addItem(item));
+  intakeQueue.filter((item) => item.type === "Leave").forEach((item) => addItem(item, true));
   return [...byRequest.values()].filter((item) => ["Approved", "Pending"].includes(item.status));
 }
 
