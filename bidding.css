@@ -12963,3 +12963,10 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .manual-leave-preflight p { margin: 6px 0 0; color: var(--text); font-size: 12px; }
 .manual-picker-grid button[data-date-conflict="rdo"] { border-style: dashed; border-color: var(--gold); }
 .manual-picker-grid button[data-date-conflict="full"] { border-color: var(--red); box-shadow: inset 0 -3px var(--red); }
+
+/* These admin tools retain dark panels inside the light app-main theme. */
+.app-main :is(.slot-capacity-manager, .bid-window-builder) :is(h3, h4, h5, label, legend),
+.app-main :is(.slot-capacity-manager, .bid-window-builder) p:not(.form-status),
+.app-main .bid-window-builder .bid-window-consistency-toggle > span {
+  color: #fff;
+}
