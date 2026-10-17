@@ -4405,7 +4405,7 @@ function visibleLeaveSlotDetailsFromMap(
   key,
   area = currentUser.area,
   slotMap = leaveSlotMap(area),
-  { includePrivateOverlays = true } = {}
+  { includePrivateOverlays = true, calendarIndex = null } = {}
 ) {
   const details = leaveSlotsForDateFromMap(key, area, slotMap, {
     includePersonalHolidays: includePrivateOverlays && Boolean(currentUser),
@@ -4416,6 +4416,13 @@ function visibleLeaveSlotDetailsFromMap(
     dev: [...(details.dev || [])],
     glBids: [...(details.glBids || [])],
   };
+  if (calendarIndex) {
+    (calendarIndex.overlays.get(key) || []).forEach(({ item, initials, bucket, gl }) => {
+      if (gl) addVisibleGlBid(visible, item, initials);
+      else showInitialsInVisibleSlot(visible, bucket, initials);
+    });
+    return visible;
+  }
   const showCurrentUserOverlay = includePrivateOverlays && Boolean(currentUser) && area === currentUser.area;
   const previewItem = showCurrentUserOverlay ? activeLeavePreviewItem() : null;
   if (showCurrentUserOverlay && !currentUser.ghostBidder && previewItem && leaveSlotDateKeys(leaveDateKeysForItem(previewItem), currentUser.initials).includes(key)) {
@@ -6109,6 +6116,76 @@ function cachedLeaveRead(key, read) {
   return leaveReadCache.get(key);
 }
 
+// Derived data lives only within withLeaveReadCache's synchronous render.
+// Never retain RDO decisions across edits, approvals, year changes or sessions.
+function calendarLeaveIndex(area, includePrivateOverlays, showPersonalLeave) {
+  const cacheKey = JSON.stringify(["calendarLeaveIndex", area, includePrivateOverlays, showPersonalLeave,
+    currentUser?.initials, currentUser?.area, selectedLineId]);
+  return cachedLeaveRead(cacheKey, () => buildCalendarLeaveIndex(area, includePrivateOverlays, showPersonalLeave));
+}
+
+function buildCalendarLeaveIndex(area, includePrivateOverlays, showPersonalLeave) {
+  const overlays = new Map();
+  const personalStatuses = new Map();
+  const ranges = new Map();
+  const weekdaysByInitials = new Map();
+  const datesForRange = (range) => {
+    if (!ranges.has(range)) ranges.set(range, datesInLeaveRange(range));
+    return ranges.get(range);
+  };
+  const addOverlay = (item, initials, keys, bidAs) => {
+    if (!keys.length) return;
+    if (!weekdaysByInitials.has(initials)) {
+      // Preserve pending/submitted precedence and the existing preview fallback.
+      const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
+      weekdaysByInitials.set(initials, rdoWeekdaysForLine(line));
+    }
+    const weekdays = weekdaysByInitials.get(initials);
+    const gl = isGlLeaveItem(item);
+    const overlay = { item, initials, gl, bucket: gl ? null : leaveSlotBucketForBidAs(bidAs) };
+    keys.forEach((key) => {
+      if (weekdays.has(dateFromKey(key).getDay())) return;
+      if (!overlays.has(key)) overlays.set(key, []);
+      overlays.get(key).push(overlay);
+    });
+  };
+  const showOwn = includePrivateOverlays && Boolean(currentUser) && area === currentUser.area;
+  if (showOwn) {
+    const preview = activeLeavePreviewItem();
+    if (!currentUser.ghostBidder && preview) {
+      addOverlay(preview, currentUser.initials, leaveDateKeysForItem(preview), preview.bidAs);
+    }
+    leaveBids.forEach((item) => {
+      if (isGhostLeaveItem(item) || !["Pending", "Approved"].includes(item.status)) return;
+      addOverlay(item, currentUser.initials, datesForRange(item.range), item.bidAs || currentUserBidAs());
+    });
+    leaveDraftQueue.forEach((item) => {
+      if (isGhostLeaveItem(item)) return;
+      addOverlay(item, currentUser.initials, leaveDateKeysForItem(item), item.bidAs || currentUserBidAs());
+    });
+  }
+  intakeQueue.forEach((item) => {
+    if (item.area !== area || item.type !== "Leave" || !["Pending", "Approved"].includes(item.status)
+      || isGhostLeaveItem(item)) return;
+    addOverlay(item, item.initials, datesForRange(item.range), item.bidAs);
+  });
+  if (showPersonalLeave && currentUser) {
+    const addStatus = (item) => {
+      if (!["Pending", "Approved"].includes(item.status)) return;
+      datesForRange(item.range).forEach((key) => {
+        if (item.status === "Approved" || personalStatuses.get(key) !== "approved") {
+          personalStatuses.set(key, item.status === "Approved" ? "approved" : "pending");
+        }
+      });
+    };
+    leaveBids.forEach(addStatus);
+    intakeQueue.forEach((item) => {
+      if (item.type === "Leave" && item.initials === currentUser.initials) addStatus(item);
+    });
+  }
+  return { overlays, personalStatuses };
+}
+
 function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlotTooltip, publicReadOnly = false, slotBucket = null }) {
   return {
     area,
@@ -6125,6 +6202,7 @@ function makeCalendarRenderContext({ area, showRdo, showPersonalLeave, deferSlot
       ? new Set(leaveBuilderDateKeys())
       : new Set(),
     slotMap: leaveSlotMap(area),
+    leaveIndex: calendarLeaveIndex(area, !publicReadOnly, showPersonalLeave),
     baseSlotDetails: new Map(),
     visibleSlotDetails: new Map(),
     personalLeaveStatuses: new Map(),
@@ -6149,6 +6227,7 @@ function cachedVisibleLeaveSlotDetails(key, context) {
       key,
       visibleLeaveSlotDetailsFromMap(key, context.area, context.slotMap, {
         includePrivateOverlays: !context.publicReadOnly,
+        calendarIndex: context.leaveIndex,
       })
     );
   }
@@ -6158,7 +6237,9 @@ function cachedVisibleLeaveSlotDetails(key, context) {
 
 function cachedPersonalLeaveDateStatus(key, context) {
   if (!context.personalLeaveStatuses.has(key)) {
-    context.personalLeaveStatuses.set(key, personalLeaveDateStatus(key));
+    context.personalLeaveStatuses.set(key, context.leaveIndex
+      ? context.leaveIndex.personalStatuses.get(key) || ""
+      : personalLeaveDateStatus(key));
   }
 
   return context.personalLeaveStatuses.get(key);
