@@ -6318,6 +6318,7 @@ function jumpToCalendarMonth(target, month) {
   target.querySelectorAll("[data-calendar-month]").forEach((item) => {
     item.classList.toggle("mobile-current-month", item === card);
   });
+  renderProgressiveCalendarMonths(target, [month]);
   updateCalendarMonthNavigation(target, month);
   const mobileSelect = document.querySelector(`[data-mobile-calendar="${target.id}"] select`);
   if (mobileSelect) mobileSelect.value = String(month);
@@ -6329,6 +6330,7 @@ function jumpToCalendarMonth(target, month) {
   } else {
     card.scrollIntoView({ behavior: "instant", block: "start" });
   }
+  scheduleProgressiveCalendar(target);
 }
 
 function syncCalendarMonthNavigation(target) {
@@ -6426,7 +6428,150 @@ function syncMobileCalendarMonths(target) {
     month.classList.toggle("mobile-current-month", calendarNavigationIndex(month) === selectedMonth);
   });
   syncCalendarMonthNavigation(target);
+  if (progressiveCalendars.has(target)) {
+    renderProgressiveCalendarMonths(target, [selectedMonth]);
+    scheduleProgressiveCalendar(target);
+  }
 }
+
+const progressiveCalendars = new WeakMap();
+
+function cancelProgressiveCalendar(target) {
+  const state = progressiveCalendars.get(target);
+  if (!state) return;
+  state.observer?.disconnect();
+  state.cancelIdle?.();
+  state.cancelIdle = null;
+}
+
+function progressiveCalendarIsCurrent(target, state) {
+  return progressiveCalendars.get(target) === state && state.year === displayedCalendarYear
+    && state.revision === calendarRenderRevision;
+}
+
+function renderProgressiveCalendarMonths(target, indexes) {
+  const state = progressiveCalendars.get(target);
+  if (!state || !progressiveCalendarIsCurrent(target, state)) return;
+  const anchor = [...target.querySelectorAll('[data-calendar-month]')].find((card) => {
+    const rect = card.getBoundingClientRect();
+    return rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+  });
+  const anchorTop = anchor?.getBoundingClientRect().top;
+  withLeaveReadCache(() => {
+    let context;
+    indexes.forEach((index) => {
+      const card = [...target.querySelectorAll('[data-calendar-pending]')]
+        .find((item) => calendarNavigationIndex(item) === index);
+      if (!card) return;
+      let html = state.months.get(index);
+      if (!html) {
+        context ||= makeCalendarRenderContext(state.options);
+        html = renderMonthCard(Number(card.dataset.calendarMonth), Number(card.dataset.calendarYear), {
+          ...state.options, context,
+        });
+        state.months.set(index, html);
+      }
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      card.replaceChildren(...template.content.firstElementChild.childNodes);
+      delete card.dataset.calendarPending;
+      card.removeAttribute('aria-busy');
+      // Use measured row heights for the remaining placeholders at this width.
+      const grid = card.querySelector('.month-grid');
+      const rows = Math.ceil((new Date(Number(card.dataset.calendarYear), Number(card.dataset.calendarMonth), 1).getDay()
+        + new Date(Number(card.dataset.calendarYear), Number(card.dataset.calendarMonth) + 1, 0).getDate()) / 7);
+      const height = grid.getBoundingClientRect().height;
+      if (height > 0 && !state.measuredRow) {
+        target.style.setProperty('--calendar-placeholder-row', `${Math.max(1, (height - 32) / rows)}px`);
+        state.measuredRow = true;
+      }
+    });
+  });
+  // Hydrating months above the viewport must not move the month being read.
+  if (anchor && anchor.isConnected) {
+    const delta = anchor.getBoundingClientRect().top - anchorTop;
+    if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: 'instant' });
+  }
+}
+
+function scheduleProgressiveCalendar(target) {
+  const state = progressiveCalendars.get(target);
+  if (!state || !progressiveCalendarIsCurrent(target, state)) return;
+  state.cancelIdle?.();
+  state.observer?.disconnect();
+  const single = window.matchMedia('(max-width: 900px)').matches && target.classList.contains('mobile-single-month');
+  const selected = calendarNavigationMonths.get(target.id) ?? displayedCalendarMonth;
+  if (!single) {
+    state.observer = new IntersectionObserver((entries) => {
+      if (!progressiveCalendarIsCurrent(target, state)) return;
+      const visible = entries.filter((entry) => entry.isIntersecting).map((entry) => calendarNavigationIndex(entry.target));
+      renderProgressiveCalendarMonths(target, visible);
+      if (visible.length && !state.cancelIdle) queueIdle();
+    }, { rootMargin: '100% 0px', threshold: 0 });
+    target.querySelectorAll('[data-calendar-pending]').forEach((card) => state.observer.observe(card));
+  }
+  const prepareNext = (deadline) => {
+    state.cancelIdle = null;
+    if (!progressiveCalendarIsCurrent(target, state)) return;
+    if (!target.getClientRects().length) return;
+    const pending = [...target.querySelectorAll('[data-calendar-pending]')]
+      .map(calendarNavigationIndex)
+      .filter((index) => !single || Math.abs(index - selected) <= 1)
+      .sort((a, b) => Math.abs(a - selected) - Math.abs(b - selected));
+    if (!pending.length) return;
+    if (!deadline || deadline.didTimeout || deadline.timeRemaining() >= 8) {
+      renderProgressiveCalendarMonths(target, pending.slice(0, 1));
+    }
+    queueIdle();
+  };
+  const queueIdle = () => {
+    if (window.requestIdleCallback) {
+      const id = window.requestIdleCallback(prepareNext, { timeout: 1500 });
+      state.cancelIdle = () => window.cancelIdleCallback(id);
+    } else {
+      const id = window.setTimeout(() => prepareNext(null), 150);
+      state.cancelIdle = () => window.clearTimeout(id);
+    }
+  };
+  queueIdle();
+}
+
+function makeProgressiveCalendar(target, renderKey, options, viewCache, reuseCurrent) {
+  const previous = progressiveCalendars.get(target);
+  if (reuseCurrent && previous?.renderKey === renderKey && previous.revision === calendarRenderRevision) {
+    syncMobileCalendarMonths(target);
+    return;
+  }
+  cancelProgressiveCalendar(target);
+  const cached = reuseCurrent && viewCache.get(renderKey);
+  const months = cached?.months || new Map();
+  const state = { renderKey, revision: calendarRenderRevision, year: displayedCalendarYear, options, months };
+  progressiveCalendars.set(target, state);
+  // Retain strings for revisits, never clones of a full year's DOM.
+  while (viewCache.size >= 4 && !viewCache.has(renderKey)) viewCache.delete(viewCache.keys().next().value);
+  viewCache.set(renderKey, { months });
+  const count = displayedCalendarYear === BID_YEAR ? 13 : 12;
+  target.style.removeProperty('--calendar-placeholder-row');
+  target.classList.add('progressive-year-calendar');
+  target.innerHTML = Array.from({ length: count }, (_, index) => {
+    const month = index % 12;
+    const year = displayedCalendarYear + Math.floor(index / 12);
+    const rows = Math.ceil((new Date(year, month, 1).getDay() + new Date(year, month + 1, 0).getDate()) / 7);
+    return `<article class="month-card" data-calendar-month="${month}" data-calendar-year="${year}" data-calendar-pending aria-busy="true">
+      <h3>${monthNames[month]} ${year}</h3><div class="month-grid calendar-month-placeholder" style="--calendar-placeholder-weeks:${rows}" role="status">Loading calendar…</div></article>`;
+  }).join('');
+  target.dataset.calendarRevision = String(calendarRenderRevision);
+  target.dataset.calendarRenderKey = renderKey;
+  syncMobileCalendarMonths(target);
+}
+
+// Printing must include every month, including those never visited on screen.
+window.addEventListener('beforeprint', () => {
+  document.querySelectorAll('.progressive-year-calendar').forEach((target) => {
+    if (!target.getClientRects().length) return;
+    renderProgressiveCalendarMonths(target, Array.from({ length: 13 }, (_, index) => index));
+  });
+});
 
 function initializeMobilePublicNavigation() {
   const login = document.querySelector(".public-login");
@@ -6523,6 +6668,16 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     publicCalendarCache.clear();
     publicCalendarCacheRevision = calendarRenderRevision;
   }
+  if (expandedSlots || window.matchMedia('(max-width: 900px)').matches) {
+    makeProgressiveCalendar(target, renderKey, {
+      area, showRdo, showPersonalLeave, deferSlotTooltip, expandedSlots,
+      publicReadOnly: isPublicCalendar, slotBucket,
+    }, viewCache, reuseCurrent);
+    return;
+  }
+  cancelProgressiveCalendar(target);
+  progressiveCalendars.delete(target);
+  target.classList.remove('progressive-year-calendar');
   if (reuseCurrent && target.childElementCount > 0
     && Number(target.dataset.calendarRevision) === calendarRenderRevision
     && target.dataset.calendarRenderKey === renderKey) {
@@ -6530,7 +6685,7 @@ function makeCalendar(targetId, { reuseCurrent = false } = {}) {
     return;
   }
   const cached = reuseCurrent && viewCache.get(renderKey);
-  if (cached) {
+  if (cached && Array.isArray(cached)) {
     target.replaceChildren(...cached.map((node) => node.cloneNode(true)));
     syncMobileCalendarMonths(target);
     target.dataset.calendarRevision = String(calendarRenderRevision);
@@ -6873,6 +7028,9 @@ function refreshMemberCalendarDates(dateKeys = [], { includeInactive = false } =
 
 function refreshMemberCalendarDatesWithCache(dateKeys = [], { includeInactive = false } = {}) {
   memberCalendarCache.clear();
+  document.querySelectorAll('.app-shell .progressive-year-calendar').forEach((calendar) => {
+    progressiveCalendars.get(calendar)?.months.clear();
+  });
   const uniqueKeys = [...new Set(dateKeys)].filter(Boolean);
   if (!uniqueKeys.length) return;
 
@@ -15506,6 +15664,7 @@ async function refreshLiveData() {
 function refreshPublicCalendarSlots(previousSlots) {
   const calendar = document.getElementById("public-calendar");
   if (!calendar?.childElementCount || Number(calendar.dataset.calendarRevision) !== calendarRenderRevision - 1) return false;
+  if (progressiveCalendars.has(calendar)) return false;
   const area = publicState.area;
   const expandedSlots = calendarLayouts.public === "full";
   const context = makeCalendarRenderContext({
@@ -18474,12 +18633,17 @@ document.addEventListener("click", async (event) => {
   const monthStep = event.target.closest("[data-mobile-month-step]");
   if (monthStep) {
     const next = new Date(displayedCalendarYear, (calendarNavigationMonths.get(mobileCalendar.dataset.mobileCalendar) ?? displayedCalendarMonth) + Number(monthStep.dataset.mobileMonthStep), 1);
+    const sameYear = displayedCalendarYear === next.getFullYear();
     displayedCalendarYear = next.getFullYear();
     displayedCalendarMonth = next.getMonth();
     calendarNavigationMonths.set(mobileCalendar.dataset.mobileCalendar, displayedCalendarMonth);
     setSelectedDateYear(displayedCalendarYear);
     annualMobileCalendars.delete(mobileCalendar.dataset.mobileCalendar);
-    renderVisibleCalendars();
+    const target = document.getElementById(mobileCalendar.dataset.mobileCalendar);
+    if (sameYear) {
+      syncMobileCalendarMonths(target);
+      jumpToCalendarMonth(target, displayedCalendarMonth);
+    } else renderVisibleCalendars();
     document.querySelector(`[data-mobile-calendar="${mobileCalendar.dataset.mobileCalendar}"] [data-mobile-month-step="${monthStep.dataset.mobileMonthStep}"]`)?.focus();
     return;
   }
@@ -18487,7 +18651,9 @@ document.addEventListener("click", async (event) => {
     const id = mobileCalendar.dataset.mobileCalendar;
     if (annualMobileCalendars.has(id)) annualMobileCalendars.delete(id);
     else annualMobileCalendars.add(id);
-    renderVisibleCalendars();
+    const target = document.getElementById(id);
+    syncMobileCalendarMonths(target);
+    jumpToCalendarMonth(target, calendarNavigationMonths.get(id) ?? displayedCalendarMonth);
     return;
   }
   const presentation = event.target.closest("[data-rdo-presentation]");
@@ -19550,7 +19716,9 @@ document.addEventListener("change", async (event) => {
     displayedCalendarMonth = Number(event.target.value);
     calendarNavigationMonths.set(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar, displayedCalendarMonth);
     annualMobileCalendars.delete(event.target.closest("[data-mobile-calendar]").dataset.mobileCalendar);
-    renderVisibleCalendars();
+    const target = document.getElementById(event.target.closest('[data-mobile-calendar]').dataset.mobileCalendar);
+    syncMobileCalendarMonths(target);
+    jumpToCalendarMonth(target, displayedCalendarMonth);
     return;
   }
 
