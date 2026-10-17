@@ -12914,22 +12914,22 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 
 /* Size minimal months by their available panel width, including desktop zoom
    and split-screen windows. Seven days must always stay inside each month. */
-.app-main .year-calendar:not(.expanded-slots-calendar) {
+:is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
 }
 
-.app-main .year-calendar:not(.expanded-slots-calendar) .month-card {
+:is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) .month-card {
   min-width: 0;
 }
 
-.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid {
+:is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) .month-grid {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
-.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid > :is(button, span) {
+:is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) .month-grid > :is(button, span) {
   min-width: 0;
 }
 
-.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid > button {
+:is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) .month-grid > button {
   min-height: 44px;
 }
