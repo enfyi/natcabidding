@@ -12933,3 +12933,20 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 :is(.app-main, .public-main) .year-calendar:not(.expanded-slots-calendar) .month-grid > button {
   min-height: 44px;
 }
+
+/* Manual intake: local multi-date selection alongside the range workflow. */
+.manual-date-modes { display: flex; flex-wrap: wrap; gap: 8px; }
+.manual-date-modes button[aria-pressed="true"] { background: var(--teal); color: var(--deep); border-color: var(--teal); }
+.manual-multi-picker { padding: 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel-2); color: var(--text); }
+.manual-multi-picker .manual-picker-hint { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+.manual-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.manual-picker-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.manual-picker-weekday { text-align: center; font-size: 11px; font-weight: 700; padding: 4px; color: var(--muted); }
+.manual-picker-grid button { min-height: 38px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-solid); color: var(--text); cursor: pointer; font: inherit; }
+.manual-picker-grid button:hover { border-color: var(--teal); background: var(--line); }
+.manual-picker-grid button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: var(--deep); }
+.manual-picker-grid button:disabled { opacity: .32; cursor: default; }
+.manual-picker-grid button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.manual-picker-total { margin: 14px 0 10px; font-size: 13px; font-weight: 700; }
+.manual-picker-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.manual-multi-picker > small { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }

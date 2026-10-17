@@ -151,6 +151,7 @@ const savedLeaveContext = vm.createContext({
   manualLeaveBatch: { key: '', entries: [] },
   manualLeaveBatchKey: () => 'bidder-round-one',
   manualLeaveRangeValue: () => 'June 7–11',
+  manualLeaveDraftEntries: () => [{ range: 'June 7–11', notes: '' }],
   prepareManualLeaveEntries: () => ({ request: { range: 'June 7–11' }, requests: [{ days: 5 }] }),
   setManualBidStatus: () => {},
   saveSupabaseManualLeaveRequest: async () => { saveEvents.push('save'); return { submission_ids: ['saved'] } },
