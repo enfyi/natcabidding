@@ -1061,9 +1061,7 @@ begin
   where b.id = request_row.bidder_id
     and b.active;
 
-  if actor.role <> 'admin' and actor.area_id is distinct from target.area_id then
-    raise exception 'Intake users can only replace approved leave in their own area.';
-  end if;
+  -- Authorized shared intake reviewers may edit bidders across areas.
 
   if target.bid_role in ('ADM', 'NB') then
     raise exception 'This profile cannot be assigned leave.';
@@ -1131,7 +1129,7 @@ begin
       and existing_request.bidder_id = request_row.bidder_id
       and existing_request.id <> request_row.id
       and existing_request.status in ('pending', 'approved')
-      and existing_date.leave_date between requested_start_date and requested_end_date
+      and existing_date.leave_date between replacement_start_date and replacement_end_date
   ) then
     raise exception 'The bidder already has one or more replacement dates in another pending or approved request.';
   end if;
