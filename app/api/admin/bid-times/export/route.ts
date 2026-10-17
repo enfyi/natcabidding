@@ -10,7 +10,8 @@ export async function GET(request: Request) {
   if (!token) return Response.json({ error: 'Sign in before exporting bid times.' }, { status: 401 })
   const params = new URL(request.url).searchParams
   const year = Number(params.get('year'))
-  const areas = params.getAll('area')
+  // Accept a single comma-separated selection and older repeated-key URLs.
+  const areas = params.getAll('area').flatMap(value => value.split(','))
   if (!Number.isInteger(year) || year < 2000 || year > 2100 || !areas.length || areas.some(area => !AREAS.includes(area))) {
     return Response.json({ error: 'Choose a valid bid year and at least one area.' }, { status: 400 })
   }
