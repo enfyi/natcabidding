@@ -58,5 +58,5 @@ const input = source.slice(source.indexOf('const manualLeaveDateField ='), sourc
 assert.match(input, /updateManualLeaveDays\(manualPanel\)/);
 assert.doesNotMatch(input, /renderManualBidPanel/);
 const change = source.slice(source.indexOf('if (manualPanel && manualReactiveField)'), source.indexOf('const rdoFilter =', source.indexOf('if (manualPanel && manualReactiveField)')));
-assert.match(change, /data-manual-leave-start\], \[data-manual-leave-end\][\s\S]*updateManualLeaveDays\(manualPanel\);\s+return;/);
+assert.match(change, /data-manual-leave-start\], \[data-manual-leave-end\][\s\S]*updateManualLeaveDays\(manualPanel\);\s+renderManualLeavePreflight\(manualPanel\);\s+return;/);
 console.log('PASS manual leave date edits update only charged days, preserve selected bidder/round, and initials rendering uses the read cache');

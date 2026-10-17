@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=20261017-manual-multi-date" />
+    <link rel="stylesheet" href="bidding.css?v=20261017-manual-preflight" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -1178,6 +1178,7 @@
                     <strong data-manual-leave-batch-summary></strong>
                     <div data-manual-leave-batch-list></div>
                   </div>
+                  <div class="manual-leave-preflight" data-manual-leave-preflight role="status" aria-live="polite" hidden></div>
                   <div class="manual-leave-batch-actions">
                     <button class="secondary-action small" type="button" data-manual-leave-add>Add to batch</button>
                     <button class="primary-action small" type="button" data-manual-bid-submit>Submit Requested Leave Dates</button>
@@ -1947,7 +1948,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261017-manual-multi-date"></script>
+    <script src="bidding.js?v=20261017-manual-preflight"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

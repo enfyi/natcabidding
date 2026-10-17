@@ -3389,6 +3389,7 @@ function manualLeaveBatchKey(person, area, round) {
 
 function renderManualLeaveBatch(panel) {
   renderManualDatePicker(panel);
+  renderManualLeavePreflight(panel);
   const batch = panel.querySelector("[data-manual-leave-batch]");
   if (!batch) return;
   const person = manualBidPerson(panel);
@@ -3497,6 +3498,70 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
 }
 
 // Picker state belongs to this form and never triggers a queue refresh or network read.
+// Uses the selected bidder and the loaded slot snapshot; no network work on input.
+function manualLeaveDateChecks(person, area, keys) {
+  const bucket = leaveSlotBucketForBidAs(person.bidAs, person.initials, area);
+  const slotMap = person.ghostBidder ? {} : leaveSlotMap(area);
+  return new Map(keys.map((key) => {
+    const rdo = isRdoDateForInitials(key, person.initials);
+    const details = leaveSlotsForDateFromMap(key, area, slotMap, { includePersonalHolidays: false });
+    const unknown = !rdo && !person.ghostBidder && Boolean(bucket) && !leaveSlotDataIsLoaded(details);
+    const full = !rdo && !person.ghostBidder && Boolean(bucket) && !unknown
+      && ((bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key))
+        || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !(details[bucket] || []).includes(person.initials)));
+    return [key, { rdo, full, unknown }];
+  }));
+}
+
+function manualLeavePreflight(panel) {
+  return withLeaveReadCache(() => {
+    const person = manualBidPerson(panel);
+    const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
+    const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
+    const state = manualDatePickerState(panel);
+    const batch = manualLeaveBatch.key === state.key ? manualLeaveBatch.entries : [];
+    const draftKeys = state.mode === "multiple" ? [...state.dates] : datesInLeaveRange(manualLeaveRangeValue(panel));
+    const groups = [...batch.map((entry) => datesInLeaveRange(entry.range)), ...(draftKeys.length ? [draftKeys] : [])];
+    const allKeys = groups.flat();
+    const keys = [...new Set(allKeys)].sort();
+    const errors = [], warnings = [];
+    if (!keys.length) return { errors, warnings, summary: "", hasDates: false };
+    const checks = manualLeaveDateChecks(person, area, keys);
+    const rdos = keys.filter((key) => checks.get(key).rdo);
+    const full = keys.filter((key) => checks.get(key).full);
+    if (invalidLeaveYearDateKeys(keys).length) errors.push(`Dates must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`);
+    if (keys.length !== allKeys.length) errors.push("Some selected dates are already in this batch.");
+    const existing = new Set(activeLeaveItemsForInitials(person.initials).flatMap(leaveDateKeysForItem));
+    const duplicates = keys.filter((key) => existing.has(key));
+    if (duplicates.length) errors.push(`Already bid: ${formatLeaveConflictDates(duplicates)}.`);
+    if (rdos.length) (round === 1 ? warnings : errors).push(`RDO dates: ${formatLeaveConflictDates(rdos)}.${round === 1 ? " Excluded from charged days." : " Choose different dates."}`);
+    if (full.length) warnings.push(`Full dates: ${formatLeaveConflictDates(full)}. An intake override is required before approval.`);
+    if (keys.some((key) => checks.get(key).unknown)) warnings.push("Availability is not loaded for some dates. Refresh before relying on the slot check.");
+    const days = chargeableLeaveDateKeys(keys, person.initials, round).length;
+    const requestedRanges = groups.map((group) => leaveSlotDateKeys(group, person.initials));
+    const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
+    if (keys.length) {
+      const limitError = manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges });
+      if (limitError) errors.push(limitError);
+      if (!days) errors.push("Select at least one chargeable leave day.");
+      const balanceError = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{ area, bidAs: person.bidAs, initials: person.initials, days, dateKeys: keys, round }]);
+      if (balanceError) errors.push(balanceError);
+    }
+    const used = leaveRoundUsageForInitials(person.initials, round).reduce((total, item) => total + leaveItemChargedDays(item), 0);
+    const summary = round === 1 ? `${days} charged days in selection and batch` : `${used + days} of ${leaveDayLimitForRound(round, person.initials)} charged days · ${used} already bid + ${days} in selection and batch`;
+    return { errors, warnings, summary, hasDates: keys.length > 0 };
+  });
+}
+
+function renderManualLeavePreflight(panel) {
+  const target = panel.querySelector("[data-manual-leave-preflight]");
+  if (!target) return;
+  const result = manualLeavePreflight(panel);
+  target.hidden = !result.hasDates;
+  target.dataset.status = result.errors.length ? "error" : result.warnings.length ? "warning" : "success";
+  target.innerHTML = `<strong>${escapeHtml(result.summary)}</strong>${[...result.errors, ...result.warnings].map((message) => `<p>${escapeHtml(message)}</p>`).join("")}${result.hasDates && !result.errors.length && !result.warnings.length ? '<p>No conflicts found in the loaded data. Availability is checked again when saved.</p>' : ""}`;
+}
+
 function manualDatePickerState(panel) {
   const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
   const key = manualLeaveBatchKey({ initials }, panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), Number(panel.querySelector("[data-manual-leave-round]")?.value || 0));
@@ -3533,10 +3598,14 @@ function renderManualDatePicker(panel) {
   const staged = new Set(manualLeaveBatch.key === state.key ? manualLeaveBatch.entries.flatMap((entry) => datesInLeaveRange(entry.range)) : []);
   const buttons = Array.from({ length: month.getDay() }, () => '<span aria-hidden="true"></span>');
   const lastDay = new Date(BID_YEAR, state.month + 1, 0).getDate();
+  const monthKeys = Array.from({ length: lastDay }, (_, index) => dateKeyFromDate(new Date(BID_YEAR, state.month, index + 1)));
+  const checks = withLeaveReadCache(() => manualLeaveDateChecks(manualBidPerson(panel), panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), monthKeys));
   for (let day = 1; day <= lastDay; day++) {
     const key = dateKeyFromDate(new Date(BID_YEAR, state.month, day));
     const unavailable = key < `${BID_YEAR}-01-10` || key > `${BID_YEAR + 1}-01-08` || staged.has(key);
-    buttons.push(`<button type="button" data-manual-pick-date="${key}" aria-label="${escapeHtml(dateLabel(key))}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
+    const check = checks.get(key);
+    const hint = check.rdo ? "RDO" : check.full ? "Full" : "";
+    buttons.push(`<button type="button" data-manual-pick-date="${key}" data-date-conflict="${check.rdo ? "rdo" : check.full ? "full" : ""}" title="${hint}" aria-label="${escapeHtml(dateLabel(key))}${hint ? `, ${hint}` : ""}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
   }
   const dates = [...state.dates].sort();
   const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
@@ -3553,7 +3622,7 @@ function renderManualDatePicker(panel) {
     <div class="manual-picker-total" role="status">${dates.length} selected · ${charged} charged ${charged === 1 ? "day" : "days"}</div>
     <div class="manual-picker-chips">${dates.map((key) => `<button type="button" class="secondary-action small" data-manual-pick-date="${key}" aria-label="Remove ${escapeHtml(dateLabel(key))}">${escapeHtml(dateLabel(key))} ×</button>`).join("")}</div>
     ${dates.length ? '<button type="button" class="secondary-action small" data-manual-picker-clear>Clear selection</button>' : ""}
-    <small>RDOs are excluded from charged days. Dates already in your batch are disabled. Round limits are checked when you add to batch.</small>`;
+    <small>Outlined dates: RDO or full (hover for details). Dates already in your batch are disabled. Checks use loaded data; availability can change.</small>`;
 }
 
 function addManualLeaveToBatch(panel) {
@@ -19282,6 +19351,7 @@ document.addEventListener("click", async (event) => {
       else state.dates.add(key);
     }
     renderManualDatePicker(panel);
+    renderManualLeavePreflight(panel);
     const focusSelector = pickerAction.hasAttribute("data-manual-pick-date") ? `[data-manual-pick-date="${pickerAction.dataset.manualPickDate}"]` : pickerAction.hasAttribute("data-manual-picker-month") ? `[data-manual-picker-month="${pickerAction.dataset.manualPickerMonth}"]` : `[data-manual-date-mode="${state.mode}"]`;
     panel.querySelector(focusSelector)?.focus({ preventScroll: true });
     return;
@@ -19723,6 +19793,7 @@ document.addEventListener("input", (event) => {
   if (manualPanel && manualLeaveDateField) {
     if (manualLeaveDateField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     updateManualLeaveDays(manualPanel);
+    renderManualLeavePreflight(manualPanel);
     return;
   }
 
@@ -19909,6 +19980,7 @@ document.addEventListener("change", async (event) => {
     if (manualReactiveField.matches("[data-manual-leave-start]")) defaultManualLeaveEndDate(manualPanel);
     if (manualReactiveField.matches("[data-manual-leave-start], [data-manual-leave-end]")) {
       updateManualLeaveDays(manualPanel);
+      renderManualLeavePreflight(manualPanel);
       return;
     }
     renderManualBidPanel(manualPanel);

@@ -24,7 +24,8 @@ const context = vm.createContext({
   isRdoDateForInitials: (key, initials) => { assert.equal(initials, 'DM'); assert.ok(cacheActive); return new Date(`${key}T12:00:00`).getDay() === 0; },
   isHolidayDate: () => false,
   // These must never run on a date click.
-  manualBidPerson: () => { throw Error('Date clicks must not rebuild the roster'); },
+  manualBidPerson: () => ({ initials: 'DM', bidAs: 'CPC' }),
+  manualLeaveDateChecks: (_person, _area, keys) => new Map(keys.map(key => [key, {rdo:false, full:false} ])),
   renderApp: () => { throw Error('Date clicks must not refresh the app'); },
   fetch: () => { throw Error('Date clicks must not access the network'); },
 });

@@ -16,7 +16,7 @@
     "test:bid-time-import": "node scripts/test-bid-time-import-ranking.mjs",
     "test:pilot-bid-window": "node scripts/test-pilot-bid-window-bypass.mjs",
     "test:import-destination": "node scripts/test-import-destination-selection.mjs",
-    "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs && node scripts/test-manual-multi-date.mjs",
+    "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs && node scripts/test-manual-multi-date.mjs && node scripts/test-manual-preflight.mjs",
     "test:manual-leave-input-performance": "node scripts/test-manual-leave-input-performance.mjs && node scripts/test-manual-multi-date-performance.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs && node scripts/test-live-intake-queue.mjs",
     "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
