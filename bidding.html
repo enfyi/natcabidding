@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=20261016-progressive-calendar" />
+    <link rel="stylesheet" href="bidding.css?v=20261017-manual-multi-date" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -1140,6 +1140,11 @@
                     Bid Area
                     <select data-manual-bid-area></select>
                   </label>
+                  <div class="manual-date-modes" role="group" aria-label="Date entry method">
+                    <button type="button" class="secondary-action small" aria-pressed="true" data-manual-date-mode="range">Consecutive range</button>
+                    <button type="button" class="secondary-action small" aria-pressed="false" data-manual-date-mode="multiple">Pick multiple dates</button>
+                  </div>
+                  <div class="manual-multi-picker" data-manual-multi-picker hidden></div>
                   <div class="manual-bid-fields" data-manual-leave-fields>
                     <label>
                       Start Date
@@ -1942,7 +1947,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261016-progressive-calendar"></script>
+    <script src="bidding.js?v=20261017-manual-multi-date"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;

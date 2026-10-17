@@ -3388,6 +3388,7 @@ function manualLeaveBatchKey(person, area, round) {
 }
 
 function renderManualLeaveBatch(panel) {
+  renderManualDatePicker(panel);
   const batch = panel.querySelector("[data-manual-leave-batch]");
   if (!batch) return;
   const person = manualBidPerson(panel);
@@ -3416,6 +3417,7 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
   if (!openRound) throw new Error("No bidding round is currently open across ZLA.");
   if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} is open across ZLA.`);
   if (round > 4) throw new Error("Leave bids are only available in Rounds 1 through 4.");
+  if (!entries.length) throw new Error("Select at least one date before submitting.");
   const selected = entries.map((entry) => {
     const dateKeys = datesInLeaveRange(entry.range);
     if (!dateKeys.length) throw new Error("Select a start and end date before adding to the batch.");
@@ -3494,16 +3496,81 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
   return { request, requests, chargedDays, round };
 }
 
+// Picker state belongs to this form and never triggers a queue refresh or network read.
+function manualDatePickerState(panel) {
+  const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+  const key = manualLeaveBatchKey({ initials }, panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), Number(panel.querySelector("[data-manual-leave-round]")?.value || 0));
+  if (!panel.manualDatePicker || panel.manualDatePicker.key !== key) {
+    panel.manualDatePicker = { key, mode: panel.manualDatePicker?.mode || "range", month: 0, dates: new Set() };
+  }
+  return panel.manualDatePicker;
+}
+
+function manualLeaveDraftEntries(panel) {
+  const state = manualDatePickerState(panel);
+  const notes = panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "";
+  return state.mode === "multiple"
+    ? [...state.dates].sort().map((key) => ({ range: formatLeaveRangeFromKeys([key]), notes }))
+    : [{ range: manualLeaveRangeValue(panel), notes }];
+}
+
+function renderManualDatePicker(panel) {
+  const target = panel.querySelector("[data-manual-multi-picker]");
+  if (!target) return;
+  const state = manualDatePickerState(panel);
+  const multiple = state.mode === "multiple";
+  target.hidden = !multiple;
+  panel.querySelectorAll("[data-manual-date-mode]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.manualDateMode === state.mode)));
+  ["start", "end", "days"].forEach((name) => {
+    const label = panel.querySelector(`[data-manual-leave-${name}]`)?.closest("label");
+    if (label) label.hidden = multiple;
+  });
+  if (!multiple) return;
+  const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const dateLabel = (key) => dateFormatter.format(dateFromKey(key));
+  const month = new Date(BID_YEAR, state.month, 1);
+  const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const staged = new Set(manualLeaveBatch.key === state.key ? manualLeaveBatch.entries.flatMap((entry) => datesInLeaveRange(entry.range)) : []);
+  const buttons = Array.from({ length: month.getDay() }, () => '<span aria-hidden="true"></span>');
+  const lastDay = new Date(BID_YEAR, state.month + 1, 0).getDate();
+  for (let day = 1; day <= lastDay; day++) {
+    const key = dateKeyFromDate(new Date(BID_YEAR, state.month, day));
+    const unavailable = key < `${BID_YEAR}-01-10` || key > `${BID_YEAR + 1}-01-08` || staged.has(key);
+    buttons.push(`<button type="button" data-manual-pick-date="${key}" aria-label="${escapeHtml(dateLabel(key))}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
+  }
+  const dates = [...state.dates].sort();
+  const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
+  const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
+  const charged = withLeaveReadCache(() => chargeableLeaveDateKeys(dates, initials, round).length);
+  target.innerHTML = `
+    <p class="manual-picker-hint">Click any dates, across any months. Then add them to your batch together.</p>
+    <div class="manual-picker-heading">
+      <button type="button" class="secondary-action small" data-manual-picker-month="-1" aria-label="Previous month" ${state.month === 0 ? "disabled" : ""}>←</button>
+      <strong>${monthLabel}</strong>
+      <button type="button" class="secondary-action small" data-manual-picker-month="1" aria-label="Next month" ${state.month === 12 ? "disabled" : ""}>→</button>
+    </div>
+    <div class="manual-picker-grid">${["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => `<span class="manual-picker-weekday">${day}</span>`).join("")}${buttons.join("")}</div>
+    <div class="manual-picker-total" role="status">${dates.length} selected · ${charged} charged ${charged === 1 ? "day" : "days"}</div>
+    <div class="manual-picker-chips">${dates.map((key) => `<button type="button" class="secondary-action small" data-manual-pick-date="${key}" aria-label="Remove ${escapeHtml(dateLabel(key))}">${escapeHtml(dateLabel(key))} ×</button>`).join("")}</div>
+    ${dates.length ? '<button type="button" class="secondary-action small" data-manual-picker-clear>Clear selection</button>' : ""}
+    <small>RDOs are excluded from charged days. Dates already in your batch are disabled. Round limits are checked when you add to batch.</small>`;
+}
+
 function addManualLeaveToBatch(panel) {
   const person = manualBidPerson(panel);
   const area = panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea();
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || 0);
   const key = manualLeaveBatchKey(person, area, round);
-  const entry = { range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" };
+  const entries = manualLeaveDraftEntries(panel);
   try {
+    if (!entries.length) throw new Error("Select at least one date before adding to the batch.");
     if (manualLeaveBatch.entries.length && manualLeaveBatch.key !== key) throw new Error("The controller, area, year, or round changed. Start a new batch.");
-    const prepared = prepareManualLeaveEntries(panel, person, area, [...manualLeaveBatch.entries, entry]);
-    manualLeaveBatch = { key, entries: [...manualLeaveBatch.entries, { ...entry, days: prepared.chargedDays - manualLeaveBatch.entries.reduce((total, item) => total + item.days, 0) }] };
+    const nextEntries = withLeaveReadCache(() => {
+      prepareManualLeaveEntries(panel, person, area, [...manualLeaveBatch.entries, ...entries]);
+      return entries.map((entry) => ({ ...entry, days: chargeableLeaveDatesForInitials(entry.range, person.initials, round).length }));
+    });
+    manualLeaveBatch = { key, entries: [...manualLeaveBatch.entries, ...nextEntries] };
+    manualDatePickerState(panel).dates.clear();
     panel.querySelector("[data-manual-leave-start]").value = "";
     panel.querySelector("[data-manual-leave-end]").value = "";
     panel.querySelector("[data-manual-leave-days]").value = "";
@@ -3522,9 +3589,13 @@ async function submitManualLeaveBid(panel, person, area) {
     setManualBidStatus(panel, "The controller, area, year, or round changed. Start a new batch.", "error");
     return;
   }
+  if (manualLeaveBatch.entries.length && panel.manualDatePicker?.mode === "multiple" && panel.manualDatePicker.dates.size) {
+    setManualBidStatus(panel, "Add your selected dates to the batch before submitting.", "error");
+    return;
+  }
   const entries = manualLeaveBatch.entries.length
     ? manualLeaveBatch.entries
-    : [{ range: manualLeaveRangeValue(panel), notes: panel.querySelector("[data-manual-leave-notes]")?.value.trim() || "" }];
+    : manualLeaveDraftEntries(panel);
   let prepared;
   try {
     prepared = prepareManualLeaveEntries(panel, person, area, entries);
@@ -3552,6 +3623,7 @@ async function submitManualLeaveBid(panel, person, area) {
   delete panel.dataset.approvalRefreshDirty;
   logHistory(area, "Manual leave bid entered", `${currentUser.initials} entered ${request.range} for ${person.initials}. Intake approval is required before leave slots are populated.`);
   manualLeaveBatch = { key: "", entries: [] };
+  if (panel.manualDatePicker) panel.manualDatePicker.dates.clear();
   activeOverrideId = null;
   activeDenialId = null;
   renderApp();
@@ -19193,6 +19265,25 @@ document.addEventListener("click", async (event) => {
       currentEntry?.scrollIntoView({ behavior: "smooth", block: "center" });
       currentEntry?.focus({ preventScroll: true });
     });
+    return;
+  }
+
+  const pickerAction = event.target.closest("[data-manual-date-mode], [data-manual-pick-date], [data-manual-picker-month], [data-manual-picker-clear]");
+  if (pickerAction) {
+    const panel = pickerAction.closest("[data-manual-bid-panel]");
+    if (!panel || panel.dataset.manualBidSubmitting === "true" || !(hasIntakeAccess() || hasSystemAdminAccess())) return;
+    const state = manualDatePickerState(panel);
+    if (pickerAction.hasAttribute("data-manual-date-mode")) state.mode = pickerAction.dataset.manualDateMode;
+    if (pickerAction.hasAttribute("data-manual-picker-month")) state.month = Math.max(0, Math.min(12, state.month + Number(pickerAction.dataset.manualPickerMonth)));
+    if (pickerAction.hasAttribute("data-manual-picker-clear")) state.dates.clear();
+    if (pickerAction.hasAttribute("data-manual-pick-date")) {
+      const key = pickerAction.dataset.manualPickDate;
+      if (state.dates.has(key)) state.dates.delete(key);
+      else state.dates.add(key);
+    }
+    renderManualDatePicker(panel);
+    const focusSelector = pickerAction.hasAttribute("data-manual-pick-date") ? `[data-manual-pick-date="${pickerAction.dataset.manualPickDate}"]` : pickerAction.hasAttribute("data-manual-picker-month") ? `[data-manual-picker-month="${pickerAction.dataset.manualPickerMonth}"]` : `[data-manual-date-mode="${state.mode}"]`;
+    panel.querySelector(focusSelector)?.focus({ preventScroll: true });
     return;
   }
 
