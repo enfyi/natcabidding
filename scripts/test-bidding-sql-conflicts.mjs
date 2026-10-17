@@ -84,15 +84,49 @@ const holidayFlags=(await db.query('select charged from leave_request_dates wher
 if(holidayFlags.length!==2 || holidayFlags.some(row=>!row.charged)) throw new Error('Holiday dates were not stored as charged');
 const heldHolidaySlots=(await db.query(`select slot_date::text as slot_date,slot_initials,status
   from leave_slots where source_leave_request_id=$1 order by slot_date`,[holidayRequest.id])).rows;
-if(heldHolidaySlots.length!==2 || heldHolidaySlots.some(row=>row.slot_initials!=='HT' || row.status!=='held'))
-  throw new Error('Pending holiday and in-lieu bids did not hold visible daily slots');
-console.log('PASS Round 2 holiday and in-lieu dates charge hours/days and hold visible slots');
+if(heldHolidaySlots.length!==0) throw new Error('Pending holidays reserved daily inventory');
+console.log('PASS Round 2 holiday and in-lieu dates charge hours/days without holding slots');
+// Reproduce legacy pending holds, then prove the upgrade releases them without
+// changing the accounting used for individual balances, area usage or credits.
+const accounting = async () => (await db.query(`select
+ (select jsonb_agg(to_jsonb(r) order by r.id) from leave_requests r) as requests,
+ (select jsonb_agg(to_jsonb(d) order by d.leave_request_id,d.leave_date) from leave_request_dates d) as dates,
+ (select to_jsonb(b) from private.area_leave_balance_days($1,$2,'cpc') b) as area,
+ private.round_four_credit_days($1,$3) as credits`,[year,bidder.area_id,holidayBidder])).rows[0];
+const beforeUpgrade = JSON.stringify(await accounting());
+await db.exec(`do $$ begin execute replace(replace(
+ pg_get_functiondef('private.sync_holiday_leave_slots(uuid)'::regprocedure),
+ 'request_row.status <> ''approved''', 'request_row.status not in (''pending'', ''approved'')'),
+ 'target_status := ''approved'';', 'target_status := case when request_row.status = ''approved'' then ''approved'' else ''held'' end;'); end $$;`);
+await db.query('select private.sync_holiday_leave_slots($1)',[holidayRequest.id]);
+if((await db.query('select count(*)::int as n from leave_slots where source_leave_request_id=$1',[holidayRequest.id])).rows[0].n!==2)
+ throw new Error('Legacy hold fixture was not created');
+const timingMigration=fs.readFileSync(new URL('../database/defer_holiday_slots_until_approval.sql',import.meta.url),'utf8');
+await db.exec(timingMigration);
+await db.exec(timingMigration);
+if((await db.query('select count(*)::int as n from leave_slots where source_leave_request_id=$1',[holidayRequest.id])).rows[0].n!==0)
+ throw new Error('Upgrade did not release legacy holds');
+if(JSON.stringify(await accounting())!==beforeUpgrade) throw new Error('Upgrade changed leave accounting');
+console.log('PASS migration releases legacy holds, reapplies safely, preserves dates, charges, area usage and Round 4 credits');
+
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+// A slot filled after submission must block approval and keep the bid pending.
+await db.query("update leave_slots set status='unavailable' where slot_date='2027-05-31' and area_id=$1",[bidder.area_id]);
+try {
+ await db.query("select public.review_bidding_submission($1,'approved')",[holidayResult.submission_ids[0]]);
+ throw new Error('Holiday approval ignored full capacity');
+} catch(error) { if(!/available|capacity|full/i.test(error.message)) throw error; }
+if((await db.query('select status from leave_requests where id=$1',[holidayRequest.id])).rows[0].status!=='pending')
+ throw new Error('Failed approval did not retain pending request');
+await db.query("update leave_slots set status='open' where slot_date='2027-05-31' and area_id=$1",[bidder.area_id]);
+console.log('PASS holiday approval rechecks capacity and rolls back on conflict');
 await db.query('select public.review_bidding_submission($1,\'approved\')',[holidayResult.submission_ids[0]]);
 const approvedHolidaySlots=(await db.query(`select count(*)::integer as used
   from leave_slots where source_leave_request_id=$1 and slot_initials='HT' and status='approved'`,[holidayRequest.id])).rows[0].used;
 if(approvedHolidaySlots!==2) throw new Error('Approval did not retain the holiday slots and initials');
 console.log('PASS holiday approval keeps initials in two consumed daily slots');
+await db.exec(timingMigration);
+if((await db.query("select count(*)::int as n from leave_slots where source_leave_request_id=$1 and status='approved'",[holidayRequest.id])).rows[0].n!==2) throw new Error('Upgrade changed approved allocations');
 await db.exec(`set test.uid='${holidayAuth}'; set test.email='holiday@example.test'; update bid_year_settings set test_bid_round=3 where bid_year_id='${year}';
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
  values('${year}','${bidder.area_id}','2027-06-02','cpc','HOLIDAY-TEST') on conflict do nothing;`);
@@ -129,9 +163,8 @@ const roundOneHoliday=(await db.query('select public.submit_leave_bid_batch(2027
 if(roundOneHoliday.charged_days!==1) throw new Error('Round 1 holiday did not use one leave day');
 const roundOneHolidaySlot=(await db.query(`select slot_initials,status from leave_slots
   where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[roundOneBidder])).rows[0];
-if(!roundOneHolidaySlot || roundOneHolidaySlot.slot_initials!=='R1' || roundOneHolidaySlot.status!=='held')
-  throw new Error('Round 1 holiday did not hold a visible daily slot');
-console.log('PASS Round 1 holiday uses one leave day and one visible daily slot');
+if(roundOneHolidaySlot) throw new Error('Pending Round 1 holiday reserved a slot');
+console.log('PASS Round 1 holiday uses one leave day without a daily hold');
 
 const inLieuBidder='00000000-0000-0000-0000-000000000231';
 const inLieuAuth='00000000-0000-0000-0000-000000000232';
@@ -155,9 +188,8 @@ const inLieuSaved=(await db.query("select d.is_holiday_in_lieu,d.charged from le
 if(!inLieuSaved.is_holiday_in_lieu || !inLieuSaved.charged) throw new Error('Pending in-lieu date flags are incorrect');
 const inLieuSlot=(await db.query(`select slot_initials,status from leave_slots
   where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[inLieuBidder])).rows[0];
-if(!inLieuSlot || inLieuSlot.slot_initials!=='IL' || inLieuSlot.status!=='held')
-  throw new Error('Pending in-lieu bid did not hold a visible daily slot');
-console.log('PASS pending RDO creates a charged in-lieu date with a visible daily slot');
+if(inLieuSlot) throw new Error('Pending in-lieu bid reserved a slot');
+console.log('PASS pending RDO creates a charged in-lieu date without holding a slot');
 await db.query(`update leave_request_dates set is_holiday_in_lieu=false
   where leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)
     and leave_date='2027-06-01'`,[inLieuBidder]);
@@ -165,7 +197,7 @@ const releasedInLieuSlot=(await db.query(`select bidder_id,slot_initials,status,
   from leave_slots where slot_code='IN-LIEU-2'`)).rows[0];
 if(releasedInLieuSlot.bidder_id || releasedInLieuSlot.slot_initials || releasedInLieuSlot.source_leave_request_id || releasedInLieuSlot.status!=='open')
   throw new Error('Removed in-lieu designation left a stale slot reservation');
-console.log('PASS removing an in-lieu designation releases its held slot');
+console.log('PASS removing an in-lieu designation leaves its slot open');
 
 const changeBidder='00000000-0000-0000-0000-000000000241';
 const changeAuth='00000000-0000-0000-0000-000000000242';
