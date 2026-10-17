@@ -13034,7 +13034,8 @@ async function exportBidTimes(form) {
     const { data, error } = await client.auth.getSession();
     if (error || !data.session?.access_token) throw new Error("Sign in with an admin account before exporting.");
     const params = new URLSearchParams({ year: String(BID_YEAR) });
-    areas.forEach(area => params.append("area", area));
+    // Keep the selection in one value: URL intermediaries can collapse repeated keys.
+    params.set("area", areas.join(","));
     const response = await fetch(`/api/admin/bid-times/export?${params}`, {
       headers: { Authorization: `Bearer ${data.session.access_token}` },
     });
