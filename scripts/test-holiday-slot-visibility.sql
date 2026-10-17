@@ -13,6 +13,8 @@ begin
  select * into strict actor from public.bidders where active and role='admin' and auth_user_id is not null limit 1;
  select * into strict y from public.bid_years order by bid_year desc limit 1;
  if not exists(select 1 from public.bid_year_settings where bid_year_id=y.id and pilot_database) then raise exception 'Pilot required.'; end if;
+ -- Temporary fixture access; the enclosing transaction rolls this back.
+ update public.bid_year_settings set pilot_enabled=true, pilot_open_rounds=array[1] where bid_year_id=y.id;
  perform set_config('request.jwt.claim.sub',actor.auth_user_id::text,true);
  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor.auth_user_id,'email',actor.email)::text,true);
  insert into public.bidders(area_id,first_name,last_name,initials,email,leave_slot_allowance)
@@ -25,7 +27,7 @@ begin
   insert into public.leave_request_dates(leave_request_id,leave_date,charged,is_rdo,is_holiday,is_holiday_in_lieu)
   values(req,make_date(y.bid_year,6,18)+i,i=1,false,i=1,i=0);
   select count(*) into total from public.leave_slots where source_leave_request_id=req and status='held' and slot_initials='TESTH';
-  if total<>1 then raise exception 'Holiday/in-lieu bid did not reserve a visible slot.'; end if;
+  if total<>0 then raise exception 'Pending holiday/in-lieu bid reserved a slot.'; end if;
   insert into public.intake_submissions(bid_year_id,area_id,bidder_id,round_number,leave_request_id,submission_type,status,payload,submitted_at)
   values(y.id,actor.area_id,fixture,1,req,'leave','pending','{}',now()) returning id into sid;
   perform public.review_bidding_submission(sid,'approved');

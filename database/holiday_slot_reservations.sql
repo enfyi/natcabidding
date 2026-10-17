@@ -1,6 +1,6 @@
 -- Holiday and holiday-in-lieu leave uses the same daily inventory as other
--- selected non-RDO leave. Pending requests hold a real slot so the bidder's initials
--- are visible immediately; approval promotes the hold to an approved slot.
+-- selected non-RDO leave. Only approved requests occupy a daily slot; pending
+-- requests retain their leave dates and accounting without reserving inventory.
 
 create or replace function private.sync_holiday_leave_slots(target_request_id uuid)
 returns void
@@ -26,7 +26,7 @@ begin
     return;
   end if;
 
-  if request_row.status not in ('pending', 'approved') then
+  if request_row.status <> 'approved' then
     delete from public.leave_slots slot
     where slot.source_leave_request_id = request_row.id
       and slot.slot_code like 'OVERRIDE-%';
@@ -66,7 +66,7 @@ begin
     when bidder_row.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
     else 'cpc'
   end;
-  target_status := case when request_row.status = 'approved' then 'approved' else 'held' end;
+  target_status := 'approved';
 
   for request_date in
     select day.leave_date
@@ -247,7 +247,7 @@ for each row
 when (old.status is distinct from new.status)
 execute function private.sync_holiday_leave_slots_from_request();
 
--- Approval must promote this request's existing hold rather than claim a
+-- Approval reuses any existing allocation rather than claiming a
 -- second slot. Preserve all other installed reviewer rules.
 do $upgrade$
 declare
@@ -268,8 +268,8 @@ begin
 end;
 $upgrade$;
 
--- Repair active pilot bids created before holiday slot reservations were
--- enabled. The migration stops on a real capacity conflict instead of
+-- Reconcile active holiday bids: release pending holds and retain approved
+-- allocations. The migration stops on a real capacity conflict instead of
 -- silently increasing that day's configured capacity.
 do $block$
 declare
@@ -290,4 +290,4 @@ end
 $block$;
 
 comment on function private.sync_holiday_leave_slots(uuid) is
-  'Reserves visible daily leave inventory for non-RDO holiday and holiday-in-lieu bids independently of charged hours, including pending holds.';
+  'Reserves visible daily leave inventory for non-RDO holiday and holiday-in-lieu bids independently of charged hours, only after approval.';
