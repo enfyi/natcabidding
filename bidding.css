@@ -12795,6 +12795,31 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 }
 .calendar-navigation-actions:has(> [data-navigation-annual]:only-child) { gap: 0; }
 
+/* Reserve month geometry while its detailed dates are prepared nearby. */
+.progressive-year-calendar { --calendar-placeholder-row: 50px; }
+.progressive-year-calendar.expanded-slots-calendar { --calendar-placeholder-row: 198px; }
+.progressive-year-calendar > .month-card:not([data-calendar-pending]) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(80px + 6 * var(--calendar-placeholder-row));
+}
+.calendar-month-placeholder {
+  min-height: calc(32px + var(--calendar-placeholder-weeks) * var(--calendar-placeholder-row));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+}
+@media (max-width: 720px) {
+  .progressive-year-calendar.expanded-slots-calendar { --calendar-placeholder-row: 150px; }
+}
+@media print {
+  .progressive-year-calendar > .month-card {
+    display: block !important;
+    content-visibility: visible;
+    contain-intrinsic-block-size: none;
+  }
+}
+
 @media (max-width: 900px) {
   .public-main:has(#public-calendar.mobile-single-month),
   .app-main:has(:is(#dashboard-calendar, #leave-calendar).mobile-single-month) { overflow-anchor: none; }

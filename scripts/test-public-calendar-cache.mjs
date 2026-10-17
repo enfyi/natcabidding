@@ -28,6 +28,13 @@ const context = {
   monthNames: Array(12).fill('month'),
   calendarWorkforceForScope: () => 'cpc',
   syncMobileCalendarControls() {}, syncMobileCalendarMonths() {},
+  progressiveCalendars: new WeakMap(), cancelProgressiveCalendar() {},
+  makeProgressiveCalendar(target, key, options, cache, reuse) {
+    if (!reuse || !cache.has(key)) {
+      builds++; deferred = options.deferSlotTooltip;
+      cache.set(key, { months: new Map() });
+    }
+  },
   makeCalendarRenderContext(options) { builds++; deferred = options.deferSlotTooltip; return {}; },
   renderMonthCard: () => '<month/>', renderLeaveYearContinuation: () => '',
 };

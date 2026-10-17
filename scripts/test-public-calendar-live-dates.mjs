@@ -30,6 +30,7 @@ const after = {
   d: { date:'2027-01-12', area:'Area B', cpc:['GH'] },
 };
 const context = vm.createContext({
+  progressiveCalendars: new WeakMap(),
   document: { getElementById: () => calendar, activeElement: buttons['2027-01-10'] },
   calendarRenderRevision:5, publicCalendarCacheRevision:4,
   publicCalendarCache:cache, publicState:{area:'Area A'}, calendarLayouts:{public:'minimal'},
