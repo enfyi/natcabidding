@@ -12041,6 +12041,7 @@ function renderSubmittedLeaveManager() {
   const round = editableLeaveRound(now) || currentRoundNumber();
   const items = submittedLeaveItemsForCurrentRound(now);
   const pendingItems = items.filter((item) => item.status === "Pending");
+  panel.classList.toggle("has-pending-dates", pendingItems.length > 0);
   const pendingDecisionMessage = pendingItems.length
     ? "Your leave dates are awaiting an intake decision. Wait until they are approved or denied before changing or removing them."
     : "";
