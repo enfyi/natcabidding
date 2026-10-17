@@ -159,11 +159,12 @@ limit still applies. The migration
 recalculates older saved holiday charges and updates the leave-summary views.
 
 Run `database/holiday_slot_reservations.sql` after the holiday rules and the
-Round 2–4 allowance upgrades. Charged holiday and holiday-in-lieu bids then hold
-normal CPC/DEV daily inventory while pending, display the bidder's initials in
-the calendar, and remain assigned when approved. Existing active holiday bids
-are backfilled into open slots; the migration stops on a real capacity conflict
-instead of silently increasing the configured capacity.
+Round 2–4 allowance upgrades. Holiday and holiday-in-lieu bids occupy normal
+CPC/DEV daily inventory only after approval. Pending bids retain their charged
+leave dates, area usage, and Round 4 credits without holding a daily slot.
+For existing installations, run `database/defer_holiday_slots_until_approval.sql`
+to release pending holiday holds and preserve installed role-specific rules.
+Approval rechecks capacity and fails if no slot is available.
 
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database
