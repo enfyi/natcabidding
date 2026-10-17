@@ -5182,10 +5182,10 @@ tr.occupied-row .rdo-tag {
   display: grid;
   gap: 10px;
   margin: 0 0 14px;
-  border: 1px solid rgba(122, 189, 194, 0.34);
+  border: 1px solid #fecaca;
   border-radius: 8px;
   padding: 12px;
-  background: rgba(122, 189, 194, 0.08);
+  background: #fee2e2;
 }
 
 .leave-draft-panel.is-empty {
@@ -5289,6 +5289,11 @@ tr.occupied-row .rdo-tag {
 
 .submitted-leave-manager[hidden] {
   display: none;
+}
+
+.submitted-leave-manager.has-pending-dates {
+  border-color: #fecaca;
+  background: #fee2e2;
 }
 
 .submitted-leave-manager-head {
