@@ -12943,7 +12943,8 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .manual-date-modes { display: flex; flex-wrap: wrap; gap: 8px; }
 .manual-date-modes button[aria-pressed="true"] { background: var(--teal); color: var(--deep); border-color: var(--teal); }
 .manual-multi-picker { padding: 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel-2); color: var(--text); }
-.manual-multi-picker .manual-picker-hint { color: #fff; margin: 0 0 14px; font-size: 13px; }
+.manual-multi-picker p.manual-picker-hint,
+.app-main .manual-multi-picker p.manual-picker-hint { color: #fff; margin: 0 0 14px; font-size: 13px; }
 .manual-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .manual-picker-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
 .manual-picker-weekday { text-align: center; font-size: 11px; font-weight: 700; padding: 4px; color: var(--muted); }
