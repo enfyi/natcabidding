@@ -36,7 +36,7 @@
 }
 
 body {
-  min-width: 1180px;
+  min-width: 0;
   margin: 0;
   color: var(--text);
   background:
@@ -1853,7 +1853,7 @@ input {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: minmax(140px, 0.65fr) minmax(275px, 1.22fr) minmax(235px, 1fr) minmax(200px, 0.86fr) minmax(210px, 0.9fr) minmax(250px, 1.05fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -7743,10 +7743,6 @@ body.roster-column-resizing .roster-table th [data-roster-col-resizer]::after {
 }
 
 @media (max-width: 1280px) {
-  body {
-    min-width: 1040px;
-  }
-
   .dashboard-grid,
   .workspace-grid {
     grid-template-columns: minmax(650px, 1fr) 380px;
@@ -12882,3 +12878,58 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .round-announcement-copy { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .round-announcement-copy > span { white-space: pre-wrap; }
 .round-announcement a { flex-shrink: 1; overflow-wrap: anywhere; }
+
+/* Tablet workspaces must fit both portrait and landscape iPads. Keep wide
+   tables inside their scroll containers rather than sizing the page to them. */
+@media screen and (min-width: 721px) and (max-width: 1600px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-grid,
+  .workspace-grid,
+  #leave-page .workspace-grid,
+  .bottom-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-main .page,
+  .dashboard-grid > *,
+  .workspace-grid > *,
+  .bottom-grid > *,
+  .right-stack,
+  .panel,
+  .member-rdo-results,
+  .table-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .app-main .panel-header,
+  .calendar-view-row,
+  .calendar-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+/* Size minimal months by their available panel width, including desktop zoom
+   and split-screen windows. Seven days must always stay inside each month. */
+.app-main .year-calendar:not(.expanded-slots-calendar) {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+}
+
+.app-main .year-calendar:not(.expanded-slots-calendar) .month-card {
+  min-width: 0;
+}
+
+.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid > :is(button, span) {
+  min-width: 0;
+}
+
+.app-main .year-calendar:not(.expanded-slots-calendar) .month-grid > button {
+  min-height: 44px;
+}
