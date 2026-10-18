@@ -52,7 +52,7 @@ assert.ok(result.errors.some(x=>x.includes('RDO dates')));
 assert.ok(result.warnings.some(x=>x.includes('Full dates')));
 assert.ok(result.summary.includes('1 of 10'));
 person.bidAs='DEV';assert.ok(!c.manualLeavePreflight(panel).warnings.some(x=>x.includes('Full dates')));person.bidAs='CPC';
-person.ghostBidder=true;assert.ok(!c.manualLeavePreflight(panel).warnings.some(x=>x.includes('Full dates')));person.ghostBidder=false;
+person.ghostBidder=true;assert.ok(c.manualLeavePreflight(panel).errors.some(x=>x.includes('Full dates')));person.ghostBidder=false;
 state.dates.clear();state.dates.add('2027-06-11');
 c.manualLeaveBatch={key:state.key,entries:[{range:'Jun 12, 2027',days:1}]};used=[{days:9}];
 result=c.manualLeavePreflight(panel);assert.ok(result.errors.some(x=>x.includes('bring DM to 11')));
@@ -77,4 +77,4 @@ const roundOneState=c.manualDatePickerState(panel);roundOneState.mode='multiple'
 result=c.manualLeavePreflight(panel);
 assert.ok(!result.errors.some(x=>x.includes('RDO dates')));
 assert.ok(result.warnings.some(x=>x.includes('Excluded from charged days')));
-console.log(`PASS selected-bidder RDOs, CPC/DEV capacity, ghost exemption, duplicates, cumulative round limit, range entry and missing-data warnings; 500 sample-data preflights p95 ${p95.toFixed(2)}ms (excludes browser paint and live data)`);
+console.log(`PASS selected-bidder RDOs, CPC/DEV capacity, ghost availability, duplicates, cumulative round limit, range entry and missing-data warnings; 500 sample-data preflights p95 ${p95.toFixed(2)}ms (excludes browser paint and live data)`);
