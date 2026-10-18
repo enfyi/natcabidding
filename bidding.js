@@ -3452,6 +3452,9 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
   }]);
   if (capacityMessage) throw new Error(capacityMessage);
 
+  const availabilityMessage = person.ghostBidder ? ghostLeaveAvailabilityMessage(person, area, allDateKeys) : "";
+  if (availabilityMessage) throw new Error(availabilityMessage);
+
   const submittedAt = formatDateTime(new Date());
   const request = {
     id: `manual-leave-${person.initials.toLowerCase()}-${Date.now()}`,
@@ -3501,16 +3504,31 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
 // Uses the selected bidder and the loaded slot snapshot; no network work on input.
 function manualLeaveDateChecks(person, area, keys) {
   const bucket = leaveSlotBucketForBidAs(person.bidAs, person.initials, area);
-  const slotMap = person.ghostBidder ? {} : leaveSlotMap(area);
+  const slotMap = leaveSlotMap(area);
   return new Map(keys.map((key) => {
     const rdo = isRdoDateForInitials(key, person.initials);
     const details = leaveSlotsForDateFromMap(key, area, slotMap, { includePersonalHolidays: false });
-    const unknown = !rdo && !person.ghostBidder && Boolean(bucket) && !leaveSlotDataIsLoaded(details);
-    const full = !rdo && !person.ghostBidder && Boolean(bucket) && !unknown
+    const unknown = !rdo && Boolean(bucket) && !leaveSlotDataIsLoaded(details);
+    const full = !rdo && Boolean(bucket) && !unknown
       && ((bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key))
-        || (leaveSlotOpenCountForDetails(details, bucket) === 0 && !(details[bucket] || []).includes(person.initials)));
+        || (leaveSlotOpenCountForDetails(details, bucket) === 0
+          && (person.ghostBidder || !(details[bucket] || []).includes(person.initials))));
     return [key, { rdo, full, unknown }];
   }));
+}
+
+// Ghost status does not change the bidder's workforce or reserve daily capacity.
+function ghostLeaveAvailabilityMessage(person, area, keys) {
+  if (!person.ghostBidder || !keys.length) return "";
+  const bucket = leaveSlotBucketForBidAs(person.bidAs, person.initials, area);
+  if (!bucket) return "The bidder must have a CPC or DEV bidding role before selecting ghost leave.";
+  const checks = manualLeaveDateChecks(person, area, keys);
+  const unknown = keys.filter((key) => checks.get(key).unknown);
+  if (unknown.length) return `Availability is not loaded for ${formatLeaveConflictDates(unknown)}. Refresh before selecting ghost leave.`;
+  const full = keys.filter((key) => checks.get(key).full);
+  return full.length
+    ? `No ${bucket.toUpperCase()} leave slot is available in ${area} on: ${formatLeaveConflictDates(full)}. Choose different dates.`
+    : "";
 }
 
 function manualLeavePreflight(panel) {
@@ -3535,8 +3553,8 @@ function manualLeavePreflight(panel) {
     const duplicates = keys.filter((key) => existing.has(key));
     if (duplicates.length) errors.push(`Already bid: ${formatLeaveConflictDates(duplicates)}.`);
     if (rdos.length) (round === 1 ? warnings : errors).push(`RDO dates: ${formatLeaveConflictDates(rdos)}.${round === 1 ? " Excluded from charged days." : " Choose different dates."}`);
-    if (full.length) warnings.push(`Full dates: ${formatLeaveConflictDates(full)}. An intake override is required before approval.`);
-    if (keys.some((key) => checks.get(key).unknown)) warnings.push("Availability is not loaded for some dates. Refresh before relying on the slot check.");
+    if (full.length) (person.ghostBidder ? errors : warnings).push(`Full dates: ${formatLeaveConflictDates(full)}.${person.ghostBidder ? " Ghost bids require an available slot. Choose different dates." : " An intake override is required before approval."}`);
+    if (keys.some((key) => checks.get(key).unknown)) (person.ghostBidder ? errors : warnings).push("Availability is not loaded for some dates. Refresh before relying on the slot check.");
     const days = chargeableLeaveDateKeys(keys, person.initials, round).length;
     const requestedRanges = groups.map((group) => leaveSlotDateKeys(group, person.initials));
     const weekKeys = round === 1 ? roundOneWeekKeysForDateKeys(keys) : [];
@@ -3599,11 +3617,13 @@ function renderManualDatePicker(panel) {
   const buttons = Array.from({ length: month.getDay() }, () => '<span aria-hidden="true"></span>');
   const lastDay = new Date(BID_YEAR, state.month + 1, 0).getDate();
   const monthKeys = Array.from({ length: lastDay }, (_, index) => dateKeyFromDate(new Date(BID_YEAR, state.month, index + 1)));
-  const checks = withLeaveReadCache(() => manualLeaveDateChecks(manualBidPerson(panel), panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), monthKeys));
+  const person = manualBidPerson(panel);
+  const checks = withLeaveReadCache(() => manualLeaveDateChecks(person, panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), monthKeys));
   for (let day = 1; day <= lastDay; day++) {
     const key = dateKeyFromDate(new Date(BID_YEAR, state.month, day));
-    const unavailable = key < `${BID_YEAR}-01-10` || key > `${BID_YEAR + 1}-01-08` || staged.has(key);
     const check = checks.get(key);
+    const unavailable = key < `${BID_YEAR}-01-10` || key > `${BID_YEAR + 1}-01-08` || staged.has(key)
+      || (person.ghostBidder && !state.dates.has(key) && (check.full || check.unknown));
     const hint = check.rdo ? "RDO" : check.full ? "Full" : "";
     buttons.push(`<button type="button" data-manual-pick-date="${key}" data-date-conflict="${check.rdo ? "rdo" : check.full ? "full" : ""}" title="${hint}" aria-label="${escapeHtml(dateLabel(key))}${hint ? `, ${hint}` : ""}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
   }
@@ -3884,6 +3904,16 @@ function selectLeaveBuilderDate(key) {
     return false;
   }
 
+  if (currentUser.ghostBidder && !selectedLeaveDates.has(key)) {
+    const availabilityMessage = ghostLeaveAvailabilityMessage(
+      { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area, [key]
+    );
+    if (availabilityMessage) {
+      setLeaveBuilderStatus(availabilityMessage, "error");
+      return false;
+    }
+  }
+
   if (usesIndividualLeaveDateSelection()) {
     const round = currentRoundNumber();
     const nextDates = new Set(selectedLeaveDates);
@@ -3986,6 +4016,11 @@ function renderLeaveDatePicker() {
   const daysInMonth = new Date(leavePickerYear, leavePickerMonthIndex + 1, 0).getDate();
   const selectedKeys = new Set(leaveBuilderDateKeys());
   const previouslyBidDates = previouslyBidLeaveDateKeys();
+  const ghostChecks = currentUser.ghostBidder ? withLeaveReadCache(() => manualLeaveDateChecks(
+    { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area,
+    Array.from({ length: daysInMonth }, (_, index) => dateKey(leavePickerYear, leavePickerMonthIndex + 1, index + 1))
+  )) : null;
+  const ghostBucket = ghostChecks ? leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) : null;
   const cells = [];
 
   dayNames.forEach((day) => cells.push(`<span class="picker-dow">${day[0]}</span>`));
@@ -3998,14 +4033,20 @@ function renderLeaveDatePicker() {
     const isOutsideLeaveYear = !isBidLeaveYearDate(key);
     const isRdo = isRdoDateForInitials(key, currentUser.initials);
     const isAlreadyBid = previouslyBidDates.has(key);
-    const isUnavailable = isOutsideLeaveYear || isRdo || isAlreadyBid;
+    const ghostCheck = ghostChecks?.get(key);
+    const isGhostUnavailable = Boolean(ghostChecks) && !isInRange
+      && (!ghostBucket || ghostCheck.full || ghostCheck.unknown);
+    const isUnavailable = isOutsideLeaveYear || isRdo || isAlreadyBid || isGhostUnavailable;
     const unavailableLabel = isAlreadyBid
       ? ": already submitted for leave; cannot be selected again"
       : isRdo
       ? ": RDO on your submitted line; leave bidding unavailable"
       : isOutsideLeaveYear
         ? ": leave bidding unavailable"
-        : "";
+        : isGhostUnavailable
+          ? ghostCheck.unknown ? ": availability not loaded; refresh before selecting ghost leave"
+            : `: no ${ghostBucket?.toUpperCase() || "CPC or DEV"} leave slot available in ${currentUser.area}`
+          : "";
     cells.push(`
       <button class="${isInRange ? "in-range" : ""} ${isEdge ? "range-edge" : ""} ${isRdo ? "rdo" : ""} ${isUnavailable ? "unavailable" : ""}" type="button" ${isUnavailable ? "disabled" : `data-leave-picker-date="${key}"`} aria-label="${monthNames[leavePickerMonthIndex]} ${day}, ${leavePickerYear}${unavailableLabel}">
         ${day}
@@ -4715,6 +4756,14 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
+  const availabilityMessage = currentUser.ghostBidder ? ghostLeaveAvailabilityMessage(
+    { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area, dateKeys
+  ) : "";
+  if (availabilityMessage) {
+    setLeaveBuilderStatus(availabilityMessage, "error");
+    return;
+  }
+
   const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
     { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays },
@@ -4879,6 +4928,12 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
 }
 
 function leaveDraftPreSubmissionMessageWithCache(drafts = leaveDraftQueue) {
+  const availabilityMessage = currentUser.ghostBidder ? ghostLeaveAvailabilityMessage(
+    { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area,
+    drafts.flatMap(leaveDateKeysForItem)
+  ) : "";
+  if (availabilityMessage) return availabilityMessage;
+
   const requestedDates = new Map();
   const overlappingDates = new Set();
 
@@ -7050,12 +7105,18 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const nextFatigueAttribute = nextFatigueGroup ? `data-fatigue-next-week="${nextFatigueGroup}"` : "";
   const ariaStatus = showVacationLayer && fatigueGroup ? `${status}; ${fatigueStatus}` : status;
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
+  const ghostSlotBucket = currentUser?.ghostBidder
+    ? leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) : null;
+  const ghostSelectionBlocked = Boolean(ghostSlotBucket) && canShowLeaveState && !publicReadOnly
+    && showPersonalLeave && detailArea === currentUser.area && !isBuilderDate && !isPreviewLeave && !isDraftLeave
+    && (!slotDataLoaded || leaveSlotOpenCountForDetails(baseSlotDetails || leaveSlotsForDate(key, detailArea), ghostSlotBucket) === 0
+      || (ghostSlotBucket === "cpc" && detailArea === "Area A" && fullLeaveDates.has(key)));
   const leaveDateAttribute = canShowLeaveState
     ? publicReadOnly ? `data-public-leave-date="${key}"` : `data-leave-date="${key}"`
     : hasDetail ? "" : 'aria-disabled="true"';
 
   return `
-    <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
+    <button class="${className}" type="button" data-calendar-date="${key}" ${leaveDateAttribute} ${ghostSelectionBlocked ? 'disabled aria-disabled="true"' : ""} ${fatigueAttribute} ${nextFatigueAttribute} aria-label="${monthNames[monthIndex]} ${day}, ${year}: ${ariaStatus}">
       ${isFatigueWeekStart ? `<i class="fatigue-week-dot" aria-hidden="true"></i>` : ""}
       ${expandedSlots ? `
         <span class="expanded-day-heading">

@@ -41,7 +41,7 @@
     "test:bid-window-boundaries": "node scripts/test-bid-window-boundaries.mjs",
     "test:consistent-bid-windows": "node scripts/test-consistent-bid-window-builder.mjs",
     "test:round-rules": "node scripts/test-independent-round-rules.mjs",
-    "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs",
+    "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs && node scripts/test-ghost-leave-availability.mjs && node scripts/test-dashboard-ghost-popup.mjs",
     "test:leave-hours-usage": "node scripts/test-leave-hours-usage.mjs",
     "test:reference-loading": "node scripts/test-reference-loading.mjs && node scripts/test-rdo-loading-messages.mjs",
     "test:dashboard-loading": "node scripts/test-reload-week-buckets.mjs && node scripts/test-dashboard-startup-render.mjs && node scripts/test-mutation-render-scope.mjs && node scripts/test-live-bidding-updates.mjs",
