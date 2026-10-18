@@ -155,7 +155,10 @@ to Vercel Production, Preview, and Development:
 - `BID_NOTIFICATION_FROM_NAME` — the display name recipients see; defaults to
   `ZLA Bidding`.
 
-Apply `database/bid_email_notifications.sql` to Supabase before enabling email.
+Apply `database/intake_review_access.sql`, then
+`database/bid_email_notifications.sql` to Supabase before enabling email. Existing
+installations should reapply the email SQL to align cross-area and scheduled
+intake notification permissions with approval permissions.
 It installs a narrowly scoped authenticated recipient lookup, so the notification
 route does not need a Supabase service-role key in Vercel.
 
