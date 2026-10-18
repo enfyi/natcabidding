@@ -84,7 +84,7 @@ for (const name of ['approveIntakeItem','denyIntakeItem','reviewIntakeLeaveGroup
   assert.doesNotMatch(fn(name), /await refreshBiddingAfterIntakeDecision/);
   assert.match(fn(name), /scheduleIntakeDecisionRefresh/);
 }
-let visible = true, focused = false;
+let visible = true, focused = false, focusedEditor = false;
 const panel = {
   dataset: {},
   closest: selector => selector === '.page.active' && visible ? {} : null,
@@ -94,7 +94,8 @@ const editor = vm.createContext({
   document: {
     activeElement: {
       matches: () => focused,
-      closest: selector => selector === '.app-shell' || selector === '.page.active' ? {} : null,
+      closest: selector => selector === '.page.active'
+        || (selector === '[data-manual-bid-panel], [data-bidder-editor-form]' && focusedEditor) ? {} : null,
     },
     querySelectorAll: () => [panel],
   },
@@ -112,6 +113,8 @@ panel.dataset.manualBidSubmitting = 'true';
 assert.equal(editor.hasActiveIntakeEditing(), true, 'A manual save in flight is protected');
 delete panel.dataset.manualBidSubmitting;
 focused = true;
+assert.equal(editor.hasActiveIntakeEditing(), false, 'Focused search and filters never pause background updates');
+focusedEditor = true;
 assert.equal(editor.hasActiveIntakeEditing(), true, 'Focused fields are protected before their first change');
 focused = false;
 editor.activeOverrideId = 'request';
