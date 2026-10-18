@@ -1,6 +1,7 @@
 -- Resolve a bid-notification recipient without exposing the service-role key to Vercel.
--- The caller must be authenticated and may only notify themselves, their own area
--- when serving as intake, or any area when serving as an administrator.
+-- The caller must be authenticated. Permanent intake/admin reviewers cover all
+-- areas; scheduled reviewers need access to a year containing this bidder's bids.
+-- Requires database/intake_review_access.sql for the shared reviewer check.
 
 create or replace function public.resolve_bid_notification_recipient(
   notification_area text,
@@ -10,11 +11,11 @@ returns table (recipient_email text)
 language plpgsql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  actor bidders%rowtype;
-  recipient bidders%rowtype;
+  actor public.bidders%rowtype;
+  recipient public.bidders%rowtype;
 begin
   if auth.uid() is null then
     raise exception 'Authentication is required.';
@@ -22,8 +23,9 @@ begin
 
   select b.*
   into actor
-  from bidders b
+  from public.bidders b
   where b.auth_user_id = auth.uid()
+    and lower(b.email) = lower(auth.jwt() ->> 'email')
     and b.active
   limit 1;
 
@@ -33,8 +35,8 @@ begin
 
   select b.*
   into recipient
-  from bidders b
-  join areas a on a.id = b.area_id
+  from public.bidders b
+  join public.areas a on a.id = b.area_id
   where lower(a.name) = lower(trim(notification_area))
     and upper(b.initials) = upper(trim(notification_initials))
     and b.active
@@ -45,13 +47,17 @@ begin
   end if;
 
   if actor.id = recipient.id
-    or actor.role = 'admin'
-    or (actor.role = 'intake' and actor.area_id = recipient.area_id)
+    or actor.role in ('admin', 'intake')
+    or exists (
+      select 1 from public.intake_submissions submission
+      where submission.bidder_id = recipient.id
+        and private.can_review_intake_year(submission.bid_year_id)
+    )
   then
     return query select recipient.email;
   end if;
 end;
 $$;
 
-revoke all on function public.resolve_bid_notification_recipient(text, text) from public;
+revoke all on function public.resolve_bid_notification_recipient(text, text) from public, anon;
 grant execute on function public.resolve_bid_notification_recipient(text, text) to authenticated;
