@@ -5603,7 +5603,8 @@ let intakeDecisionRefreshRunning = false;
 function hasActiveIntakeEditing() {
   if (activeOverrideId || activeDenialId || bidderEditor.busy) return true;
   const focused = document.activeElement;
-  if (focused?.matches("input, textarea, select") && focused.closest(".app-shell")
+  // Search and filters are safe to refresh; only actual bid editors need protection.
+  if (focused?.matches("input, textarea, select") && focused.closest("[data-manual-bid-panel], [data-bidder-editor-form]")
     && !focused.closest("[hidden]") && focused.closest(".page.active")) return true;
   return [...document.querySelectorAll("[data-manual-bid-panel], [data-bidder-editor-form]")]
     .some((panel) => panel.closest(".page.active") && !panel.closest("[hidden]")
