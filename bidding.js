@@ -6522,10 +6522,10 @@ function updateCalendarMonthNavigation(target, month) {
   nav.querySelector('[data-month-jump="next"]').disabled = month === Number(nav.querySelector('select').lastElementChild.value);
 }
 
-function jumpToCalendarMonth(target, month) {
+function jumpToCalendarMonth(target, month, { preserveMobilePosition = true } = {}) {
   const card = [...target.querySelectorAll("[data-calendar-month]")].find((item) => calendarNavigationIndex(item) === month);
   if (!card) return;
-  const keepMobilePosition = ["public-calendar", "dashboard-calendar", "leave-calendar"].includes(target.id)
+  const keepMobilePosition = preserveMobilePosition && ["public-calendar", "dashboard-calendar", "leave-calendar"].includes(target.id)
     && window.matchMedia("(max-width: 900px)").matches
     && target.classList.contains("mobile-single-month");
   const scrollTop = window.scrollY;
@@ -6549,6 +6549,11 @@ function jumpToCalendarMonth(target, month) {
     });
   } else {
     card.scrollIntoView({ behavior: "instant", block: "start" });
+    if (!preserveMobilePosition) {
+      // Collapsing the year changes page height. Align again after layout and
+      // scroll anchoring settle, rather than restoring the full-year offset.
+      requestAnimationFrame(() => card.scrollIntoView({ behavior: "instant", block: "start" }));
+    }
   }
   scheduleProgressiveCalendar(target);
 }
@@ -6623,7 +6628,7 @@ document.addEventListener("click", (event) => {
     else annualMobileCalendars.add(target.id);
     const month = Number(target.querySelector("[data-month-jump-select]").value);
     syncMobileCalendarMonths(target);
-    jumpToCalendarMonth(target, month);
+    jumpToCalendarMonth(target, month, { preserveMobilePosition: false });
     return;
   }
   const button = event.target.closest("[data-month-jump]");
@@ -18919,7 +18924,7 @@ document.addEventListener("click", async (event) => {
     else annualMobileCalendars.add(id);
     const target = document.getElementById(id);
     syncMobileCalendarMonths(target);
-    jumpToCalendarMonth(target, calendarNavigationMonths.get(id) ?? displayedCalendarMonth);
+    jumpToCalendarMonth(target, calendarNavigationMonths.get(id) ?? displayedCalendarMonth, { preserveMobilePosition: false });
     return;
   }
   const presentation = event.target.closest("[data-rdo-presentation]");
