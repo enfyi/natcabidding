@@ -67,7 +67,7 @@ const liveDataTables = { windows: [] };
 let liveDataTimer = null, liveDataRunning = false, liveDataGeneration = 0, liveDataActivityRevision = 0;
 const liveDataDirtyGroups = new Set(), liveDataSnapshots = new Map(), liveDataLastReadAt = new Map();
 ` + ['supabaseRows', 'applyBidWindowsFromDatabase', 'applyPublishedBidWindowResult',
-  'currentUserBidWindowStatus', 'scheduleLiveDataRefresh', 'refreshLiveData'].map(fn).join('\n'), lifecycle);
+  'currentUserBidWindowStatus', 'scheduleLiveDataRefresh', 'readLiveDataGroupWithTimeout', 'refreshLiveData'].map(fn).join('\n'), lifecycle);
 
 // Initial/foreground loading must discard prior assignments on failure.
 lifecycle.applyPublishedBidWindowResult(responseData);

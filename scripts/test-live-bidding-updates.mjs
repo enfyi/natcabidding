@@ -32,7 +32,7 @@ vm.runInContext(`const liveDataTables = { bidding: [], roster: [], slots: [] };
 let liveDataTimer = null, liveDataRunning = false, liveDataGeneration = 0, liveDataActivityRevision = 0;
 const liveDataDirtyGroups = new Set(), liveDataSnapshots = new Map(), liveDataLastReadAt = new Map();
 let calendarRenderRevision = 0;
-` + ['scheduleLiveDataRefresh','stopLiveDataUpdates','refreshLiveData'].map(fn).join('\n'), ctx);
+` + ['scheduleLiveDataRefresh','stopLiveDataUpdates','readLiveDataGroupWithTimeout','refreshLiveData'].map(fn).join('\n'), ctx);
 ctx.scheduleLiveDataRefresh(['bidding']);
 ctx.scheduleLiveDataRefresh(['bidding']);
 assert.equal(timers.size, 1, 'Events debounce into one timer');
@@ -217,3 +217,144 @@ calls.length = 0;
 target.dataset.calendarRevision = '-1';
 rendering.renderLiveDataSections(new Set(['slots']), true, {});
 assert.deepEqual(calls, ['slots', 'full-calendar'], 'A stale calendar rebuilds before date patches can mark it current');
+
+// HZ left selected in manual entry must not freeze arrivals or notifications.
+let intakeActive = true;
+const guard = vm.createContext({
+  document: { querySelector: selector => selector.includes('page.active') && intakeActive ? {} : null },
+  hasActiveIntakeEditing: () => true, bidderEditor: { busy: false },
+  intakeDecisionPending: false, intakeDecisionRefreshRunning: false,
+  intakeScheduleMutationPending: false, shiftPresetMutationPending: false,
+  leaveManagementPendingId: null, intakeLeaveRemovalPendingId: null,
+  pilotBidderResetPending: false, biddingBackupBusy: false, liveDataWritesPending: 0,
+});
+vm.runInContext(fn('hasActiveLiveDataEditing'), guard);
+assert.equal(guard.hasActiveLiveDataEditing(), false, 'Dirty manual panel does not block intake reads');
+guard.liveDataWritesPending = 1;
+assert.equal(guard.hasActiveLiveDataEditing(), true, 'Actual saves still block stale reads');
+guard.liveDataWritesPending = 0;
+intakeActive = false;
+assert.equal(guard.hasActiveLiveDataEditing(), true, 'Other page editing remains protected');
+page = 'intake';
+rendering.hasActiveIntakeEditing = () => true;
+rendering.renderLiveIntakeQueue = () => calls.push('queue');
+calls.length = 0;
+rendering.renderLiveDataSections(new Set(['bidding']), true, {});
+assert.deepEqual(calls, ['alerts', 'queue'], 'New arrivals update alerts and queue without rebuilding HZ manual entry');
+
+let deadline, lateResolve;
+const stalled = vm.createContext({
+  setTimeout: callback => { deadline = callback; return 1; }, clearTimeout() {},
+  readLiveDataGroup: () => new Promise(resolve => { lateResolve = resolve; }),
+});
+vm.runInContext(fn('readLiveDataGroupWithTimeout'), stalled);
+const blocked = stalled.readLiveDataGroupWithTimeout('bidding');
+deadline();
+const timeout = await blocked;
+assert.equal(timeout.results[0].error.code, 'LIVE_READ_TIMEOUT');
+let lateApplies = 0;
+lateResolve({ results: [{ data: [] }], apply: () => lateApplies++ });
+await Promise.resolve();
+assert.equal(lateApplies, 0, 'A late read cannot overwrite newer data');
+console.log('PASS idle manual selection, notifications, editor safety and stalled-read recovery');
+
+for (const panelName of ['RDO Selection', 'Requested Leave Dates']) {
+  const panel = { dataset: {}, closest: selector => selector === '.page.active' ? {} : null };
+  const formGuard = vm.createContext({
+    document: { activeElement: null, querySelectorAll: () => [panel],
+      querySelector: selector => selector.includes('page.active') ? {} : null },
+    activeOverrideId: null, activeDenialId: null, bidderEditor: { busy: false },
+    intakeDecisionPending: false, intakeDecisionRefreshRunning: false,
+    intakeScheduleMutationPending: false, shiftPresetMutationPending: false,
+    leaveManagementPendingId: null, intakeLeaveRemovalPendingId: null,
+    pilotBidderResetPending: false, biddingBackupBusy: false, liveDataWritesPending: 0,
+  });
+  vm.runInContext(['markIntakeEditing', 'hasActiveIntakeEditing', 'hasActiveLiveDataEditing'].map(fn).join('\n'), formGuard);
+  formGuard.markIntakeEditing({ target: { closest: () => panel } });
+  assert.equal(formGuard.hasActiveIntakeEditing(), true, `${panelName} draft remains protected`);
+  assert.equal(formGuard.hasActiveLiveDataEditing(), false, `${panelName} draft allows queue and notification reads while idle`);
+}
+
+for (const scenario of [
+  { name: 'Intake queue search', focused: true },
+  { name: 'Queue filter or sort', focused: true },
+  { name: 'Edit Bidder Info search', focused: true },
+  { name: 'Edit Bidder Info unsaved changes', focused: true, editor: true, dirty: true },
+  { name: 'Read Approval Rules' },
+  { name: 'Read Round Rules' },
+  { name: 'Open override', override: 'bid' },
+  { name: 'Open denial', denial: 'bid' },
+]) {
+  const panel = { dataset: { approvalRefreshDirty: scenario.dirty ? 'true' : '' },
+    closest: selector => selector === '.page.active' ? {} : null };
+  const audit = vm.createContext({
+    document: {
+      activeElement: { matches: () => Boolean(scenario.focused),
+        closest: selector => selector === '.page.active' ||
+          (selector.includes('data-manual-bid-panel') && scenario.editor) ? {} : null },
+      querySelectorAll: () => [panel],
+      querySelector: selector => selector.includes('page.active') ? {} : null,
+    },
+    activeOverrideId: scenario.override || null, activeDenialId: scenario.denial || null,
+    bidderEditor: { busy: false }, intakeDecisionPending: false, intakeDecisionRefreshRunning: false,
+    intakeScheduleMutationPending: false, shiftPresetMutationPending: false,
+    leaveManagementPendingId: null, intakeLeaveRemovalPendingId: null,
+    pilotBidderResetPending: false, biddingBackupBusy: false, liveDataWritesPending: 0,
+  });
+  vm.runInContext(['hasActiveIntakeEditing', 'hasActiveLiveDataEditing'].map(fn).join('\n'), audit);
+  assert.equal(audit.hasActiveLiveDataEditing(), false, `${scenario.name} allows intake notifications`);
+}
+console.log('PASS intake search, filters, bidder edits, rules, override and denial notification guards');
+
+// Exact RDO lookup flow: select HZ, display Bidding Employee, then receive a bid.
+let employeeRenders = 0, detailLoads = 0;
+const selectedBidder = { initials: 'HZ', profileId: 'hz-profile', record: null, generation: 0, loading: false };
+const selection = vm.createContext({
+  intakeBidderSelection: selectedBidder,
+  bueByInitials: initials => initials === 'HZ' ? { initials: 'HZ', profileId: 'hz-profile' } : null,
+  renderIntakeBidderSummary: () => employeeRenders++,
+  loadSelectedIntakeBidder: async () => { detailLoads++; selectedBidder.record = { displayed: true }; },
+});
+vm.runInContext(fn('selectIntakeBidder'), selection);
+selection.selectIntakeBidder(' hz ');
+assert.equal(selectedBidder.initials, 'HZ');
+assert.equal(employeeRenders, 1, 'Selecting an RDO bidder displays Bidding Employee information');
+assert.equal(detailLoads, 1);
+intakeActive = true;
+assert.equal(guard.hasActiveLiveDataEditing(), false, 'Displayed employee information does not pause reads');
+calls.length = 0;
+rendering.renderLiveDataSections(new Set(['bidding']), true, {});
+assert.deepEqual(calls, ['alerts', 'queue'], 'New notifications and queue items render with the selected employee displayed');
+assert.equal(selectedBidder.initials, 'HZ', 'Incoming bids preserve the selected RDO employee');
+console.log('PASS RDO bidder lookup followed by incoming notifications and queue refresh');
+
+// A read-only calendar date popup is not a bid editor.
+intakeActive = true;
+let openDialog = 'date-detail';
+guard.document.querySelector = selector => {
+  if (selector.includes('page.active')) return {};
+  if (openDialog === 'date-detail') return selector.includes(':not([data-leave-slot-modal])') ? null : {};
+  return {};
+};
+assert.equal(guard.hasActiveLiveDataEditing(), false, 'Leave Slot Detail permits incoming notifications');
+openDialog = 'bid-change';
+assert.equal(guard.hasActiveLiveDataEditing(), true, 'Editable bid-change dialogs retain their protection');
+console.log('PASS read-only calendar popup updates and editable dialog protection');
+
+for (const interaction of ['start date focused', 'end date focused', 'unfinished consecutive range', 'round changed', 'notes edited', 'range added to batch']) {
+  const panel = { dataset: { approvalRefreshDirty: 'true' }, closest: selector => selector === '.page.active' ? {} : null };
+  const range = vm.createContext({
+    document: { activeElement: { matches: () => true,
+      closest: selector => selector === '.page.active' || selector.includes('data-manual-bid-panel') ? {} : null },
+      querySelectorAll: () => [panel], querySelector: selector => selector.includes('page.active') ? {} : null },
+    activeOverrideId: null, activeDenialId: null, bidderEditor: { busy: false },
+    intakeDecisionPending: false, intakeDecisionRefreshRunning: false,
+    intakeScheduleMutationPending: false, shiftPresetMutationPending: false,
+    leaveManagementPendingId: null, intakeLeaveRemovalPendingId: null,
+    pilotBidderResetPending: false, biddingBackupBusy: false, liveDataWritesPending: 0,
+  });
+  vm.runInContext(['hasActiveIntakeEditing', 'hasActiveLiveDataEditing'].map(fn).join('\n'), range);
+  assert.equal(range.hasActiveIntakeEditing(), true, `${interaction}: preserve draft panel`);
+  assert.equal(range.hasActiveLiveDataEditing(), false, `${interaction}: allow incoming updates`);
+}
+console.log('PASS consecutive-range focused fields and unsaved draft notification guards');
