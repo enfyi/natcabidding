@@ -12969,7 +12969,8 @@ function bueRoster() {
 }
 
 function bueRosterUncached() {
-  const currentEntry = {
+  // Public calendars also need the roster during logout and before profile restoration.
+  const currentEntry = currentUser ? {
     rank: currentUser.seniorityRank,
     firstName: currentUser.firstName,
     lastName: currentUser.lastName,
@@ -12981,7 +12982,7 @@ function bueRosterUncached() {
     leaveSlotAllowance: normalizeLeaveSlotAllowance(currentUser.leaveSlotAllowance),
     profileId: currentUser.supabaseProfileId || "",
     ghostBidder: Boolean(currentUser.ghostBidder),
-  };
+  } : null;
   const byInitials = new Map();
 
   senioritySource.forEach((entry) => {
@@ -12989,11 +12990,11 @@ function bueRosterUncached() {
     const person = rosterEntryToPerson(entry);
     byInitials.set(person.initials, {
       ...person,
-      area: person.area || currentUser.area,
+      area: person.area || currentUser?.area,
       bidAs: person.bidAs || "CPC",
     });
   });
-  if (currentEntry.initials) byInitials.set(currentEntry.initials, currentEntry);
+  if (currentEntry?.initials) byInitials.set(currentEntry.initials, currentEntry);
 
   return [...byInitials.values()]
     .filter((person) => person.initials)
