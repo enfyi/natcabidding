@@ -18727,6 +18727,16 @@ function logOut() {
   renderPublicPage(publicState.area, publicState.section, { persistNavigation: true });
 }
 
+function dismissPublicLoginOnOutsidePress(event) {
+  const menu = document.querySelector("[data-public-login-menu]");
+  if (!menu || menu.hidden || event.target.closest(".public-login")) return;
+  menu.hidden = true;
+  document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
+}
+
+// Use the start of a gesture: selecting input text can end outside the popup.
+document.addEventListener("pointerdown", dismissPublicLoginOnOutsidePress);
+
 document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-intake-detail-close]")) {
     const detailId = activeIntakeDetailId;
@@ -18978,11 +18988,6 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-log-out]")) {
     logOut();
     return;
-  }
-
-  if (publicLoginMenu && !publicLoginMenu.hidden && !event.target.closest(".public-login")) {
-    publicLoginMenu.hidden = true;
-    document.querySelector("[data-public-login-toggle]")?.setAttribute("aria-expanded", "false");
   }
 
   const leaveRangeInput = event.target.closest("[data-leave-range-input]");
