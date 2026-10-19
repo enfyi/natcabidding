@@ -29,15 +29,15 @@ for(const engine of [chromium,webkit]) {
  prepareManualLeaveEntries=()=>({});chargeableLeaveDatesForInitials=range=>datesInLeaveRange(range);
  });
  const panel=page.locator('.manual-leave-request-card');await panel.locator('[data-manual-date-mode="multiple"]').click();
- const dialog=panel.locator('dialog');assert.equal(await dialog.evaluate(el=>el.open),true);assert.equal(await dialog.locator('.manual-picker-month').count(),13);
+ const dialog=panel.locator('[data-manual-multi-picker]');assert.equal(await dialog.isVisible(),true);assert.equal(await dialog.locator('.manual-picker-month').count(),13);
  for(const date of ['2027-06-07','2027-12-30','2028-01-08']) {const button=dialog.locator('[data-manual-pick-date="'+date+'"]').first();await button.click();assert.equal(await button.getAttribute('aria-pressed'),'true');}
  await dialog.locator('[data-manual-pick-date="2027-06-07"]').first().click();assert.equal(await page.evaluate(()=>fixturePanel.manualDatePicker.dates.size),2);
  assert.equal(await dialog.locator('[data-manual-pick-date="2028-01-09"]').isDisabled(),true);
  assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'No horizontal overflow');
  await dialog.locator('[data-manual-leave-add]').click();assert.deepEqual(await page.evaluate(()=>manualLeaveBatch.entries.flatMap(e=>datesInLeaveRange(e.range))),['2027-12-30','2028-01-08']);
  assert.equal(await page.evaluate(()=>fixturePanel.manualDatePicker.dates.size),0);
- await dialog.locator('[data-manual-picker-close]').click();assert.equal(await dialog.evaluate(el=>el.open),false);
- await panel.locator('[data-manual-date-mode="multiple"]').click();await page.keyboard.press('Escape');assert.equal(await dialog.evaluate(el=>el.open),false);
- assert.deepEqual(errors,[]);console.log('PASS',engine.name(),width,'full calendar, cross-month toggles, leave-year boundary, batch, Done and Escape');await page.close();
+ await panel.locator('[data-manual-date-mode="range"]').click();assert.equal(await dialog.isVisible(),false);
+ await panel.locator('[data-manual-date-mode="multiple"]').click();assert.equal(await dialog.isVisible(),true);
+ assert.deepEqual(errors,[]);console.log('PASS',engine.name(),width,'full calendar, cross-month toggles, leave-year boundary, batch and inline mode switching');await page.close();
  }}finally{await browser.close();}
 }
