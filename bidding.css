@@ -12914,3 +12914,18 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .app-main .bid-window-builder .bid-window-consistency-toggle > span {
   color: #fff;
 }
+
+/* Intake bid entry: select requested dates across the full leave year. */
+dialog.manual-multi-picker { width: min(1200px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 48px); margin: auto; overflow: auto; border: 1px solid var(--line-strong); }
+dialog.manual-multi-picker::backdrop { background: rgba(15, 23, 42, .65); }
+.manual-picker-year { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; }
+.manual-picker-month { min-width: 0; }
+.manual-picker-month h3 { margin: 8px 0; font-size: .9rem; text-align: center; }
+.manual-picker-grid > button { min-width: 0; }
+.manual-picker-heading h2 { margin: 0; font-size: 1.1rem; }
+dialog.manual-multi-picker { color: #0f172a; background: #ffffff; background-image: none; }
+.app-main dialog.manual-multi-picker p.manual-picker-hint,
+dialog.manual-multi-picker > small,
+dialog.manual-multi-picker .manual-picker-weekday { color: #475569; }
+dialog.manual-multi-picker .manual-picker-grid button { color: #0f172a; background: #f8fafc; border-color: #cbd5e1; }
+dialog.manual-multi-picker .manual-picker-grid button[aria-pressed="true"] { color: #ffffff; background: #0f766e; border-color: #0f766e; }

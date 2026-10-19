@@ -16,7 +16,7 @@ const panel = { querySelector: key => fields[key], querySelectorAll: () => [] };
 let cacheActive = false;
 let countPasses = 0;
 const context = vm.createContext({
-  BID_YEAR: 2027, currentUser: { initials: 'ADMIN' },
+  BID_YEAR: 2027, BID_LEAVE_YEAR_START_KEY: "2027-01-10", BID_LEAVE_YEAR_END_KEY: "2028-01-08", currentUser: { initials: 'ADMIN' },
   manualLeaveBatch: { key: '', entries: [] },
   currentViewArea: () => 'Area A', currentRoundNumber: () => 2,
   escapeHtml: value => value,
@@ -47,6 +47,10 @@ for (let run = 0; run < 50; run++) {
 assert.equal(countPasses, 500, 'One charge calculation per render');
 assert.match(target.innerHTML, /10 selected · 9 charged days/);
 assert.match(target.innerHTML, /aria-pressed="true"/);
+assert.equal((target.innerHTML.match(/class="manual-picker-month"/g) || []).length, 13, 'Full leave year and January boundary are visible together');
+assert.match(target.innerHTML, /data-manual-pick-date="2028-01-08"/);
+assert.match(target.innerHTML, /data-manual-pick-date="2028-01-09"[^>]*disabled/);
+assert.match(target.innerHTML, /data-manual-leave-add/);
 samples.sort((a, b) => a - b);
 const p95 = samples[Math.floor(samples.length * .95)];
 assert.ok(p95 < 50, `Picker HTML generation p95 ${p95.toFixed(2)}ms exceeds 50ms budget`);
