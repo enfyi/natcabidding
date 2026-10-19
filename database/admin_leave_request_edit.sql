@@ -1,5 +1,6 @@
 -- Durable intake/admin edits for approved leave requests.
--- Apply after schema.sql, rls_area_policies.sql, and leave_submission_preflight.sql.
+-- Apply after round_four_holiday_allowances.sql and closed_round_leave_management.sql.
+-- Includes current round limits, holiday charging, ghost/GL capacity, and closed-round checks.
 
 create schema if not exists private;
 revoke all on schema private from public, anon;
@@ -57,7 +58,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -88,9 +89,7 @@ begin
   where b.id = request_row.bidder_id
     and b.active;
 
-  if actor.role <> 'admin' and actor.area_id is distinct from target.area_id then
-    raise exception 'Intake users can only replace approved leave in their own area.';
-  end if;
+  -- Authorized shared intake reviewers may edit bidders across areas.
 
   if target.bid_role in ('ADM', 'NB') then
     raise exception 'This profile cannot be assigned leave.';
@@ -158,7 +157,7 @@ begin
       and existing_request.bidder_id = request_row.bidder_id
       and existing_request.id <> request_row.id
       and existing_request.status in ('pending', 'approved')
-      and existing_date.leave_date between requested_start_date and requested_end_date
+      and existing_date.leave_date between replacement_start_date and replacement_end_date
   ) then
     raise exception 'The bidder already has one or more replacement dates in another pending or approved request.';
   end if;
@@ -228,7 +227,7 @@ begin
       raise exception 'Round 1 can include no more than 2 seven-day bid weeks.';
     end if;
   else
-    round_limit := case when request_row.round_number in (2, 3) then 10 else 5 end;
+    round_limit := case when request_row.round_number in (2, 3) then private.round_two_three_limit_for_line(target_rdo_line_id) else private.round_four_limit_for_line(target_rdo_line_id) end;
 
     select coalesce(sum(other_request.charged_days), 0)::integer
     into other_round_usage
@@ -369,6 +368,8 @@ begin
     from public.leave_request_dates request_date
     where request_date.leave_request_id = request_row.id
       and request_date.charged
+      and not request_row.is_ghost_bid
+      and target.bid_role <> 'GL'
       and not request_date.is_holiday and not request_date.is_holiday_in_lieu
     order by request_date.leave_date
   loop
@@ -392,12 +393,13 @@ begin
       on pending_bidder.id = pending_request.bidder_id
     where pending_request.bid_year_id = request_row.bid_year_id
       and pending_request.status = 'pending'
+      and not pending_request.is_ghost_bid
       and pending_request.id <> request_row.id
       and pending_date.leave_date = edit_date
       and pending_date.charged
       and not pending_date.is_holiday and not pending_date.is_holiday_in_lieu
       and pending_bidder.area_id = target.area_id
-      and pending_bidder.bid_role not in ('ADM', 'NB')
+      and pending_bidder.bid_role not in ('GL', 'ADM', 'NB')
       and case
         when pending_bidder.bid_role in ('R-DEV', 'D-DEV', 'DEV', 'TMCIT') then 'dev'
         else 'cpc'
@@ -468,11 +470,8 @@ begin
       updated_at = now()
   where request.id = request_row.id;
 
-  select case when line.four_ten then 10 else 8 end
-  into leave_hours_per_day
-  from public.rdo_lines line where line.id = target_rdo_line_id;
-  leave_hours_per_day := coalesce(leave_hours_per_day, 8);
-  for check_round in 1..4 loop
+  leave_hours_per_day := private.leave_hours_for_line(target_rdo_line_id);
+  for check_round in 1..6 loop
     select coalesce(sum(request.charged_days), 0) * leave_hours_per_day
     into used_hours
     from public.leave_requests request
@@ -481,25 +480,8 @@ begin
       and request.status in ('pending', 'approved')
       and request.round_number <= check_round;
     credit_days := 0;
-    if check_round = 4 then
-      select count(distinct request_date.leave_date)
-      into credit_days
-      from public.leave_request_dates request_date
-      join public.leave_requests request on request.id = request_date.leave_request_id
-      where request.bid_year_id = request_row.bid_year_id
-        and request.bidder_id = target.id
-        and request.round_number between 1 and 3
-        and request.status in ('pending', 'approved')
-        and request_date.charged
-        and (request_date.is_holiday or request_date.is_holiday_in_lieu);
-      select coalesce(sum(event.credit_days), 0)
-      into manual_credit_days
-      from public.leave_credit_events event
-      where event.bid_year_id = request_row.bid_year_id
-        and event.bidder_id = target.id
-        and event.round_number <= check_round
-        and event.source = 'manual_adjustment';
-      credit_days := credit_days + manual_credit_days;
+    if check_round >= 4 then
+      credit_days := private.round_four_credit_days(request_row.bid_year_id, target.id);
     end if;
     if used_hours > target.leave_slot_allowance + credit_days * leave_hours_per_day then
       raise exception 'Round % would use % leave hours, above the % hour allowance.',
@@ -563,16 +545,19 @@ create or replace function public.replace_approved_leave_request_dates(
   allow_capacity_override boolean default false
 )
 returns jsonb
-language sql
+language plpgsql
 security invoker
 set search_path = ''
 as $function$
-  select private.replace_approved_leave_request_dates_unchecked(
+begin
+  perform private.assert_intake_leave_round_open(requested_leave_request_id);
+  return private.replace_approved_leave_request_dates_unchecked(
     requested_leave_request_id,
     requested_start_date,
     requested_end_date,
     allow_capacity_override
-  )
+  );
+end;
 $function$;
 
 revoke all on function public.replace_approved_leave_request_dates(uuid, date, date, boolean)
@@ -582,3 +567,5 @@ to authenticated;
 
 comment on function public.replace_approved_leave_request_dates(uuid, date, date, boolean) is
   'Atomically replaces an approved leave request range, date details, week buckets, assigned slots, and audit history for an authorized intake user or administrator.';
+
+notify pgrst, 'reload schema';

@@ -1,3 +1,4 @@
+-- Requires database/fatigue_group_balancing.sql.
 -- Round 4: return every charged Round 1-3 holiday/in-lieu day to the
 -- bidder's allowance, using the selected line's hours per day.
 create or replace function private.round_four_limit_for_line(line_id uuid)
@@ -662,7 +663,7 @@ begin
         error_messages,
         format('RDO Line %s could not be found in %s.', submitted_rdo_line_code, target_area)
       );
-    elsif exists (
+    elsif target.bid_role <> 'GL' and exists (
       select 1
       from public.rdo_lines rl
       where rl.id = submitted_rdo_line_id
@@ -1029,7 +1030,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -1060,9 +1061,7 @@ begin
   where b.id = request_row.bidder_id
     and b.active;
 
-  if actor.role <> 'admin' and actor.area_id is distinct from target.area_id then
-    raise exception 'Intake users can only replace approved leave in their own area.';
-  end if;
+  -- Authorized shared intake reviewers may edit bidders across areas.
 
   if target.bid_role in ('ADM', 'NB') then
     raise exception 'This profile cannot be assigned leave.';
@@ -1130,7 +1129,7 @@ begin
       and existing_request.bidder_id = request_row.bidder_id
       and existing_request.id <> request_row.id
       and existing_request.status in ('pending', 'approved')
-      and existing_date.leave_date between requested_start_date and requested_end_date
+      and existing_date.leave_date between replacement_start_date and replacement_end_date
   ) then
     raise exception 'The bidder already has one or more replacement dates in another pending or approved request.';
   end if;
@@ -1558,7 +1557,7 @@ begin
       select 1
       from public.intake_schedules schedule
       where schedule.intake_user_id = actor.id
-        and now() >= schedule.starts_at - interval '15 minutes'
+        and now() >= schedule.starts_at - interval '60 minutes'
         and now() <= schedule.ends_at
     )
   ) then
@@ -2028,7 +2027,7 @@ returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   actor_id uuid; target public.bidders%rowtype; year_id uuid; before_state jsonb;
   line_row public.rdo_lines%rowtype; line_change jsonb; entry jsonb; prior jsonb;
-  rdo_id uuid; rdo_status text; group_name text; area_max integer; crew_max integer;
+  rdo_id uuid; rdo_status text; group_name text;
   start_day date; end_day date; round_no integer; day_hours integer; used_hours integer; credit_days integer; manual_credit_days integer;
   bucket text; d date; r record;
 begin
@@ -2066,25 +2065,17 @@ begin
     if target.bid_role <> 'GL' and line_row.status <> 'open' and line_row.assigned_bidder_id is distinct from target.id then
       raise exception 'This RDO line is no longer available.';
     end if;
-    group_name := line_change->>'fatigue_group';
-    if group_name is null or group_name not in ('A','B','C') then raise exception 'Choose fatigue group A, B, or C.'; end if;
+    group_name := nullif(trim(line_change->>'fatigue_group'), '');
+    if group_name is not null and group_name not in ('A','B','C') then raise exception 'Choose fatigue group A, B, C, or No preference.'; end if;
     if line_row.fatigue_group like '%only' and group_name <> left(line_row.fatigue_group,1) then
       raise exception 'This line requires fatigue group %.',left(line_row.fatigue_group,1);
     end if;
     if jsonb_typeof(line_change->'flex') is distinct from 'boolean' or jsonb_typeof(line_change->'aws') is distinct from 'boolean'
       or coalesce(line_change->>'mid','') not in ('Yes','No','BID') then raise exception 'Choose valid Flex, AWS, and Mid values.'; end if;
     if line_row.mid='BID' and line_change->>'mid' <> 'BID' then raise exception 'A designated Mid line must retain BID.'; end if;
-    if line_row.line_type='CPC' and target.bid_role <> 'GL' then
-      select greatest(1,floor(count(*)::numeric/3)::integer) into area_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC';
-      select greatest(1,floor(count(*)::numeric/3)::integer) into crew_max from public.rdo_lines
-        where bid_year_id=year_id and area_id=target.area_id and line_type='CPC' and pattern=line_row.pattern;
-      if (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= area_max
-        or (select count(*) from public.rdo_lines where bid_year_id=year_id and area_id=target.area_id and line_type='CPC'
-        and pattern=line_row.pattern and status='taken' and fatigue_group=group_name and assigned_bidder_id is distinct from target.id) >= crew_max then
-        raise exception 'Fatigue group % is full for this area or crew.',group_name;
-      end if;
+    if group_name is not null and line_row.line_type in ('CPC','DEV') and target.bid_role <> 'GL'
+      and not private.fatigue_group_is_available(year_id,target.area_id,line_row.id,group_name,target.id) then
+      raise exception 'Fatigue group % is full for this area or RDO set.',group_name;
     end if;
     rdo_id := (before_state->'rdo'->>'id')::uuid;
     rdo_status := coalesce(before_state->'rdo'->>'status','approved');

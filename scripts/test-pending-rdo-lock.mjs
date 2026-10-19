@@ -9,7 +9,7 @@ const migration = await readFile(
 
 assert.match(source, /function pendingCurrentUserRdoRequest\(/)
 assert.match(source, /Your RDO bid is awaiting an intake decision/)
-assert.match(source, /button\.textContent = "Awaiting Intake Decision"/)
+assert.match(source, /button\.textContent = "Awaiting Intaker Decision"/)
 assert.match(source, /const bidderSelectionLocked = Boolean\(pendingRequest\)/)
 assert.match(source, /isViewingHomeArea\(\) && !bidderSelectionLocked/)
 assert.match(source, /const submittedLine = submittedRdoLineForInitials\(currentUser\.initials\)/)

@@ -1,6 +1,8 @@
 'use client'
 
 import Link from 'next/link'
+import { RoundAnnouncementEditor } from './round-announcement-editor'
+import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { getSupabaseEnv } from '@/lib/env'
@@ -24,6 +26,8 @@ type MouDocument = {
 }
 
 const MOU_BUCKET = 'mou-documents'
+// The storage folder identifies area MOUs without changing the existing document schema.
+const AREA_MOU_PREFIX = 'mous/areas/'
 const RICH_TEXT_TAGS = new Set(['P', 'DIV', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'UL', 'OL', 'LI', 'A', 'H3', 'H4', 'BLOCKQUOTE', 'SPAN'])
 const RICH_TEXT_FONT_SIZES = new Set(['0.75rem', '0.875rem', '1rem', '1.125rem', '1.25rem', '1.5rem', '2rem'])
 
@@ -486,6 +490,8 @@ export function FaqAdmin() {
   const [documents, setDocuments] = useState<MouDocument[]>([])
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
+  const [areaName, setAreaName] = useState('')
+  const [areaFile, setAreaFile] = useState<File | null>(null)
   const [docTitle, setDocTitle] = useState('')
   const [docDescription, setDocDescription] = useState('')
   const [docFile, setDocFile] = useState<File | null>(null)
@@ -596,19 +602,20 @@ export function FaqAdmin() {
     setBusy(false)
   }
 
-  async function addDocument() {
+  async function addDocument(areaMou = false) {
     if (!supabase) return
-    const cleanTitle = docTitle.trim()
-    const cleanDescription = normalizedRichHtml(docDescription)
-    if (!cleanTitle || !docFile) {
-      setStatus('Add a document title and choose the MOU file.')
+    const cleanTitle = areaMou ? `${areaName.trim()} MOU` : docTitle.trim()
+    const cleanDescription = areaMou ? '' : normalizedRichHtml(docDescription)
+    const file = areaMou ? areaFile : docFile
+    if (!file || (areaMou ? !areaName.trim() : !cleanTitle) || cleanTitle.length > 240) {
+      setStatus('Add an area or document title (up to 236 characters) and choose the MOU file.')
       return
     }
 
     setBusy(true)
     setStatus('Uploading MOU...')
-    const filePath = `mous/${slugFileName(docFile.name)}`
-    const upload = await supabase.storage.from(MOU_BUCKET).upload(filePath, docFile, {
+    const filePath = `${areaMou ? AREA_MOU_PREFIX : 'mous/'}${crypto.randomUUID()}-${slugFileName(file.name)}`
+    const upload = await supabase.storage.from(MOU_BUCKET).upload(filePath, file, {
       cacheControl: '3600',
       upsert: false,
     })
@@ -629,12 +636,18 @@ export function FaqAdmin() {
     })
 
     if (error) {
+      await supabase.storage.from(MOU_BUCKET).remove([filePath])
       setStatus(error.message)
     } else {
-      setDocTitle('')
-      setDocDescription('')
-      setDocFile(null)
-      const input = document.querySelector<HTMLInputElement>('[data-mou-file-input]')
+      if (areaMou) {
+        setAreaName('')
+        setAreaFile(null)
+      } else {
+        setDocTitle('')
+        setDocDescription('')
+        setDocFile(null)
+      }
+      const input = document.querySelector<HTMLInputElement>(areaMou ? '[data-area-mou-file-input]' : '[data-mou-file-input]')
       if (input) input.value = ''
       setStatus('MOU uploaded.')
       await loadContent()
@@ -698,13 +711,15 @@ export function FaqAdmin() {
         <div>
           <p className="eyebrow">System administration</p>
           <h1>FAQ & MOUs.</h1>
-          <p className="import-lede">Publish frequently asked questions and upload MOU documents for the public bidding FAQ page.</p>
+          <p className="import-lede">Manage round announcements, publish frequently asked questions, and upload MOU documents.</p>
         </div>
         <div className="faq-admin-stats" aria-label="Published content summary">
           <div><strong>{publishedEntries}</strong><span>FAQs live</span></div>
           <div><strong>{publishedDocuments}</strong><span>MOUs live</span></div>
         </div>
       </header>
+
+      {supabase ? <RoundAnnouncementEditor client={supabase} /> : null}
 
       <div className="faq-admin-grid">
         <section className="import-card faq-editor-card" aria-labelledby="faq-add-heading">
@@ -725,7 +740,7 @@ export function FaqAdmin() {
             <span className="faq-field-label">Answer</span>
             <HtmlEditor value={answer} onChange={setAnswer} placeholder="Write the answer exactly as it should appear." ariaLabel="New FAQ answer" />
           </div>
-          <button className="button primary" type="button" disabled={busy} onClick={() => void addEntry()}>Publish FAQ</button>
+          <button className="button primary" type="button" disabled={busy} aria-busy={busy} onClick={() => void addEntry()}>{busy ? 'Working…' : 'Publish FAQ'}</button>
         </section>
 
         <section className="import-card faq-editor-card" aria-labelledby="mou-add-heading">
@@ -751,11 +766,26 @@ export function FaqAdmin() {
             <input data-mou-file-input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(event) => setDocFile(event.target.files?.[0] || null)} />
             <small>{docFile ? `${docFile.name} · ${(docFile.size / 1024).toFixed(1)} KB` : 'Choose the MOU file to upload.'}</small>
           </label>
-          <button className="button primary" type="button" disabled={busy} onClick={() => void addDocument()}>Upload MOU</button>
+          <button className="button primary" type="button" disabled={busy} aria-busy={busy} onClick={() => void addDocument()}>{busy ? 'Working…' : 'Upload MOU'}</button>
         </section>
       </div>
 
-      {status ? <p className="import-status" role="status">{status}</p> : null}
+      <section className="import-card faq-editor-card" aria-labelledby="area-mou-add-heading">
+        <h2 id="area-mou-add-heading">Area MOUs</h2>
+        <p>Upload each area’s MOU here. All area documents appear together in one Area MOUs section on the FAQ.</p>
+        <label>
+          Area name
+          <input value={areaName} maxLength={236} onChange={(event) => setAreaName(event.target.value)} placeholder="Area A" />
+        </label>
+        <label>
+          Area MOU file
+          <input data-area-mou-file-input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(event) => setAreaFile(event.target.files?.[0] || null)} />
+          <small>{areaFile ? `${areaFile.name} · ${(areaFile.size / 1024).toFixed(1)} KB` : 'Choose the MOU file for this area.'}</small>
+        </label>
+        <button className="button primary" type="button" disabled={busy} aria-busy={busy} onClick={() => void addDocument(true)}>{busy ? 'Working…' : 'Upload area MOU'}</button>
+      </section>
+
+      <ActionStatus message={status} busy={busy} className="import-status" />
 
       <section className="import-card faq-list-card" aria-labelledby="faq-list-heading">
         <div className="import-section-heading">
@@ -818,46 +848,51 @@ export function FaqAdmin() {
             </div>
           </div>
         </div>
-        <div className="faq-admin-list">
-          {documents.map((document) => (
-            <article className="faq-admin-row" key={document.id}>
-              <label>
-                Title
-                <input defaultValue={document.title} onBlur={(event) => {
-                  const value = event.target.value.trim()
-                  if (value && value !== document.title) void updateDocument(document, { title: value })
-                }} />
-              </label>
-              <div className="faq-field">
-                <span className="faq-field-label">Short note</span>
-                <HtmlEditor
-                  value={document.description || ''}
-                  placeholder="Optional context for this document."
-                  ariaLabel={`Note for ${document.title}`}
-                  onCommit={(value) => {
-                    if (value !== normalizedRichHtml(document.description || '')) void updateDocument(document, { description: value || null })
-                  }}
-                />
-              </div>
-              <div className="faq-admin-row-actions">
-                <a className="button secondary" href={supabase ? documentUrl(supabase, document) : '#'} target="_blank" rel="noreferrer">Open file</a>
+        {['General MOUs', 'Area MOUs'].map((group, groupIndex) => (
+          <div key={group}>
+            <h3>{group}</h3>
+            <div className="faq-admin-list">
+            {documents.filter((document) => document.file_path.startsWith(AREA_MOU_PREFIX) === (groupIndex === 1)).map((document) => (
+              <article className="faq-admin-row" key={document.id}>
                 <label>
-                  Order
-                  <input type="number" defaultValue={document.display_order} onBlur={(event) => {
-                    const value = Number(event.target.value)
-                    if (Number.isFinite(value) && value !== document.display_order) void updateDocument(document, { display_order: value })
+                  Title
+                  <input defaultValue={document.title} onBlur={(event) => {
+                    const value = event.target.value.trim()
+                    if (value && value !== document.title) void updateDocument(document, { title: value })
                   }} />
                 </label>
-                <label className="faq-checkbox">
-                  <input type="checkbox" checked={document.published} onChange={(event) => void updateDocument(document, { published: event.target.checked })} />
-                  Published
-                </label>
-                <button className="button secondary" type="button" disabled={busy} onClick={() => void deleteDocument(document)}>Delete</button>
-              </div>
-            </article>
-          ))}
-          {documents.length ? null : <p className="muted">No MOU documents yet.</p>}
-        </div>
+                <div className="faq-field">
+                  <span className="faq-field-label">Short note</span>
+                  <HtmlEditor
+                    value={document.description || ''}
+                    placeholder="Optional context for this document."
+                    ariaLabel={`Note for ${document.title}`}
+                    onCommit={(value) => {
+                      if (value !== normalizedRichHtml(document.description || '')) void updateDocument(document, { description: value || null })
+                    }}
+                  />
+                </div>
+                <div className="faq-admin-row-actions">
+                  <a className="button secondary" href={supabase ? documentUrl(supabase, document) : '#'} target="_blank" rel="noreferrer">Open file</a>
+                  <label>
+                    Order
+                    <input type="number" defaultValue={document.display_order} onBlur={(event) => {
+                      const value = Number(event.target.value)
+                      if (Number.isFinite(value) && value !== document.display_order) void updateDocument(document, { display_order: value })
+                    }} />
+                  </label>
+                  <label className="faq-checkbox">
+                    <input type="checkbox" checked={document.published} onChange={(event) => void updateDocument(document, { published: event.target.checked })} />
+                    Published
+                  </label>
+                  <button className="button secondary" type="button" disabled={busy} onClick={() => void deleteDocument(document)}>Delete</button>
+                </div>
+              </article>
+            ))}
+            {documents.some((document) => document.file_path.startsWith(AREA_MOU_PREFIX) === (groupIndex === 1)) ? null : <p className="muted">No {group.toLowerCase()} yet.</p>}
+            </div>
+          </div>
+        ))}
       </section>
     </main>
   )

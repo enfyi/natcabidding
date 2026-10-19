@@ -20,6 +20,7 @@ const context = {
   dateFromKey: (key) => new Date(`${key}T12:00:00`),
   dateKeyFromDate: (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
   rdoWeekdaysForLine: () => new Set([0,6]),
+  submittedRdoLineForInitials: () => null,
 };
 vm.createContext(context);
 vm.runInContext('let leaveReadCache = null;\n' + [...names].map((name) => {

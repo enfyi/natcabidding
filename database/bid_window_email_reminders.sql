@@ -101,6 +101,14 @@ begin
     and nullif(trim(b.email), '') is not null
     and now() >= bw.closes_at - interval '30 minutes'
     and now() < bw.closes_at
+    and not exists (
+      select 1
+      from public.leave_requests lr
+      where lr.bid_year_id = bw.bid_year_id
+        and lr.bidder_id = bw.bidder_id
+        and lr.round_number = bw.round_number
+        and lr.status = 'approved'
+    )
   on conflict on constraint bid_window_email_reminders_bid_window_id_reminder_type_key do nothing;
 
   return query
@@ -113,7 +121,15 @@ begin
       and r.scheduled_for <= now()
       and (
         (r.reminder_type = 'opening_15_minutes' and now() < bw.opens_at)
-        or (r.reminder_type = 'expiring_30_minutes' and now() < bw.closes_at)
+        or (r.reminder_type = 'expiring_30_minutes' and now() < bw.closes_at
+          and not exists (
+            select 1
+            from public.leave_requests lr
+            where lr.bid_year_id = bw.bid_year_id
+              and lr.bidder_id = bw.bidder_id
+              and lr.round_number = bw.round_number
+              and lr.status = 'approved'
+          ))
       )
     order by r.scheduled_for, r.id
     limit 50

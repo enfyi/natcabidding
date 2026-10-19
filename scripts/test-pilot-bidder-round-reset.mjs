@@ -10,6 +10,7 @@ const handler = source.slice(start, end);
 function scenario(overrides = {}) {
   const calls = [], messages = [], confirmations = [];
   const context = vm.createContext({
+    showActionFeedback() {},
     pilotState: { database: true, memberIds: ['allowed'] }, pilotBidderResetPending: false,
     senioritySource: [['Bidder', 'Test', 'CPC', 'TB', 'Area A', 'allowed']], BID_YEAR: 2027,
     supabaseState: { placeholdersCleared: true },

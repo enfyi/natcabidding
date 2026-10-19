@@ -22,6 +22,10 @@ come from the existing public roster read model.
 Run `database/public_leave_slots_read.sql` so leave calendars load the complete
 saved slot schedule and daily capacity adjustments from Supabase without the
 Data API row limit truncating later dates or areas.
+For existing installations, run `database/optimize_public_leave_slots_read.sql`
+to reduce repeated capacity-marker checks while preserving the deployed function
+and its grants. Run `scripts/test-public-leave-slot-query.sql` to compare the
+complete old and optimized calendar results in a rollback-only transaction.
 
 Run `database/rdo_line_eligibility.sql` after `database/schema.sql` to install
 the shared RDO-line eligibility rule used by member and admin bidding flows.
@@ -47,8 +51,24 @@ base schema, then run `database/fatigue_group_balancing.sql` before running or
 re-running `database/transactional_bidding.sql` and
 `database/high_priority_bidding_fixes.sql` (when that migration is part of the
 installation), followed by `database/leave_submission_preflight.sql`,
-`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`. Keep the
-preflight migration after either script that replaces the leave submission
+`database/rls_area_policies.sql`, and `database/admin_bidder_editor.sql`.
+Reusable SQL installers call the shared fatigue helper directly, including the
+submission, review, and admin bidder editor definitions. Install
+`database/fatigue_group_balancing.sql` before running those installers.
+For existing installations or replayed historical migrations, run
+`database/fatigue_capacity_sync.sql` to upgrade legacy submission and review
+checks without replacing their other deployed bidding logic. The sync script also upgrades the legacy admin bidder editor in place. The browser and database then allow balanced
+remainders (for example, four lines split 2/1/1) using both area and RDO-set limits.
+Install `database/manual_fatigue_override.sql` after the fatigue helper and
+capacity sync. This installs the staff-only manual override RPC, its private
+authorization records, and upgrades the deployed review function in place.
+Reusable review installers also require this script's private helper. Only
+active `intake` and `admin` accounts can create overrides. An override bypasses
+fatigue capacity only for the saved submission, line, and group; all other
+submission and approval validation remains enforced. Entry and review are
+audited. Browser-supplied override flags do not authorize a capacity bypass.
+
+Keep the preflight migration after either script that replaces the leave submission
 function so its transactional wrapper remains installed. Intake can designate a controller before the
 controller submits a bid. Their selected RDO is retained as a **Ghost Line** in
 their account and audit history without taking the source line. Their ghost
@@ -73,7 +93,11 @@ admin-managed FAQ rows, a public MOU document list, and the public Supabase
 storage bucket used by the `/admin/faq` editor.
 
 For durable intake/admin replacement of dates on an approved leave request, also
-run `database/admin_leave_request_edit.sql` after the leave submission preflight.
+run `database/admin_leave_request_edit.sql` after the current round-rule installers
+and `database/closed_round_leave_management.sql`. For existing installations, apply
+`supabase/migrations/20261005155249_install_approved_leave_date_replacement.sql`.
+The replacement API retains the closed-round restriction and excludes ghost/GL
+requests from area slot consumption.
 The operation releases the request's old slots, validates and reserves its new
 dates, rebuilds Round 1 buckets and charged-date details, and writes an audit
 event in one transaction.
@@ -135,11 +159,12 @@ limit still applies. The migration
 recalculates older saved holiday charges and updates the leave-summary views.
 
 Run `database/holiday_slot_reservations.sql` after the holiday rules and the
-Round 2–4 allowance upgrades. Charged holiday and holiday-in-lieu bids then hold
-normal CPC/DEV daily inventory while pending, display the bidder's initials in
-the calendar, and remain assigned when approved. Existing active holiday bids
-are backfilled into open slots; the migration stops on a real capacity conflict
-instead of silently increasing the configured capacity.
+Round 2–4 allowance upgrades. Holiday and holiday-in-lieu bids occupy normal
+CPC/DEV daily inventory only after approval. Pending bids retain their charged
+leave dates, area usage, and Round 4 credits without holding a daily slot.
+For existing installations, run `database/defer_holiday_slots_until_approval.sql`
+to release pending holiday holds and preserve installed role-specific rules.
+Approval rechecks capacity and fails if no slot is available.
 
 For an isolated participant pilot, run `database/pilot_mode.sql` in both schemas
 so the application can read the pilot state. In the disposable pilot database
@@ -196,6 +221,21 @@ seniority rank, leave allowance, and active status by immutable bidder ID, while
 also supporting the older initials-based payload during deployment rollout.
 When seniority changes, draft and open bid-window times stay with their rank and
 are reassigned to every bidder affected by the move in the same transaction.
+
+For an existing installation using the older roster-save helper, apply
+`supabase/migrations/20260929010000_sync_bid_windows_with_seniority.sql`.
+The browser already calls `admin_save_bidder_roster_rows`; this migration routes
+that call through the atomic window reassignment helper. No browser deployment
+is required to activate the change.
+
+Production deployment verified on October 2, 2026:
+- Applied the seniority/window synchronization migration to ZLA Bidding Website.
+- Corrected Area B ranks 24 and 25 in all four rounds (eight window assignments),
+  preserving window IDs, start/end times, and the current seniority order.
+- Tested a further 24/25 reorder in a rolled-back transaction: all eight windows
+  moved to the new rank holders while preserving the original two-hour slots.
+- Confirmed the restored production roster assigns rank 24 the earlier window
+  and rank 25 the later window in every round.
 
 Run `database/roster_bid_window_sync.sql` after the existing admin roster helpers.
 The roster editor then saves seniority changes and reassigns every affected
@@ -299,3 +339,40 @@ event for the completed schedule.
 Local regression tests are in `scripts/test-bidder-editor.mjs`. They use synthetic
 data in PGlite, with no live database connection. Set `PGLITE_MODULE` to an installed
 `@electric-sql/pglite/dist/index.js` module and run `node scripts/test-bidder-editor.mjs`.
+
+The combined migration `supabase/migrations/20261004224619_fatigue_group_manual_round_down_fix.sql` installs both fatigue fixes while preserving each environment's deployed RPC logic. Run `scripts/test-manual-fatigue-override.sql` for rollback-only database verification.
+
+## Round announcements
+
+Apply `supabase/migrations/20261015164831_round_announcements.sql` after the FAQ,
+active bid year, and public bid-window reader installations. It adds admin-only
+announcement edits and public reads of enabled announcements. The aggregate
+schedule reader reuses `read_public_bid_windows`; it exposes no private bidder
+fields and does not create a new privileged function.
+
+Open **Admin Console → Edit FAQs and MOUs → Round announcements**. Select a bid
+year and round, enable the announcement, edit its wording, choose amber or blue,
+and set the public and dashboard link labels and destinations. Relative links
+resolve beside `bidding.html`, including the configured self-hosted base path.
+`{round}` and `{start}` in the heading use the round number and published start
+date. `{start}` includes “tomorrow” or “today” where appropriate; without a
+published start it reads “soon.” Text is rendered as plain text.
+
+Automatic mode shows the announcement from the last published bid window’s end
+in the previous round until the first window’s start in the selected round,
+across all areas. No gap or missing schedules means no automatic announcement.
+Round 1 requires a chosen start time because it has no previous round. Manual
+mode uses the chosen show/hide times independently of the round schedule. All
+inputs use Los Angeles time, including daylight saving time. Banners appear only
+for the active bid year. Website settings refresh every 30 seconds and scheduled
+visibility changes happen at the configured boundaries.
+
+Run `pnpm test:round-announcements` for scheduling and rendering tests. For
+isolated Postgres/RLS integration tests, install `@electric-sql/pglite` outside
+the repository and run `PGLITE_MODULE=/absolute/path/to/node_modules/@electric-sql/pglite node scripts/test-round-announcement-database.mjs`.
+
+Apply `supabase/migrations/20261015172421_optional_round_announcement_labels.sql`
+to make announcement headings and both link labels optional. Blank headings are
+hidden; a blank link label hides that surface’s entire link, including its arrow.
+Hidden links may also have a blank destination. Visible links still require a safe
+destination. Existing saved wording is preserved.

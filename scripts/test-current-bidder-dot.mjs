@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8');
-const helpers = source.slice(source.indexOf('function bidTimeCurrentBidderDot('), source.indexOf('function renderPublicBidTimeTable('));
+const helpers = source.slice(source.indexOf('function bidTimeOpenRound('), source.indexOf('function renderPublicBidTimeTable('));
 const dots = ['Area A', 'Area B'].flatMap(area => [1, 2].map(rank => ({
-  dataset: { bidderArea: area, bidderRank: String(rank) },
+  dataset: { bidderArea: area, bidderRank: String(rank), bidderRoundCount: '4' },
+  parentElement: { classList: { toggle(name, active) { this.active = active; } } },
   hidden: true,
   label: '',
   getAttribute() { return this.label; },
@@ -16,18 +17,20 @@ const end = start + 2 * 60 * 60 * 1000;
 const context = vm.createContext({
   escapeHtml: value => value,
   document: { querySelectorAll: () => dots },
-  areaBidRoundState(date, area) {
-    if (area === 'Area B' || date.getTime() < start || date.getTime() >= end + 2 * 60 * 60 * 1000) return { phase: 'closed' };
-    return { phase: 'open', activeRank: date.getTime() < end ? 1 : 2, round: 1 };
+  Date: class extends Date { constructor(...args) { super(...(args.length ? args : [start])); } },
+  bidWindowForRankRound(rank, round, area) {
+    if (area === 'Area B' || round !== 2) return null;
+    return { start: new Date(start + (rank - 1) * (end - start)), end: new Date(start + rank * (end - start)) };
   },
 });
 vm.runInContext(helpers, context);
-assert.match(context.bidTimeCurrentBidderDot({ rank: 1, area: 'Area A', openRound: 1 }), /role="img" aria-label="Round 1 bid window open"/);
-assert.doesNotMatch(context.bidTimeCurrentBidderDot({ rank: 1, area: 'Area A', openRound: 1 }), / hidden/);
-assert.match(context.bidTimeCurrentBidderDot({ rank: 2, area: 'Area A' }), / hidden/);
+assert.match(context.bidTimeCurrentBidderDot({ rank: 1, area: 'Area A', rounds: ['', '', '', ''] }), /role="img" aria-label="Round 2 bid window open"/);
+assert.doesNotMatch(context.bidTimeCurrentBidderDot({ rank: 1, area: 'Area A', rounds: ['', '', '', ''] }), / hidden/);
+assert.match(context.bidTimeCurrentBidderDot({ rank: 2, area: 'Area A', rounds: ['', '', '', ''] }), / hidden/);
 for (const [time, expected] of [[start - 1, []], [start, [0]], [end - 1, [0]], [end, [1]], [end + 2 * 60 * 60 * 1000, []]]) {
   context.syncBidTimeCurrentBidderDots(new Date(time));
   assert.deepEqual(dots.flatMap((dot, index) => dot.hidden ? [] : [index]), expected);
+  assert.deepEqual(dots.flatMap((dot, index) => dot.parentElement.classList.active ? [index] : []), expected);
 }
 for (const name of ['renderPublicBidTimeTable', 'seniorityCardMarkup', 'seniorityTableMarkup']) {
   const beginning = source.indexOf(`function ${name}(`);

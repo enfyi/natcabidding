@@ -11,7 +11,7 @@ for(const file of ['schema.sql','seed.sql','ghost_bidding.sql','transactional_bi
  try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
 }
 {
- for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql']) {
+ for(const file of ['20260927043000_round_four_holiday_credit_compat.sql','20260927043500_round_four_holiday_credit_submitter_fix.sql','20260928040000_allow_rdo_no_fatigue_preference.sql','20260930142036_gl_independent_leave_balance.sql','20261001231620_gl_shared_rdo_lines.sql','20261002000006_prevent_gl_leave_slot_consumption.sql','20261002015357_ghost_leave_requires_available_slots.sql','20261002020308_install_ghost_bid_preservation_compatibility.sql']) {
   const migration=fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url));
   const sql=fs.readFileSync(migration,'utf8');
   try {await db.exec(sql); console.log('PASS',file)} catch(e) {console.error('FAIL',file,e.message,e.where||'');process.exit(1)}
@@ -84,15 +84,49 @@ const holidayFlags=(await db.query('select charged from leave_request_dates wher
 if(holidayFlags.length!==2 || holidayFlags.some(row=>!row.charged)) throw new Error('Holiday dates were not stored as charged');
 const heldHolidaySlots=(await db.query(`select slot_date::text as slot_date,slot_initials,status
   from leave_slots where source_leave_request_id=$1 order by slot_date`,[holidayRequest.id])).rows;
-if(heldHolidaySlots.length!==2 || heldHolidaySlots.some(row=>row.slot_initials!=='HT' || row.status!=='held'))
-  throw new Error('Pending holiday and in-lieu bids did not hold visible daily slots');
-console.log('PASS Round 2 holiday and in-lieu dates charge hours/days and hold visible slots');
+if(heldHolidaySlots.length!==0) throw new Error('Pending holidays reserved daily inventory');
+console.log('PASS Round 2 holiday and in-lieu dates charge hours/days without holding slots');
+// Reproduce legacy pending holds, then prove the upgrade releases them without
+// changing the accounting used for individual balances, area usage or credits.
+const accounting = async () => (await db.query(`select
+ (select jsonb_agg(to_jsonb(r) order by r.id) from leave_requests r) as requests,
+ (select jsonb_agg(to_jsonb(d) order by d.leave_request_id,d.leave_date) from leave_request_dates d) as dates,
+ (select to_jsonb(b) from private.area_leave_balance_days($1,$2,'cpc') b) as area,
+ private.round_four_credit_days($1,$3) as credits`,[year,bidder.area_id,holidayBidder])).rows[0];
+const beforeUpgrade = JSON.stringify(await accounting());
+await db.exec(`do $$ begin execute replace(replace(
+ pg_get_functiondef('private.sync_holiday_leave_slots(uuid)'::regprocedure),
+ 'request_row.status <> ''approved''', 'request_row.status not in (''pending'', ''approved'')'),
+ 'target_status := ''approved'';', 'target_status := case when request_row.status = ''approved'' then ''approved'' else ''held'' end;'); end $$;`);
+await db.query('select private.sync_holiday_leave_slots($1)',[holidayRequest.id]);
+if((await db.query('select count(*)::int as n from leave_slots where source_leave_request_id=$1',[holidayRequest.id])).rows[0].n!==2)
+ throw new Error('Legacy hold fixture was not created');
+const timingMigration=fs.readFileSync(new URL('../database/defer_holiday_slots_until_approval.sql',import.meta.url),'utf8');
+await db.exec(timingMigration);
+await db.exec(timingMigration);
+if((await db.query('select count(*)::int as n from leave_slots where source_leave_request_id=$1',[holidayRequest.id])).rows[0].n!==0)
+ throw new Error('Upgrade did not release legacy holds');
+if(JSON.stringify(await accounting())!==beforeUpgrade) throw new Error('Upgrade changed leave accounting');
+console.log('PASS migration releases legacy holds, reapplies safely, preserves dates, charges, area usage and Round 4 credits');
+
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
+// A slot filled after submission must block approval and keep the bid pending.
+await db.query("update leave_slots set status='unavailable' where slot_date='2027-05-31' and area_id=$1",[bidder.area_id]);
+try {
+ await db.query("select public.review_bidding_submission($1,'approved')",[holidayResult.submission_ids[0]]);
+ throw new Error('Holiday approval ignored full capacity');
+} catch(error) { if(!/available|capacity|full/i.test(error.message)) throw error; }
+if((await db.query('select status from leave_requests where id=$1',[holidayRequest.id])).rows[0].status!=='pending')
+ throw new Error('Failed approval did not retain pending request');
+await db.query("update leave_slots set status='open' where slot_date='2027-05-31' and area_id=$1",[bidder.area_id]);
+console.log('PASS holiday approval rechecks capacity and rolls back on conflict');
 await db.query('select public.review_bidding_submission($1,\'approved\')',[holidayResult.submission_ids[0]]);
 const approvedHolidaySlots=(await db.query(`select count(*)::integer as used
   from leave_slots where source_leave_request_id=$1 and slot_initials='HT' and status='approved'`,[holidayRequest.id])).rows[0].used;
 if(approvedHolidaySlots!==2) throw new Error('Approval did not retain the holiday slots and initials');
 console.log('PASS holiday approval keeps initials in two consumed daily slots');
+await db.exec(timingMigration);
+if((await db.query("select count(*)::int as n from leave_slots where source_leave_request_id=$1 and status='approved'",[holidayRequest.id])).rows[0].n!==2) throw new Error('Upgrade changed approved allocations');
 await db.exec(`set test.uid='${holidayAuth}'; set test.email='holiday@example.test'; update bid_year_settings set test_bid_round=3 where bid_year_id='${year}';
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
  values('${year}','${bidder.area_id}','2027-06-02','cpc','HOLIDAY-TEST') on conflict do nothing;`);
@@ -129,9 +163,8 @@ const roundOneHoliday=(await db.query('select public.submit_leave_bid_batch(2027
 if(roundOneHoliday.charged_days!==1) throw new Error('Round 1 holiday did not use one leave day');
 const roundOneHolidaySlot=(await db.query(`select slot_initials,status from leave_slots
   where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[roundOneBidder])).rows[0];
-if(!roundOneHolidaySlot || roundOneHolidaySlot.slot_initials!=='R1' || roundOneHolidaySlot.status!=='held')
-  throw new Error('Round 1 holiday did not hold a visible daily slot');
-console.log('PASS Round 1 holiday uses one leave day and one visible daily slot');
+if(roundOneHolidaySlot) throw new Error('Pending Round 1 holiday reserved a slot');
+console.log('PASS Round 1 holiday uses one leave day without a daily hold');
 
 const inLieuBidder='00000000-0000-0000-0000-000000000231';
 const inLieuAuth='00000000-0000-0000-0000-000000000232';
@@ -155,9 +188,8 @@ const inLieuSaved=(await db.query("select d.is_holiday_in_lieu,d.charged from le
 if(!inLieuSaved.is_holiday_in_lieu || !inLieuSaved.charged) throw new Error('Pending in-lieu date flags are incorrect');
 const inLieuSlot=(await db.query(`select slot_initials,status from leave_slots
   where source_leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)`,[inLieuBidder])).rows[0];
-if(!inLieuSlot || inLieuSlot.slot_initials!=='IL' || inLieuSlot.status!=='held')
-  throw new Error('Pending in-lieu bid did not hold a visible daily slot');
-console.log('PASS pending RDO creates a charged in-lieu date with a visible daily slot');
+if(inLieuSlot) throw new Error('Pending in-lieu bid reserved a slot');
+console.log('PASS pending RDO creates a charged in-lieu date without holding a slot');
 await db.query(`update leave_request_dates set is_holiday_in_lieu=false
   where leave_request_id=(select id from leave_requests where bidder_id=$1 and round_number=1 limit 1)
     and leave_date='2027-06-01'`,[inLieuBidder]);
@@ -165,7 +197,7 @@ const releasedInLieuSlot=(await db.query(`select bidder_id,slot_initials,status,
   from leave_slots where slot_code='IN-LIEU-2'`)).rows[0];
 if(releasedInLieuSlot.bidder_id || releasedInLieuSlot.slot_initials || releasedInLieuSlot.source_leave_request_id || releasedInLieuSlot.status!=='open')
   throw new Error('Removed in-lieu designation left a stale slot reservation');
-console.log('PASS removing an in-lieu designation releases its held slot');
+console.log('PASS removing an in-lieu designation leaves its slot open');
 
 const changeBidder='00000000-0000-0000-0000-000000000241';
 const changeAuth='00000000-0000-0000-0000-000000000242';
@@ -387,9 +419,38 @@ await db.query("select public.review_bidding_submission($1,'approved')",[ghostRd
 const openGhostLine=(await db.query('select status,assigned_bidder_id from rdo_lines where id=$1',[ghostLine])).rows[0];
 if(openGhostLine.status!=='open' || openGhostLine.assigned_bidder_id) throw new Error('Ghost Line consumed its source RDO line');
 await db.exec(`set test.uid='${ghostAuth}'; set test.email='ghost@example.test';`);
+await db.exec(`update rdo_lines set status='taken',assigned_bidder_id='${bidder.id}' where id='${ghostLine}';`);
+try {
+  await db.query("select public.submit_rdo_bid(2027,'GHOST-TEST','A',true,false,'No',1)");
+  throw new Error('Ghost RDO unexpectedly accepted a taken line');
+} catch (error) {
+  if (!error.message.includes('already assigned') && !error.message.includes('choose an open RDO line')) throw error;
+}
+await db.exec(`update rdo_lines set status='open',assigned_bidder_id=null where id='${ghostLine}';`);
+console.log('PASS Ghost RDO rejects a taken source line');
+// A ghost must see an open slot at submission, but must not reserve it.
+await db.exec(`delete from leave_slots where bid_year_id='${year}' and area_id='${bidder.area_id}' and slot_date='2027-09-01' and slot_group='cpc';`);
+try {
+  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:'2027-09-01',end_date:'2027-09-01',round:1,rdo_line_code:'GHOST-TEST'}])]);
+  throw new Error('Ghost leave unexpectedly accepted a full date');
+} catch (error) {
+  if (!error.message.includes('No CPC leave slot is available')) throw error;
+}
+const ghostDateReservations=(await db.query(`select count(*)::integer as total
+ from leave_request_dates d join leave_requests lr on lr.id=d.leave_request_id
+ join bidders b on b.id=lr.bidder_id where lr.bid_year_id=$1 and b.area_id=$2
+ and d.leave_date='2027-09-01' and d.charged and lr.status='pending'
+ and not lr.is_ghost_bid and b.bid_role not in ('ADM','NB','GL','R-DEV','D-DEV','DEV','TMCIT')`,[year,bidder.area_id])).rows[0].total;
+const ghostAvailableSlotCount=ghostDateReservations+1;
+await db.exec(`insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code,status)
+ select '${year}','${bidder.area_id}','2027-09-01','cpc','GHOST-AVAILABLE-' || n,'open' from generate_series(1,${ghostAvailableSlotCount}) n;`);
+console.log('PASS Ghost leave rejects full dates');
 const ghostLeave=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
   [JSON.stringify([{start_date:'2027-09-01',end_date:'2027-09-01',round:1,rdo_line_code:'GHOST-TEST'}])])).rows[0].result;
 if(!ghostLeave.is_ghost_bid) throw new Error('Ghost leave submission was not annotated');
+const stillOpen=(await db.query(`select count(*)::integer as total from leave_slots where bid_year_id=$1 and area_id=$2 and slot_date='2027-09-01' and slot_group='cpc' and status='open'`,[year,bidder.area_id])).rows[0].total;
+if(stillOpen!==ghostAvailableSlotCount) throw new Error('Pending ghost leave reserved its source slot');
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
 await db.query("select public.review_bidding_submission($1,'approved')",[ghostLeave.submission_ids[0]]);
 const ghostLeaveRequest=(await db.query('select id,status,is_ghost_bid from leave_requests where bidder_id=$1',[ghostBidder])).rows[0];
@@ -405,28 +466,30 @@ console.log('PASS Ghost Line stays open and Ghost Leave consumes no area capacit
 const glArea='00000000-0000-0000-0000-000000000310';
 const glAreaCpc='00000000-0000-0000-0000-000000000311';
 const glAreaCpcAuth='00000000-0000-0000-0000-000000000315';
-const glAreaCpcLine='00000000-0000-0000-0000-000000000316';
 const glBidder='00000000-0000-0000-0000-000000000312';
 const glAuth='00000000-0000-0000-0000-000000000313';
 const glLine='00000000-0000-0000-0000-000000000314';
+const secondGlBidder='00000000-0000-0000-0000-000000000317';
+const secondGlAuth='00000000-0000-0000-0000-000000000318';
 await db.exec(`insert into areas(id,code,name,display_order)
  values('${glArea}','gl-test','GL Test Area',99);
  insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
  values('${glAreaCpc}','${glAreaCpcAuth}','${glArea}','Area','Controller','AC','area-controller@example.test','CPC',1,16);
  insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
  values('${glBidder}','${glAuth}','${glArea}','Gate','Leader','GL','gl@example.test','GL',2,40);
+ insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,seniority_rank,leave_slot_allowance)
+ values('${secondGlBidder}','${secondGlAuth}','${glArea}','Second','Leader','G2','gl2@example.test','GL',3,40);
  insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
  values('${glLine}','${year}','${glArea}','GL-LINE','CPC','S/S','open');
- insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
- values('${glAreaCpcLine}','${year}','${glArea}','AREA-CPC-LINE','CPC','S/S','open');
  insert into rdo_line_days(rdo_line_id,weekday,shift_code)
  select '${glLine}',weekday,'0700' from generate_series(0,6) weekday;
- insert into rdo_line_days(rdo_line_id,weekday,shift_code)
- select '${glAreaCpcLine}',weekday,'0700' from generate_series(0,6) weekday;
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
  values('${year}','${glArea}','${glBidder}',1,'${glLine}','rdo','pending','{"line":"GL-LINE"}',now());
  insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
- values('${year}','${glArea}','${glAreaCpc}',1,'${glAreaCpcLine}','rdo','pending','{"line":"AREA-CPC-LINE"}',now());
+ values('${year}','${glArea}','${secondGlBidder}',1,'${glLine}','rdo','pending','{"line":"GL-LINE"}',now());
+ insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+ values('${year}','${glArea}','${glAreaCpc}',1,'${glLine}','rdo','approved','{"line":"GL-LINE"}',now());
+ update rdo_lines set status='taken',assigned_bidder_id='${glAreaCpc}',assigned_initials='AC' where id='${glLine}';
  insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date,charged_days,submitted_at)
  values('${year}','${glAreaCpc}',1,1,'approved','2027-01-10','2027-01-10',1,now());
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
@@ -435,6 +498,13 @@ await db.exec(`insert into areas(id,code,name,display_order)
        ('${year}','${glArea}','2027-11-03','cpc','GL-3'),
        ('${year}','${glArea}','2027-11-04','cpc','GL-4');
  set test.uid='${glAuth}'; set test.email='gl@example.test';`);
+const sharedLine=(await db.query('select status,assigned_initials from rdo_lines where id=$1',[glLine])).rows[0];
+const sharedGlAssignments=(await db.query('select public.read_public_gl_rdo_assignments(2027) as assignments')).rows[0].assignments
+  .filter(item=>item.rdo_line_id===glLine);
+if(sharedLine.status!=='taken' || sharedLine.assigned_initials!=='AC'
+   || sharedGlAssignments.length!==2
+   || sharedGlAssignments.map(item=>item.initials).sort().join(',')!=='G2,GL')
+  throw new Error(`Shared RDO line did not expose one occupant and two GL overlays: ${JSON.stringify({sharedLine,sharedGlAssignments})}`);
 const glBalanceBefore=(await db.query(`select total_days::text,used_days,remaining_days::text
  from private.area_leave_balance_days($1,$2,'cpc')`,[year,glArea])).rows[0];
 if(Number(glBalanceBefore.total_days)!==2 || glBalanceBefore.used_days!==1 || Number(glBalanceBefore.remaining_days)!==1)
@@ -468,7 +538,7 @@ if(!publicGlDate || publicGlDate.cpc_open!==1 || publicGlDate.cpc_initials.lengt
 await db.exec(`set test.uid='${glAreaCpcAuth}'; set test.email='area-controller@example.test';
  update bid_year_settings set test_bid_round=6 where bid_year_id='${year}';`);
 const followingCpc=(await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) as result',
-  [JSON.stringify([{start_date:'2027-11-01',end_date:'2027-11-01',round:6,rdo_line_code:'AREA-CPC-LINE'}])])).rows[0].result;
+  [JSON.stringify([{start_date:'2027-11-01',end_date:'2027-11-01',round:6,rdo_line_code:'GL-LINE'}])])).rows[0].result;
 await db.exec(`set test.uid='00000000-0000-0000-0000-000000000111'; set test.email='sh@natcazla.com';`);
 await db.query("select public.review_bidding_submission($1,'approved')",[followingCpc.submission_ids[0]]);
 const sharedDateSlot=(await db.query(`select slot_initials,status from leave_slots
@@ -483,4 +553,4 @@ try {
 } catch(error) {
   if(!error.message.includes('leave balance is exhausted')) throw error;
 }
-console.log('PASS GL bids stay visible and annotated without consuming slots; the next CPC bidder can take the same date');
+console.log('PASS two GL bidders share one occupied RDO line, stay visible, and consume no line or leave slots');

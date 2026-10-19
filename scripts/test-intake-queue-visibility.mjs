@@ -17,7 +17,7 @@ assert.match(source, /\["pending", "approved", "denied"\]\.includes/)
 assert.match(source, /denialReason: item\.denialReason/)
 assert.match(source, /item\.denialReason = reason;[\s\S]{0,80}queueBidDeniedEmail\(item\)/)
 assert.match(source, /function latestCurrentUserDeniedRdoRequest\(/)
-assert.match(source, /Intake denial reason:/)
+assert.match(source, /has been denied\. Reason: \$\{deniedRequest\.denialReason/)
 assert.match(source, /Reason: \$\{escapeHtml\(bid\.denialReason/)
 assert.doesNotMatch(
   source,

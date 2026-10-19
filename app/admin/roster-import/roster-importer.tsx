@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import ActionStatus from '@/app/components/action-status'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { useEffect, useMemo, useState } from 'react'
 import { getSupabaseEnv } from '@/lib/env'
@@ -210,7 +211,7 @@ export function RosterImporter() {
       <p className="import-safety-note"><strong>Safe update:</strong> Existing bidders are matched by profile ID or initials. Their account links, submitted bids, and leave records stay attached. Leave allowance is imported in hours. Blank email and phone cells keep the current values. Omitted bidders remain unchanged.</p>
       <button className="button primary" type="button" disabled={busy || !file} onClick={() => void previewFile()}>{busy && !preview ? 'Validating…' : 'Preview import'}</button>
     </section>
-    {status ? <p className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} role="status">{status}</p> : null}
+    <ActionStatus message={status} busy={busy} className={`import-status ${result ? 'success' : issues.length ? 'error' : ''}`} />
     {issues.length ? <section className="import-issues"><h2>Fix these roster rows</h2><ul>{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></section> : null}
     {preview ? <section className="import-card import-preview" aria-labelledby="preview-heading">
       <div className="import-section-heading"><div><span>2</span><div><h2 id="preview-heading">Review roster changes</h2>
