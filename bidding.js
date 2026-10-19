@@ -15645,11 +15645,12 @@ async function fetchWithLiveUpdateTracking(input, init) {
 }
 
 function hasActiveLiveDataEditing() {
-  return hasActiveIntakeEditing() || intakeDecisionPending || intakeDecisionRefreshRunning
+  const intakePage = Boolean(document.querySelector('.page.active[data-page-panel="intake"]'));
+  return (!intakePage && hasActiveIntakeEditing()) || bidderEditor.busy || intakeDecisionPending || intakeDecisionRefreshRunning
     || intakeScheduleMutationPending || shiftPresetMutationPending || leaveManagementPendingId
     || intakeLeaveRemovalPendingId || pilotBidderResetPending || biddingBackupBusy
     || liveDataWritesPending > 0
-    || Boolean(document.querySelector('[role="dialog"]:not([hidden]), [data-bid-change-modal]:not([hidden]), [data-leave-slot-modal]:not([hidden])'));
+    || Boolean(document.querySelector('[role="dialog"]:not([hidden]):not([data-leave-slot-modal]), [data-bid-change-modal]:not([hidden])'));
 }
 
 function liveDataLocalSnapshot() {
@@ -15802,6 +15803,22 @@ function restoreLiveDataControls(controls) {
   }
 }
 
+async function readLiveDataGroupWithTimeout(group, client, areaById, member) {
+  // Nested reads (including legacy week-bucket lookups) must not hold the
+  // shared refresh lock forever. Late results are discarded, never applied.
+  let timer;
+  try {
+    return await Promise.race([
+      readLiveDataGroup(group, client, areaById, member),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ results: [{ error: { code: "LIVE_READ_TIMEOUT" } }] }), 20000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function refreshLiveData() {
   if (liveDataRunning || !liveDataDirtyGroups.size || document.visibilityState !== "visible") return;
   const publicPilot = window.NATCA_SUPABASE_CONFIG?.environment === "pilot" && !isMemberAppVisible();
@@ -15826,7 +15843,7 @@ async function refreshLiveData() {
       : await readReferenceData("live areas", () => client.from("areas").select("id,name"));
     if (areas.error) throw areas.error;
     const areaById = new Map((areas.data || []).map((area) => [area.id, area.name]));
-    const updates = await Promise.all(groups.map((group) => readLiveDataGroup(group, client, areaById, member)));
+    const updates = await Promise.all(groups.map((group) => readLiveDataGroupWithTimeout(group, client, areaById, member)));
     if (generation !== liveDataGeneration || year !== BID_YEAR || userId !== supabaseState.authUserId
       || member !== isMemberAppVisible()) return;
     // Never apply a read overtaken by editing, a local save, or a foreground load.
@@ -15928,6 +15945,16 @@ function renderLiveDataSections(groups, member, previousSlots) {
       return;
     }
     const page = document.querySelector(".page.active")?.dataset.pagePanel;
+    if (page === "intake" && hasActiveIntakeEditing()) {
+      // The manual-entry panels keep their DOM and unsaved controller selection.
+      // Their editing state must not suppress incoming queue items or alerts.
+      if (has("bidding", "help", "roster", "rules")) renderAlerts();
+      if (has("bidding", "roster", "rules")) {
+        liveIntakeQueueRenderPending = true;
+        renderLiveIntakeQueue();
+      }
+      return;
+    }
     if (has("bidding", "roster", "windows", "rules")) {
       seniority = buildSeniority();
       renderCurrentUser();
@@ -15995,13 +16022,13 @@ function renderLiveIntakeQueue() {
   liveIntakeQueueRenderTimer = null;
   if (!liveIntakeQueueRenderPending) return;
   if (!hasIntakeAccess() || !document.querySelector('.page.active[data-page-panel="intake"]')) return;
-  if (intakeDecisionPending || hasActiveIntakeEditing()) {
+  if (intakeDecisionPending || activeOverrideId || activeDenialId || bidderEditor.busy) {
     liveIntakeQueueRenderTimer = setTimeout(renderLiveIntakeQueue, 350);
     return;
   }
   liveIntakeQueueRenderPending = false;
   renderIntakeQueue();
-  renderIntakeBidderSummary();
+  if (!hasActiveIntakeEditing()) renderIntakeBidderSummary();
 }
 
 function stopLiveAlertUpdates() {

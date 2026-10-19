@@ -7,46 +7,33 @@ function fn(name) {
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
-let editing = false, active = true, queueRenders = 0, summaryRenders = 0, alertRenders = 0;
+let editing = true, active = true, queueRenders = 0, summaryRenders = 0;
 const timers = new Map();
-const client = {
-  rpc: async name => ({ data: name === 'read_bidding_state' ? { submissions: [] } : name === 'read_leave_intake_queue' ? [{ id: 'new-bid', status: 'Pending' }] : [] }),
-  from: () => ({ select: async () => ({ data: [] }) }),
-};
 const context = vm.createContext({
-  console, BID_YEAR: 2027, intakeQueue: [], helpThreads: [], intakeDecisionPending: false,
-  supabaseState: { authUserId: 'admin', connected: true, loading: false },
-  document: { visibilityState: 'visible', querySelector: () => active ? {} : null },
-  supabaseClient: () => client, isMemberAppVisible: () => true, hasIntakeAccess: () => true,
-  hasActiveIntakeEditing: () => editing,
-  currentHelpRequester: () => ({ sessionId: 'session' }),
-  attachLeaveRequestWeekBuckets: async (_, rows) => rows,
-  attachSubmissionIdsToLeaveRequests: rows => rows,
-  biddingStateSubmissionType: () => 'RDO Line', inferRdoBidChanges() {},
-  upsertLeaveRequestsFromDatabase: rows => context.intakeQueue.push(...rows),
-  helpThreadFromRpc: row => row,
-  renderAlerts: () => alertRenders++,
-  renderIntakeQueue: () => { queueRenders++; assert.equal(context.intakeQueue[0].id, 'new-bid'); },
+  intakeDecisionPending: false, activeOverrideId: null, activeDenialId: null,
+  bidderEditor: { busy: false },
+  document: { querySelector: () => active ? {} : null },
+  hasIntakeAccess: () => true, hasActiveIntakeEditing: () => editing,
+  renderIntakeQueue: () => queueRenders++,
   renderIntakeBidderSummary: () => summaryRenders++,
   setTimeout: action => { timers.set(1, action); return 1; }, clearTimeout: id => timers.delete(id),
 });
-vm.runInContext(`let alertRefreshPending = false;
-let lastAlertDatabaseSnapshot = '';
-let liveIntakeQueueRenderPending = false;
+vm.runInContext(`let liveIntakeQueueRenderPending = true;
 let liveIntakeQueueRenderTimer = null;
-` + [fn('renderLiveIntakeQueue'), fn('refreshLiveAlerts')].join('\n'), context);
-await context.refreshLiveAlerts();
-assert.equal(alertRenders, 1);
-assert.equal(queueRenders, 1, 'Live submissions redraw approval rows without navigation');
-assert.equal(summaryRenders, 1);
-editing = true;
+` + fn('renderLiveIntakeQueue'), context);
+context.renderLiveIntakeQueue();
+assert.equal(queueRenders, 1, 'Manual selection and unsaved forms do not block incoming queue rows');
+assert.equal(summaryRenders, 0, 'The selected bidder editor is preserved');
+context.activeDenialId = 'review';
 vm.runInContext('liveIntakeQueueRenderPending = true', context);
 context.renderLiveIntakeQueue();
-assert.equal(queueRenders, 1, 'Editing is preserved');
+assert.equal(queueRenders, 1, 'Open denial form is preserved');
 assert.equal(timers.size, 1);
+context.activeDenialId = null;
 editing = false;
 timers.get(1)();
-assert.equal(queueRenders, 2, 'Deferred redraw runs after editing even when the database snapshot is unchanged');
+assert.equal(queueRenders, 2, 'Deferred queue redraw resumes when review closes');
+assert.equal(summaryRenders, 1);
 active = false;
 vm.runInContext('liveIntakeQueueRenderPending = true', context);
 context.renderLiveIntakeQueue();
@@ -55,6 +42,8 @@ const target = { innerHTML: '' };
 const older = { id: 'reviewed', type: 'RDO Line', status: 'Pending', submittedAt: '2026-10-05T18:00:00Z' };
 const newer = { ...older, id: 'new-pending', submittedAt: '2026-10-05T19:00:00Z' };
 const sorted = vm.createContext({
+  intakeDisplayStatus: item => item.status, renderIntakeDateCheckControl: () => '',
+  intakeCancellationNote: () => '',
   intakeSort: 'entered', activeIntakeDetailId: older.id, activeOverrideId: null, activeDenialId: null,
   document: { getElementById: id => id === 'intake-queue' ? target : null, querySelector: () => null },
   syncIntakeSearchControls() {}, hasIntakeAccess: () => true,
@@ -76,6 +65,7 @@ assert.ok(target.innerHTML.indexOf('data-intake-card="new-pending"') < target.in
   'A new pending bid sorts above the bid currently under review');
 const historyPanel = { hidden: true, innerHTML: '' };
 const history = vm.createContext({
+  intakeDisplayStatus: item => item.status, intakeCancellationNote: () => '',
   intakeSort: 'entered', intakeItemRound: item => item.round,
   document: { querySelector: () => historyPanel },
   escapeHtml: value => value || '', bidTypeLabel: item => item.type,
