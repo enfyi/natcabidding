@@ -3584,7 +3584,7 @@ function manualDatePickerState(panel) {
   const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
   const key = manualLeaveBatchKey({ initials }, panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), Number(panel.querySelector("[data-manual-leave-round]")?.value || 0));
   if (!panel.manualDatePicker || panel.manualDatePicker.key !== key) {
-    panel.manualDatePicker = { key, mode: panel.manualDatePicker?.mode || "range", month: 0, dates: new Set() };
+    panel.manualDatePicker = { key, mode: panel.manualDatePicker?.mode || "range", month: 0, view: panel.manualDatePicker?.view || "year", dates: new Set() };
   }
   return panel.manualDatePicker;
 }
@@ -3609,45 +3609,63 @@ function renderManualDatePicker(panel) {
     if (label) label.hidden = multiple;
   });
   if (!multiple) {
-    target.close?.();
-    state.open = false;
     return;
   }
-  const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const dateLabel = (key) => dateFormatter.format(dateFromKey(key));
-  const months = Array.from({ length: 13 }, (_, index) => new Date(BID_YEAR, index, 1));
+  // Only calendar geometry and labels are cached; availability is read fresh below.
+  if (!state.calendarMetadata || state.calendarMetadata.year !== BID_YEAR) {
+    const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+    state.calendarMetadata = {
+      year: BID_YEAR,
+      months: Array.from({ length: 13 }, (_, index) => {
+        const month = new Date(BID_YEAR, index, 1);
+        return {
+          label: monthFormatter.format(month),
+          weekday: month.getDay(),
+          days: Array.from({ length: new Date(BID_YEAR, index + 1, 0).getDate() }, (_, offset) => {
+            const date = new Date(BID_YEAR, index, offset + 1);
+            return { key: dateKeyFromDate(date), label: dateFormatter.format(date), day: offset + 1 };
+          }),
+        };
+      }),
+    };
+  }
+  state.calendarMetadata.labels ||= new Map(state.calendarMetadata.months.flatMap((month) => month.days.map((date) => [date.key, date.label])));
+  const months = state.view === "month" ? [state.calendarMetadata.months[state.month]] : state.calendarMetadata.months;
+  const dateLabel = (key) => state.calendarMetadata.labels.get(key) || key;
   const staged = new Set(manualLeaveBatch.key === state.key ? manualLeaveBatch.entries.flatMap((entry) => datesInLeaveRange(entry.range)) : []);
-  const monthKeys = months.flatMap((month) => Array.from({ length: new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate() }, (_, index) => dateKeyFromDate(new Date(month.getFullYear(), month.getMonth(), index + 1))));
+  const monthKeys = months.flatMap((month) => month.days.map((date) => date.key));
   const person = manualBidPerson(panel);
   const checks = withLeaveReadCache(() => manualLeaveDateChecks(person, panel.querySelector("[data-manual-bid-area]")?.value || currentViewArea(), monthKeys));
   const calendar = months.map((month) => {
-    const buttons = Array.from({ length: month.getDay() }, () => '<span aria-hidden="true"></span>');
-    const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-    for (let day = 1; day <= lastDay; day++) {
-      const key = dateKeyFromDate(new Date(month.getFullYear(), month.getMonth(), day));
+    const buttons = Array.from({ length: month.weekday }, () => '<span aria-hidden="true"></span>');
+    for (const { key, label, day } of month.days) {
       const check = checks.get(key);
       const unavailable = key < BID_LEAVE_YEAR_START_KEY || key > BID_LEAVE_YEAR_END_KEY || staged.has(key)
         || (person.ghostBidder && !state.dates.has(key) && (check.full || check.unknown));
       const hint = check.rdo ? "RDO" : check.full ? "Full" : "";
-      buttons.push(`<button type="button" data-manual-pick-date="${key}" data-date-conflict="${check.rdo ? "rdo" : check.full ? "full" : ""}" title="${hint}" aria-label="${escapeHtml(dateLabel(key))}${hint ? `, ${hint}` : ""}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
+      buttons.push(`<button type="button" data-manual-pick-date="${key}" data-date-conflict="${check.rdo ? "rdo" : check.full ? "full" : ""}" title="${hint}" aria-label="${escapeHtml(label)}${hint ? `, ${hint}` : ""}${staged.has(key) ? ", in batch" : ""}" aria-pressed="${state.dates.has(key)}" ${unavailable ? "disabled" : ""}>${day}</button>`);
     }
-    return `<section class="manual-picker-month"><h3>${month.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</h3><div class="manual-picker-grid">${["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => `<span class="manual-picker-weekday">${day}</span>`).join("")}${buttons.join("")}</div></section>`;
+    return `<section class="manual-picker-month"><h3>${month.label}</h3><div class="manual-picker-grid">${["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => `<span class="manual-picker-weekday">${day}</span>`).join("")}${buttons.join("")}</div></section>`;
   }).join("");
   const dates = [...state.dates].sort();
   const initials = panel.querySelector("[data-manual-bid-controller]")?.value || currentUser.initials;
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
   const charged = withLeaveReadCache(() => chargeableLeaveDateKeys(dates, initials, round).length);
   target.innerHTML = `
-    <div class="manual-picker-heading"><h2>Requested leave calendar</h2><button type="button" class="secondary-action small" data-manual-picker-close>Done</button></div>
+    <div class="manual-picker-heading"><h2>Requested leave calendar</h2></div>
     <p class="manual-picker-hint">Select the dates requested by ${escapeHtml(person.initials)}. Click a selected date again to remove it, then add the dates to your batch.</p>
-    <div class="manual-picker-year">${calendar}</div>
+    <div class="manual-date-modes" role="group" aria-label="Calendar view">
+      <button type="button" class="secondary-action small" data-manual-picker-view="month" aria-pressed="${state.view === "month"}">Month</button>
+      <button type="button" class="secondary-action small" data-manual-picker-view="year" aria-pressed="${state.view !== "month"}">Full year</button>
+    </div>
+    ${state.view === "month" ? `<div class="manual-picker-navigation" role="group" aria-label="Month navigation"><button type="button" class="secondary-action small" data-manual-picker-month="-1" ${state.month === 0 ? "disabled" : ""}>Previous month</button><button type="button" class="secondary-action small" data-manual-picker-month="1" ${state.month === 12 ? "disabled" : ""}>Next month</button></div>` : ""}
+    <div class="manual-picker-year" data-calendar-view="${state.view || "year"}">${calendar}</div>
     <div class="manual-picker-total" role="status">${dates.length} selected · ${charged} charged ${charged === 1 ? "day" : "days"}</div>
     <div class="manual-picker-chips">${dates.map((key) => `<button type="button" class="secondary-action small" data-manual-pick-date="${key}" aria-label="Remove ${escapeHtml(dateLabel(key))}">${escapeHtml(dateLabel(key))} ×</button>`).join("")}</div>
     ${dates.length ? '<button type="button" class="secondary-action small" data-manual-picker-clear>Clear selection</button>' : ""}
     <button type="button" class="primary-action small" data-manual-leave-add ${dates.length ? "" : "disabled"}>Add selected dates to batch</button>
     <small>Outlined dates: RDO or full (hover for details). Dates already in your batch are disabled. Checks use loaded data; availability can change.</small>`;
-  target.oncancel = () => { state.open = false; };
-  if (state.open && !target.open) target.showModal?.();
 }
 
 function addManualLeaveToBatch(panel) {
@@ -19410,21 +19428,15 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  const pickerAction = event.target.closest("[data-manual-date-mode], [data-manual-pick-date], [data-manual-picker-month], [data-manual-picker-clear], [data-manual-picker-close]");
+  const pickerAction = event.target.closest("[data-manual-date-mode], [data-manual-pick-date], [data-manual-picker-month], [data-manual-picker-clear], [data-manual-picker-view]");
   if (pickerAction) {
     const panel = pickerAction.closest("[data-manual-bid-panel]");
     if (!panel || panel.dataset.manualBidSubmitting === "true" || !(hasIntakeAccess() || hasSystemAdminAccess())) return;
     const state = manualDatePickerState(panel);
-    if (pickerAction.hasAttribute("data-manual-picker-close")) {
-      state.open = false;
-      panel.querySelector("[data-manual-multi-picker]")?.close();
-      panel.querySelector('[data-manual-date-mode="multiple"]')?.focus();
-      return;
-    }
     if (pickerAction.hasAttribute("data-manual-date-mode")) {
       state.mode = pickerAction.dataset.manualDateMode;
-      state.open = state.mode === "multiple";
     }
+    if (pickerAction.hasAttribute("data-manual-picker-view")) state.view = pickerAction.dataset.manualPickerView;
     if (pickerAction.hasAttribute("data-manual-picker-month")) state.month = Math.max(0, Math.min(12, state.month + Number(pickerAction.dataset.manualPickerMonth)));
     if (pickerAction.hasAttribute("data-manual-picker-clear")) state.dates.clear();
     if (pickerAction.hasAttribute("data-manual-pick-date")) {
@@ -19433,8 +19445,8 @@ document.addEventListener("click", async (event) => {
       else state.dates.add(key);
     }
     renderManualDatePicker(panel);
-    renderManualLeavePreflight(panel);
-    const focusSelector = pickerAction.hasAttribute("data-manual-pick-date") ? `[data-manual-pick-date="${pickerAction.dataset.manualPickDate}"]` : pickerAction.hasAttribute("data-manual-picker-month") ? `[data-manual-picker-month="${pickerAction.dataset.manualPickerMonth}"]` : `[data-manual-date-mode="${state.mode}"]`;
+    if (pickerAction.hasAttribute("data-manual-pick-date") || pickerAction.hasAttribute("data-manual-picker-clear") || pickerAction.hasAttribute("data-manual-date-mode")) renderManualLeavePreflight(panel);
+    const focusSelector = pickerAction.hasAttribute("data-manual-picker-view") ? `[data-manual-picker-view="${state.view}"]` : pickerAction.hasAttribute("data-manual-pick-date") ? `[data-manual-pick-date="${pickerAction.dataset.manualPickDate}"]` : pickerAction.hasAttribute("data-manual-picker-month") ? `[data-manual-picker-month="${pickerAction.dataset.manualPickerMonth}"]` : `[data-manual-date-mode="${state.mode}"]`;
     panel.querySelector(focusSelector)?.focus({ preventScroll: true });
     return;
   }

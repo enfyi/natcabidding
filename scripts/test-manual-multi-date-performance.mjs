@@ -55,3 +55,28 @@ samples.sort((a, b) => a - b);
 const p95 = samples[Math.floor(samples.length * .95)];
 assert.ok(p95 < 50, `Picker HTML generation p95 ${p95.toFixed(2)}ms exceeds 50ms budget`);
 console.log(`PASS 500 picker renders: HTML generation p95 ${p95.toFixed(2)}ms; max ${samples.at(-1).toFixed(2)}ms (sample RDO rules; excludes browser layout and live-data cost)`);
+
+state.view = 'month';
+state.month = 5;
+context.renderManualDatePicker(panel);
+assert.equal((target.innerHTML.match(/class="manual-picker-month"/g) || []).length, 1);
+assert.match(target.innerHTML, /June 2027/);
+assert.match(target.innerHTML, /10 selected · 9 charged days/);
+state.view = 'year';
+context.renderManualDatePicker(panel);
+assert.equal((target.innerHTML.match(/class="manual-picker-month"/g) || []).length, 13);
+assert.equal(state.dates.size, 10, 'View switching preserves selected dates');
+console.log('PASS month and full-year views preserve cross-month selections');
+
+const metadata = state.calendarMetadata;
+context.manualLeaveDateChecks = (_person, _area, keys) => new Map(keys.map(key => [key, { rdo: true, full: false }]));
+context.renderManualDatePicker(panel);
+assert.equal(state.calendarMetadata, metadata, 'Static calendar metadata is reused');
+assert.match(target.innerHTML, /data-date-conflict="rdo"/, 'Availability is refreshed even when metadata is reused');
+state.view = 'month';
+context.manualLeaveDateChecks = (_person, _area, keys) => {
+  assert.equal(keys.length, 30, 'Month view checks only the visible month');
+  return new Map(keys.map(key => [key, { rdo: false, full: false }]));
+};
+context.renderManualDatePicker(panel);
+console.log('PASS cached calendar labels retain fresh availability and month-scoped checks');
