@@ -7081,7 +7081,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     isPendingLeave ? "pending-leave-day" : "",
     isApprovedLeave ? "leave-day" : "",
     isRdo ? "rdo-day" : "",
-    isClosed ? "closed-day" : "",
+    isClosed && !isApprovedLeave ? "closed-day" : "",
     hasOneTmuSlotLeft ? "tmu-one-slot-left" : "",
     hasGlBid ? "has-gl-bid" : "",
     fatigueClass ? `fatigue-week fatigue-${fatigueClass}` : "",
@@ -7095,7 +7095,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
     : `Group ${fatigueGroup} fatigue week`;
   const workforceLabel = availabilityBucket === "dev" ? "DEV" : "CPC";
   const glBidStatus = hasGlBid ? `; GL Bid: ${glBids.map((bid) => bid.initials).join(", ")} (no slot used)` : "";
-  const vacationStatus = `${holidayKind?.label || (!slotDataLoaded ? leaveSlotLoadingMessage() : isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
+  const vacationStatus = `${isApprovedLeave ? "Approved leave" : holidayKind?.label || (!slotDataLoaded ? leaveSlotLoadingMessage() : isRdo ? "RDO - leave bidding unavailable" : isClosed ? `${workforceLabel} leave slots filled` : `${workforceLabel} leave slots available; view CPC and DEV slots`)}${glBidStatus}`;
   const status = isPreviousLeaveYear
     ? "2026 leave year - leave bidding unavailable"
     : isAfterLeaveYear
