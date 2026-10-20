@@ -20393,7 +20393,8 @@ function syncSlotClosureForm() {
   const rule = slotClosureRules.find((row) => row.area_name === area && row.slot_group === group);
   document.querySelector("[data-slot-closure-round]").value = String(rule?.after_round ?? 3);
   document.querySelector("[data-slot-closure-count]").value = String(rule?.close_count ?? 1);
-  document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady || Boolean(rule?.applied_at);
+  document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady;
+  document.querySelector("[data-save-slot-closure]").textContent = rule ? "Save changes" : "Save rule";
   document.querySelector("[data-apply-slot-closure]").disabled = !slotClosureRulesReady || !rule || Boolean(rule.applied_at);
   document.querySelector("[data-reopen-slot-closure]").disabled = !slotClosureRulesReady || !rule?.applied_at || !(Number(rule.closed_slots) > 0);
   document.querySelectorAll("[data-slot-closure-reopen-start], [data-slot-closure-reopen-end]").forEach((input) => {
@@ -20401,7 +20402,7 @@ function syncSlotClosureForm() {
     input.max = BID_LEAVE_YEAR_END_KEY;
   });
   setText("[data-slot-closure-summary]", rule
-    ? `${area} · ${group.toUpperCase()}: ${rule.close_count} unused slot(s) per date after Round ${rule.after_round}. ${rule.applied_at ? `Applied. ${rule.closed_slots === undefined ? "Install database/reopen_unused_slots.sql to enable reopening." : `${rule.closed_slots} rule-closed slots remain.`} This rule cannot close more slots.` : "Saved; not yet applied."}`
+    ? `${area} · ${group.toUpperCase()}: ${rule.close_count} unused slot(s) per date after Round ${rule.after_round}. ${rule.applied_at ? `Applied. ${rule.closed_slots === undefined ? "Install database/reopen_unused_slots.sql to enable reopening." : `${rule.closed_slots} rule-closed slots remain.`} Reopen all remaining rule-closed slots before applying this rule again. You can edit and save its settings at any time.` : "Saved; not yet applied."}`
     : "No saved rule for this area and slot group. Defaults: 1 unused slot after Round 3.");
 }
 async function loadSlotClosureRules() {
@@ -20443,7 +20444,7 @@ async function saveOrApplySlotClosure(apply) {
   if (error) { setText("[data-slot-closure-status]", error.message || "Could not save slot closures."); return; }
   await loadSlotClosureRules();
   if (apply) { supabaseState.placeholdersCleared = false; await loadSupabaseReferenceData(); renderApp(); }
-  setText("[data-slot-closure-status]", apply ? `${data?.closed_slots ?? 0} unused ${group.toUpperCase()} slots closed for ${area}. Occupied slots were retained.` : `Rule saved for ${area} ${group.toUpperCase()}.`);
+  setText("[data-slot-closure-status]", apply ? `${data?.closed_slots ?? 0} unused ${group.toUpperCase()} slots closed for ${area}. Occupied slots were retained.` : `Rule saved for ${area} ${group.toUpperCase()}. ${slotClosureRules.find((row) => row.area_name === area && row.slot_group === group)?.applied_at ? "Reopen the remaining rule-closed slots before applying these settings again." : "Ready to close unused slots after the selected round."}`);
 }
 async function reopenSlotClosure() {
   if (!hasSystemAdminAccess() || !slotClosureRulesReady) return;
