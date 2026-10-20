@@ -10914,7 +10914,7 @@ video {
     display: contents;
   }
 
-  .intake-workspace > .right-stack > .manual-bid-card {
+  .intake-workspace > .right-stack > [data-manual-bid-panel] {
     order: -1;
   }
 
