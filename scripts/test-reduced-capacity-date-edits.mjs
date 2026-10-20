@@ -29,6 +29,7 @@ try {
   await db.exec(`create or replace function public.current_bidder_id() returns uuid language sql as $$select id from public.bidders where auth_user_id=auth.uid() and active limit 1$$;
     create or replace function public.is_current_admin() returns boolean language sql as $$select exists(select 1 from public.bidders where id=public.current_bidder_id() and role='admin')$$;`);
   await db.exec(read('database/unused_slot_closures.sql'));
+  await db.exec(read('database/reopen_unused_slots.sql'));
   await db.exec(`update bid_rounds set status='closed' where bid_year_id='${year}' and round_number=3;
     insert into bid_rounds(bid_year_id,round_number,label,status) values('${year}',3,'Round 3','closed') on conflict(bid_year_id,round_number) do update set status='closed';
     insert into bid_year_settings(bid_year_id,enforce_bid_windows,test_bid_round) values('${year}',false,2) on conflict(bid_year_id) do update set enforce_bid_windows=false,test_bid_round=2;
@@ -60,5 +61,31 @@ try {
   assert.equal((await db.query('select status,requested_start_date::text as day from leave_requests where id=$1',[id(905)])).rows[0].day,'2027-06-10');
   await assert.rejects(()=>db.query('select public.replace_own_leave_request_batch($1::uuid[],$2::jsonb)',[[id(905)],JSON.stringify([{start_date:'2027-06-09',end_date:'2027-06-09',round:2}])]),/No CPC leave slot is available/);
   assert.equal((await db.query('select status from leave_requests where id=$1',[id(905)])).rows[0].status,'approved');
+  await db.exec(`update bidders set role='admin' where id='${id(901)}';
+    set test.uid='${id(902)}'; set test.email='admin-regression@example.test';
+    insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status,assigned_bidder_id)
+      values('${id(907)}','${year}','${area}','REOPEN-LR','CPC','WORK','taken','${id(903)}');
+    insert into rdo_line_days(rdo_line_id,weekday,shift_code) select '${id(907)}',n,'0700' from generate_series(0,6) n;`);
+  const beforeReopen = async () => (await db.query(`select jsonb_build_object(
+    'requests',(select jsonb_agg(to_jsonb(r) order by id) from leave_requests r),
+    'dates',(select jsonb_agg(to_jsonb(d) order by leave_request_id,leave_date) from leave_request_dates d),
+    'submissions',(select jsonb_agg(to_jsonb(s) order by id) from intake_submissions s),
+    'awarded_slots',(select jsonb_agg(to_jsonb(s) order by id) from leave_slots s where bidder_id is not null or source_leave_request_id is not null or nullif(trim(slot_initials),'') is not null)
+  ) as snapshot`)).rows[0].snapshot;
+  const originalBids = await beforeReopen();
+  const reopened = await db.query(`select reopen_slot_closure_rule(2027,(select name from areas where id=$1),'cpc','2027-06-09','2027-06-09') as result`,[area]);
+  assert.equal(reopened.rows[0].result.reopened_slots,1);
+  assert.deepEqual(await beforeReopen(),originalBids,'Reopening cannot modify approved/pending requests, dates, submissions, or assigned slots');
+  // Explicit date edits, performed after reopening, can now use the restored slot.
+  await edit('2027-06-09','2027-06-09');
+  assert.equal((await db.query('select requested_start_date::text as day from leave_requests where id=$1',[id(905)])).rows[0].day,'2027-06-09');
+  await db.query(`select reopen_slot_closure_rule(2027,(select name from areas where id=$1),'cpc','2027-06-10','2027-06-10')`,[area]);
+  await db.exec(`set test.uid='${id(904)}'; set test.email='leave-regression@example.test';`);
+  await db.query('select public.replace_own_leave_request($1,$2,$3)',[id(905),'2027-06-10','2027-06-10']);
+  const memberRequest = (await db.query(`select id from leave_requests where bidder_id=$1 and status='pending' and requested_start_date='2027-06-10'`,[id(903)])).rows[0];
+  assert.ok(memberRequest,'Member date replacement succeeds with restored capacity');
+  await db.query('select public.replace_own_leave_request_batch($1::uuid[],$2::jsonb)',[[memberRequest.id],JSON.stringify([{start_date:'2027-06-09',end_date:'2027-06-09',round:2}])]);
+  assert.equal((await db.query(`select count(*)::int as n from leave_requests where bidder_id=$1 and status='pending' and requested_start_date='2027-06-09'`,[id(903)])).rows[0].n,1);
+  console.log('PASS restored capacity permits admin, member single-date and batch replacements; reopening itself preserves existing bids');
   console.log('PASS admin/intake and member date edits enforce reduced capacity, allow open dates, and roll back rejected replacements');
 } finally { await db.close(); }
