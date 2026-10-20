@@ -57,6 +57,13 @@ try {
   await db.exec(accessMigration);
   await db.exec(accessMigration);
   assert.equal((await call('2027-06-11', '2027-06-11')).rows[0].result.start_date, '2027-06-11');
+  // The same shared intake permission must hold for every bidding round.
+  for (const round of [1, 2, 3, 4]) {
+    await db.query('update leave_requests set round_number=$1 where id=$2', [round, id(905)]);
+    const start = round % 2 ? '2027-06-14' : '2027-06-15';
+    assert.equal((await call(start, start)).rows[0].result.start_date, start,
+      `Cross-area intake can edit approved leave in round ${round}`);
+  }
   await assert.rejects(() => call('2027-07-05', '2027-07-05'), /already has one or more replacement dates/);
   await db.exec(`update bidders set role='controller' where id='${id(901)}'`);
   await assert.rejects(() => call('2027-06-14', '2027-06-14'), /only be replaced by intake or an administrator/);

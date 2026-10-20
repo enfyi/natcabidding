@@ -8385,6 +8385,18 @@ body {
   box-shadow: inset 3px 0 #a991c5;
 }
 
+.app-main .intake-change-history {
+  color: #475569;
+}
+
+.app-main .intake-change-history strong {
+  color: #854d0e;
+}
+
+.app-main .intake-change-history small {
+  color: #64748b;
+}
+
 .app-main .intake-change-badge {
   border-color: #80619d;
   color: #ffffff;

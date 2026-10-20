@@ -8932,6 +8932,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
   return {
     id: `supabase-leave-${row.id}`,
     supabaseRequestId: row.id,
+    leaveEditHistory: Array.isArray(row.leaveEditHistory) ? row.leaveEditHistory : [],
     submissionBatchKey: row.submitted_at || row.created_at || row.id,
     supabaseSubmissionId: row.submission_id || "",
     bidderId: row.bidder_id || bidder.id || "",
@@ -16776,13 +16777,17 @@ function intakeItemRound(item) {
 
 function intakeLeaveRoundIsOpen(item) {
   const round = intakeItemRound(item);
-  if (pilotState.database) return pilotState.enabled && pilotOpenRounds.includes(round);
-  const windows = ZLA_AREAS.flatMap((area) => roundWindows(round, area));
-  if (!windows.length) return false;
-  const startsAt = Math.min(...windows.map((window) => window.start.getTime()));
-  const endsAt = Math.max(...windows.map((window) => window.end.getTime()));
+  if (currentUser?.role === "admin" || currentUser?.systemAdmin) return true;
+  if (pilotState.database) return pilotState.enabled && round === Math.max(...pilotOpenRounds);
   const now = Date.now();
-  return now >= startsAt && now < endsAt;
+  const openRounds = Array.from({ length: 6 }, (_, index) => index + 1).filter((candidate) => {
+    const windows = ZLA_AREAS.flatMap((area) => roundWindows(candidate, area));
+    if (!windows.length) return false;
+    const startsAt = Math.min(...windows.map((window) => window.start.getTime()));
+    const endsAt = Math.max(...windows.map((window) => window.end.getTime()));
+    return now >= startsAt && now < endsAt;
+  });
+  return round === Math.max(...openRounds);
 }
 
 function intakeDisplayStatus(item) {
@@ -16970,6 +16975,25 @@ function rdoBidChangeDifferences(original, requested) {
     : [`${label}: ${value(original)} → ${value(requested)}`]);
 }
 
+function renderIntakeLeaveEditHistory(item) {
+  const edits = (item?.members || [item]).flatMap((member) => member?.leaveEditHistory || []);
+  const seen = new Set();
+  return edits.sort((a, b) => String(b.editedAt || "").localeCompare(String(a.editedAt || ""))).map((edit) => {
+    if (edit.id && seen.has(edit.id)) return "";
+    if (edit.id) seen.add(edit.id);
+    const before = edit.before || {};
+    const after = edit.after || {};
+    if (before.start_date === after.start_date && before.end_date === after.end_date) return "";
+    const range = (value) => formatLeaveRangeFromKeys(datesBetweenKeys(value.start_date, value.end_date));
+    return `<div class="intake-change-history">
+      <strong>Leave date edit · Round ${escapeHtml(intakeItemRound(item))}</strong>
+      <span><b>Before:</b> ${escapeHtml(range(before))}</span>
+      <span><b>After:</b> ${escapeHtml(range(after))}</span>
+      <small>${escapeHtml(edit.editedBy || "Intake/admin")} · ${escapeHtml(edit.editedAt ? formatDateTime(new Date(edit.editedAt)) : "Time not recorded")}</small>
+    </div>`;
+  }).join("");
+}
+
 function renderIntakeAdminEditHistory(item) {
   return (item?.adminEditHistory || []).map((edit) => {
     const before = edit.before || {};
@@ -16987,7 +17011,7 @@ function renderIntakeAdminEditHistory(item) {
 }
 
 function renderIntakeChangeHistory(item) {
-  const adminHistory = renderIntakeAdminEditHistory(item);
+  const adminHistory = item?.type === "Leave" ? renderIntakeLeaveEditHistory(item) : renderIntakeAdminEditHistory(item);
   if (!item?.isChange) return adminHistory;
   const differences = rdoBidChangeDifferences(item.originalBid, item);
   const source = item.changeSource === "intake"
@@ -18494,14 +18518,18 @@ function bidderEditorDraft() {
         || Boolean(form.querySelector('[data-editor-gl-line-type-verification]')?.checked) } : null,
     leave: (bidderEditor.record?.snapshot.leave || []).map((row) => ({ id: row.id,
       // Hidden requests must retain their dates in the complete database save payload.
-      start_date: row.status === 'approved' ? form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null : row.requested_start_date,
-      end_date: row.status === 'approved' ? form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null : row.requested_end_date,
+      start_date: row.status === 'approved' && intakeLeaveRoundIsOpen({ round: row.round_number }) ? form.querySelector(`[data-editor-start="${row.id}"]`)?.value || null : row.requested_start_date,
+      end_date: row.status === 'approved' && intakeLeaveRoundIsOpen({ round: row.round_number }) ? form.querySelector(`[data-editor-end="${row.id}"]`)?.value || null : row.requested_end_date,
     })),
   };
 }
 function bidderEditorSetBusy(busy) {
   bidderEditor.busy = busy;
-  document.querySelectorAll('[data-bidder-editor] input, [data-bidder-editor] select, [data-bidder-editor] button, [data-bidder-editor] fieldset').forEach((el) => { el.disabled = busy; });
+  document.querySelectorAll('[data-bidder-editor] input, [data-bidder-editor] select, [data-bidder-editor] button, [data-bidder-editor] fieldset').forEach((el) => {
+    const requestId = el.dataset.editorStart || el.dataset.editorEnd;
+    const row = requestId && bidderEditor.record?.snapshot.leave.find((entry) => entry.id === requestId);
+    el.disabled = busy || Boolean(row && !intakeLeaveRoundIsOpen({ round: row.round_number }));
+  });
   const submit = document.querySelector('[data-editor-submit]');
   if (submit) submit.disabled = busy || !bidderEditor.validated || bidderEditor.validated !== JSON.stringify(bidderEditorDraft());
 }
@@ -18566,10 +18594,10 @@ function renderBidderEditorForm() {
     </label>` : ''}</fieldset>
     ${[1,2,3,4,5].map(round => {
       const rows = snapshot.leave.filter(row => row.round_number === round && row.status === 'approved');
-      return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${rows.length ? rows.map(row => `
+      return `<fieldset><legend>Round ${round} · ${rows.length} leave bid${rows.length === 1 ? '' : 's'}</legend>${intakeLeaveRoundIsOpen({ round }) ? "" : "<p>Only an administrator can change dates outside the current round.</p>"}${rows.length ? rows.map(row => `
         <div class="bidder-editor-date-row"><div><strong>Priority ${row.priority}</strong> · ${escapeHtml(row.status)}<br><small>${row.charged_days} charged days currently</small></div>
-          <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" /></label>
-          <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" /></label>
+          <label>Start date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-start="${row.id}" value="${escapeHtml(row.requested_start_date || '')}" ${intakeLeaveRoundIsOpen({ round }) ? "" : "disabled"} /></label>
+          <label>End date<input type="date" min="${BID_YEAR}-01-10" max="${BID_YEAR+1}-01-08" data-editor-end="${row.id}" value="${escapeHtml(row.requested_end_date || '')}" ${intakeLeaveRoundIsOpen({ round }) ? "" : "disabled"} /></label>
         </div>`).join('') : '<p>No approved leave bids in this round.</p>'}</fieldset>`;
     }).join('')}
     <div data-editor-review aria-live="polite"></div>

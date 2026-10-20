@@ -9,12 +9,13 @@ const leave = ['approved', 'cancelled', 'pending', 'denied', 'expired', 'draft']
 }));
 const inputs = new Map();
 const form = {
-  innerHTML: '',
+  innerHTML: '', dataset: {},
   querySelector: selector => inputs.has(selector) ? { value: inputs.get(selector) } : null,
 };
 const context = vm.createContext({
   bidderEditor: { record: { snapshot: { leave }, lines: [] }, person: { bid_role: 'CPC', area: 'Area A' } },
   document: { querySelector: () => form },
+  intakeLeaveRoundIsOpen: () => true,
   escapeHtml: value => String(value ?? ''), BID_YEAR: 2027,
 });
 for (const [start, end] of [
@@ -40,4 +41,16 @@ for (const [i, row] of leave.entries()) {
 }
 inputs.set('[data-editor-start="request-0"]', '');
 assert.equal(vm.runInContext('bidderEditorDraft()', context).leave[0].start_date, null);
+context.intakeLeaveRoundIsOpen = () => false;
+vm.runInContext('renderBidderEditorForm()', context);
+assert.match(form.innerHTML, /data-editor-start="request-0"[^>]*disabled/);
+assert.equal(vm.runInContext('bidderEditorDraft()', context).leave[0].start_date, leave[0].requested_start_date);
+const dateInput = { dataset: { editorStart: 'request-0' }, disabled: false };
+context.document.querySelectorAll = () => [dateInput];
+vm.runInContext(source.slice(source.indexOf('function bidderEditorSetBusy('), source.indexOf('function invalidateBidderEditor(')), context);
+vm.runInContext('bidderEditorSetBusy(false)', context);
+assert.equal(dateInput.disabled, true, 'Busy-state reset keeps older-round dates locked');
+context.intakeLeaveRoundIsOpen = () => true;
+vm.runInContext('bidderEditorSetBusy(false)', context);
+assert.equal(dateInput.disabled, false, 'Current-round and admin date fields can be enabled');
 console.log('PASS bidder editor shows only approved leave and preserves hidden request dates during save');
