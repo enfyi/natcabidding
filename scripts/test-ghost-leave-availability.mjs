@@ -35,7 +35,7 @@ const c = vm.createContext({
   fetch: () => { throw Error('Availability checks must use the loaded snapshot'); },
 });
 vm.runInContext(['leaveSlotBucketForBidAs', 'leaveSlotDataIsLoaded', 'leaveSlotOpenCountForDetails',
-  'leaveSlotCapacityForDetails', 'manualLeaveDateChecks', 'ghostLeaveAvailabilityMessage',
+  'leaveSlotCapacityForDetails', 'manualLeaveDateChecks', 'bidderLeaveAvailabilityMessage',
   'selectLeaveBuilderDate', 'leaveDraftPreSubmissionMessageWithCache'].map(fn).join('\n'), c);
 
 for (const round of [1, 2, 3, 4]) {
@@ -69,26 +69,26 @@ assert.equal(c.leaveDraftPreSubmissionMessageWithCache(), '');
 slots['Area B'][key].cpcOpen = 0;
 assert.match(c.leaveDraftPreSubmissionMessageWithCache(), /No CPC leave slot/);
 slots['Area B'][key].cpc = ['GH'];
-assert.match(c.ghostLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), /No CPC leave slot/,
+assert.match(c.bidderLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), /No CPC leave slot/,
   'A ghost annotation is never treated as ownership of a real slot');
 
 // Missing snapshots must not be interpreted as availability.
 delete slots['Area B'][key];
-assert.match(c.ghostLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), /not loaded/);
+assert.match(c.bidderLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), /not loaded/);
 c.selectedLeaveDates.clear();
 assert.equal(c.selectLeaveBuilderDate(key), false);
 
-// Preserve ordinary intake override behavior for non-ghost bidders.
+// Regular bidders also fail closed when the capacity snapshot is missing.
 c.currentUser.ghostBidder = false;
-assert.equal(c.ghostLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), '');
+assert.match(c.bidderLeaveAvailabilityMessage(c.currentUser, 'Area B', [key]), /not loaded/);
 
 // Area A's explicit CPC closures do not close DEV availability.
 c.currentUser = { ...c.currentUser, ghostBidder: true, area: 'Area A', bidAs: 'CPC' };
 slots['Area A'][key] = day(1, 1);
 c.fullLeaveDates.add(key);
-assert.match(c.ghostLeaveAvailabilityMessage(c.currentUser, 'Area A', [key]), /No CPC/);
+assert.match(c.bidderLeaveAvailabilityMessage(c.currentUser, 'Area A', [key]), /No CPC/);
 c.currentUser.bidAs = 'DEV';
-assert.equal(c.ghostLeaveAvailabilityMessage(c.currentUser, 'Area A', [key]), '');
+assert.equal(c.bidderLeaveAvailabilityMessage(c.currentUser, 'Area A', [key]), '');
 console.log('PASS ghost leave enforces CPC/DEV role and area availability in rounds 1–4, blocks unknown slots, rechecks staged dates, permits deselection, and never reserves slots');
 
 // Render the actual calendar button with an intentionally different workforce view.
@@ -147,3 +147,68 @@ delete slots['Area A'][key];
 assert.match(inputDay(), /disabled/);
 assert.match(inputDay(), /availability not loaded/);
 console.log('PASS leave-selection input picker disables full/unknown dates for the actual CPC/DEV role before selection');
+
+// Regular bidders need the same protections after scheduled capacity reductions.
+c.currentUser.ghostBidder = false;
+c.currentUser.bidAs = 'CPC';
+c.currentUser.area = 'Area A';
+slots['Area A'][key] = {cpc:['AB','CD'], dev:[], cpcCapacity:2, devCapacity:4, cpcOpen:0, devOpen:4};
+c.selectedLeaveDates.clear();
+assert.equal(c.selectLeaveBuilderDate(key),false, 'Regular CPC bidder cannot select a full reduced-capacity date');
+assert.match(inputDay(),/disabled/);
+c.leaveDraftQueue = [{dateKeys:[key],round:4,days:1}];
+assert.match(c.leaveDraftPreSubmissionMessageWithCache(),/No CPC leave slot/, 'A staged regular bid is rejected if capacity fills before submission');
+c.currentUser.bidAs = 'DEV';
+assert.equal(c.selectLeaveBuilderDate(key),true, 'Regular DEV bidder can use unchanged DEV capacity');
+assert.equal(c.leaveDraftPreSubmissionMessageWithCache(),'');
+c.selectedLeaveDates.clear();
+slots['Area A'][key].devOpen = 0;
+assert.equal(c.selectLeaveBuilderDate(key),false);
+assert.match(c.leaveDraftPreSubmissionMessageWithCache(),/No DEV leave slot/);
+assert.match(render(), /disabled aria-disabled="true"/, 'Regular bidder calendar disables full dates for their actual workforce');
+console.log('PASS regular CPC/DEV bidders cannot select or submit full reduced-capacity dates, including stale staged bids');
+
+// Exercise actual intake review and approval guard against the same two-slot day.
+Object.assign(c, {
+  leaveSlotsForDate: (date,area) => slots[area][date],
+  leaveApprovalDates: item => item.dateKeys,
+  refreshLeaveItemCharge() {},
+  currentUser: {initials:'ADMIN',area:'Area A'},
+  activeOverrideId:'',
+  intakeReviewConflicts: (item,check) => check(item),
+  leaveRdoConflicts: () => [], isGlLeaveItem: () => false,
+  intakeItemRound: item => item.round,
+  escapeHtml: value => String(value),
+  dateFromKey: value => new Date(`${value}T12:00:00`),
+  intakeLeaveRoundIsOpen: () => true,
+});
+vm.runInContext(['leaveApprovalBucket','leaveApprovalConflicts','applyLeaveApproval','renderIntakeDateCheck'].map(fn).join('\n'),c);
+for (const role of ['CPC','DEV']) {
+  const item = {id:role,type:'Leave',initials:'XY',area:'Area A',bidAs:role,round:4,dateKeys:[key]};
+  assert.equal(c.leaveApprovalConflicts(item).length,1);
+  assert.equal(c.applyLeaveApproval(item),false,'Ordinary approval must stop on a full date');
+  assert.match(item.reviewNote,/filled leave slots/);
+  assert.equal(c.activeOverrideId,item.id);
+  assert.match(c.renderIntakeDateCheck(item),/Full · override required/);
+  assert.match(c.renderIntakeDateCheck(item),/needs-review/);
+}
+console.log('PASS intake/admin show Full · override required and stop ordinary approval for full CPC and DEV dates');
+
+// The change-bid modal uses the same snapshot, while preserving existing dates.
+Object.assign(c, {
+  currentUser: {initials:'XY',area:'Area A',bidAs:'CPC',ghostBidder:false},
+  bidChangeRound:4, bidChangeRows:[{oldKey:key}],
+  isBidLeaveYearDate: () => true,
+  leaveRoundUsageForInitials: () => [],
+  submittedLeaveItemKey: item => item.id,
+});
+vm.runInContext(['bidChangeCapacityMessage','bidChangeRowValidationMessage'].map(fn).join('\n'),c);
+assert.equal(c.bidChangeCapacityMessage([key]),'', 'Retaining a full original date is allowed');
+c.bidChangeRows = [{oldKey:'2027-06-09'}];
+assert.match(c.bidChangeCapacityMessage([key]),/No CPC leave slot/);
+assert.match(c.bidChangeRowValidationMessage({oldKey:'2027-06-09',newKey:key},[{newKey:key}],new Set()),/No CPC leave slot/);
+slots['Area A'][key].cpcOpen = 1;
+assert.equal(c.bidChangeCapacityMessage([key]),'', 'An available replacement date is allowed');
+slots['Area A'][key].cpcOpen = 0;
+assert.match(c.bidChangeCapacityMessage([key]),/No CPC leave slot/, 'Changes recheck a date that filled while editing');
+console.log('PASS bid changes reject full new dates, recheck current capacity, and permit retained original dates');

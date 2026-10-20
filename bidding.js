@@ -3452,7 +3452,7 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
   }]);
   if (capacityMessage) throw new Error(capacityMessage);
 
-  const availabilityMessage = person.ghostBidder ? ghostLeaveAvailabilityMessage(person, area, allDateKeys) : "";
+  const availabilityMessage = person.ghostBidder ? bidderLeaveAvailabilityMessage(person, area, allDateKeys) : "";
   if (availabilityMessage) throw new Error(availabilityMessage);
 
   const submittedAt = formatDateTime(new Date());
@@ -3517,14 +3517,15 @@ function manualLeaveDateChecks(person, area, keys) {
   }));
 }
 
+// All bidders use the current area/workforce snapshot before selecting or submitting.
 // Ghost status does not change the bidder's workforce or reserve daily capacity.
-function ghostLeaveAvailabilityMessage(person, area, keys) {
-  if (!person.ghostBidder || !keys.length) return "";
+function bidderLeaveAvailabilityMessage(person, area, keys) {
+  if (!keys.length) return "";
   const bucket = leaveSlotBucketForBidAs(person.bidAs, person.initials, area);
-  if (!bucket) return "The bidder must have a CPC or DEV bidding role before selecting ghost leave.";
+  if (!bucket) return person.ghostBidder ? "The bidder must have a CPC or DEV bidding role before selecting ghost leave." : "";
   const checks = manualLeaveDateChecks(person, area, keys);
   const unknown = keys.filter((key) => checks.get(key).unknown);
-  if (unknown.length) return `Availability is not loaded for ${formatLeaveConflictDates(unknown)}. Refresh before selecting ghost leave.`;
+  if (unknown.length) return `Availability is not loaded for ${formatLeaveConflictDates(unknown)}. Refresh before selecting leave.`;
   const full = keys.filter((key) => checks.get(key).full);
   return full.length
     ? `No ${bucket.toUpperCase()} leave slot is available in ${area} on: ${formatLeaveConflictDates(full)}. Choose different dates.`
@@ -3927,8 +3928,8 @@ function selectLeaveBuilderDate(key) {
     return false;
   }
 
-  if (currentUser.ghostBidder && !selectedLeaveDates.has(key)) {
-    const availabilityMessage = ghostLeaveAvailabilityMessage(
+  if (!selectedLeaveDates.has(key)) {
+    const availabilityMessage = bidderLeaveAvailabilityMessage(
       { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area, [key]
     );
     if (availabilityMessage) {
@@ -4039,10 +4040,10 @@ function renderLeaveDatePicker() {
   const daysInMonth = new Date(leavePickerYear, leavePickerMonthIndex + 1, 0).getDate();
   const selectedKeys = new Set(leaveBuilderDateKeys());
   const previouslyBidDates = previouslyBidLeaveDateKeys();
-  const ghostChecks = currentUser.ghostBidder ? withLeaveReadCache(() => manualLeaveDateChecks(
+  const ghostChecks = withLeaveReadCache(() => manualLeaveDateChecks(
     { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area,
     Array.from({ length: daysInMonth }, (_, index) => dateKey(leavePickerYear, leavePickerMonthIndex + 1, index + 1))
-  )) : null;
+  ));
   const ghostBucket = ghostChecks ? leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) : null;
   const cells = [];
 
@@ -4057,8 +4058,8 @@ function renderLeaveDatePicker() {
     const isRdo = isRdoDateForInitials(key, currentUser.initials);
     const isAlreadyBid = previouslyBidDates.has(key);
     const ghostCheck = ghostChecks?.get(key);
-    const isGhostUnavailable = Boolean(ghostChecks) && !isInRange
-      && (!ghostBucket || ghostCheck.full || ghostCheck.unknown);
+    const isGhostUnavailable = Boolean(ghostBucket) && !isInRange
+      && (ghostCheck.full || ghostCheck.unknown);
     const isUnavailable = isOutsideLeaveYear || isRdo || isAlreadyBid || isGhostUnavailable;
     const unavailableLabel = isAlreadyBid
       ? ": already submitted for leave; cannot be selected again"
@@ -4067,7 +4068,7 @@ function renderLeaveDatePicker() {
       : isOutsideLeaveYear
         ? ": leave bidding unavailable"
         : isGhostUnavailable
-          ? ghostCheck.unknown ? ": availability not loaded; refresh before selecting ghost leave"
+          ? ghostCheck.unknown ? ": availability not loaded; refresh before selecting leave"
             : `: no ${ghostBucket?.toUpperCase() || "CPC or DEV"} leave slot available in ${currentUser.area}`
           : "";
     cells.push(`
@@ -4779,9 +4780,9 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const availabilityMessage = currentUser.ghostBidder ? ghostLeaveAvailabilityMessage(
+  const availabilityMessage = bidderLeaveAvailabilityMessage(
     { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area, dateKeys
-  ) : "";
+  );
   if (availabilityMessage) {
     setLeaveBuilderStatus(availabilityMessage, "error");
     return;
@@ -4951,10 +4952,10 @@ function leaveDraftPreSubmissionMessage(drafts = leaveDraftQueue) {
 }
 
 function leaveDraftPreSubmissionMessageWithCache(drafts = leaveDraftQueue) {
-  const availabilityMessage = currentUser.ghostBidder ? ghostLeaveAvailabilityMessage(
+  const availabilityMessage = bidderLeaveAvailabilityMessage(
     { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area,
     drafts.flatMap(leaveDateKeysForItem)
-  ) : "";
+  );
   if (availabilityMessage) return availabilityMessage;
 
   const requestedDates = new Map();
@@ -7134,7 +7135,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const nextFatigueAttribute = nextFatigueGroup ? `data-fatigue-next-week="${nextFatigueGroup}"` : "";
   const ariaStatus = showVacationLayer && fatigueGroup ? `${status}; ${fatigueStatus}` : status;
   const publicReadOnly = Boolean(context?.publicReadOnly || options.publicReadOnly);
-  const ghostSlotBucket = currentUser?.ghostBidder
+  const ghostSlotBucket = currentUser
     ? leaveSlotBucketForBidAs(currentUserBidAs(), currentUser.initials, currentUser.area) : null;
   const ghostSelectionBlocked = Boolean(ghostSlotBucket) && canShowLeaveState && !publicReadOnly
     && showPersonalLeave && detailArea === currentUser.area && !isBuilderDate && !isPreviewLeave && !isDraftLeave
@@ -11966,11 +11967,21 @@ function bidChangeDraftSelection() {
   return { changedRows, affectedRequestIds, replacementRows };
 }
 
+function bidChangeCapacityMessage(keys) {
+  // Retained dates already belong to this bidder, including pending requests
+  // that have not claimed an inventory row yet. Recheck only newly added dates.
+  const added = keys.filter((key) => !bidChangeRows.some((row) => row.oldKey === key));
+  return bidderLeaveAvailabilityMessage({ ...currentUser, bidAs: currentUserBidAs() }, currentUser.area, added);
+}
+
 function bidChangeRowValidationMessage(row, replacementRows, affectedRequestIds) {
   if (!row.newKey || row.newKey === row.oldKey) return "";
   if (!isBidLeaveYearDate(row.newKey)) return "Outside the bidding leave year.";
   if (bidChangeRound > 1 && isRdoDateForInitials(row.newKey, currentUser.initials)) return "This is one of your RDO dates.";
   if (replacementRows.filter((candidate) => candidate.newKey === row.newKey).length > 1) return "This date is selected more than once.";
+
+  const capacityError = bidChangeCapacityMessage([row.newKey]);
+  if (capacityError) return capacityError;
 
   const overlapsAnotherBid = leaveRoundUsageForInitials(currentUser.initials, bidChangeRound)
     .filter((item) => !affectedRequestIds.has(submittedLeaveItemKey(item)))
@@ -12124,7 +12135,11 @@ function toggleRoundOneBidChangeDate(key) {
   if (key < bidChangeWeek.startKey || key > addDaysToDateKey(bidChangeWeek.startKey, 6)
       || !isBidLeaveYearDate(key) || isRdoDateForInitials(key, currentUser.initials)) return;
   if (bidChangeWeek.dates.has(key)) bidChangeWeek.dates.delete(key);
-  else bidChangeWeek.dates.add(key);
+  else {
+    const capacityError = bidChangeCapacityMessage([key]);
+    if (capacityError) { setBidChangeStatus(capacityError, 'error'); return; }
+    bidChangeWeek.dates.add(key);
+  }
   renderBidChangeModal();
 }
 
@@ -12136,7 +12151,7 @@ function roundOneBidChangeValidationMessage() {
   if (keys.some((key) => isRdoDateForInitials(key, currentUser.initials))) return 'RDO dates cannot be selected.';
   const otherWeekStarts = [...new Set(bidChangeRows.filter((row) => row.groupKey !== bidChangeWeek.groupKey).map((row) => row.groupKey))];
   if (otherWeekStarts.some((start) => start <= addDaysToDateKey(bidChangeWeek.startKey, 6) && addDaysToDateKey(start, 6) >= bidChangeWeek.startKey)) return 'This week overlaps your other bid week. Choose a separate seven-day span.';
-  return '';
+  return bidChangeCapacityMessage(keys);
 }
 
 function renderRoundOneBidChangeModal(rowsTarget, saveButton) {
@@ -12155,7 +12170,8 @@ function renderRoundOneBidChangeModal(rowsTarget, saveButton) {
         const key = addDaysToDateKey(bidChangeWeek.startKey, i);
         const rdo = isRdoDateForInitials(key, currentUser.initials);
         const other = bidChangeRows.some((row) => row.groupKey !== bidChangeWeek.groupKey && row.oldKey === key);
-        return `<button type="button" data-bid-change-toggle-date="${key}" aria-pressed="${bidChangeWeek.dates.has(key)}" ${rdo || other || !isBidLeaveYearDate(key) || leaveManagementPendingId ? 'disabled' : ''}>${escapeHtml(bidChangeDateLabel(key))}<small>${rdo ? 'RDO' : other ? 'Other bid week' : bidChangeWeek.dates.has(key) ? 'Selected' : 'Not selected'}</small></button>`;
+        const capacityError = bidChangeWeek.dates.has(key) ? '' : bidChangeCapacityMessage([key]);
+        return `<button type="button" data-bid-change-toggle-date="${key}" aria-pressed="${bidChangeWeek.dates.has(key)}" ${rdo || other || capacityError || !isBidLeaveYearDate(key) || leaveManagementPendingId ? 'disabled' : ''}>${escapeHtml(bidChangeDateLabel(key))}<small>${rdo ? 'RDO' : other ? 'Other bid week' : capacityError ? 'Full or unavailable' : bidChangeWeek.dates.has(key) ? 'Selected' : 'Not selected'}</small></button>`;
       }).join('') : ''}</div>
       <p><strong>Replacement dates:</strong> ${[...bidChangeWeek.dates].sort().map((key) => escapeHtml(bidChangeDateLabel(key))).join(', ') || 'None selected'}</p>
       <p>${bidChangeWeek.dates.size} workdays selected. Saving replaces this entire week.</p></section>`;
@@ -12176,6 +12192,8 @@ function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
     if (weekError) return weekError;
   }
   const newKeys = replacementRows.map((row) => row.newKey || row.oldKey);
+  const capacityError = bidChangeCapacityMessage(newKeys);
+  if (capacityError) return capacityError;
   if (newKeys.some((key) => !isBidLeaveYearDate(key))) return "All new dates must be inside the bidding leave year.";
   if (new Set(newKeys).size !== newKeys.length) return "Two bid dates cannot be changed to the same date.";
   const rdoDates = bidChangeRound > 1 ? newKeys.filter((key) => isRdoDateForInitials(key, currentUser.initials)) : [];
@@ -12417,6 +12435,12 @@ async function replaceSubmittedLeaveRequest() {
     setLeaveBuilderStatus("Choose replacement dates within the bidding leave year.", "error");
     return;
   }
+  const originalKeys = new Set(leaveDateKeysForItem(item));
+  const availabilityMessage = bidderLeaveAvailabilityMessage(
+    { ...currentUser, bidAs: currentUserBidAs() }, currentUser.area,
+    dateKeys.filter((key) => !originalKeys.has(key))
+  );
+  if (availabilityMessage) { setLeaveBuilderStatus(availabilityMessage, "error"); return; }
   const round = leaveRoundForItem(item);
   if (matchesCurrentReplacementDates(dateKeys)) {
     setLeaveBuilderStatus("Those are the same dates as your existing bid. Choose different dates and try again.", "error");
@@ -14631,6 +14655,7 @@ let biddingBackupBusy = false;
 function renderAdminToolsPage() {
   if (!hasSystemAdminAccess()) return;
   void loadBiddingBackups();
+  void loadSlotClosureRules();
   renderRuleEditors();
   renderEmailLog();
   syncBidWindowTestingControls();
@@ -20352,3 +20377,75 @@ async function refreshRoundAnnouncements() {
 void refreshRoundAnnouncements();
 setInterval(() => { if (!document.hidden) void refreshRoundAnnouncements(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshRoundAnnouncements(); });
+
+// Rules are persisted per bid year, area, and workforce; never shared across CPC/DEV.
+let slotClosureRules = [];
+let slotClosureRulesLoading = false;
+let slotClosureRulesReady = false;
+function slotClosureSelection() {
+  return {
+    area: document.querySelector("[data-slot-closure-area]")?.value,
+    group: document.querySelector("[data-slot-closure-group]")?.value,
+  };
+}
+function syncSlotClosureForm() {
+  const { area, group } = slotClosureSelection();
+  const rule = slotClosureRules.find((row) => row.area_name === area && row.slot_group === group);
+  document.querySelector("[data-slot-closure-round]").value = String(rule?.after_round ?? 3);
+  document.querySelector("[data-slot-closure-count]").value = String(rule?.close_count ?? 1);
+  document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady || Boolean(rule?.applied_at);
+  document.querySelector("[data-apply-slot-closure]").disabled = !slotClosureRulesReady || !rule || Boolean(rule.applied_at);
+  setText("[data-slot-closure-summary]", rule
+    ? `${area} · ${group.toUpperCase()}: ${rule.close_count} unused slot(s) per date after Round ${rule.after_round}. ${rule.applied_at ? "Applied; this rule cannot close more slots." : "Saved; not yet applied."}`
+    : "No saved rule for this area and slot group. Defaults: 1 unused slot after Round 3.");
+}
+async function loadSlotClosureRules() {
+  const area = document.querySelector("[data-slot-closure-area]");
+  if (!area || !hasSystemAdminAccess() || slotClosureRulesLoading) return;
+  if (!area.options.length) area.innerHTML = ZLA_AREAS.map((name) => `<option>${escapeHtml(name)}</option>`).join("");
+  const client = supabaseClient();
+  if (!client || !supabaseState.connected) return;
+  slotClosureRulesLoading = true;
+  try {
+    const { data, error } = await client.rpc("read_slot_closure_rules", { requested_bid_year: BID_YEAR });
+    if (error) throw error;
+    slotClosureRules = data || [];
+    slotClosureRulesReady = true;
+    syncSlotClosureForm();
+  } catch (error) {
+    slotClosureRulesReady = false;
+    setText("[data-slot-closure-status]", isMissingSupabaseRoutine(error)
+      ? "Slot closures require database/unused_slot_closures.sql to be installed."
+      : error.message || "Could not load slot closure rules.");
+    syncSlotClosureForm();
+  } finally { slotClosureRulesLoading = false; }
+}
+async function saveOrApplySlotClosure(apply) {
+  if (!hasSystemAdminAccess() || !slotClosureRulesReady) return;
+  const { area, group } = slotClosureSelection();
+  const round = Number(document.querySelector("[data-slot-closure-round]").value);
+  const count = Number(document.querySelector("[data-slot-closure-count]").value);
+  if (!ZLA_AREAS.includes(area) || !["cpc", "dev"].includes(group) || !Number.isInteger(round) || round < 1 || round > 6 || !Number.isInteger(count) || count < 1 || count > 99) {
+    setText("[data-slot-closure-status]", "Choose an area, group, round, and a whole slot count from 1 to 99."); return;
+  }
+  const saved = slotClosureRules.find((row) => row.area_name === area && row.slot_group === group);
+  if (apply && (!saved || saved.after_round !== round || saved.close_count !== count)) {
+    setText("[data-slot-closure-status]", "Save your changes before closing unused slots."); return;
+  }
+  const params = { requested_bid_year: BID_YEAR, requested_area_name: area, requested_slot_group: group };
+  if (!apply) Object.assign(params, { requested_after_round: round, requested_close_count: count });
+  const { data, error } = await supabaseClient().rpc(apply ? "apply_slot_closure_rule" : "save_slot_closure_rule", params);
+  if (error) { setText("[data-slot-closure-status]", error.message || "Could not save slot closures."); return; }
+  await loadSlotClosureRules();
+  if (apply) { supabaseState.placeholdersCleared = false; await loadSupabaseReferenceData(); renderApp(); }
+  setText("[data-slot-closure-status]", apply ? `${data?.closed_slots ?? 0} unused ${group.toUpperCase()} slots closed for ${area}. Occupied slots were retained.` : `Rule saved for ${area} ${group.toUpperCase()}.`);
+}
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-slot-closure-area], [data-slot-closure-group]")) syncSlotClosureForm();
+});
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-save-slot-closure], [data-apply-slot-closure]");
+  if (!button) return;
+  await runUiAction("slot-closure", button, "Saving…", () => saveOrApplySlotClosure(button.hasAttribute("data-apply-slot-closure")));
+  syncSlotClosureForm();
+});

@@ -9,7 +9,7 @@ const context = {
   dateKeyFromDate: date => date.toISOString().slice(0, 10),
   isBidLeaveYearDate: key => key >= '2027-01-10' && key <= '2028-01-08',
   isRdoDateForInitials: key => [0, 6].includes(new Date(`${key}T12:00:00Z`).getUTCDay()),
-  renderBidChangeModal: () => {},
+  renderBidChangeModal: () => {}, bidChangeCapacityMessage: () => '',
 };
 vm.createContext(context);
 for (const name of ['addDaysToDateKey', 'bidChangeCount', 'bidChangeDraftSelection', 'selectRoundOneBidChangeWeek', 'updateRoundOneBidChangeWeek', 'toggleRoundOneBidChangeDate', 'roundOneBidChangeValidationMessage']) {
