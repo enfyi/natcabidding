@@ -1585,9 +1585,7 @@ begin
   where b.id = request_row.bidder_id
     and b.active;
 
-  if actor.role <> 'admin' and actor.area_id is distinct from target.area_id then
-    raise exception 'Intake users can only replace approved leave in their own area.';
-  end if;
+  -- Authorized shared intake reviewers may edit bidders across areas.
 
   if target.bid_role in ('ADM', 'NB') then
     raise exception 'This profile cannot be assigned leave.';

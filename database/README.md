@@ -376,3 +376,18 @@ to make announcement headings and both link labels optional. Blank headings are
 hidden; a blank link label hides that surface’s entire link, including its arrow.
 Hidden links may also have a blank destination. Visible links still require a safe
 destination. Existing saved wording is preserved.
+
+### Leave date edits and history
+
+Install `current_round_leave_date_edits.sql` and `leave_date_edit_history.sql` after
+the bidder editor, approved-date replacement, intake review access, and combined
+leave/week reader. The matching migration installs both changes together.
+Intake can change dates only in the current round (the latest open round when
+pilot rounds overlap); administrators can edit across rounds. Unchanged older
+leave remains eligible for recalculation after an RDO edit. The intake queue and
+bid details show saved before/after dates, editor initials, and timestamps from
+existing audit records, including edits made through the bidder editor.
+
+Run `pnpm test:leave-edit-history` with `PGLITE_MODULE` pointing to a temporary
+PGlite installation, plus `node scripts/test-bidder-editor-approved-leave.mjs`.
+Run `node scripts/preview-leave-edit-history.mjs` for a sample rendered queue.
