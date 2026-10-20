@@ -34,6 +34,7 @@ await db.exec(`insert into leave_requests(bid_year_id,bidder_id,round_number,pri
  select y.id,a.id,'2027-06-12','cpc','MANUAL-CLOSED','unavailable' from bid_years y cross join areas a;`);
 await db.exec(await read('unused_slot_closures.sql'));
 await db.exec(await read('reopen_unused_slots.sql'));
+await db.exec(await read('edit_slot_closure_rules.sql'));
 // Preserve full records, not only counts, to catch changed dates, status,
 // ownership, accounting, or history on any existing request or occupied slot.
 const bidTables = ['leave_requests','leave_request_dates','leave_request_week_buckets','intake_submissions','leave_credit_events','rdo_lines','rdo_line_days','bidders','bid_windows'];
@@ -76,11 +77,25 @@ assert.equal(restored.find(d=>d.slot_date==='2027-06-10').cpc_open,2);
 assert.equal(restored.find(d=>d.slot_date==='2027-06-11').cpc_capacity,2,'Dates outside the range retain reduced capacity');
 assert.deepEqual(await bidSnapshot(),bidsBefore,'Reopening must preserve every existing bid field and assigned slot');
 assert.equal((await reopen('2027-06-10','2027-06-10')).reopened_slots,0,'Repeated reopening cannot add capacity');
+const partiallyOpenInventory = (await db.query('select jsonb_agg(to_jsonb(s) order by id) as rows from leave_slots s')).rows[0].rows;
+await db.exec(`select save_slot_closure_rule(2027,'Area A','cpc',4,1)`);
+assert.deepEqual((await db.query('select jsonb_agg(to_jsonb(s) order by id) as rows from leave_slots s')).rows[0].rows,partiallyOpenInventory,'Editing a saved rule never changes inventory');
+assert.equal((await db.query(`select after_round,close_count,applied_at is not null as locked from read_slot_closure_rules(2027) where slot_group='cpc'`)).rows[0].locked,true);
+await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','cpc')`),/already been applied/,'Saving after a partial reopen must not allow another reduction');
 assert.equal((await reopen()).reopened_slots,1,'Reopen all restores only remaining closed slots');
 assert.deepEqual(await bidSnapshot(),bidsBefore);
 assert.deepEqual((await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows,devBefore);
 assert.equal((await db.query(`select closed_slots::int as n from read_slot_closure_rules(2027) where slot_group='cpc'`)).rows[0].n,0);
-await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','cpc')`),/already been applied/);
+assert.equal((await db.query(`select applied_at is null as ready from read_slot_closure_rules(2027) where slot_group='cpc'`)).rows[0].ready,true);
+await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','cpc')`),/must end/,'Updated round cutoff remains enforced');
+await db.exec(`insert into bid_rounds(bid_year_id,round_number,label,status) select id,4,'Round 4','closed' from bid_years;`);
+assert.equal((await db.query(`select apply_slot_closure_rule(2027,'Area A','cpc') as result`)).rows[0].result.closed_slots,2,'Reclosing uses the latest saved slot count');
+assert.deepEqual(await bidSnapshot(),bidsBefore);
+assert.equal((await reopen()).reopened_slots,2);
+await db.exec(`select save_slot_closure_rule(2027,'Area A','cpc',3,2)`);
+assert.equal((await db.query(`select apply_slot_closure_rule(2027,'Area A','cpc') as result`)).rows[0].result.closed_slots,3);
+assert.equal((await reopen()).reopened_slots,3);
+assert.deepEqual(await bidSnapshot(),bidsBefore,'Repeated edit/close/reopen cycles preserve all original bids');
 assert.equal((await db.query(`select status from leave_slots where slot_code='MANUAL-CLOSED'`)).rows[0].status,'unavailable');
 // Exercise the real TMU/other-area and CPC/DEV capacities, including full ->
 // reopened -> full after the new slot is taken.
@@ -104,6 +119,11 @@ for (const [area,group,capacity] of [['Area B','cpc',3],['Area B','dev',4],['TMU
  d=(await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule.find(d=>d.area_name===area&&d.slot_date==='2027-08-10');
  assert.equal(d[group+'_open'],0,'Taking the reopened slot marks the date full at the restored capacity');
 }
+// Upgrade rules that were fully reopened by the previous version.
+await db.exec(`select save_slot_closure_rule(2027,'Area A','dev',3,1);
+ update slot_closure_rules set applied_at=now() where area_id=(select id from areas where name='Area A') and slot_group='dev';`);
+await db.exec(await read('edit_slot_closure_rules.sql'));
+assert.equal((await db.query(`select applied_at is null as ready from read_slot_closure_rules(2027) where area_name='Area A' and slot_group='dev'`)).rows[0].ready,true,'Legacy fully reopened rules are reusable after upgrade');
 await db.exec(`create or replace function public.is_current_admin() returns boolean language sql as $$select false$$;`);
 await assert.rejects(()=>reopen(),/Only system admins/);
 await db.close();

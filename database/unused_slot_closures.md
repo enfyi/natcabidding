@@ -1,7 +1,7 @@
 # Unused-slot closure deployment notes
 
 The application changes and `unused_slot_closures.sql` belong together. This is
-an opt-in, one-time admin action per bid year, area, and workforce. Saving a rule
+an opt-in admin action per bid year, area, and workforce. Fully reopen the rule before applying it again. Saving a rule
 does not automatically run it. Choose TMU / CPC / Round 2 / 1 and save; other
 areas default to Round 3 / 1. DEV requires a separate rule.
 
@@ -18,8 +18,7 @@ A missing closure API disables the panel and displays an installation message.
 
 Closures preserve occupied inventory and unrepresented pending/approved requests.
 They use submission's area/workforce/date advisory locks, change only the chosen
-workforce, record per-date audit entries, and cannot run a second time for the
-same rule. Capacity markers are excluded from the public reader's full-day
+workforce, record per-date audit entries, and cannot run again while rule-closed slots remain. Capacity markers are excluded from the public reader's full-day
 manual-unavailability flag. Holiday exemptions use four slots in the chosen
 group and a holiday in the same Sunday–Saturday week, from `holidays` for that
 year. Verify that those configured holiday weeks match the intended exceptions.
@@ -29,8 +28,7 @@ Capacity changes affect calendar fullness, bidder selection and submission,
 member date changes, intake/admin approval and edits, and calculated area slot
 budgets. Existing explicit intake/admin capacity overrides are still permitted.
 Failed member/admin replacement transactions retain the original request and
-inventory. Ordinary per-date capacity editing can reopen slots later; applying
-an existing closure rule again is intentionally blocked. Rules do not continuously
+inventory. Ordinary per-date capacity editing can reopen slots later; an existing closure rule can run again after all of its closed slots are restored. Rules do not continuously
 close slots released by a later cancellation.
 
 Realtime already covers `leave_slots` and `leave_slot_capacities`; its fallback
@@ -65,8 +63,7 @@ rule-closed slots; matching start/end dates restore one day.
 Only unoccupied rows with that rule's `CAPACITY-CLOSED-<row UUID>` marker are
 reopened. Normal/manual closures, other areas/groups, awarded slots, and pending
 requests are preserved. Daily capacity increases by exactly the rows restored;
-repeating the action adds zero capacity. The original rule stays applied and
-cannot close additional slots after reopening. Reopened dates become full again
+repeating the action adds zero capacity. The original rule stays applied until all rule-closed slots are restored, then becomes ready to apply again. Saved settings can be edited at any time; changes affect the next application. Reopened dates become full again
 when their restored capacity is used. Audit records identify each restored date.
 Regression tests compare complete request/date/submission/accounting and occupied
 slot records before/after both operations, and exercise member/admin date edits,
@@ -80,3 +77,21 @@ request, date, submission, accounting, bidder, RDO, bid-window, slot, and daily
 capacity tables in both databases. Installation did not reopen any live slot.
 The new RPC denies anonymous execution and has no feature-specific security
 advisor findings.
+
+## Editing and reusing saved rules
+
+Install `edit_slot_closure_rules.sql` after the reopening installer. Save changes
+is available for existing rules, including applied rules. Updating round/count
+only changes the saved configuration; it never changes slots or existing bids.
+When any rule-closed slots remain, applying the rule again stays blocked. Fully
+reopening the rule resets it to ready, using the most recently saved settings on
+its next application. Existing fully reopened rules are made ready by the upgrade.
+Round cutoffs, pending protection, holiday exemptions, and workforce isolation
+continue to apply on each cycle. Tests cover edits during partial reopening,
+repeated close/reopen cycles, cutoff changes, and unchanged original bid records.
+
+The edit/reuse update was installed in production and pilot on October 20, 2026
+(production migration `20261020165507`). Backups #42/#3 were captured first.
+Fingerprints of all existing bid, assignment, slot, and daily-capacity tables
+matched before/after installation in both projects. Only rule lifecycle metadata
+was normalized for fully reopened rules; installation applied no slot changes.

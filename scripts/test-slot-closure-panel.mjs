@@ -31,7 +31,8 @@ field('count').value = '1.5'; await vm.runInContext('saveOrApplySlotClosure(fals
 assert.equal(calls.length, 1, 'Fractional counts must not reach the database');
 field('group').value = 'cpc';
 vm.runInContext("slotClosureRules[0].applied_at = '2026-10-20'; syncSlotClosureForm()", context);
-assert.equal(fields.get('[data-save-slot-closure]').disabled, true);
+assert.equal(fields.get('[data-save-slot-closure]').disabled, false);
+assert.equal(fields.get('[data-save-slot-closure]').textContent, 'Save changes');
 assert.equal(fields.get('[data-apply-slot-closure]').disabled, true);
 console.log('Slot closure defaults, workforce isolation, validation, and applied-state checks passed.');
 
@@ -54,5 +55,12 @@ assert.equal(calls[2].params.requested_start_date,null);
 assert.equal(calls[2].params.requested_end_date,null);
 vm.runInContext('slotClosureRules[0].closed_slots = 0; syncSlotClosureForm()',context);
 assert.equal(fields.get('[data-reopen-slot-closure]').disabled,true);
-assert.equal(fields.get('[data-apply-slot-closure]').disabled,true,'Reopening cannot rearm an applied closure');
+assert.equal(fields.get('[data-apply-slot-closure]').disabled,true,'Partial closures stay locked until the database clears applied_at');
+vm.runInContext('slotClosureRules[0].applied_at = null; syncSlotClosureForm()',context);
+assert.equal(fields.get('[data-apply-slot-closure]').disabled,false,'Fully reopening makes the saved rule ready again');
+assert.equal(fields.get('[data-save-slot-closure]').disabled,false);
+field('round').value='4'; field('count').value='2';
+await vm.runInContext('saveOrApplySlotClosure(false)',context);
+assert.equal(calls[3].params.requested_after_round,4);
+assert.equal(calls[3].params.requested_close_count,2);
 console.log('PASS reopening controls: area/group, optional date range, validation, no remaining slots, and no repeated closure');

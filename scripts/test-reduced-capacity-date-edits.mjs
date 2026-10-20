@@ -16,7 +16,7 @@ try {
   await db.exec(read('supabase/migrations/20260928021500_atomic_member_leave_batch_replacement.sql'));
   const id = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
   const year = (await db.query('select id from bid_years where bid_year=2027')).rows[0].id;
-  const area = (await db.query('select id from areas limit 1')).rows[0].id;
+  const area = (await db.query("select id from areas where code='area-a'")).rows[0].id;
   await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,role,bid_role,leave_slot_allowance) values
     ('${id(901)}','${id(902)}','${area}','Admin','Regression','AR','admin-regression@example.test','admin','CPC',1000),
     ('${id(903)}','${id(904)}','${area}','Leave','Regression','LR','leave-regression@example.test','controller','CPC',1000);
@@ -30,6 +30,7 @@ try {
     create or replace function public.is_current_admin() returns boolean language sql as $$select exists(select 1 from public.bidders where id=public.current_bidder_id() and role='admin')$$;`);
   await db.exec(read('database/unused_slot_closures.sql'));
   await db.exec(read('database/reopen_unused_slots.sql'));
+  await db.exec(read('database/edit_slot_closure_rules.sql'));
   await db.exec(`update bid_rounds set status='closed' where bid_year_id='${year}' and round_number=3;
     insert into bid_rounds(bid_year_id,round_number,label,status) values('${year}',3,'Round 3','closed') on conflict(bid_year_id,round_number) do update set status='closed';
     insert into bid_year_settings(bid_year_id,enforce_bid_windows,test_bid_round) values('${year}',false,2) on conflict(bid_year_id) do update set enforce_bid_windows=false,test_bid_round=2;
