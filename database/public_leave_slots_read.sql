@@ -62,6 +62,14 @@ as $$
         ),
         '[]'::jsonb
       ) as dev_initials,
+      count(*) filter (where slot.slot_group = 'cpc' and slot.status = 'unavailable'
+        and slot.slot_code = 'CAPACITY-CLOSED-' || slot.id::text
+        and slot.bidder_id is null and slot.source_leave_request_id is null
+        and nullif(trim(slot.slot_initials), '') is null)::integer as cpc_closed,
+      count(*) filter (where slot.slot_group = 'dev' and slot.status = 'unavailable'
+        and slot.slot_code = 'CAPACITY-CLOSED-' || slot.id::text
+        and slot.bidder_id is null and slot.source_leave_request_id is null
+        and nullif(trim(slot.slot_initials), '') is null)::integer as dev_closed,
       bool_or(slot.status = 'unavailable' and not starts_with(slot.slot_code, 'CAPACITY-')) as unavailable
     from public.leave_slots slot
     join target_year on target_year.id = slot.bid_year_id
@@ -106,6 +114,8 @@ as $$
       )::integer as dev_open,
       coalesce(slots.cpc_initials, '[]'::jsonb) as cpc_initials,
       coalesce(slots.dev_initials, '[]'::jsonb) as dev_initials,
+      coalesce(slots.cpc_closed, 0)::integer as cpc_closed,
+      coalesce(slots.dev_closed, 0)::integer as dev_closed,
       coalesce(slots.unavailable, false) as unavailable
     from slot_summary slots
     full join public.leave_slot_capacities capacity
@@ -127,6 +137,8 @@ as $$
       coalesce(base.cpc_initials, '[]'::jsonb) as cpc_initials,
       coalesce(base.dev_initials, '[]'::jsonb) as dev_initials,
       coalesce(gl.gl_bids, '[]'::jsonb) as gl_bids,
+      coalesce(base.cpc_closed, 0) as cpc_closed,
+      coalesce(base.dev_closed, 0) as dev_closed,
       coalesce(base.unavailable, false) as unavailable
     from base_schedule base
     full join gl_overlay gl
@@ -142,6 +154,8 @@ as $$
         'slot_date', schedule.slot_date,
         'cpc_capacity', schedule.cpc_capacity,
         'dev_capacity', schedule.dev_capacity,
+        'cpc_closed', schedule.cpc_closed,
+        'dev_closed', schedule.dev_closed,
         'cpc_open', schedule.cpc_open,
         'dev_open', schedule.dev_open,
         'cpc_initials', schedule.cpc_initials,

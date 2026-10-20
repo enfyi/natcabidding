@@ -6841,7 +6841,7 @@ function openPublicDateSheetWithCache(button) {
       const name = bucket === "cpc" ? "CPC" : "Developmental";
       const capacity = leaveSlotCapacityForDetails(details, bucket);
       return `<section><h3>${name} · ${leaveSlotOpenCountForDetails(details, bucket)} open</h3>
-        ${capacity ? Array.from({length: capacity}, (_, index) => `<div class="slot-row"><span>${name} ${index + 1}</span><b>${escapeHtml(details[bucket][index] || "Open")}</b></div>`).join("") : "<p>No slots available.</p>"}</section>`;
+        ${capacity || leaveSlotClosedCountForDetails(details, bucket) ? slotRows(name, details[bucket], capacity, leaveSlotClosedCountForDetails(details, bucket)) : "<p>No slots available.</p>"}</section>`;
     }).join("")}
     ${(details.glBids || []).length ? `<section class="gl-bid-detail"><h3>GL Bids · no slots used</h3>${details.glBids.map((bid) => `<div class="slot-row gl-bid-row"><span>GL Bid</span><b aria-label="${escapeHtml(`${bid.initials} · GL Bid${bid.status ? ` · ${bid.status}` : ""}`)}">${escapeHtml(bid.initials)}</b></div>`).join("")}</section>` : ""}
     ${details.unavailable ? '<p>This day is unavailable for additional bidding.</p>' : ""}`;
@@ -7411,6 +7411,11 @@ function leaveSlotLoadingMessage() {
     : "Leave slots could not be loaded. Refresh to try again.";
 }
 
+function leaveSlotClosedCountForDetails(details, bucket) {
+  const count = Number(details?.[`${bucket}Closed`]);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
 function leaveSlotCapacityForDetails(details, bucket) {
   const configuredCapacity = Number(details?.[`${bucket}Capacity`]);
   if (Number.isFinite(configuredCapacity) && configuredCapacity >= 0) return configuredCapacity;
@@ -7441,8 +7446,8 @@ function isLeaveSlotsFull(key, area = currentUser.area, bucket = "cpc") {
   return leaveSlotDataIsLoaded(details) && (leaveSlotOpenCountForDetails(details, bucket) === 0 || (bucket === "cpc" && area === "Area A" && fullLeaveDates.has(key)));
 }
 
-function slotRows(type, initials, capacity) {
-  return Array.from({ length: capacity }, (_, index) => {
+function slotRows(type, initials, capacity, closedCount = 0) {
+  const openRows = Array.from({ length: capacity }, (_, index) => {
     const value = initials[index] || "";
     return `
       <div class="slot-row ${value ? "filled" : "empty"}">
@@ -7451,6 +7456,11 @@ function slotRows(type, initials, capacity) {
       </div>
     `;
   }).join("");
+  const closedRows = Array.from({ length: closedCount }, (_, index) => `
+    <div class="slot-row rule-closed-slot" aria-label="${type} ${capacity + index + 1} Closed">
+      <span>${type} ${capacity + index + 1}</span><b>Closed</b>
+    </div>`).join("");
+  return openRows + closedRows;
 }
 
 function showPublicCalendarTooltip(button) {
@@ -7493,11 +7503,11 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
   const cpcSlots = Array.from({ length: cpcCapacity }, (_, index) => details.cpc[index] || "");
   const devSlots = Array.from({ length: devCapacity }, (_, index) => details.dev[index] || "");
   const glBids = details.glBids || [];
-  const renderSlotRow = (prefix, value, index) => {
+  const renderSlotRow = (prefix, value, index, closed = false) => {
     const slotLabel = `${prefix}${index + 1}`;
-    const displayValue = value ? escapeHtml(value) : "Open";
+    const displayValue = closed ? "Closed" : value ? escapeHtml(value) : "Open";
     return `
-      <span class="tooltip-slot-row ${value ? "filled" : "empty"}" aria-label="${slotLabel} ${displayValue}">
+      <span class="tooltip-slot-row ${closed ? "rule-closed-slot" : value ? "filled" : "empty"}" aria-label="${slotLabel} ${displayValue}">
         <span class="tooltip-slot-name">${slotLabel}</span>
         <b class="tooltip-slot-value">${displayValue}</b>
       </span>
@@ -7511,9 +7521,11 @@ function quickLeaveSlotTooltip(key, holidayKind = calendarHolidayKind(key), area
       <span class="tooltip-slot-rows">
         <span class="tooltip-slot-heading">CPC</span>
         ${cpcSlots.map((value, index) => renderSlotRow("C", value, index)).join("")}
+        ${Array.from({ length: leaveSlotClosedCountForDetails(details, "cpc") }, (_, index) => renderSlotRow("C", "", cpcCapacity + index, true)).join("")}
         <span class="tooltip-slot-rule"></span>
         <span class="tooltip-slot-heading">DEV</span>
         ${devSlots.map((value, index) => renderSlotRow("D", value, index)).join("")}
+        ${Array.from({ length: leaveSlotClosedCountForDetails(details, "dev") }, (_, index) => renderSlotRow("D", "", devCapacity + index, true)).join("")}
         ${glBids.length ? `<span class="tooltip-slot-rule"></span><span class="tooltip-slot-heading gl-bid-heading">GL Bids · no slot used</span>${glBids.map((bid) => `
           <span class="tooltip-slot-row gl-bid-row filled">
             <span class="tooltip-slot-name">GL Bid</span>
@@ -7568,14 +7580,14 @@ function renderLeaveSlotBoardWithCache({ key = selectedLeaveDateKey, area = curr
             <h4>CPC Slots</h4>
             <small>${cpcFull ? "Not available for CPC leave" : "Still available for CPC leave"}</small>
           </div>
-          ${slotRows("Slot", details.cpc, cpcCapacity)}
+          ${slotRows("Slot", details.cpc, cpcCapacity, leaveSlotClosedCountForDetails(details, "cpc"))}
         </section>
         <section class="daily-slot-card dev">
           <div>
             <h4>Developmental Slots</h4>
             <small>${devFull ? "Developmental slots full" : "Developmental slots still open"}</small>
           </div>
-          ${slotRows("Dev", details.dev, devCapacity)}
+          ${slotRows("Dev", details.dev, devCapacity, leaveSlotClosedCountForDetails(details, "dev"))}
         </section>
       </div>
       ${inspectOnly && (details.glBids || []).length ? `<section class="daily-slot-card gl-bid-detail" aria-label="GL bids, no slots used">
@@ -8895,6 +8907,8 @@ function applyLeaveSlotScheduleFromDatabase(rows, areaById) {
         : [],
       cpcCapacity,
       devCapacity,
+      cpcClosed: Math.max(0, Math.floor(Number(row.cpc_closed) || 0)),
+      devClosed: Math.max(0, Math.floor(Number(row.dev_closed) || 0)),
       cpcOpen: Math.min(cpcCapacity, Math.max(0, Number(row.cpc_open) || 0)),
       devOpen: Math.min(devCapacity, Math.max(0, Number(row.dev_open) || 0)),
       unavailable: Boolean(row.unavailable),

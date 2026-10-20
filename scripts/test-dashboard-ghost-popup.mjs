@@ -27,7 +27,7 @@ const context = vm.createContext({
   leaveSlotOpenCountForDetails: (data, bucket) => data[`${bucket}Open`],
   slotRows: (label, initials) => initials.join(','), escapeHtml: String,
 });
-vm.runInContext(fn('ghostLeaveBidsForDate') + '\n' + fn('renderLeaveSlotBoardWithCache'), context);
+vm.runInContext(fn('leaveSlotClosedCountForDetails') + '\n' + fn('ghostLeaveBidsForDate') + '\n' + fn('renderLeaveSlotBoardWithCache'), context);
 assert.deepEqual(JSON.parse(JSON.stringify(context.ghostLeaveBidsForDate(key, 'Area A'))), [
   { initials: 'GH', status: 'Approved' }, { initials: 'PD', status: 'Pending' },
 ]);

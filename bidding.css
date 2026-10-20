@@ -13001,3 +13001,21 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 
 .manual-picker-navigation { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; }
 .manual-picker-year[data-calendar-view="month"] { grid-template-columns: minmax(0, 360px); justify-content: center; }
+
+/* Rule-closed slots stay visible but never contribute to available capacity. */
+.slot-row.rule-closed-slot {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.slot-row.rule-closed-slot b {
+  color: #475569;
+  background: #e2e8f0;
+  font-family: inherit;
+}
+.month-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.rule-closed-slot .tooltip-slot-value,
+.week-calendar-grid .leave-date-tooltip.slot-summary .tooltip-slot-row.rule-closed-slot .tooltip-slot-value {
+  color: #475569 !important;
+  background: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+  font-family: inherit !important;
+}

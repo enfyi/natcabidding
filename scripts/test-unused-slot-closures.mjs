@@ -61,6 +61,8 @@ await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','cpc
 await db.exec(await read('public_leave_slots_read.sql'));
 const schedule = (await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule;
 const full = schedule.find(day => day.slot_date === '2027-06-10');
+assert.equal(full.cpc_closed,2);
+assert.equal(full.dev_closed,0);
 assert.equal(full.cpc_capacity,1);
 assert.equal(full.cpc_open,0);
 assert.equal(full.dev_capacity,4);
@@ -72,6 +74,7 @@ await assert.rejects(()=>reopen('2027-06-11','2027-06-10'),/Choose both dates/);
 await assert.rejects(()=>reopen('2027-01-09','2027-06-10'),/Choose both dates/);
 assert.equal((await reopen('2027-06-10','2027-06-10')).reopened_slots,2);
 let restored = (await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule;
+assert.equal(restored.find(d=>d.slot_date==='2027-06-10').cpc_closed,0);
 assert.equal(restored.find(d=>d.slot_date==='2027-06-10').cpc_capacity,3);
 assert.equal(restored.find(d=>d.slot_date==='2027-06-10').cpc_open,2);
 assert.equal(restored.find(d=>d.slot_date==='2027-06-11').cpc_capacity,2,'Dates outside the range retain reduced capacity');
