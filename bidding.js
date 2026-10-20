@@ -20395,8 +20395,13 @@ function syncSlotClosureForm() {
   document.querySelector("[data-slot-closure-count]").value = String(rule?.close_count ?? 1);
   document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady || Boolean(rule?.applied_at);
   document.querySelector("[data-apply-slot-closure]").disabled = !slotClosureRulesReady || !rule || Boolean(rule.applied_at);
+  document.querySelector("[data-reopen-slot-closure]").disabled = !slotClosureRulesReady || !rule?.applied_at || !(Number(rule.closed_slots) > 0);
+  document.querySelectorAll("[data-slot-closure-reopen-start], [data-slot-closure-reopen-end]").forEach((input) => {
+    input.min = BID_LEAVE_YEAR_START_KEY;
+    input.max = BID_LEAVE_YEAR_END_KEY;
+  });
   setText("[data-slot-closure-summary]", rule
-    ? `${area} · ${group.toUpperCase()}: ${rule.close_count} unused slot(s) per date after Round ${rule.after_round}. ${rule.applied_at ? "Applied; this rule cannot close more slots." : "Saved; not yet applied."}`
+    ? `${area} · ${group.toUpperCase()}: ${rule.close_count} unused slot(s) per date after Round ${rule.after_round}. ${rule.applied_at ? `Applied. ${rule.closed_slots === undefined ? "Install database/reopen_unused_slots.sql to enable reopening." : `${rule.closed_slots} rule-closed slots remain.`} This rule cannot close more slots.` : "Saved; not yet applied."}`
     : "No saved rule for this area and slot group. Defaults: 1 unused slot after Round 3.");
 }
 async function loadSlotClosureRules() {
@@ -20440,12 +20445,41 @@ async function saveOrApplySlotClosure(apply) {
   if (apply) { supabaseState.placeholdersCleared = false; await loadSupabaseReferenceData(); renderApp(); }
   setText("[data-slot-closure-status]", apply ? `${data?.closed_slots ?? 0} unused ${group.toUpperCase()} slots closed for ${area}. Occupied slots were retained.` : `Rule saved for ${area} ${group.toUpperCase()}.`);
 }
+async function reopenSlotClosure() {
+  if (!hasSystemAdminAccess() || !slotClosureRulesReady) return;
+  const { area, group } = slotClosureSelection();
+  const rule = slotClosureRules.find((row) => row.area_name === area && row.slot_group === group);
+  if (!rule?.applied_at || !(Number(rule.closed_slots) > 0)) return;
+  const start = document.querySelector("[data-slot-closure-reopen-start]").value;
+  const end = document.querySelector("[data-slot-closure-reopen-end]").value;
+  if (Boolean(start) !== Boolean(end) || (start && (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)
+    || start > end || start < BID_LEAVE_YEAR_START_KEY || end > BID_LEAVE_YEAR_END_KEY))) {
+    setText("[data-slot-closure-status]", "Choose both dates within the bid leave year, or leave both blank to reopen all rule-closed dates."); return;
+  }
+  const { data, error } = await supabaseClient().rpc("reopen_slot_closure_rule", {
+    requested_bid_year: BID_YEAR, requested_area_name: area, requested_slot_group: group,
+    requested_start_date: start || null, requested_end_date: end || null,
+  });
+  if (error) {
+    setText("[data-slot-closure-status]", isMissingSupabaseRoutine(error)
+      ? "Reopening requires database/reopen_unused_slots.sql to be installed." : error.message || "Could not reopen slots."); return;
+  }
+  await loadSlotClosureRules();
+  supabaseState.placeholdersCleared = false;
+  await loadSupabaseReferenceData();
+  renderApp();
+  setText("[data-slot-closure-status]", `${data?.reopened_slots ?? 0} ${group.toUpperCase()} slots reopened for ${area}. Existing bids were unchanged.`);
+}
 document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-slot-closure-area], [data-slot-closure-group]")) syncSlotClosureForm();
+  if (event.target.matches("[data-slot-closure-area], [data-slot-closure-group]")) {
+    document.querySelector("[data-slot-closure-reopen-start]").value = "";
+    document.querySelector("[data-slot-closure-reopen-end]").value = "";
+    syncSlotClosureForm();
+  }
 });
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-save-slot-closure], [data-apply-slot-closure]");
+  const button = event.target.closest("[data-save-slot-closure], [data-apply-slot-closure], [data-reopen-slot-closure]");
   if (!button) return;
-  await runUiAction("slot-closure", button, "Saving…", () => saveOrApplySlotClosure(button.hasAttribute("data-apply-slot-closure")));
+  await runUiAction("slot-closure", button, "Saving…", () => button.hasAttribute("data-reopen-slot-closure") ? reopenSlotClosure() : saveOrApplySlotClosure(button.hasAttribute("data-apply-slot-closure")));
   syncSlotClosureForm();
 });

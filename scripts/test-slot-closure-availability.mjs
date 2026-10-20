@@ -30,6 +30,13 @@ for (const area of ['Area B', 'TMU']) {
   assert.doesNotMatch(render(area,'dev'), /closed-day/);
   assert.match(render(area,'dev'), /DEV leave slots available/);
   assert.equal((c.slotRows('Slot', details.cpc, c.leaveSlotCapacityForDetails(details,'cpc')).match(/slot-row /g)||[]).length,2);
+  // Restoring a previously closed slot clears the full color and restores
+  // the visible slot count without changing the two existing occupants.
+  details.cpcCapacity = 3; details.cpcOpen = 1;
+  assert.doesNotMatch(render(area,'cpc'), /closed-day/);
+  assert.equal((c.slotRows('Slot', details.cpc, c.leaveSlotCapacityForDetails(details,'cpc')).match(/slot-row /g)||[]).length,3);
+  assert.equal(details.cpc.join(','),'AB,CD');
+  details.cpcCapacity = 2;
   // One occupied slot leaves availability; TMU retains its one-slot-left cue.
   details.cpc = ['AB']; details.cpcOpen = 1;
   assert.equal(c.isLeaveSlotsFull('2027-06-10',area,'cpc'),false);

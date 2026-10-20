@@ -212,3 +212,26 @@ assert.equal(c.bidChangeCapacityMessage([key]),'', 'An available replacement dat
 slots['Area A'][key].cpcOpen = 0;
 assert.match(c.bidChangeCapacityMessage([key]),/No CPC leave slot/, 'Changes recheck a date that filled while editing');
 console.log('PASS bid changes reject full new dates, recheck current capacity, and permit retained original dates');
+
+// Reopening uses the refreshed capacity snapshot for every bidder flow.
+for (const group of ['cpc','dev']) {
+ c.currentUser = {initials:'XY',area:'Area A',bidAs:group==='cpc'?'CPC':'DEV',ghostBidder:false};
+ c.bidChangeRows = [{oldKey:'2027-06-09'}];
+ c.selectedLeaveDates.clear();
+ slots['Area A'][key][group+'Capacity'] = 3;
+ slots['Area A'][key][group+'Open'] = 1;
+ slots['Area A'][key][group] = ['AB','CD'];
+ assert.equal(c.selectLeaveBuilderDate(key),true,'Reopened dates become selectable');
+ assert.equal(c.leaveDraftPreSubmissionMessageWithCache(),'','Reopened dates pass draft capacity checks');
+ assert.equal(c.bidChangeCapacityMessage([key]),'','Reopened dates pass member replacement checks');
+ const item = {type:'Leave',initials:'XY',area:'Area A',bidAs:c.currentUser.bidAs,round:4,dateKeys:[key]};
+ assert.equal(c.leaveApprovalConflicts(item).length,0);
+ assert.match(c.renderIntakeDateCheck(item),/Slot available/);
+ slots['Area A'][key][group+'Open'] = 0;
+ c.selectedLeaveDates.clear();
+ assert.equal(c.selectLeaveBuilderDate(key),false,'Once restored capacity fills, selection blocks again');
+ assert.match(c.leaveDraftPreSubmissionMessageWithCache(),/No (CPC|DEV) leave slot/);
+ assert.equal(c.leaveApprovalConflicts(item).length,1);
+ assert.match(c.renderIntakeDateCheck(item),/Full · override required/);
+}
+console.log('PASS reopened CPC/DEV dates: selection, drafts, member edits, intake/admin availability, and full-again checks');

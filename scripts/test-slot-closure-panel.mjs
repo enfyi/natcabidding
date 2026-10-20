@@ -4,15 +4,15 @@ import vm from 'node:vm';
 const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8');
 const panel = source.slice(source.indexOf('// Rules are persisted per bid year, area, and workforce;'));
 const fields = new Map();
-for (const name of ['area', 'group', 'round', 'count', 'summary', 'status']) fields.set(`[data-slot-closure-${name}]`, {value: ''});
-for (const action of ['save', 'apply']) fields.set(`[data-${action}-slot-closure]`, {disabled: false});
+for (const name of ['area', 'group', 'round', 'count', 'summary', 'status', 'reopen-start', 'reopen-end']) fields.set(`[data-slot-closure-${name}]`, {value: ''});
+for (const action of ['save', 'apply', 'reopen']) fields.set(`[data-${action}-slot-closure]`, {disabled: false});
 const field = (name) => fields.get(`[data-slot-closure-${name}]`);
 field('area').value = 'TMU'; field('group').value = 'cpc';
 const calls = [];
 const context = vm.createContext({
-  document: {querySelector: (s) => fields.get(s), addEventListener() {}},
+  document: {querySelector: (s) => fields.get(s), querySelectorAll: () => [], addEventListener() {}},
   setText: (s, text) => { fields.get(s).textContent = text; },
-  hasSystemAdminAccess: () => true, ZLA_AREAS: ['TMU'], BID_YEAR: 2027,
+  isMissingSupabaseRoutine: () => false, hasSystemAdminAccess: () => true, ZLA_AREAS: ['TMU'], BID_YEAR: 2027, BID_LEAVE_YEAR_START_KEY:'2027-01-10', BID_LEAVE_YEAR_END_KEY:'2028-01-08',
   supabaseClient: () => ({rpc: async (name, params) => { calls.push({name, params}); return {data: null, error: {message: 'Test response'}}; }}),
 });
 vm.runInContext(panel, context);
@@ -34,3 +34,25 @@ vm.runInContext("slotClosureRules[0].applied_at = '2026-10-20'; syncSlotClosureF
 assert.equal(fields.get('[data-save-slot-closure]').disabled, true);
 assert.equal(fields.get('[data-apply-slot-closure]').disabled, true);
 console.log('Slot closure defaults, workforce isolation, validation, and applied-state checks passed.');
+
+vm.runInContext('slotClosureRules[0].closed_slots = 2; syncSlotClosureForm()',context);
+assert.equal(fields.get('[data-reopen-slot-closure]').disabled,false);
+field('reopen-start').value='2027-06-10';
+await vm.runInContext('reopenSlotClosure()',context);
+assert.equal(calls.length,1,'Incomplete reopening ranges must not reach the database');
+field('reopen-end').value='2027-06-09';
+await vm.runInContext('reopenSlotClosure()',context);
+assert.equal(calls.length,1,'Reversed reopening ranges must not reach the database');
+field('reopen-end').value='2027-06-10';
+await vm.runInContext('reopenSlotClosure()',context);
+assert.equal(calls[1].name,'reopen_slot_closure_rule');
+assert.equal(calls[1].params.requested_slot_group,'cpc');
+assert.equal(calls[1].params.requested_start_date,'2027-06-10');
+field('reopen-start').value=''; field('reopen-end').value='';
+await vm.runInContext('reopenSlotClosure()',context);
+assert.equal(calls[2].params.requested_start_date,null);
+assert.equal(calls[2].params.requested_end_date,null);
+vm.runInContext('slotClosureRules[0].closed_slots = 0; syncSlotClosureForm()',context);
+assert.equal(fields.get('[data-reopen-slot-closure]').disabled,true);
+assert.equal(fields.get('[data-apply-slot-closure]').disabled,true,'Reopening cannot rearm an applied closure');
+console.log('PASS reopening controls: area/group, optional date range, validation, no remaining slots, and no repeated closure');

@@ -1659,6 +1659,11 @@
                 <p>Occupied and pending slots are always protected. Four-slot holiday-week dates are exempt. A CPC rule does not change DEV availability. No closures happen until a saved rule is applied.</p>
                 <p data-slot-closure-summary></p>
                 <div class="button-row"><button class="secondary-action" type="button" data-save-slot-closure disabled>Save rule</button><button class="secondary-action" type="button" data-apply-slot-closure disabled>Close unused slots</button></div>
+                <h4>Reopen rule-closed slots</h4>
+                <p>Restore slots for this area and group. Leave both dates blank for all dates, or select a range. Use the same start and end date for one day. Existing bids and manual closures stay unchanged.</p>
+                <label class="testing-select-row">Reopen from<input type="date" data-slot-closure-reopen-start></label>
+                <label class="testing-select-row">Reopen through<input type="date" data-slot-closure-reopen-end></label>
+                <button class="secondary-action" type="button" data-reopen-slot-closure disabled>Reopen closed slots</button>
                 <p class="form-status" role="status" aria-live="polite" data-slot-closure-status></p>
               </section>
               <section class="panel bid-window-testing-card admin-section-target" id="admin-pilot-section" tabindex="-1" data-system-admin-only data-pilot-admin-card hidden>
