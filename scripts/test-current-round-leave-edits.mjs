@@ -34,6 +34,7 @@ try {
     update bid_year_settings set pilot_database=true,pilot_enabled=true,pilot_open_rounds=array[2] where bid_year_id='${year}';`);
   const migration = read('database/current_round_leave_date_edits.sql');
   await db.exec(migration); await db.exec(migration);
+  await db.exec('alter function private.can_review_intake_year(uuid) rename to can_review_intake_year_test_backup');
   const otherArea = (await db.query('select id from areas where id<>$1 limit 1', [area])).rows[0].id;
   await db.exec(`update bidders set role='intake',area_id='${otherArea}' where id='${id(901)}'`);
   for (const round of [1,2,3,4,5,6]) {
@@ -84,6 +85,7 @@ try {
   await db.query('select private.assert_intake_leave_date_round($1)',[id(905)]);
   await db.exec(`update bidders set active=false where id='${id(901)}'`);
   await assert.rejects(()=>call('2027-06-12','2027-06-12'),/access is required/);
+  await db.exec('alter function private.can_review_intake_year_test_backup(uuid) rename to can_review_intake_year');
   await db.exec(`create function public.read_leave_intake_queue(queue_bid_year integer) returns table(id uuid,bidder_id uuid,round_number integer,status text,created_at timestamptz)
     language sql security definer set search_path=public as $$select lr.id,lr.bidder_id,lr.round_number,lr.status,lr.created_at
       from leave_requests lr join bidders target on target.id=lr.bidder_id join bid_years y on y.id=lr.bid_year_id

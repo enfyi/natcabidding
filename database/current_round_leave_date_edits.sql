@@ -4,6 +4,7 @@ returns void language plpgsql security definer set search_path = ''
 as $function$
 declare
   request_row public.leave_requests%rowtype;
+  actor public.bidders%rowtype;
   pilot_database boolean;
   pilot_enabled boolean;
   open_rounds jsonb;
@@ -12,13 +13,19 @@ begin
   if auth.uid() is null then raise exception 'Authentication required.'; end if;
   select * into request_row from public.leave_requests where id = requested_leave_request_id for update;
   if request_row.id is null then raise exception 'The leave request was not found.'; end if;
-  if not coalesce(private.can_review_intake_year(request_row.bid_year_id), false) then
+  select * into actor from public.bidders
+  where auth_user_id = auth.uid() and lower(email) = lower(auth.jwt()->>'email') and active;
+  if actor.id is null or not (
+    actor.role in ('admin', 'intake') or exists (
+      select 1 from public.intake_schedules schedule
+      where schedule.intake_user_id = actor.id
+        and (schedule.bid_year_id = request_row.bid_year_id or schedule.bid_year_id is null)
+        and now() between schedule.starts_at - interval '60 minutes' and schedule.ends_at
+    )
+  ) then
     raise exception 'Intake or administrator access is required.';
   end if;
-  if exists (select 1 from public.bidders actor where actor.auth_user_id = auth.uid()
-    and lower(actor.email) = lower(auth.jwt()->>'email') and actor.active and actor.role = 'admin') then
-    return;
-  end if;
+  if actor.role = 'admin' then return; end if;
   select coalesce((to_jsonb(settings)->>'pilot_database')::boolean, false),
     coalesce((to_jsonb(settings)->>'pilot_enabled')::boolean, false),
     coalesce(to_jsonb(settings)->'pilot_open_rounds', '[]'::jsonb)
