@@ -2441,9 +2441,9 @@ input {
 }
 
 .month-grid .draft-leave-day {
-  color: #7f1d1d;
-  background: var(--red);
-  outline: 2px dashed #991b1b;
+  color: #065f46;
+  background: #d7f8ea;
+  outline: 2px dashed #168263;
   outline-offset: -3px;
   box-shadow: none;
 }
@@ -2871,8 +2871,8 @@ input {
 }
 
 .legend .draft {
-  background: var(--red);
-  outline: 1px dashed #991b1b;
+  background: #9ee6c7;
+  outline: 1px dashed #168263;
   outline-offset: 1px;
 }
 
@@ -5219,7 +5219,7 @@ tr.occupied-row .rdo-tag {
 
 .leave-draft-head > strong {
   flex: 0 0 auto;
-  color: #991b1b;
+  color: #0f766e;
   font-family: Montserrat, Arial, sans-serif;
   font-size: 0.8rem;
 }
@@ -5246,8 +5246,8 @@ tr.occupied-row .rdo-tag {
   height: 24px;
   place-items: center;
   border-radius: 7px;
-  color: #7f1d1d;
-  background: var(--red);
+  color: #065f46;
+  background: #bdf5dd;
   font-weight: 900;
 }
 
@@ -8506,9 +8506,9 @@ body {
 }
 
 .app-main .month-grid .draft-leave-day {
-  color: #7f1d1d;
-  background: var(--red);
-  outline: 2px dashed #991b1b;
+  color: #065f46;
+  background: #d7f8ea;
+  outline: 2px dashed #168263;
   outline-offset: -3px;
   box-shadow: none;
 }
@@ -8568,9 +8568,9 @@ body {
 .month-grid .draft-leave-day.closed-day,
 .app-main .month-grid .draft-leave-day.leave-day,
 .app-main .month-grid .draft-leave-day.closed-day {
-  color: #7f1d1d;
-  background: var(--red);
-  outline: 2px dashed #991b1b;
+  color: #065f46;
+  background: #d7f8ea;
+  outline: 2px dashed #168263;
   outline-offset: -3px;
   box-shadow: none;
 }
@@ -8636,27 +8636,18 @@ body {
 }
 
 .month-grid .holiday-day.pending-leave-day,
+.month-grid .holiday-day.draft-leave-day,
 .month-grid .holiday-in-lieu-day.pending-leave-day,
+.month-grid .holiday-in-lieu-day.draft-leave-day,
 .app-main .month-grid .holiday-day.pending-leave-day,
-.app-main .month-grid .holiday-in-lieu-day.pending-leave-day {
+.app-main .month-grid .holiday-day.draft-leave-day,
+.app-main .month-grid .holiday-in-lieu-day.pending-leave-day,
+.app-main .month-grid .holiday-in-lieu-day.draft-leave-day {
   color: #065f46;
   background:
     repeating-linear-gradient(135deg, rgba(215, 248, 234, 0.96) 0 4px, rgba(22, 130, 99, 0.24) 4px 7px),
     #d7f8ea;
   outline: 2px dashed #168263;
-  outline-offset: -3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(252, 188, 127, 0.58),
-    0 0 0 2px rgba(252, 188, 127, 0.92);
-}
-
-.month-grid .holiday-day.draft-leave-day,
-.month-grid .holiday-in-lieu-day.draft-leave-day,
-.app-main .month-grid .holiday-day.draft-leave-day,
-.app-main .month-grid .holiday-in-lieu-day.draft-leave-day {
-  color: #7f1d1d;
-  background: var(--red);
-  outline: 2px dashed #991b1b;
   outline-offset: -3px;
   box-shadow:
     inset 0 0 0 1px rgba(252, 188, 127, 0.58),
