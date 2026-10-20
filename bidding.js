@@ -19504,8 +19504,10 @@ document.addEventListener("click", async (event) => {
     const panel = pickerAction.closest("[data-manual-bid-panel]");
     if (!panel || panel.dataset.manualBidSubmitting === "true" || !(hasIntakeAccess() || hasSystemAdminAccess())) return;
     const state = manualDatePickerState(panel);
+    const openingCalendar = pickerAction.dataset.manualDateMode === "multiple" && state.mode !== "multiple";
     if (pickerAction.hasAttribute("data-manual-date-mode")) {
       state.mode = pickerAction.dataset.manualDateMode;
+      if (openingCalendar) state.month = 0;
     }
     if (pickerAction.hasAttribute("data-manual-picker-view")) state.view = pickerAction.dataset.manualPickerView;
     if (pickerAction.hasAttribute("data-manual-picker-month")) state.month = Math.max(0, Math.min(12, state.month + Number(pickerAction.dataset.manualPickerMonth)));
@@ -19519,6 +19521,10 @@ document.addEventListener("click", async (event) => {
     if (pickerAction.hasAttribute("data-manual-pick-date") || pickerAction.hasAttribute("data-manual-picker-clear") || pickerAction.hasAttribute("data-manual-date-mode")) renderManualLeavePreflight(panel);
     const focusSelector = pickerAction.hasAttribute("data-manual-picker-view") ? `[data-manual-picker-view="${state.view}"]` : pickerAction.hasAttribute("data-manual-pick-date") ? `[data-manual-pick-date="${pickerAction.dataset.manualPickDate}"]` : pickerAction.hasAttribute("data-manual-picker-month") ? `[data-manual-picker-month="${pickerAction.dataset.manualPickerMonth}"]` : `[data-manual-date-mode="${state.mode}"]`;
     panel.querySelector(focusSelector)?.focus({ preventScroll: true });
+    if (openingCalendar) {
+      // Expanding a full year can anchor the viewport to the fields below it.
+      requestAnimationFrame(() => panel.querySelector("[data-manual-multi-picker]")?.scrollIntoView({ behavior: "instant", block: "start" }));
+    }
     return;
   }
 
