@@ -10910,6 +10910,14 @@ video {
     grid-row: auto;
   }
 
+  .intake-workspace > .right-stack {
+    display: contents;
+  }
+
+  .intake-workspace > .right-stack > .manual-bid-card {
+    order: -1;
+  }
+
   .intake-control-card {
     min-height: 88px;
     padding: 14px 44px 14px 16px;
