@@ -95,3 +95,20 @@ The edit/reuse update was installed in production and pilot on October 20, 2026
 Fingerprints of all existing bid, assignment, slot, and daily-capacity tables
 matched before/after installation in both projects. Only rule lifecycle metadata
 was normalized for fully reopened rules; installation applied no slot changes.
+
+## Visible closed slots
+
+`show_closed_leave_slots.sql` extends the public schedule with separate CPC/DEV
+closed-row counts. Only unoccupied `CAPACITY-CLOSED-<row UUID>` rows count as
+rule closures. Calendar tooltips, expanded calendars, mobile date sheets, and
+daily slot boards append gray Closed rows while retaining the reduced active
+capacity and open count. Closed rows are display-only; they never become available
+or change full-date coloring. Reopening removes the closed display and restores
+real capacity. The upgrade replaces only the reader function and changes no data.
+
+The closed-row display update was installed in production and pilot on October
+20, 2026 (production migration `20261020170308`), after backups #43/#4. Existing
+bid/inventory/capacity table fingerprints matched in both projects. Active
+capacity, open counts, and existing schedule fields were preserved; the pilot
+reader also receives the repository's existing GL-overlay field. The pilot API
+now reports its 362 rule-closed CPC rows separately from active capacity.

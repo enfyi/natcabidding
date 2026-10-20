@@ -51,7 +51,7 @@ const popup = vm.createContext({
   leaveSlotOpenCountForDetails: (details, bucket) => details[`${bucket}Open`],
   leaveSlotLoadingMessage: () => 'Loading leave slots…',
 });
-vm.runInContext(fn('openPublicDateSheet') + '\n' + fn('openPublicDateSheetWithCache'), popup);
+vm.runInContext(fn('slotRows') + '\n' + fn('leaveSlotClosedCountForDetails') + '\n' + fn('openPublicDateSheet') + '\n' + fn('openPublicDateSheetWithCache'), popup);
 popup.openPublicDateSheet({ dataset: { publicLeaveDate: dates[30] } });
 assert.equal(shown, 1);
 assert.match(content.innerHTML, /CPC · 2 open/);

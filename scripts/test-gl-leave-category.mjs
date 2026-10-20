@@ -63,7 +63,7 @@ context.intakeQueue.push({
   type: 'Leave', initials: 'OG', area: 'Area F', bidAs: 'GL',
   status: 'Approved', range: '2027-01-11',
 });
-vm.runInContext(['isGlLeaveItem', 'addVisibleGlBid', 'visibleLeaveSlotDetailsFromMap', 'quickLeaveSlotTooltip'].map(functionSource).join('\n'), context);
+vm.runInContext(['isGlLeaveItem', 'addVisibleGlBid', 'visibleLeaveSlotDetailsFromMap', 'leaveSlotClosedCountForDetails', 'quickLeaveSlotTooltip'].map(functionSource).join('\n'), context);
 const visible = context.visibleLeaveSlotDetailsFromMap('2027-01-11', 'Area F', {});
 assert.equal(visible.glBids[0].initials, 'OG');
 assert.equal(visible.glBids[0].label, 'GL Bid');

@@ -50,7 +50,7 @@
     "test:pilot-rounds": "node scripts/test-pilot-round-controls.mjs",
     "test:pilot-reset": "node scripts/test-pilot-bidder-round-reset.mjs",
     "test:round-one-week-changes": "node scripts/test-round-one-week-changes.mjs",
-    "test:slot-closures": "node scripts/test-slot-closure-panel.mjs && node scripts/test-slot-closure-availability.mjs && node scripts/test-ghost-leave-availability.mjs && node scripts/test-unused-slot-closures.mjs && node scripts/test-reduced-capacity-date-edits.mjs"
+    "test:slot-closures": "node scripts/test-slot-closure-panel.mjs && node scripts/test-slot-closure-availability.mjs && node scripts/test-ghost-leave-availability.mjs && node scripts/test-unused-slot-closures.mjs && node scripts/test-reduced-capacity-date-edits.mjs && node scripts/test-closed-slot-display.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
