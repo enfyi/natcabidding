@@ -45,3 +45,11 @@ Local regression coverage: `test-unused-slot-closures.mjs`,
 The first two accept `PGLITE_MODULE` for a temporary local PostgreSQL runtime.
 These tests do not certify the schema or installed function versions of the
 live Supabase project. No live data was changed during this review.
+
+Production installation was verified on October 20, 2026 under migration
+`20261020162311_show_round_based_slot_removal`. Backup #40 was captured first.
+The rule table has RLS enabled; public RPCs use invoker rights and deny anonymous
+execution. No slot-closure security-advisor findings were reported. Existing
+submission and single/batch member/admin replacement routines were verified in
+the production catalog. Installation preserved all 16,914 inventory rows and 564
+capacity rows; no closure rules were activated or applied by the installation.
