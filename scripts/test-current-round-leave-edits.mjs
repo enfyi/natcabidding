@@ -105,10 +105,15 @@ try {
   const historyAfter=(await queue()).rows[0].data.find(row=>row.id===id(905)).leaveEditHistory;
   assert.equal(historyAfter.length,historyBefore.length+1,'Bidder-editor snapshot edits are included');
   assert.ok(historyAfter.some(edit=>edit.before.start_date==='2027-06-11' && edit.after.start_date==='2027-06-14'));
+  await db.exec('grant usage on schema public, private, auth to authenticated; set role authenticated');
+  assert.ok((await db.query('select public.read_leave_intake_queue_with_weeks(2027) data')).rows[0].data.length>0,
+    'Authenticated wrapper works even on a legacy database without the earlier combined reader');
+  await db.exec('reset role');
   await db.exec(`update bidders set role='controller' where id='${id(901)}'; delete from intake_schedules;`);
   assert.equal((await queue()).rows[0].data.length,0,'History does not expose another area to regular members');
   await db.exec("set test.uid=''");
   assert.deepEqual((await queue()).rows[0].data,[],'Anonymous callers cannot read history');
+  await assert.rejects(()=>db.query('select public.read_leave_intake_queue_with_weeks(2027)'),/Authentication required/);
   console.log('PASS database history includes old direct edits and bidder-editor snapshots, preserves scope and rejects anonymous reads.');
   console.log('PASS database current-round restrictions: intake roles/schedules, pilot/live, rounds 1–6, admin cross-round saves and editor rollback.');
 } finally { await db.close(); }
