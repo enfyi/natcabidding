@@ -5493,6 +5493,40 @@ function formatLeaveConflictDates(keys) {
     .join(", ");
 }
 
+function renderApprovedLeaveDatePicker(item) {
+  const keys = datesInLeaveRange(item.range);
+  const start = keys[0] || "";
+  const end = keys[keys.length - 1] || "";
+  return `<section class="approved-leave-date-picker" aria-label="Replacement leave dates">
+    <p class="approved-leave-current">Currently approved: <strong>${escapeHtml(item.range)}</strong></p>
+    <div class="approved-leave-date-fields">
+      <label>Start date <input type="date" value="${start}" min="${BID_YEAR}-01-01" max="${BID_YEAR}-12-31" data-override-start data-previous-date="${start}" required /></label>
+      <label>End date <input type="date" value="${end}" min="${BID_YEAR}-01-01" max="${BID_YEAR}-12-31" data-override-end required /></label>
+    </div>
+    <input type="hidden" value="${escapeHtml(item.range)}" data-override-range />
+    <p class="approved-leave-preview" data-override-date-preview aria-live="polite">Choose replacement dates using the calendars.</p>
+    <p class="override-warning" data-override-date-error role="alert" hidden></p>
+  </section>`;
+}
+
+function syncApprovedLeaveDatePicker(editor) {
+  const start = editor?.querySelector("[data-override-start]");
+  const end = editor?.querySelector("[data-override-end]");
+  if (!start || !end) return true;
+  const range = editor.querySelector("[data-override-range]");
+  const preview = editor.querySelector("[data-override-date-preview]");
+  const error = editor.querySelector("[data-override-date-error]");
+  const message = !start.value || !end.value ? "Choose both a start date and an end date."
+    : !start.validity.valid || !end.validity.valid ? `Choose dates within the ${BID_YEAR} bid year.`
+    : end.value < start.value ? "The end date must be on or after the start date." : "";
+  error.textContent = message;
+  error.hidden = !message;
+  range.value = message ? "" : formatLeaveRangeFromKeys(start.value === end.value ? [start.value] : [start.value, end.value]);
+  preview.textContent = message ? "" : `New dates: ${range.value}`;
+  editor.querySelector("[data-intake-save-override]")?.toggleAttribute("disabled", Boolean(message));
+  return !message;
+}
+
 function captureIntakeOverrideFields(item) {
   const editor = document.querySelector("[data-override-editor]");
   if (!item || !editor) return;
@@ -6033,6 +6067,8 @@ async function saveSupabaseApprovedRdoEdit(item) {
 async function saveIntakeOverride(id) {
   const item = intakeQueue.find((entry) => entry.id === id);
   if (!item) return;
+  if (item.type === "Leave" && item.status === "Approved"
+    && !syncApprovedLeaveDatePicker(document.querySelector("[data-override-editor]"))) return;
   if (item.type === "RDO Line" && !hasIntakeAccess()) {
     item.reviewNote = "Active intake access is required to edit RDO bids.";
     showActionFeedback(item.reviewNote, "error");
@@ -16734,7 +16770,7 @@ function renderOverrideEditor(item) {
     ${bidderIdentity}
     ${rdoConflictNote}
     ${conflictNote}
-    <label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>
+    ${pending ? `<label>Date Range <input type="text" value="${escapeHtml(item.range)}" data-override-range /></label>` : renderApprovedLeaveDatePicker(item)}
     <label>Days <input type="number" value="${item.days}" data-override-days ${pending ? "" : "readonly"} /></label>
     ${pending ? "" : "<small>Charged days are recalculated from the replacement range.</small>"}
     ${item.ghostBid ? '<p class="ghost-bid-badge">Ghost Leave · Area capacity is not consumed.</p>' : isGlLeaveItem(item) ? '<p class="gl-bid-badge">GL Bid · Visible on the calendar; no area slot is consumed.</p>' : `<label class="override-check">
@@ -17690,7 +17726,7 @@ function focusIntakeEditor(panelId) {
     const panel = document.getElementById(panelId);
     if (!panel || panel.hidden) return;
     const focusTarget = panel.querySelector("[data-denial-reason]")
-      || panel.querySelector("[data-override-line], [data-override-range]")
+      || panel.querySelector("[data-override-line], [data-override-start], input:not([type=hidden])[data-override-range]")
       || panel.querySelector("textarea, input:not([readonly]), select")
       || panel.querySelector("button");
     focusTarget?.focus();
@@ -20016,6 +20052,16 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-override-start], [data-override-end]")) {
+    const editor = event.target.closest("[data-override-editor]");
+    if (event.target.matches("[data-override-start]")) {
+      const end = editor.querySelector("[data-override-end]");
+      if (end.value === event.target.dataset.previousDate) end.value = event.target.value;
+      event.target.dataset.previousDate = event.target.value;
+    }
+    syncApprovedLeaveDatePicker(editor);
+    return;
+  }
   if (event.target.matches("[data-archive-year], [data-archive-area]")) {
     if (event.target.matches("[data-archive-year]")) publicArchive.year = event.target.value;
     else publicArchive.area = event.target.value;
