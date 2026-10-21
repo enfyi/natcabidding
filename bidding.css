@@ -4296,6 +4296,14 @@ tr.occupied-row .rdo-tag {
   gap: 10px;
 }
 
+.approved-leave-date-picker { display: grid; gap: 12px; min-width: 0; }
+.approved-leave-current, .approved-leave-preview { margin: 0; }
+.approved-leave-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.approved-leave-date-fields input { width: 100%; min-width: 0; box-sizing: border-box; }
+@media (max-width: 480px) {
+  .approved-leave-date-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
 .override-editor label,
 .denial-editor label {
   display: grid;
