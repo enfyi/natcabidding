@@ -4069,6 +4069,88 @@ tr.occupied-row .rdo-tag {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.intake-card-name-row { position: relative; }
+.intake-balance-disclosure { font-size: 12px; }
+.intake-balance-disclosure > summary {
+  padding: 3px 9px;
+  border: 1px solid #a7ccbc;
+  border-radius: 20px;
+  background: #eaf5ef;
+  color: #21684e;
+  cursor: pointer;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.intake-balance-disclosure.over > summary,
+.intake-balance-disclosure.unavailable > summary {
+  color: #91470e;
+  border-color: #e9c8a5;
+  background: #fff1df;
+}
+.intake-balance-disclosure > summary:focus-visible { outline: 2px solid #24745c; outline-offset: 3px; }
+.intake-balance-disclosure[open] > summary { box-shadow: 0 0 0 2px rgba(36,116,92,.15); }
+.intake-balance-disclosure > .intake-leave-balance {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  z-index: 5;
+  margin: 6px 0 0;
+  box-shadow: 0 8px 24px rgba(21,45,59,.18);
+}
+.intake-leave-balance {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #54bc99;
+  border-radius: 6px;
+  background: rgba(84, 188, 153, 0.06);
+}
+.intake-balance-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+.intake-balance-heading span, .intake-balance-metrics dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.intake-balance-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.intake-balance-metrics dd {
+  margin: 4px 0 0;
+  text-align: left;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.intake-balance-metrics > div { display: block; }
+.intake-card .intake-balance-result {
+  margin: 0;
+  color: #54bc99;
+  font-size: 12px;
+  font-weight: 700;
+}
+.intake-leave-balance.over, .intake-leave-balance.unavailable {
+  border-left-color: #efab67;
+  background: rgba(239, 171, 103, 0.07);
+}
+.intake-card .over .intake-balance-result { color: #efab67; }
+.app-main .intake-leave-balance { border-color: #cee3db; border-left-color: #24745c; background: #f0f8f4; }
+.app-main .intake-balance-heading span, .app-main .intake-balance-metrics dt { color: #526477; }
+.app-main .intake-balance-result { color: #21684e; }
+.app-main .intake-leave-balance.over, .app-main .intake-leave-balance.unavailable { border-color: #e9c8a5; border-left-color: #a85812; background: #fff7ed; }
+.app-main .over .intake-balance-result { color: #91470e; }
+@media (max-width: 720px) {
+  .intake-balance-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .intake-card:hover,
 .intake-card:focus-visible,
 .intake-card.selected {

@@ -19,6 +19,7 @@
     "test:manual-intake": "node scripts/test-manual-intake-persistence.mjs && node scripts/test-manual-multi-date.mjs && node scripts/test-manual-preflight.mjs",
     "test:manual-leave-input-performance": "node scripts/test-manual-leave-input-performance.mjs && node scripts/test-manual-multi-date-performance.mjs",
     "test:intake-queue": "node scripts/test-intake-queue-visibility.mjs && node scripts/test-live-intake-queue.mjs",
+    "test:intake-leave-balance": "node scripts/test-intake-leave-balance.mjs",
     "test:alert-intake-navigation": "node scripts/test-alert-intake-navigation.mjs",
     "test:alert-review-performance": "node scripts/test-alert-review-performance.mjs",
     "test:live-bidding-updates": "node scripts/test-live-bidding-updates.mjs",

@@ -5752,6 +5752,19 @@ async function runIntakeDecision(action, id) {
 async function approveIntakeItem(id) {
   const item = intakeReviewItemById(id);
   if (!item || item.status !== "Pending") return;
+  if (activeOverrideId === id) captureIntakeOverrideFields(item);
+  if (item.type === "Leave") {
+    const balance = withLeaveReadCache(() => intakeLeaveBalance(item));
+    if (!balance || balance.remainingHours < 0) {
+      const reviewNote = balance
+        ? `Cannot approve: over leave allowance by ${formatEstimatedLeaveDays(-balance.remaining)} days. Edit or deny pending dates first.`
+        : "Cannot approve: bidder leave balance is unavailable. Verify the bidder's allowance and reload the queue.";
+      item.reviewNote = reviewNote;
+      if (item.members) intakeGroupReviewState.set(id, { reviewNote });
+      renderIntakeQueue();
+      return;
+    }
+  }
   if (item.members) {
     try { await reviewIntakeLeaveGroup(item, "approved"); }
     catch (error) {
@@ -5760,7 +5773,6 @@ async function approveIntakeItem(id) {
     }
     return;
   }
-  if (activeOverrideId === id) captureIntakeOverrideFields(item);
   if (item.type === "RDO Line" && item.bidAs === "GL") {
     const verification = activeOverrideId === id
       ? document.querySelector("[data-gl-line-type-verification]")
@@ -17496,11 +17508,82 @@ function renderIntakeDateCheckControl(item) {
   return `<div class="intake-date-check"><button type="button" class="secondary-action small" data-intake-check-dates="${escapeHtml(item.id)}" aria-expanded="${open}">${open ? "Hide date check" : "Check dates"}</button><div data-intake-date-check-content ${open ? "" : "hidden"}>${open ? renderIntakeDateCheck(item) : ""}</div></div>`;
 }
 
+// One index per synchronous render; no requests or persistent balance cache.
+function intakeLeaveBalanceIndex() {
+  return cachedLeaveRead("intakeLeaveBalanceIndex", () => {
+    const requests = new Map();
+    [...leaveBids, ...intakeQueue.filter((row) => row.type === "Leave")].forEach((row) => {
+      const initials = row.initials || currentUser.initials;
+      const key = row.supabaseRequestId || `${initials}|${leaveRoundForItem(row)}|${row.range}`;
+      requests.set(key, row);
+    });
+    const index = new Map();
+    requests.forEach((row) => {
+      if (!["Approved", "Pending"].includes(row.status)) return;
+      const initials = row.initials || currentUser.initials;
+      if (!index.has(initials)) index.set(initials, { approved: 0, pending: 0, holidayItems: [], holidays: null });
+      const totals = index.get(initials);
+      totals[row.status === "Approved" ? "approved" : "pending"] += leaveItemChargedDays(row);
+      totals.holidayItems.push(row);
+    });
+    return index;
+  });
+}
+
+function intakeLeaveBalance(item) {
+  const person = bueByInitials(item.initials);
+  if (!person || person.leaveSlotAllowance == null || !Number.isFinite(Number(person.leaveSlotAllowance))) return null;
+  const totals = intakeLeaveBalanceIndex().get(item.initials) || { approved: 0, pending: 0, holidays: new Map() };
+  const round = leaveRoundForItem(item);
+  // Holiday date expansion is unnecessary until credits become available.
+  if (round >= 4 && totals.holidays === null) {
+    totals.holidays = new Map();
+    totals.holidayItems.forEach((row) => {
+      const priorRound = leaveRoundForItem(row);
+      leaveHolidayDateSet([row]).forEach((date) => {
+        totals.holidays.set(date, Math.min(totals.holidays.get(date) ?? Infinity, priorRound));
+      });
+    });
+  }
+  const credits = round >= 4 ? [...totals.holidays.values()].filter((priorRound) => priorRound < round).length : 0;
+  const hoursPerDay = leaveHoursPerDayForInitials(item.initials);
+  const allowanceHours = Number(person.leaveSlotAllowance) + credits * hoursPerDay;
+  const requestDays = (item.members || [item]).reduce((sum, row) => sum + leaveItemChargedDays(row), 0);
+  const otherPending = Math.max(0, totals.pending - (item.status === "Pending" ? requestDays : 0));
+  const remainingHours = allowanceHours - (totals.approved + totals.pending) * hoursPerDay;
+  return { ...totals, credits, hoursPerDay, allowanceHours, requestDays, otherPending, remainingHours,
+    remaining: remainingHours / hoursPerDay };
+}
+
+function renderIntakeLeaveBalance(item) {
+  if (item.type !== "Leave") return "";
+  const balance = intakeLeaveBalance(item);
+  if (!balance) return '<details class="intake-balance-disclosure unavailable"><summary>Balance unavailable</summary><div class="intake-leave-balance unavailable">Verify bidder allowance before approval.</div></details>';
+  const days = (value) => `${value.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${value === 1 ? "day" : "days"}`;
+  const over = balance.remainingHours < 0;
+  return `<details class="intake-balance-disclosure ${over ? "over" : "enough"}"><summary title="Leave remaining after approved and all pending bids · Click for breakdown">${over ? `${days(-balance.remaining)} over` : `${days(balance.remaining)} left`}</summary><section class="intake-leave-balance ${over ? "over" : "enough"}" aria-label="Bidder leave balance">
+    <div class="intake-balance-heading"><strong>Leave allowance: ${days(balance.allowanceHours / balance.hoursPerDay)}</strong><span>${balance.allowanceHours} hours · ${balance.hoursPerDay}-hour days${balance.credits ? ` · ${balance.credits} holiday credits` : ""}</span></div>
+    <dl class="intake-balance-metrics">
+      <div><dt>Already approved</dt><dd>${days(balance.approved)}</dd></div>
+      <div><dt>Other pending</dt><dd>${days(balance.otherPending)}</dd></div>
+      <div><dt>This request${item.status === "Pending" ? "" : ` (${escapeHtml(item.status.toLowerCase())})`}</dt><dd>${days(balance.requestDays)}</dd></div>
+      <div><dt>Left after all pending</dt><dd>${days(balance.remaining)}</dd></div>
+    </dl>
+    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · approval blocked` : `Enough days · ${days(balance.remaining)} remaining`} (${Math.abs(balance.remainingHours)} hours)</p>
+  </section></details>`;
+}
+
+function intakeLeaveApprovalAttributes(item) {
+  const balance = intakeLeaveBalance(item);
+  return !balance ? 'disabled title="Bidder leave balance unavailable"'
+    : balance.remainingHours < 0 ? 'disabled title="Pending bids exceed the bidder’s leave allowance"' : '';
+}
+
 function renderIntakeGroupDates(item, canReview) {
   if (!item.members) return "";
   return `<details><summary>Review ${item.dateKeys.length} selected dates</summary>${item.members.map((member) => `
     <div class="intake-meta"><strong>${escapeHtml(member.range)}</strong><span>${member.days} charged ${member.days === 1 ? "day" : "days"}</span>
-    ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}">Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
+    ${canReview && member.status === "Pending" ? `<button class="secondary-action small" type="button" data-intake-approve="${member.id}" ${intakeLeaveApprovalAttributes(member)}>Approve date</button><button class="secondary-action small danger" type="button" data-intake-deny="${member.id}">Deny date</button>` : ""}
     ${canReview && ["Pending", "Approved"].includes(member.status) && intakeLeaveRoundIsOpen(member) ? `<button class="secondary-action small" type="button" data-intake-edit="${member.id}">${member.status === "Approved" ? "Edit date" : "Edit / Override date"}</button>` : ""}
     </div>`).join("")}</details>`;
 }
@@ -17508,7 +17591,7 @@ function renderIntakeGroupDates(item, canReview) {
 function revealIntakeLeaveDates(id) {
   const card = [...document.querySelectorAll("[data-intake-card]")]
     .find((candidate) => candidate.dataset.intakeCard === id);
-  const details = card?.querySelector("details");
+  const details = card?.querySelector("details:not(.intake-balance-disclosure)");
   if (!details) return;
   details.open = true;
   window.requestAnimationFrame(() => details.querySelector("[data-intake-edit]")?.focus());
@@ -17677,6 +17760,7 @@ function renderIntakeQueueWithCache() {
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
           <div class="intake-card-name-row">
             <h3>${item.name} · ${item.initials}</h3>
+            ${item.type === "Leave" ? renderIntakeLeaveBalance(item) : ""}
           </div>
           <p>${escapeHtml(intakeBidSummary(item))}</p>
           ${renderIntakeChangeHistory(item)}
@@ -17699,7 +17783,7 @@ function renderIntakeQueueWithCache() {
           ${item.isChange ? '<span class="intake-change-badge">Change Request</span>' : ""}
           <span class="status ${intakeDisplayStatus(item).toLowerCase()}">${escapeHtml(intakeDisplayStatus(item))}</span>
           ${item.status === "Pending" && canReview ? `
-            <button class="primary-action small" type="button" data-intake-approve="${item.id}">${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
+            <button class="primary-action small" type="button" data-intake-approve="${item.id}" ${item.type === "Leave" ? intakeLeaveApprovalAttributes(item) : ""}>${item.members ? (item.round === 1 ? "Approve week" : "Approve batch") : "Approve"}</button>
             <button class="secondary-action small danger" type="button" data-intake-deny="${item.id}">${item.members ? (item.round === 1 ? "Deny week" : "Deny batch") : "Deny"}</button>
           ` : ""}
           ${canReview && !item.members && ["Pending", "Approved"].includes(item.status) && (item.type !== "Leave" || intakeLeaveRoundIsOpen(item)) ? `<button class="secondary-action small" type="button" data-intake-edit="${item.id}">${item.status === "Pending" ? "Edit / Override" : item.type === "Leave" ? "Edit Dates" : "Admin Edit"}</button>` : ""}
@@ -19702,6 +19786,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (event.target.closest(".intake-balance-disclosure")) return;
+
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {
     activeIntakeDetailId = intakeCard.dataset.intakeCard;
@@ -19906,6 +19992,8 @@ document.addEventListener("keydown", async (event) => {
     }
     return;
   }
+
+  if (event.target.closest(".intake-balance-disclosure")) return;
 
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
     event.preventDefault();
