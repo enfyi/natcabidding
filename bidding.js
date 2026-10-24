@@ -6711,7 +6711,7 @@ function progressiveCalendarIsCurrent(target, state) {
     && state.revision === calendarRenderRevision;
 }
 
-function renderProgressiveCalendarMonths(target, indexes) {
+function renderProgressiveCalendarMonths(target, indexes, { refresh = false } = {}) {
   const state = progressiveCalendars.get(target);
   if (!state || !progressiveCalendarIsCurrent(target, state)) return;
   const anchor = [...target.querySelectorAll('[data-calendar-month]')].find((card) => {
@@ -6722,7 +6722,7 @@ function renderProgressiveCalendarMonths(target, indexes) {
   withLeaveReadCache(() => {
     let context;
     indexes.forEach((index) => {
-      const card = [...target.querySelectorAll('[data-calendar-pending]')]
+      const card = [...target.querySelectorAll(refresh ? '[data-calendar-month]' : '[data-calendar-pending]')]
         .find((item) => calendarNavigationIndex(item) === index);
       if (!card) return;
       let html = state.months.get(index);
@@ -6812,6 +6812,20 @@ function makeProgressiveCalendar(target, renderKey, options, viewCache, reuseCur
   // Retain strings for revisits, never clones of a full year's DOM.
   while (viewCache.size >= 4 && !viewCache.has(renderKey)) viewCache.delete(viewCache.keys().next().value);
   viewCache.set(renderKey, { months });
+  if (previous?.renderKey === renderKey && previous.year === displayedCalendarYear) {
+    // Refresh in place: replacing the year with placeholders shrinks loaded
+    // months and lets browser scroll anchoring pull the reader to a month edge.
+    // Keep the month shells and refresh every already-loaded month together.
+    const loaded = [];
+    target.querySelectorAll('[data-calendar-month]').forEach((card) => {
+      if (!card.hasAttribute('data-calendar-pending')) loaded.push(calendarNavigationIndex(card));
+    });
+    renderProgressiveCalendarMonths(target, loaded, { refresh: true });
+    target.dataset.calendarRevision = String(calendarRenderRevision);
+    target.dataset.calendarRenderKey = renderKey;
+    syncMobileCalendarMonths(target);
+    return;
+  }
   const count = displayedCalendarYear === BID_YEAR ? 13 : 12;
   target.style.removeProperty('--calendar-placeholder-row');
   target.classList.add('progressive-year-calendar');
