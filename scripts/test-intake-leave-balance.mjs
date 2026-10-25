@@ -72,6 +72,12 @@ for (const scheduleHours of [8, 10]) {
   assert.match(rendered, /<summary[^>]*>5 days left<\/summary>/, 'Queue badge displays the rounded bid days');
   assert.ok(rendered.includes(`${allowance} accrued hours`), 'Expanded breakdown retains the original accrued hours');
   assert.match(rendered, /Rounded up to whole days/, 'Expanded breakdown explains the rounding');
+  const exactHours = allowance - 23 * hours;
+  assert.equal(context.intakeLeaveBalance(request).exactRemainingHours, exactHours,
+    'Displayed hours subtract approved and all pending bids from actual accrual');
+  assert.ok(rendered.includes(`${exactHours.toLocaleString('en-US', { maximumFractionDigits: 3 })} accrued hours remaining`));
+  if (scheduleHours === 10) assert.match(rendered, /5 days remaining.*48 accrued hours remaining/,
+    'CWS shows five bid days with 48 actual hours, rather than 50 rounded hours');
   allowance = 22 * hours + 0.8 * hours;
   assert.equal(context.intakeLeaveApprovalAttributes(request), '', 'The final rounded-up day can be approved');
   const beforeSave = saves;

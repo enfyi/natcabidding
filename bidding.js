@@ -17554,7 +17554,8 @@ function intakeLeaveBalance(item) {
   const requestDays = (item.members || [item]).reduce((sum, row) => sum + leaveItemChargedDays(row), 0);
   const otherPending = Math.max(0, totals.pending - (item.status === "Pending" ? requestDays : 0));
   const remainingHours = allowanceHours - (totals.approved + totals.pending) * hoursPerDay;
-  return { ...totals, credits, hoursPerDay, accruedHours, allowanceHours, requestDays, otherPending, remainingHours,
+  const exactRemainingHours = accruedHours + credits * hoursPerDay - (totals.approved + totals.pending) * hoursPerDay;
+  return { ...totals, credits, hoursPerDay, accruedHours, allowanceHours, requestDays, otherPending, remainingHours, exactRemainingHours,
     remaining: remainingHours / hoursPerDay };
 }
 
@@ -17572,7 +17573,7 @@ function renderIntakeLeaveBalance(item) {
       <div><dt>This request${item.status === "Pending" ? "" : ` (${escapeHtml(item.status.toLowerCase())})`}</dt><dd>${days(balance.requestDays)}</dd></div>
       <div><dt>Left after all pending</dt><dd>${days(balance.remaining)}</dd></div>
     </dl>
-    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · approval blocked` : `Enough days · ${days(balance.remaining)} remaining`} (${Math.abs(balance.remainingHours)} hours)</p>
+    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · approval blocked` : `Enough days · ${days(balance.remaining)} remaining`} (${balance.exactRemainingHours.toLocaleString("en-US", { maximumFractionDigits: 3 })} accrued hours remaining)</p>
   </section></details>`;
 }
 
