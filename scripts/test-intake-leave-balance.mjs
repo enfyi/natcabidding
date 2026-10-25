@@ -62,7 +62,28 @@ assert.equal(context.intakeLeaveBalance(group).otherPending, 3, 'Grouped request
 hours = 10;
 assert.equal(context.intakeLeaveBalance(request).remaining, -3, 'CWS uses ten-hour charged days');
 allowance = 231;
-assert.equal(context.intakeLeaveBalance(request).remaining, 0.1, 'Fractional balances use exact hours');
+assert.equal(context.intakeLeaveBalance(request).remaining, 1, 'CWS fractional allowance rounds up to a whole day');
+assert.equal(context.intakeLeaveBalance(request).accruedHours, 231, 'Accrued hours remain unchanged');
+for (const scheduleHours of [8, 10]) {
+  hours = scheduleHours;
+  allowance = 27 * hours + 0.8 * hours;
+  assert.equal(context.intakeLeaveBalance(request).remaining, 5, 'Both schedules round 4.8 remaining days up to five');
+  const rendered = context.renderIntakeLeaveBalance(request);
+  assert.match(rendered, /<summary[^>]*>5 days left<\/summary>/, 'Queue badge displays the rounded bid days');
+  assert.ok(rendered.includes(`${allowance} accrued hours`), 'Expanded breakdown retains the original accrued hours');
+  assert.match(rendered, /Rounded up to whole days/, 'Expanded breakdown explains the rounding');
+  allowance = 22 * hours + 0.8 * hours;
+  assert.equal(context.intakeLeaveApprovalAttributes(request), '', 'The final rounded-up day can be approved');
+  const beforeSave = saves;
+  await context.approveIntakeItem(request.id);
+  assert.equal(saves, beforeSave + 1, 'Approval handler also accepts the rounded allowance');
+  allowance = 22 * hours;
+  assert.match(context.intakeLeaveApprovalAttributes(request), /disabled/, 'Exact whole-day allowance cannot gain an extra day');
+  allowance = 21 * hours + 0.8 * hours;
+  assert.match(context.intakeLeaveApprovalAttributes(request), /disabled/, 'Rounding does not permit a second extra day');
+}
+saves = 0;
+hours = 10;
 allowance = 230;
 assert.equal(context.intakeLeaveBalance(request).remaining, 0, 'An exact fit is allowed');
 context.intakeQueue[0].holidays = ['2027-01-01', '2027-02-15'];

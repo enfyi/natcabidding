@@ -17547,11 +17547,14 @@ function intakeLeaveBalance(item) {
   }
   const credits = round >= 4 ? [...totals.holidays.values()].filter((priorRound) => priorRound < round).length : 0;
   const hoursPerDay = leaveHoursPerDayForInitials(item.initials);
-  const allowanceHours = Number(person.leaveSlotAllowance) + credits * hoursPerDay;
+  const accruedHours = Number(person.leaveSlotAllowance);
+  // Match bidder submission rules: round the base allowance up once for every
+  // schedule, then add whole-day credits and subtract approved/pending bids.
+  const allowanceHours = Math.ceil(accruedHours / hoursPerDay) * hoursPerDay + credits * hoursPerDay;
   const requestDays = (item.members || [item]).reduce((sum, row) => sum + leaveItemChargedDays(row), 0);
   const otherPending = Math.max(0, totals.pending - (item.status === "Pending" ? requestDays : 0));
   const remainingHours = allowanceHours - (totals.approved + totals.pending) * hoursPerDay;
-  return { ...totals, credits, hoursPerDay, allowanceHours, requestDays, otherPending, remainingHours,
+  return { ...totals, credits, hoursPerDay, accruedHours, allowanceHours, requestDays, otherPending, remainingHours,
     remaining: remainingHours / hoursPerDay };
 }
 
@@ -17561,8 +17564,8 @@ function renderIntakeLeaveBalance(item) {
   if (!balance) return '<details class="intake-balance-disclosure unavailable"><summary>Balance unavailable</summary><div class="intake-leave-balance unavailable">Verify bidder allowance before approval.</div></details>';
   const days = (value) => `${value.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${value === 1 ? "day" : "days"}`;
   const over = balance.remainingHours < 0;
-  return `<details class="intake-balance-disclosure ${over ? "over" : "enough"}"><summary title="Leave remaining after approved and all pending bids · Click for breakdown">${over ? `${days(-balance.remaining)} over` : `${days(balance.remaining)} left`}</summary><section class="intake-leave-balance ${over ? "over" : "enough"}" aria-label="Bidder leave balance">
-    <div class="intake-balance-heading"><strong>Leave allowance: ${days(balance.allowanceHours / balance.hoursPerDay)}</strong><span>${balance.allowanceHours} hours · ${balance.hoursPerDay}-hour days${balance.credits ? ` · ${balance.credits} holiday credits` : ""}</span></div>
+  return `<details class="intake-balance-disclosure ${over ? "over" : "enough"}"><summary title="Rounded bid days remaining after approved and all pending bids · Click for breakdown">${over ? `${days(-balance.remaining)} over` : `${days(balance.remaining)} left`}</summary><section class="intake-leave-balance ${over ? "over" : "enough"}" aria-label="Bidder leave balance">
+    <div class="intake-balance-heading"><strong>Leave allowance: ${days(balance.allowanceHours / balance.hoursPerDay)}</strong><span>${balance.accruedHours} accrued hours · ${balance.hoursPerDay}-hour days · Rounded up to whole days${balance.credits ? ` · ${balance.credits} holiday credits` : ""}</span></div>
     <dl class="intake-balance-metrics">
       <div><dt>Already approved</dt><dd>${days(balance.approved)}</dd></div>
       <div><dt>Other pending</dt><dd>${days(balance.otherPending)}</dd></div>
