@@ -115,3 +115,28 @@ budgetContext.leaveHoursPerDayForInitials = () => 10;
 assert.equal(budgetContext.currentUserBaseLeaveAllowanceDays(), 21, 'The actual personal bid-limit helper retains the CWS divisor');
 assert.equal(budgetContext.areaLeaveSlotBudget(ce.area, 'cpc') - budgetContext.currentUserBaseLeaveAllowanceDays(), 5);
 console.log('PASS CE: 21 personal CWS days, 26 area days, and five additional area days');
+
+// Exercise the actual allowance helpers used by date selection, submission,
+// bid changes, and leave replacement, rather than only the displayed balance.
+for (const name of ['leaveAllowanceLimitForRound', 'leaveAllowanceHoursForRound']) {
+  const start = source.indexOf(`function ${name}(`);
+  const end = source.indexOf('\n}', start) + 2;
+  vm.runInContext(source.slice(start, end), budgetContext);
+}
+budgetContext.leaveHolidayCreditsForRound = round => round >= 4 ? 2 : 0;
+for (const [scheduleHours, accruedHours] of [[8, 198], [10, 248]]) {
+  budgetContext.currentUserLeaveAllowanceHours = () => accruedHours;
+  budgetContext.leaveHoursPerDayForInitials = () => scheduleHours;
+  const limit = budgetContext.leaveAllowanceLimitForRound(2);
+  assert.equal(limit, 25, 'Fractional base allowance rounds up on both schedules');
+  assert.ok(20 + 5 <= limit, 'A bidder with 20 days already bid can submit the final five days');
+  assert.ok(20 + 6 > limit, 'The round-up does not permit a sixth day');
+  assert.equal(budgetContext.leaveAllowanceHoursForRound(2), 25 * scheduleHours,
+    'Hour-based bidder checks allow the same rounded-up day');
+  assert.equal(budgetContext.leaveAllowanceLimitForRound(4), 27,
+    'Holiday credits are added after rounding the base allowance');
+  budgetContext.currentUserLeaveAllowanceHours = () => 24 * scheduleHours;
+  assert.equal(budgetContext.leaveAllowanceLimitForRound(2), 24,
+    'Exact whole-day allowances receive no additional day');
+}
+console.log('PASS bidder day/hour submission limits permit rounded-up days for standard and CWS schedules');
