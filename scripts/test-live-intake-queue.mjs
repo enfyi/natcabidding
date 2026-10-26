@@ -42,6 +42,8 @@ const target = { innerHTML: '' };
 const older = { id: 'reviewed', type: 'RDO Line', status: 'Pending', submittedAt: '2026-10-05T18:00:00Z' };
 const newer = { ...older, id: 'new-pending', submittedAt: '2026-10-05T19:00:00Z' };
 const sorted = vm.createContext({
+  INTAKE_PAGE_SIZE: 50, intakePagination: { page: 1, filterKey: '', revealItemId: null },
+  intakeSearchQuery: '', intakeSearchEmployeeInitials: '', intakeFilters: {}, renderIntakePagination() {},
   intakeDisplayStatus: item => item.status, renderIntakeDateCheckControl: () => '',
   intakeCancellationNote: () => '',
   intakeSort: 'entered', activeIntakeDetailId: older.id, activeOverrideId: null, activeDenialId: null,
@@ -57,7 +59,7 @@ const sorted = vm.createContext({
   intakeReviewItemById: () => null,
   intakeQueue: [older],
 });
-vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'compareIntakeActionItems', 'renderIntakeQueueWithCache'].map(fn).join('\n'), sorted);
+vm.runInContext(['intakeSortTimestamp', 'compareIntakeItems', 'compareIntakeActionItems', 'paginateIntakeItems', 'renderIntakeQueueWithCache'].map(fn).join('\n'), sorted);
 sorted.renderIntakeQueueWithCache();
 sorted.intakeQueue.push(newer);
 sorted.renderIntakeQueueWithCache();

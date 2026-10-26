@@ -3977,6 +3977,31 @@ tr.occupied-row .rdo-tag {
   gap: 12px;
 }
 
+.intake-pagination,
+.intake-pagination-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.intake-pagination {
+  justify-content: space-between;
+  margin-block: 12px;
+  scroll-margin-top: 16px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.intake-pagination-actions {
+  gap: 8px;
+}
+
+.intake-pagination button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .intake-search-tools {
   display: grid;
   gap: 8px;

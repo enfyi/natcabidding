@@ -13,6 +13,6 @@ assert.doesNotMatch(source, /alertFocusedIntakeItemId/)
 assert.match(source, /visibleItems\.filter\(intakeItemMatchesFilters\)\.sort\(compareIntakeActionItems\)/)
 assert.match(source, /openIntakeItemFromAlert\(alertItem\.dataset\.intakeItem\)/)
 assert.match(source, /card\.scrollIntoView\(\{ behavior: "instant", block: "start" \}\)/)
-assert.match(html, /bidding\.js\?v=[^"\s]+-alert-review-focus-live-sort-detail-sort-pending-first-action-list-only/)
+assert.match(html, /bidding\.js\?v=20261026-intake-pagination/)
 
 console.log('Alert intake navigation regression checks passed.')
