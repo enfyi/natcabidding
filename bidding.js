@@ -3874,16 +3874,16 @@ function formatLeaveRangeFromKeys(keys) {
   return `${fullFormatter.format(start)} - ${fullFormatter.format(end)}`;
 }
 
+const individualLeaveDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const individualLeaveDateWithYearFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
 function formatIndividualLeaveDates(keys) {
   const sortedKeys = [...new Set(keys)].sort();
   if (!sortedKeys.length) return "";
   const years = new Set(sortedKeys.map((key) => dateFromKey(key).getFullYear()));
   const showYearOnEachDate = years.size > 1;
-  const labels = sortedKeys.map((key) => dateFromKey(key).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(showYearOnEachDate ? { year: "numeric" } : {}),
-  }));
+  const formatter = showYearOnEachDate ? individualLeaveDateWithYearFormatter : individualLeaveDateFormatter;
+  const labels = sortedKeys.map((key) => formatter.format(dateFromKey(key)));
   return showYearOnEachDate
     ? labels.join(", ")
     : `${labels.join(", ")}, ${[...years][0]}`;
@@ -17535,7 +17535,59 @@ function groupedLeaveIntakeItems(items = intakeQueue) {
 }
 
 function intakeReviewItemById(id) {
-  return intakeQueue.find((item) => item.id === id) || groupedLeaveIntakeItems().find((item) => item.id === id);
+  if (!id) return null;
+  const direct = intakeQueue.find((item) => item.id === id);
+  if (direct) return direct;
+  if (!id.startsWith("leave-group-")) return null;
+  const member = intakeQueue.find((item) => item.id === id.slice("leave-group-".length));
+  if (!member) return null;
+  return groupedLeaveIntakeItems(intakeQueue.filter((item) =>
+    item.type === "Leave" && item.initials === member.initials && item.area === member.area
+    && intakeItemRound(item) === intakeItemRound(member)
+  )).find((item) => item.id === id) || null;
+}
+
+function updateIntakeCardSelection() {
+  document.querySelectorAll("[data-intake-card]").forEach((card) => {
+    card.classList.toggle("selected", card.dataset.intakeCard === activeIntakeDetailId);
+  });
+}
+
+function selectIntakeQueueItem(id) {
+  return withLeaveReadCache(() => {
+    const item = intakeReviewItemById(id);
+    if (!item) return;
+    activeIntakeDetailId = item.id;
+    updateIntakeCardSelection();
+    const rows = intakeQueue.filter((entry) => entry.initials === item.initials
+      && intakeItemRound(entry) === intakeItemRound(item));
+    renderIntakeDetailPanel(item, groupedLeaveIntakeItems(rows));
+    selectIntakeBidder(item.initials, item.bidderId);
+    revealIntakeDetail();
+  });
+}
+
+function toggleIntakeDateCheck(button) {
+  const id = button.dataset.intakeCheckDates;
+  const content = button.parentElement.querySelector("[data-intake-date-check-content]");
+  if (!content) return;
+  // Hiding a panel needs no bid lookup, grouping or availability calculation.
+  const open = !intakeDateChecksOpen.has(id);
+  if (open) {
+    const html = withLeaveReadCache(() => {
+      const item = intakeReviewItemById(id);
+      return item ? renderIntakeDateCheck(item) : null;
+    });
+    if (html === null) return;
+    content.innerHTML = html;
+    intakeDateChecksOpen.add(id);
+  } else {
+    intakeDateChecksOpen.delete(id);
+    content.innerHTML = "";
+  }
+  content.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  button.textContent = open ? "Hide date check" : "Check dates";
 }
 
 function intakeReviewConflicts(item, check) {
@@ -19109,7 +19161,8 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-intake-detail-close]")) {
     const detailId = activeIntakeDetailId;
     activeIntakeDetailId = null;
-    renderIntakeQueue();
+    renderIntakeDetailPanel(null, []);
+    updateIntakeCardSelection();
     const returnCard = [...document.querySelectorAll("[data-intake-card]")]
       .find((card) => card.dataset.intakeCard === detailId);
     returnCard?.focus({ preventScroll: true });
@@ -19878,17 +19931,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeCheckDates = event.target.closest("[data-intake-check-dates]");
   if (intakeCheckDates) {
-    const id = intakeCheckDates.dataset.intakeCheckDates;
-    const item = intakeReviewItemById(id);
-    const content = intakeCheckDates.parentElement.querySelector("[data-intake-date-check-content]");
-    if (!item || !content) return;
-    const open = !intakeDateChecksOpen.has(id);
-    if (open) intakeDateChecksOpen.add(id);
-    else intakeDateChecksOpen.delete(id);
-    content.innerHTML = open ? withLeaveReadCache(() => renderIntakeDateCheck(item)) : "";
-    content.hidden = !open;
-    intakeCheckDates.setAttribute("aria-expanded", String(open));
-    intakeCheckDates.textContent = open ? "Hide date check" : "Check dates";
+    toggleIntakeDateCheck(intakeCheckDates);
     return;
   }
 
@@ -19920,11 +19963,7 @@ document.addEventListener("click", async (event) => {
 
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {
-    activeIntakeDetailId = intakeCard.dataset.intakeCard;
-    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
-    if (item) selectIntakeBidder(item.initials, item.bidderId);
-    renderIntakeQueue();
-    revealIntakeDetail();
+    selectIntakeQueueItem(intakeCard.dataset.intakeCard);
     return;
   }
 
@@ -20125,13 +20164,9 @@ document.addEventListener("keydown", async (event) => {
 
   if (event.target.closest(".intake-balance-disclosure")) return;
 
-  if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-intake-card]")) {
+  if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-intake-card]")) {
     event.preventDefault();
-    activeIntakeDetailId = event.target.closest("[data-intake-card]").dataset.intakeCard;
-    const item = intakeQueue.find((entry) => entry.id === activeIntakeDetailId);
-    if (item) selectIntakeBidder(item.initials, item.bidderId);
-    renderIntakeQueue();
-    revealIntakeDetail();
+    selectIntakeQueueItem(event.target.dataset.intakeCard);
   }
 });
 
