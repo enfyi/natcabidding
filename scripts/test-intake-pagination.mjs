@@ -28,6 +28,7 @@ const rows = Array.from({ length: 121 }, (_, index) => ({
   approvedAt: new Date(Date.UTC(2026, 9, 2, 0, index)).toISOString(),
 }));
 const context = vm.createContext({
+  renderIntakeAreaBalances() {},
   INTAKE_PAGE_SIZE: 50, intakePagination: { page: 1, filterKey: '', revealItemId: null },
   intakeSearchQuery: '', intakeSearchEmployeeInitials: '', intakeSort: 'approved',
   intakeFilters: { status: 'all', type: 'all', area: 'all', round: 'all' },

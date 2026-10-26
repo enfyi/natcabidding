@@ -11,6 +11,7 @@ function fn(name) {
 const timers = new Map();
 let nextTimer = 0, suggestions = 0, queueRenders = 0;
 const context = vm.createContext({
+  renderIntakeAreaBalances() {},
   intakeSearchQuery: '', intakeSearchEmployeeInitials: 'OLD', intakeSearchRenderTimer: null,
   renderIntakeEmployeeSearch: () => { suggestions++; },
   renderIntakeQueueWithCache: () => { queueRenders++; },

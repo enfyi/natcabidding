@@ -13121,6 +13121,38 @@ function areaLeaveSlotTotals() {
   });
 }
 
+function renderIntakeAreaBalances() {
+  const target = document.querySelector("[data-intake-area-balances]");
+  if (!target || !hasIntakeAccess()) return;
+  // Reuse intake's loaded snapshot: one roster pass and one committed-bid pass,
+  // rather than rescanning every bidder and request for each area/group.
+  const totals = new Map(ZLA_AREAS.map((area) => [area, {
+    cpc: { total: 0, used: 0 }, dev: { total: 0, used: 0 },
+  }]));
+  for (const person of bueRoster()) {
+    if (isAreaLeaveBalanceExemptPerson(person)) continue;
+    const balance = totals.get(person.area)?.[leaveSlotBucketForBidAs(person.bidAs)];
+    if (balance) balance.total += Math.ceil(estimatedLeaveDaysFromHours(
+      normalizeLeaveSlotAllowance(person.leaveSlotAllowance), LEAVE_SLOT_HOURS_PER_DAY
+    ));
+  }
+  for (const item of areaCommittedLeaveItems()) {
+    if (isAreaLeaveBalanceExemptItem(item)) continue;
+    const balance = totals.get(leaveItemArea(item))?.[leaveSlotBucketForBidAs(leaveItemBidAs(item))];
+    if (balance) balance.used += leaveItemAreaUsedDays(item);
+  }
+  const signature = JSON.stringify([...totals]);
+  if (target.dataset.balanceSignature === signature) return;
+  target.dataset.balanceSignature = signature;
+  target.innerHTML = [...totals].map(([area, groups]) => {
+    const balances = Object.entries(groups).map(([bucket, { total, used }]) => {
+      const left = Math.max(0, total - used);
+      return `<div><dt>${bucket.toUpperCase()}</dt><dd><strong>${formatRoundedUpLeaveDaysLabel(left)}</strong><small>${formatRoundedUpLeaveDays(used)} of ${formatRoundedUpLeaveDays(total)} used</small></dd></div>`;
+    }).join("");
+    return `<section class="intake-area-balance"><h3>${escapeHtml(area)}</h3><dl>${balances}</dl></section>`;
+  }).join("");
+}
+
 function renderLeaveBucketCards() {
   const { cpcTotal: cpcTotalDays, devTotal: devTotalDays } = areaLeaveBucketTotals();
   const cpcUsedDays = areaLeaveSlotUsedDays(currentViewArea(), "cpc");
@@ -17839,10 +17871,13 @@ async function refreshIntakeQueue() {
   }
 }
 
-function renderIntakeQueue() {
+function renderIntakeQueue({ refreshBalances = true } = {}) {
   clearTimeout(intakeSearchRenderTimer);
   intakeSearchRenderTimer = null;
-  return withLeaveReadCache(() => renderIntakeQueueWithCache());
+  return withLeaveReadCache(() => {
+    if (refreshBalances) renderIntakeAreaBalances();
+    return renderIntakeQueueWithCache();
+  });
 }
 
 function paginateIntakeItems(items) {
@@ -17878,7 +17913,7 @@ function renderIntakePagination(pagination) {
 
 function changeIntakePage(direction) {
   intakePagination.page += direction === "next" ? 1 : -1;
-  renderIntakeQueue();
+  renderIntakeQueue({ refreshBalances: false });
   const controls = document.querySelector("[data-intake-pagination]");
   controls?.scrollIntoView({ block: "start" });
   // Keep keyboard navigation on the same action unless it reached a boundary.
@@ -17893,7 +17928,7 @@ function updateIntakeSearch(query) {
   // until typing pauses, without delaying employee selection.
   renderIntakeEmployeeSearch();
   clearTimeout(intakeSearchRenderTimer);
-  intakeSearchRenderTimer = setTimeout(() => renderIntakeQueue(), 200);
+  intakeSearchRenderTimer = setTimeout(() => renderIntakeQueue({ refreshBalances: false }), 200);
 }
 
 function renderIntakeQueueWithCache() {
