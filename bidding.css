@@ -13211,3 +13211,51 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   }
 }
+
+/* All-area leave balances above the intake bidder overview. */
+.intake-area-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 12px;
+}
+
+.intake-area-balance {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d5e0e7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.intake-area-balance h3 {
+  margin: 0 0 12px;
+  color: #152d3b;
+  font-size: 0.95rem;
+}
+
+.intake-area-balance dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.intake-area-balance dt,
+.intake-area-balance small {
+  color: #627080;
+  font-size: 0.72rem;
+}
+
+.intake-area-balance dt {
+  font-weight: 800;
+}
+
+.intake-area-balance dd {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+}
+
+.intake-area-balance strong {
+  color: #152d3b;
+  font-size: 1rem;
+}

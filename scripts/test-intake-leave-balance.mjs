@@ -19,6 +19,7 @@ const request = row('request', 'Pending', 5, {
 const target = { innerHTML: '' };
 let allowance = 200, hours = 8, known = true, visits = 0, saves = 0;
 const context = vm.createContext({
+  renderIntakeAreaBalances() {},
   INTAKE_PAGE_SIZE: 50, intakePagination: { page: 1, filterKey: '', revealItemId: null },
   intakeSearchQuery: '', intakeSearchEmployeeInitials: '', intakeFilters: {}, intakeSort: 'approved', renderIntakePagination() {},
   console, Map, Set, clearTimeout() {}, intakeSearchRenderTimer: null, currentUser: { initials: 'AB' },
