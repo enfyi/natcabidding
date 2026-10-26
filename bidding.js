@@ -18314,7 +18314,7 @@ function validationExportSheets(records, areas, year, startKey, endKey, exported
         const counts = Array.from({ length: round }, (_, i) => i + 1 === round
           ? formula(`COUNTIFS(${dateRange},">="&DATE(${startKey.split("-").map(Number).join(",")}),${dateRange},"<="&DATE(${endKey.split("-").map(Number).join(",")}))`)
           : formula(`'${prefix} Round ${i + 1}'!${spreadsheetColumnName(i + 1)}${rowNumber}`));
-        const rdos = Array.isArray(assignment?.week) ? assignment.week.map((shift, day) => shift === "RDO" ? ["Su", "M", "Tu", "W", "Th", "F", "Sa"][day] : null).filter(Boolean).join("/") : line?.pattern || "";
+        const rdos = Array.isArray(line?.week) ? line.week.map((shift, day) => shift === "RDO" ? ["Su", "M", "Tu", "W", "Th", "F", "Sa"][day] : null).filter(Boolean).join("/") : line?.pattern || "";
         rows.push([person.leave_slot_allowance ?? "", ...counts,
           formula(`IF(OR(${scheduleRef}="",A${rowNumber}=""),"",A${rowNumber}-SUM(B${rowNumber}:${spreadsheetColumnName(round)}${rowNumber})*${scheduleRef})`),
           person.first_name, person.last_name, person.initials, rdos, line?.line_code || "",
@@ -18471,6 +18471,25 @@ async function downloadValidationXlsx(form) {
         return data;
       }));
       records.push(...results);
+    }
+    // GL and ghost bids have no inventory assignment. Their editor line summaries
+    // contain only the pattern, which can omit the third CWS RDO.
+    const unassigned = records.filter(record => !record.snapshot.assignment && record.snapshot.rdo?.status === "approved");
+    const lineIds = [...new Set(unassigned.map(record => record.snapshot.rdo.rdo_line_id).filter(Boolean))];
+    if (lineIds.length) {
+      const { data: schedules, error: scheduleError } = await client.from("rdo_lines")
+        .select("id,rdo_line_days(weekday,shift_code)").in("id", lineIds);
+      if (scheduleError) throw scheduleError;
+      const weeks = new Map((schedules || []).map(line => [line.id, line.rdo_line_days || []]));
+      for (const record of unassigned) {
+        const line = record.lines?.find(line => line.id === record.snapshot.rdo.rdo_line_id);
+        const days = weeks.get(record.snapshot.rdo.rdo_line_id);
+        if (!line || days?.length !== 7 || new Set(days.map(day => day.weekday)).size !== 7
+          || days.some(day => !Number.isInteger(day.weekday) || day.weekday < 0 || day.weekday > 6)) {
+          throw new Error(`${record.person.initials}: the selected RDO schedule is incomplete. Refresh and export again.`);
+        }
+        line.week = Array.from({ length: 7 }, (_, weekday) => days.find(day => day.weekday === weekday).shift_code);
+      }
     }
     if (BID_YEAR !== year || userId !== supabaseState.authUserId || !hasIntakeAccess()) throw new Error("Your bidding year or session changed. Export again.");
     const sheets = validationExportSheets(records, areas, year, start, end, new Date().toISOString());
