@@ -13172,6 +13172,14 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .intake-workspace > .right-stack {
+    display: contents;
+  }
+
+  .intake-workspace > .right-stack > [data-manual-bid-panel] {
+    order: -1;
+  }
+
   .intake-workspace > .right-stack,
   .intake-workspace > .intake-info-stack {
     grid-column: 1;
