@@ -100,6 +100,56 @@ reads = 0;
 await context.downloadValidationXlsx(form);
 assert.equal(downloaded, 'zla-validation-area-a-2027.xlsx');
 assert.equal(reads, 1, 'Single-area export reads only that area');
+
+// Area D GLs share a CWS line without occupying its canonical assignment.
+const glRecords = ['FX', 'SN'].map(initials => {
+  const gl = record('Area D', initials);
+  gl.person.bid_role = 'GL';
+  gl.snapshot.assignment = null;
+  gl.snapshot.rdo = { status: 'approved', rdo_line_id: 'd-cws-1' };
+  gl.lines = [{ id: 'd-cws-1', line_code: '1', pattern: 'S/S', four_ten: true }];
+  return gl;
+});
+let scheduleReads = 0;
+let scheduleError = null;
+context.supabaseClient = () => ({
+  async rpc(name, args) {
+    if (name === 'read_bidding_roster') return { data: glRecords.map(gl => ({ profile_id: gl.person.initials, area_name: 'Area D' })) };
+    return { data: glRecords.find(gl => gl.person.initials === args.target_bidder_id) };
+  },
+  from(table) {
+    assert.equal(table, 'rdo_lines');
+    return { select(columns) {
+      assert.equal(columns, 'id,rdo_line_days(weekday,shift_code)');
+      return { async in(column, ids) {
+        assert.equal(column, 'id');
+        assert.deepEqual(Array.from(ids), ['d-cws-1'], 'Shared GL line is read once');
+        scheduleReads++;
+        return { error: scheduleError, data: [{ id: 'd-cws-1', rdo_line_days: [6, 3, 0, 1, 2, 4, 5].map(weekday => ({
+          weekday, shift_code: [0, 3, 6].includes(weekday) ? 'RDO' : 'D',
+        })) }] };
+      } };
+    } };
+  },
+});
+form.elements['validation-area'].value = 'Area D';
+await context.downloadValidationXlsx(form);
+assert.equal(downloaded, 'zla-validation-area-d-2027.xlsx');
+assert.equal(scheduleReads, 1);
+const glSheets = context.validationExportSheets(glRecords, ['Area D'], 2027, '2027-01-10', '2028-01-08', 'test');
+for (const sheet of glSheets.filter(sheet => sheet.kind === 'round')) {
+  for (const row of sheet.rows.slice(2)) {
+    assert.equal(row[sheet.rows[1].indexOf('RDOs')], 'Su/W/Sa');
+    assert.equal(row[sheet.rows[1].indexOf('CWS?')], 10);
+    assert.equal(row[sheet.rows[1].indexOf('Line')], '1');
+  }
+}
+assert.ok(context.validationWorkbookFiles(glSheets, format).some(file => file.name.startsWith('xl/worksheets/') && file.content.includes('Su/W/Sa')));
+scheduleError = { message: 'Schedule unavailable' };
+downloaded = '';
+await context.downloadValidationXlsx(form);
+assert.equal(downloaded, '', 'Schedule read failure must not export the shortened pattern');
+assert.match(status.textContent, /Schedule unavailable/);
 context.supabaseState.connected = false;
 downloaded = '';
 await context.downloadValidationXlsx(form);
