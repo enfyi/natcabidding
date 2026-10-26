@@ -13280,3 +13280,48 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   outline: 2px solid #227e85;
   outline-offset: -2px;
 }
+
+#intake-page .intake-balance-value {
+  display: inline-grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #152d3b;
+  font: inherit;
+  line-height: 1.2;
+}
+
+#intake-page .intake-balance-value strong {
+  font-size: 0.9rem;
+}
+
+#intake-page .intake-balance-value small {
+  color: #627080;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+@media (max-width: 600px) {
+  #intake-page .intake-area-balances { padding: 10px; }
+  #intake-page .intake-area-balance-table { min-width: 560px; }
+  #intake-page .intake-area-balance-table tr > :first-child {
+    position: sticky;
+    left: 0;
+    background: #fff;
+    z-index: 1;
+  }
+}
+
+#intake-page .intake-area-balances,
+#intake-page .intake-area-balances .panel-header,
+#intake-page .intake-area-balances .panel-header > div,
+#intake-page .intake-area-balance-grid {
+  min-width: 0;
+  max-width: 100%;
+}
