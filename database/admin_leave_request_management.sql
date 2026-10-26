@@ -79,10 +79,7 @@ begin
     from public.bidders bidder
     where bidder.id = request_row.bidder_id;
 
-    if actor.role <> 'admin'
-       and actor.area_id is distinct from target.area_id then
-      raise exception 'Intake users can only remove approved leave in their own area.';
-    end if;
+    -- Authorized shared intake reviewers may remove approved bids across areas.
 
     for affected_date in
       select request_date.leave_date

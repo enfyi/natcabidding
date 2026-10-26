@@ -19,7 +19,11 @@ await db.exec(`
   create function auth.jwt() returns jsonb language sql as $$select jsonb_build_object('email', current_setting('test.email', true))$$;
 `);
 await db.exec(fs.readFileSync(`${root}/database/schema.sql`, "utf8").replace("create extension if not exists pgcrypto;", ""));
-await db.exec(migration);
+// Exercise the upgrade from the original area-scoped function, including replay.
+await db.exec(fs.readFileSync(`${root}/supabase/migrations/20261002163658_admin_leave_request_management.sql`, "utf8"));
+const accessUpgrade = fs.readFileSync(`${root}/database/intaker_leave_removal_access.sql`, "utf8");
+await db.exec(accessUpgrade);
+await db.exec(accessUpgrade);
 
 await db.exec(`
   insert into bid_years(id, bid_year) values ('${id(1)}', 2027);
@@ -69,10 +73,11 @@ await assert.rejects(
 );
 
 await db.exec(`set test.uid = '${id(112)}'; set test.email = 'intake@example.test';`);
-await assert.rejects(
-  () => db.query("select public.admin_cancel_leave_requests($1)", [[id(21)]]),
-  /own area/
-);
+const crossAreaResult = (await db.query("select public.admin_cancel_leave_requests($1) result", [[id(21)]])).rows[0].result;
+assert.equal(crossAreaResult.cancelled_count, 1);
+assert.equal((await db.query("select status from leave_requests where id = $1", [id(21)])).rows[0].status, "cancelled");
+assert.equal((await db.query("select status from leave_slots where id = $1", [id(32)])).rows[0].status, "open");
+assert.equal((await db.query("select area_id from audit_events where entity_id = $1", [id(21)])).rows[0].area_id, id(3));
 
 assert.match(source, /data-intake-manage-leave/);
 assert.match(source, /data-intake-remove-leave/);
