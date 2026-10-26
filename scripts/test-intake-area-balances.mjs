@@ -35,7 +35,10 @@ assert.equal(dateReads, 2, 'Each capacity-consuming bid is evaluated only once a
 assert.equal((markup.match(/scope="col"/g) || []).length, 8);
 assert.match(markup, /7 days left/);
 assert.match(markup, /0 days left/);
-assert.match(markup, /4 of 11 used/);
+assert.match(markup, /7 days left of 11 total/);
+assert.match(markup, /<small>of 11<\/small>/, 'Totals remain visible without hover');
+assert.equal((markup.match(/class="intake-balance-value"/g) || []).length, 14);
+assert.doesNotMatch(markup, /<button|popover|tabindex/, 'Balances are static, with no interactive breakdown');
 context.renderIntakeAreaBalances();
 assert.equal(writes, 1, 'Unchanged totals preserve the existing DOM');
 bids[0].days = 5;

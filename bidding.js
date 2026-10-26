@@ -13149,8 +13149,7 @@ function renderIntakeAreaBalances() {
     const cells = [...totals].map(([area, groups]) => {
       const { total, used } = groups[bucket];
       const left = Math.max(0, total - used);
-      const detail = `${area} ${bucket.toUpperCase()}: ${formatRoundedUpLeaveDaysLabel(left)} left; ${formatRoundedUpLeaveDays(used)} of ${formatRoundedUpLeaveDays(total)} used`;
-      return `<td tabindex="0" title="${escapeHtml(detail)}" aria-label="${escapeHtml(detail)}">${formatRoundedUpLeaveDays(left)}</td>`;
+      return `<td aria-label="${escapeHtml(area)} ${bucket.toUpperCase()}: ${formatRoundedUpLeaveDaysLabel(left)} left of ${formatRoundedUpLeaveDays(total)} total"><span class="intake-balance-value"><strong>${formatRoundedUpLeaveDays(left)}</strong><small>of ${formatRoundedUpLeaveDays(total)}</small></span></td>`;
     }).join("");
     return `<tr><th scope="row">${bucket.toUpperCase()}</th>${cells}</tr>`;
   }).join("");
