@@ -18989,7 +18989,9 @@ function renderMemberPageContent(pageName) {
 // intake saves must not calculate annual leave budgets for hidden pages.
 function renderMemberLeaveContent(pageName) {
   if (pageName === "dashboard" || pageName === "leave") {
-    syncLeaveBuilderInputs();
+    // The date builder belongs to Leave Bids; dashboard navigation only needs
+    // the saved bids and balances, not validation of a hidden draft selection.
+    if (pageName === "leave") syncLeaveBuilderInputs();
     renderLeaveRows(pageName === "dashboard" ? "dashboard-leave-rows" : "leave-page-rows");
     renderLeaveAllowanceSummary();
     renderLeaveBucketCards();
@@ -19088,7 +19090,7 @@ document.addEventListener("click", async (event) => {
   const pageNavigation = event.target.closest("[data-page]");
   if (pageNavigation?.matches("button") && !pageNavigation.matches(".window-action") && !pageNavigation.closest("[data-alert-list]")) {
     if (pageNavigation.dataset.page === "dashboard") {
-      await runUiAction("dashboard-navigation", pageNavigation, "Opening dashboard…", () => setPage("dashboard"));
+      await runUiAction("dashboard-navigation", pageNavigation, "Opening dashboard…", () => setPage("dashboard"), { deferPaint: false, showFeedback: false });
     } else {
       setPage(pageNavigation.dataset.page);
     }
