@@ -3593,7 +3593,8 @@ function manualLeavePreflight(panel) {
     const duplicates = keys.filter((key) => existing.has(key));
     if (duplicates.length) errors.push(`Already bid: ${formatLeaveConflictDates(duplicates)}.`);
     if (rdos.length) (round === 1 ? warnings : errors).push(`RDO dates: ${formatLeaveConflictDates(rdos)}.${round === 1 ? " Excluded from charged days." : " Choose different dates."}`);
-    if (full.length) (person.ghostBidder ? errors : warnings).push(`Full dates: ${formatLeaveConflictDates(full)}.${person.ghostBidder ? " Ghost bids require an available slot. Choose different dates." : " An intake override is required before approval."}`);
+    const strictCapacity = person.ghostBidder || round >= 4 || (area === "TMU" && round === 3);
+    if (full.length) (strictCapacity ? errors : warnings).push(`Full dates: ${formatLeaveConflictDates(full)}.${strictCapacity ? " An available slot is required. Choose different dates." : " An intake override is required before approval."}`);
     if (keys.some((key) => checks.get(key).unknown)) (person.ghostBidder ? errors : warnings).push("Availability is not loaded for some dates. Refresh before relying on the slot check.");
     const days = chargeableLeaveDateKeys(keys, person.initials, round).length;
     const requestedRanges = groups.map((group) => leaveSlotDateKeys(group, person.initials));

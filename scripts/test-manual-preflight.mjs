@@ -77,4 +77,24 @@ const roundOneState=c.manualDatePickerState(panel);roundOneState.mode='multiple'
 result=c.manualLeavePreflight(panel);
 assert.ok(!result.errors.some(x=>x.includes('RDO dates')));
 assert.ok(result.warnings.some(x=>x.includes('Excluded from charged days')));
+fields['[data-manual-bid-area]'].value='TMU';
+fields['[data-manual-leave-round]'].value='3';
+const tmuState=c.manualDatePickerState(panel);tmuState.mode='multiple';tmuState.dates.add('2027-06-10');
+slots['2027-06-10'].cpc=['AB'];slots['2027-06-10'].cpcCapacity=1;
+slots['2027-06-10'].cpcOpen=0;
+assert.ok(c.manualLeavePreflight(panel).errors.some(x=>x.includes('Full dates')), 'TMU Round 3 rejects a one-slot day with one bidder');
+slots['2027-06-10'].cpc=['AB','CD'];slots['2027-06-10'].cpcCapacity=2;
+assert.ok(c.manualLeavePreflight(panel).errors.some(x=>x.includes('Full dates')), 'Grandfathered two-bidder dates remain full');
+slots['2027-06-10'].cpc=[];slots['2027-06-10'].cpcCapacity=1;slots['2027-06-10'].cpcOpen=1;
+assert.ok(!c.manualLeavePreflight(panel).errors.some(x=>x.includes('Full dates')), 'An unused remaining slot is available');
+slots['2027-06-10'].cpcOpen=0;
+fields['[data-manual-bid-area]'].value='Area B';fields['[data-manual-leave-round]'].value='2';
+for (const area of ['Area A','Area B','Area C','Area D','Area E','Area F','TMU']) {
+  fields['[data-manual-bid-area]'].value=area;fields['[data-manual-leave-round]'].value='4';
+  const nextState=c.manualDatePickerState(panel);nextState.mode='multiple';nextState.dates.add('2027-06-10');
+  for (const [occupants,capacity,open] of [[['AB','CD'],2,0],[['AB','CD','EF'],3,0],[['AB','CD','EF'],4,1],[['AB','CD','EF','GH'],4,0]]) {
+    Object.assign(slots['2027-06-10'],{cpc:occupants,cpcCapacity:capacity,cpcOpen:open});
+    assert.equal(c.manualLeavePreflight(panel).errors.some(x=>x.includes('Full dates')),open===0,`${area} Round 4 respects reduced, grandfathered, and holiday capacity`);
+  }
+}
 console.log(`PASS selected-bidder RDOs, CPC/DEV capacity, ghost availability, duplicates, cumulative round limit, range entry and missing-data warnings; 500 sample-data preflights p95 ${p95.toFixed(2)}ms (excludes browser paint and live data)`);
