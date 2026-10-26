@@ -3955,8 +3955,17 @@ tr.occupied-row .rdo-tag {
   gap: 16px;
 }
 
-.intake-workspace {
-  grid-template-columns: minmax(620px, 1fr) minmax(430px, 520px);
+.intake-workspace > .panel {
+  min-width: 0;
+  container: intake-queue-panel / inline-size;
+}
+
+.intake-workspace > .panel > .panel-header {
+  flex-wrap: wrap;
+}
+
+.intake-workspace > .panel > .panel-header > * {
+  min-width: 0;
 }
 
 .intake-info-stack {
@@ -4005,14 +4014,16 @@ tr.occupied-row .rdo-tag {
 .intake-search-tools {
   display: grid;
   gap: 8px;
-  min-width: 360px;
-  max-width: 520px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
   flex: 1 1 420px;
 }
 
 .intake-search-tools input,
 .intake-search-tools select {
   width: 100%;
+  min-width: 0;
   border: 1px solid #cbd8e6;
   border-radius: 8px;
   padding: 9px 10px;
@@ -4025,7 +4036,7 @@ tr.occupied-row .rdo-tag {
 
 .intake-filter-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   gap: 8px;
 }
 
@@ -13154,4 +13165,41 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   background: #e2e8f0 !important;
   border-color: #cbd5e1 !important;
   font-family: inherit !important;
+}
+
+/* Intake needs room for both bid details and manual entry at browser zoom. */
+.intake-workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+}
+
+.intake-workspace > * {
+  min-width: 0;
+}
+
+@media (max-width: 1300px) {
+  .intake-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .intake-workspace > .right-stack,
+  .intake-workspace > .intake-info-stack {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+@container intake-queue-panel (max-width: 520px) {
+  .intake-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .intake-card > *,
+  .intake-actions {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .intake-filter-row {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  }
 }
