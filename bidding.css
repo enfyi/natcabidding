@@ -13212,50 +13212,71 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
   }
 }
 
-/* All-area leave balances above the intake bidder overview. */
-.intake-area-balance-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
-  gap: 12px;
+/* Compact all-area summary keeps the intake workflow near the top. */
+#intake-page .intake-area-balances {
+  padding: 12px 16px;
 }
 
-.intake-area-balance {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid #d5e0e7;
-  border-radius: 8px;
-  background: #fff;
+#intake-page .intake-area-balances .panel-header {
+  margin-bottom: 8px;
 }
 
-.intake-area-balance h3 {
-  margin: 0 0 12px;
-  color: #152d3b;
+#intake-page .intake-area-balances .panel-header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+#intake-page .intake-area-balances h2 {
+  margin: 0;
   font-size: 0.95rem;
 }
 
-.intake-area-balance dl {
-  display: grid;
-  gap: 12px;
+#intake-page .intake-area-balances p {
   margin: 0;
+  font-size: 0.75rem;
 }
 
-.intake-area-balance dt,
-.intake-area-balance small {
+.intake-area-balance-grid {
+  overflow-x: auto;
+}
+
+#intake-page .intake-area-balance-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.8rem;
+}
+
+#intake-page .intake-area-balance-table th,
+#intake-page .intake-area-balance-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #e1e8ed;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#intake-page .intake-area-balance-table th {
   color: #627080;
   font-size: 0.72rem;
 }
 
-.intake-area-balance dt {
+#intake-page .intake-area-balance-table td {
+  color: #152d3b;
   font-weight: 800;
 }
 
-.intake-area-balance dd {
-  display: grid;
-  gap: 4px;
-  margin: 4px 0 0;
+#intake-page .intake-area-balance-table tr > :first-child {
+  text-align: left;
 }
 
-.intake-area-balance strong {
-  color: #152d3b;
-  font-size: 1rem;
+#intake-page .intake-area-balance-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+#intake-page .intake-area-balance-table td:focus-visible {
+  outline: 2px solid #227e85;
+  outline-offset: -2px;
 }
