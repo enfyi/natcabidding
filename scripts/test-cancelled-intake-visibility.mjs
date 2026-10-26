@@ -6,6 +6,7 @@ const source = await readFile(new URL('../bidding.js', import.meta.url), 'utf8')
 const extract = (name) => source.slice(source.indexOf(`function ${name}(`), source.indexOf('\nfunction ', source.indexOf(`function ${name}(`) + 1))
 const context = vm.createContext({
   intakeSearchQuery: '',
+  intakeSearchEmployeeInitials: '',
   intakeFilters: { status: 'Cancelled', type: 'all', area: 'all', round: 'all' },
   bidTypeLabel: (item) => item.type,
   intakeItemRound: (item) => item.round || 1,
