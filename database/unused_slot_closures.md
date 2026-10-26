@@ -1,5 +1,47 @@
 # Unused-slot closure deployment notes
 
+## All-area enforcement after Round 3 (October 25, 2026)
+
+`closed_capacity_approval_guard.sql` is installed in production after backup #58.
+Once an area/workforce closure rule is applied, approvals in subsequent rounds
+cannot create extra override slots on full dates. This includes Round 4 after
+an A–F Round 3 closure and keeps the previous TMU protection. Submission preflight
+already enforces real remaining capacity for both members and manual entries.
+
+No slots were closed and no closure rules or schedules were created or changed.
+The user will configure and apply reductions through Bidding Setup. Existing
+closure behavior still skips four-slot holiday weeks and preserves occupied
+three-bidder dates. This installer changes only the approval function.
+
+The Round 4 live regression uses TMU's already-applied rule without editing any
+slot or closure rule; member/manual submission and admin/intake approvals with
+and without overrides passed, with fixtures/settings rolled back. Slot inventory,
+daily capacity, rules, settings, and bid records matched backup #58 afterward.
+Local manual-form tests cover A–F and TMU Round 4 reduced two-slot dates,
+grandfathered three-bidder dates, and four-slot availability. The local form error
+update requires the next app deployment; database enforcement is already live.
+
+## TMU Round 3 enforcement (October 25, 2026)
+
+`tmu_round_three_closed_capacity.sql` was installed directly in production after
+backup #57. It preserves the installed review routine and blocks capacity
+overrides when TMU Round 3 has no available slot under an applied closure rule.
+Member and manual submissions already share the strict database preflight.
+The current CPC rule closes one unused slot after Round 2: 311 dates have capacity
+one; 53 dates retain two existing awards. DEV is unchanged.
+
+`scripts/test-tmu-round-three-live.sql` passed against production with all test
+data and settings rolled back. It verifies member submissions, admin/intake
+submissions, and admin/intake approvals with and without capacity overrides.
+Existing requests, request dates, intake records, slots, capacities, closure rules,
+and bid-year settings matched backup #57 after verification. The security advisor
+reported the existing authenticated security-definer exposure for the reviewer;
+this patch retains its reviewer authorization and privileges.
+
+The local `bidding.js` update also makes TMU Round 3 full dates an immediate
+manual-form error. This UI update needs the next application deployment; the live
+database enforces the restriction independently of the browser version.
+
 The application changes and `unused_slot_closures.sql` belong together. This is
 an opt-in admin action per bid year, area, and workforce. Fully reopen the rule before applying it again. Saving a rule
 does not automatically run it. Choose TMU / CPC / Round 2 / 1 and save; other
