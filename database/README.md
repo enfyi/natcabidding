@@ -391,3 +391,7 @@ existing audit records, including edits made through the bidder editor.
 Run `pnpm test:leave-edit-history` with `PGLITE_MODULE` pointing to a temporary
 PGlite installation, plus `node scripts/test-bidder-editor-approved-leave.mjs`.
 Run `node scripts/preview-leave-edit-history.mjs` for a sample rendered queue.
+
+### TMU calendar display
+
+Install `tmu_calendar_display.sql` after `bid_window_testing_admin.sql` to enable Admin → Bidding Setup → Calendar display. The switch controls only the dashed outline on TMU dates with one slot remaining, defaults to on, and is shared per bid year. Only system admins may save it.

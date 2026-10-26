@@ -42,6 +42,12 @@ for (const area of ['Area B', 'TMU']) {
   assert.equal(c.isLeaveSlotsFull('2027-06-10',area,'cpc'),false);
   assert.doesNotMatch(render(area,'cpc'), /closed-day/);
   if (area === 'TMU') assert.match(render(area,'cpc'), /tmu-one-slot-left/);
+  const enabledMarkup = render(area, 'cpc');
+  c.tmuOneSlotOutlineEnabled = false;
+  assert.doesNotMatch(render(area, 'cpc'), /tmu-one-slot-left/);
+  if (area !== 'TMU') assert.equal(render(area, 'cpc'), enabledMarkup, 'Other areas must be unchanged');
+  c.tmuOneSlotOutlineEnabled = true;
+  assert.equal(render(area, 'cpc'), enabledMarkup);
   // Existing three-slot awards remain full at three; they must not be reduced.
   details.cpc = ['AB','CD','EF']; details.cpcCapacity = 3; details.cpcOpen = 0;
   assert.match(render(area,'cpc'), /closed-day/);

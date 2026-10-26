@@ -2416,8 +2416,47 @@ async function saveActiveBidYear() {
   }
 }
 
+let tmuOneSlotOutlineEnabled = true;
+let calendarDisplaySettingsAvailable = false;
+
+async function readCalendarYearSettings(client) {
+  const result = await client.rpc("read_calendar_year_settings", { requested_bid_year: BID_YEAR });
+  if (!isMissingSupabaseRoutine(result.error)) return result;
+  return client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR });
+}
+
+function syncCalendarDisplayControls() {
+  document.querySelectorAll("[data-tmu-one-slot-outline]").forEach(input => {
+    input.checked = tmuOneSlotOutlineEnabled;
+    input.disabled = !hasSystemAdminAccess() || !calendarDisplaySettingsAvailable || !supabaseState.connected;
+  });
+}
+
+async function saveTmuOneSlotOutline(input) {
+  if (!hasSystemAdminAccess() || !calendarDisplaySettingsAvailable) return;
+  input.disabled = true;
+  try {
+    const { error } = await supabaseClient().rpc("set_tmu_one_slot_outline", {
+      requested_bid_year: BID_YEAR, enabled: input.checked,
+    });
+    if (error) throw error;
+    tmuOneSlotOutlineEnabled = input.checked;
+    calendarRenderRevision += 1;
+    renderApp();
+    setText("[data-calendar-display-status]", `Saved for ${BID_YEAR}. TMU one-slot outlines are ${tmuOneSlotOutlineEnabled ? "on" : "off"}.`);
+  } catch (error) {
+    setText("[data-calendar-display-status]", error.message || "Could not save calendar display settings.");
+  } finally {
+    syncCalendarDisplayControls();
+  }
+}
+
 function applyBidYearSettings(settings) {
   if (!settings || typeof settings !== "object") return;
+  calendarDisplaySettingsAvailable = typeof settings.tmu_one_slot_outline === "boolean";
+  const outlineEnabled = settings.tmu_one_slot_outline !== false;
+  if (tmuOneSlotOutlineEnabled !== outlineEnabled) calendarRenderRevision += 1;
+  tmuOneSlotOutlineEnabled = outlineEnabled;
   enforceBidWindows = true;
   bidWindowTestRound = normalizeBidWindowTestRound(settings.test_bid_round);
   bidWindowSettingsFallbackMessage = "";
@@ -7145,7 +7184,7 @@ function renderCalendarDay(monthIndex, day, includeMonth = false, year = display
   const detailArea = context?.area || options.area || currentUser.area;
   const availabilityBucket = context?.slotBucket || options.slotBucket || "cpc";
   const slotDataLoaded = leaveSlotDataIsLoaded(baseSlotDetails || leaveSlotsForDate(key, detailArea));
-  const hasOneTmuSlotLeft = showVacationLayer && isInsideLeaveYear && detailArea === "TMU" && slotDataLoaded
+  const hasOneTmuSlotLeft = (typeof tmuOneSlotOutlineEnabled === "undefined" || tmuOneSlotOutlineEnabled) && showVacationLayer && isInsideLeaveYear && detailArea === "TMU" && slotDataLoaded
     && leaveSlotOpenCountForDetails(baseSlotDetails || leaveSlotsForDate(key, detailArea), availabilityBucket) === 1;
   const isClosed = canShowLeaveState && slotDataLoaded && (
     baseSlotDetails
@@ -9709,7 +9748,7 @@ async function loadSupabaseReferenceData({ deferIntakeData = false } = {}) {
       intakeReady.then((results) => results[0]),
       intakeReady.then((results) => results[1]),
       intakeReady.then((results) => results[2]),
-      readReferenceData("year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      readReferenceData("year settings", () => readCalendarYearSettings(client)),
       readReferenceData("round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
       readReferenceData("approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
       readReferenceData("pilot settings", () => supabaseState.authUserId
@@ -15870,7 +15909,7 @@ async function readLiveDataGroup(group, client, areaById, member) {
     };
   } else if (group === "rules") {
     results = await Promise.all([
-      read("live year settings", () => client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR })),
+      read("live year settings", () => readCalendarYearSettings(client)),
       read("live round rules", () => client.rpc("read_round_rules", { requested_bid_year: BID_YEAR })),
       read("live approval rules", () => client.rpc("read_approval_rules", { requested_bid_year: BID_YEAR })),
       read("live ghost status", () => member ? client.rpc("read_ghost_bidding_status", { requested_bid_year: BID_YEAR }) : empty()),
@@ -18952,6 +18991,8 @@ function renderApp() {
 }
 
 function renderAppWithCache() {
+  syncCalendarDisplayControls();
+  if (!calendarDisplaySettingsAvailable) setText("[data-calendar-display-status]", "Install database/tmu_calendar_display.sql to enable this setting.");
   syncBidYearControls();
   syncPilotControls();
   setText("[data-editor-year]", String(BID_YEAR));
@@ -19185,6 +19226,12 @@ document.addEventListener("click", async (event) => {
   const roundRuleSave = event.target.closest("[data-save-round-rule]");
   if (roundRuleSave) {
     await runUiAction("round-rule-save", roundRuleSave, "Saving round…", () => saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule)));
+    return;
+  }
+
+  const calendarDisplayToggle = event.target.closest("[data-tmu-one-slot-outline]");
+  if (calendarDisplayToggle) {
+    await saveTmuOneSlotOutline(calendarDisplayToggle);
     return;
   }
 
