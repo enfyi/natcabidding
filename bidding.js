@@ -13144,13 +13144,17 @@ function renderIntakeAreaBalances() {
   const signature = JSON.stringify([...totals]);
   if (target.dataset.balanceSignature === signature) return;
   target.dataset.balanceSignature = signature;
-  target.innerHTML = [...totals].map(([area, groups]) => {
-    const balances = Object.entries(groups).map(([bucket, { total, used }]) => {
+  const headings = ZLA_AREAS.map((area) => `<th scope="col">${escapeHtml(area)}</th>`).join("");
+  const rows = ["cpc", "dev"].map((bucket) => {
+    const cells = [...totals].map(([area, groups]) => {
+      const { total, used } = groups[bucket];
       const left = Math.max(0, total - used);
-      return `<div><dt>${bucket.toUpperCase()}</dt><dd><strong>${formatRoundedUpLeaveDaysLabel(left)}</strong><small>${formatRoundedUpLeaveDays(used)} of ${formatRoundedUpLeaveDays(total)} used</small></dd></div>`;
+      const detail = `${area} ${bucket.toUpperCase()}: ${formatRoundedUpLeaveDaysLabel(left)} left; ${formatRoundedUpLeaveDays(used)} of ${formatRoundedUpLeaveDays(total)} used`;
+      return `<td tabindex="0" title="${escapeHtml(detail)}" aria-label="${escapeHtml(detail)}">${formatRoundedUpLeaveDays(left)}</td>`;
     }).join("");
-    return `<section class="intake-area-balance"><h3>${escapeHtml(area)}</h3><dl>${balances}</dl></section>`;
+    return `<tr><th scope="row">${bucket.toUpperCase()}</th>${cells}</tr>`;
   }).join("");
+  target.innerHTML = `<table class="intake-area-balance-table" aria-label="Days remaining by area"><thead><tr><th scope="col">Days left</th>${headings}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderLeaveBucketCards() {
