@@ -13102,6 +13102,15 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .manual-picker-weekday { text-align: center; font-size: 11px; font-weight: 700; padding: 4px; color: var(--muted); }
 .manual-picker-grid button { min-height: 38px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-solid); color: var(--text); cursor: pointer; font: inherit; }
 .manual-picker-grid button:hover { border-color: var(--teal); background: var(--line); }
+
+/* Touch tablets can have desktop-sized viewports. Revealing hover content on
+   tap can consume Safari's first tap before the date's click is dispatched. */
+@media (hover: none), (pointer: coarse) {
+  .month-grid button .leave-date-tooltip:not(.permanent-slot-summary),
+  .week-calendar-grid button .leave-date-tooltip:not(.permanent-slot-summary) {
+    display: none !important;
+  }
+}
 .manual-picker-grid button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: var(--deep); }
 .manual-picker-grid button:disabled { opacity: .32; cursor: default; }
 .manual-picker-grid button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
