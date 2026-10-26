@@ -5977,9 +5977,11 @@ async function saveSupabaseApprovedLeaveEdit(item) {
   return true;
 }
 
-async function removeApprovedLeaveBid(id) {
+async function removeApprovedLeaveBid(id, { singleDate = false } = {}) {
   const item = intakeReviewItemById(id);
   if (!item || item.type !== "Leave" || item.status !== "Approved" || !hasIntakeAccess()) return;
+  // A date action must never expand into cancellation of a group or range.
+  if (singleDate && (item.members || leaveDateKeysForItem(item).length !== 1)) return;
   if (!intakeLeaveRoundIsOpen(item)) {
     const reviewNote = `Round ${intakeItemRound(item)} is closed. This bid can no longer be removed.`;
     item.reviewNote = reviewNote;
@@ -6004,8 +6006,9 @@ async function removeApprovedLeaveBid(id) {
   const description = item.members
     ? `${dateCount} selected ${dateCount === 1 ? "date" : "dates"}`
     : item.range;
-  if (!window.confirm(
-    `Remove ${description} from ${item.initials}'s pre-approved leave slots?\n\n` +
+  if (!window.confirm(singleDate
+    ? `Delete ${formatCalendarDate(leaveDateKeysForItem(item)[0])} from ${item.initials}'s approved bid?\n\nOnly this date will be removed. Other dates on the bid will remain. The deleted date will remain in history and will no longer reserve leave capacity.`
+    : `Remove ${description} from ${item.initials}'s pre-approved leave slots?\n\n` +
     "The bid will be marked Cancelled and remain visible in history, but it will no longer reserve leave capacity."
   )) return;
 
@@ -6031,7 +6034,7 @@ async function removeApprovedLeaveBid(id) {
       "Approved leave bid removed",
       `${currentUser.initials} removed ${item.initials}'s ${description} from pre-approved leave slots. The cancelled bid remains in history.`
     );
-    showActionFeedback("Approved leave bid removed.", "success");
+    showActionFeedback(singleDate ? "Approved leave date deleted. Other bid dates remain unchanged." : "Approved leave bid removed.", "success");
     intakeLeaveRemovalPendingId = null;
     if (item.members) intakeGroupReviewState.delete(item.id);
     activeOverrideId = null;
@@ -9059,6 +9062,7 @@ function supabaseLeaveRequestToIntakeItem(row, areaById = new Map()) {
     approvedAt: row.reviewed_at && row.status === "approved" ? formatDateTime(new Date(row.reviewed_at)) : "",
     deniedAt: row.reviewed_at && row.status === "denied" ? formatDateTime(new Date(row.reviewed_at)) : "",
     cancelledAt: row.reviewed_at && row.status === "cancelled" ? formatDateTime(new Date(row.reviewed_at)) : "",
+    cancelledBy: row.status === "cancelled" ? row.reviewedBy || "" : "",
     denialReason: row.denial_reason || "",
     range,
     days,
@@ -16845,6 +16849,7 @@ function renderOverrideEditor(item) {
     </label>`}
     <div class="button-row">
       <button class="secondary-action" type="button" data-intake-save-override="${item.id}">${pending ? "Save Override" : "Replace Approved Dates"}</button>
+      ${item.status === "Approved" && hasIntakeAccess() && intakeLeaveRoundIsOpen(item) && !item.members && leaveDateKeysForItem(item).length === 1 ? `<button class="secondary-action danger" type="button" data-intake-delete-date="${item.id}" ${intakeLeaveRemovalPendingId ? "disabled" : ""}>Delete Date</button>` : ""}
       ${pending ? `<button class="primary-action" type="button" data-intake-approve="${item.id}">${approveLabel}</button>` : ""}
       ${pending ? `<button class="secondary-action danger" type="button" data-intake-deny="${item.id}">Deny</button>` : ""}
     </div>
@@ -17112,8 +17117,18 @@ function renderIntakeAdminEditHistory(item) {
   }).join("");
 }
 
+function renderIntakeCancellationHistory(item) {
+  if (item?.type !== "Leave" || item.status !== "Cancelled") return "";
+  return `<div class="intake-change-history">
+    <strong>Leave cancellation · Round ${escapeHtml(intakeItemRound(item))}</strong>
+    <span><b>Before:</b> ${escapeHtml(item.range)}</span>
+    <span><b>After:</b> Cancelled · These dates no longer hold leave slots.</span>
+    <small>${escapeHtml(item.cancelledBy ? intakeReviewerLabel(item.cancelledBy) : "Unknown reviewer")} · ${escapeHtml(item.cancelledAt || "Time not recorded")}</small>
+  </div>`;
+}
+
 function renderIntakeChangeHistory(item) {
-  const adminHistory = item?.type === "Leave" ? renderIntakeLeaveEditHistory(item) : renderIntakeAdminEditHistory(item);
+  const adminHistory = item?.type === "Leave" ? renderIntakeCancellationHistory(item) + renderIntakeLeaveEditHistory(item) : renderIntakeAdminEditHistory(item);
   if (!item?.isChange) return adminHistory;
   const differences = rdoBidChangeDifferences(item.originalBid, item);
   const source = item.changeSource === "intake"
@@ -19829,6 +19844,12 @@ document.addEventListener("click", async (event) => {
   const intakeManageLeave = event.target.closest("[data-intake-manage-leave]");
   if (intakeManageLeave) {
     revealIntakeLeaveDates(intakeManageLeave.dataset.intakeManageLeave);
+    return;
+  }
+
+  const intakeDeleteDate = event.target.closest("[data-intake-delete-date]");
+  if (intakeDeleteDate) {
+    await runUiAction("intake-edit", intakeDeleteDate, "Deleting date…", () => removeApprovedLeaveBid(intakeDeleteDate.dataset.intakeDeleteDate, { singleDate: true }));
     return;
   }
 
