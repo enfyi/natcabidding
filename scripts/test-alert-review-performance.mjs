@@ -58,6 +58,7 @@ for (const activePage of ['dashboard', 'intake']) {
   const card = { dataset: { intakeCard: 'week' }, scrollIntoView() {}, focus() {} };
   const frames = [];
   const nav = vm.createContext({
+    intakePagination: { page: 1, filterKey: '', revealItemId: null },
     withLeaveReadCache: read => read(), groupedLeaveIntakeItems: () => [{ id: 'week', initials: 'ME', bidderId: 'bidder', members: [{ id: 'day' }] }],
     activeIntakeDetailId: null, activeOverrideId: 'old', activeDenialId: 'old',
     intakeSearchQuery: 'other', intakeFilters: { status: 'Denied', area: 'Area B' },

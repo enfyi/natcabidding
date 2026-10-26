@@ -1965,6 +1965,8 @@ const intakeFilters = {
   round: "all",
 };
 let intakeSort = "approved";
+const INTAKE_PAGE_SIZE = 50;
+const intakePagination = { page: 1, filterKey: "", revealItemId: null };
 let helpPanelMode = "user";
 let activeHelpThreadId = "help-oc-1";
 let helpThreads = [
@@ -9173,6 +9175,9 @@ function resetSupabaseBackedData() {
   databaseBidWindows.clear();
   seniority = [];
   intakeQueue = [];
+  intakePagination.page = 1;
+  intakePagination.filterKey = "";
+  intakePagination.revealItemId = null;
   helpThreads = [];
   publicFaqContent.entries = [];
   publicFaqContent.documents = [];
@@ -17788,6 +17793,47 @@ function renderIntakeQueue() {
   return withLeaveReadCache(() => renderIntakeQueueWithCache());
 }
 
+function paginateIntakeItems(items) {
+  const filterKey = JSON.stringify([intakeSearchQuery, intakeSearchEmployeeInitials, intakeFilters, intakeSort]);
+  if (intakePagination.filterKey !== filterKey) {
+    intakePagination.page = 1;
+    intakePagination.filterKey = filterKey;
+  }
+  if (intakePagination.revealItemId) {
+    const index = items.findIndex((item) => item.id === intakePagination.revealItemId);
+    if (index >= 0) intakePagination.page = Math.floor(index / INTAKE_PAGE_SIZE) + 1;
+    intakePagination.revealItemId = null;
+  }
+  const pages = Math.max(1, Math.ceil(items.length / INTAKE_PAGE_SIZE));
+  intakePagination.page = Math.max(1, Math.min(intakePagination.page, pages));
+  const start = (intakePagination.page - 1) * INTAKE_PAGE_SIZE;
+  return {
+    items: items.slice(start, start + INTAKE_PAGE_SIZE),
+    total: items.length, start, page: intakePagination.page, pages,
+  };
+}
+
+function renderIntakePagination(pagination) {
+  document.querySelectorAll("[data-intake-pagination]").forEach((control) => {
+    control.querySelector("[data-intake-page-summary]").textContent = pagination.total
+      ? `Showing ${pagination.start + 1}–${Math.min(pagination.start + INTAKE_PAGE_SIZE, pagination.total)} of ${pagination.total} bids`
+      : "Showing 0 bids";
+    control.querySelector("[data-intake-page-number]").textContent = `Page ${pagination.page} of ${pagination.pages}`;
+    control.querySelector('[data-intake-page="previous"]').disabled = pagination.page <= 1;
+    control.querySelector('[data-intake-page="next"]').disabled = pagination.page >= pagination.pages;
+  });
+}
+
+function changeIntakePage(direction) {
+  intakePagination.page += direction === "next" ? 1 : -1;
+  renderIntakeQueue();
+  const controls = document.querySelector("[data-intake-pagination]");
+  controls?.scrollIntoView({ block: "start" });
+  // Keep keyboard navigation on the same action unless it reached a boundary.
+  const button = controls?.querySelector(`[data-intake-page="${direction}"]`);
+  (button && !button.disabled ? button : controls)?.focus({ preventScroll: true });
+}
+
 function updateIntakeSearch(query) {
   intakeSearchQuery = query;
   intakeSearchEmployeeInitials = "";
@@ -17809,11 +17855,13 @@ function renderIntakeQueueWithCache() {
     ? groupedItems
     : groupedItems.filter((item) => item.area === currentUser.area && item.initials === currentUser.initials);
   const filteredItems = visibleItems.filter(intakeItemMatchesFilters).sort(compareIntakeActionItems);
+  const pagination = paginateIntakeItems(filteredItems);
+  renderIntakePagination(pagination);
   const activeDetailItem = visibleItems.find((item) => item.id === activeIntakeDetailId) || null;
   renderIntakeDetailPanel(activeDetailItem, visibleItems);
 
-  target.innerHTML = filteredItems.length
-    ? filteredItems.map((item) => `
+  target.innerHTML = pagination.items.length
+    ? pagination.items.map((item) => `
       <article class="intake-card ${intakeDisplayStatus(item).toLowerCase()} ${item.isChange ? "bid-change" : ""} ${item.id === activeIntakeDetailId ? "selected" : ""}" tabindex="0" data-intake-card="${item.id}">
         <div>
           <span class="intake-type">${escapeHtml(bidTypeLabel(item))}</span>
@@ -17928,6 +17976,7 @@ function openIntakeItemFromAlertWithCache(itemId) {
   if (!groupedItem) return;
 
   activeIntakeDetailId = groupedItem.id;
+  intakePagination.revealItemId = groupedItem.id;
   activeOverrideId = null;
   activeDenialId = null;
   intakeSearchQuery = "";
@@ -19862,6 +19911,12 @@ document.addEventListener("click", async (event) => {
   }
 
   if (event.target.closest(".intake-balance-disclosure")) return;
+
+  const intakePage = event.target.closest("[data-intake-page]");
+  if (intakePage) {
+    changeIntakePage(intakePage.dataset.intakePage);
+    return;
+  }
 
   const intakeCard = event.target.closest("[data-intake-card]");
   if (intakeCard) {

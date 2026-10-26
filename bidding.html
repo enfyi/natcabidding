@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@600;700;800;900&family=Open+Sans:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="bidding.css?v=20261017-admin-tools-contrast" />
+    <link rel="stylesheet" href="bidding.css?v=20261026-intake-pagination" />
   </head>
   <body>
     <section class="member-boot-screen" aria-live="polite" aria-label="Loading member dashboard">
@@ -1022,7 +1022,23 @@
                 <span class="pill open"><b data-intake-count>0</b> pending</span>
               </div>
               <div class="intake-detail-panel" data-intake-detail-panel tabindex="-1" hidden></div>
+              <nav class="intake-pagination" data-intake-pagination tabindex="-1" aria-label="Intake queue pages">
+                <span data-intake-page-summary role="status" aria-live="polite"></span>
+                <div class="intake-pagination-actions">
+                  <button class="secondary-action small" type="button" data-intake-page="previous" aria-controls="intake-queue" disabled>← Previous</button>
+                  <span data-intake-page-number>Page 1 of 1</span>
+                  <button class="secondary-action small" type="button" data-intake-page="next" aria-controls="intake-queue" disabled>Next →</button>
+                </div>
+              </nav>
               <div class="intake-queue" id="intake-queue"></div>
+              <nav class="intake-pagination" data-intake-pagination tabindex="-1" aria-label="Intake queue pages, bottom">
+                <span data-intake-page-summary></span>
+                <div class="intake-pagination-actions">
+                  <button class="secondary-action small" type="button" data-intake-page="previous" aria-controls="intake-queue" disabled>← Previous</button>
+                  <span data-intake-page-number>Page 1 of 1</span>
+                  <button class="secondary-action small" type="button" data-intake-page="next" aria-controls="intake-queue" disabled>Next →</button>
+                </div>
+              </nav>
             </section>
             <aside class="intake-info-stack">
               <section class="panel help-summary-card">
@@ -1981,7 +1997,7 @@
     </dialog>
     <script src="supabase-config.js"></script>
     <script src="/vendor/supabase.js?v=2.112.3"></script>
-    <script src="bidding.js?v=20261017-admin-tools-contrast"></script>
+    <script src="bidding.js?v=20261026-intake-pagination"></script>
     <script>
       window.setTimeout(() => {
         if (window.NATCA_BIDDING_READY) return;
