@@ -13400,3 +13400,104 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     margin-top: 16px;
   }
 }
+
+/* Keep queue counts, filters, and review actions compact and aligned. */
+.intake-workspace > .panel > .panel-header {
+  display: grid;
+  gap: 12px;
+}
+
+.intake-queue-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.intake-queue-heading h2,
+.intake-queue-heading .pill {
+  margin: 0;
+}
+
+.intake-queue-heading [data-intake-refresh] {
+  margin-left: auto;
+}
+
+.intake-search-tools {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
+  gap: 6px;
+}
+
+.intake-search-tools > :is(.intake-filter-row, .manual-controller-results, small) {
+  grid-column: 1 / -1;
+}
+
+.intake-search-tools > small:empty {
+  display: none;
+}
+
+.intake-search-tools > [data-intake-sort] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.intake-search-tools input,
+.intake-search-tools select {
+  padding: 7px 9px;
+}
+
+.intake-queue { gap: 8px; }
+.intake-card { padding: 10px; gap: 10px; }
+.intake-card h3 { margin: 2px 0; }
+.intake-meta { margin-top: 6px; gap: 5px; }
+.intake-meta span { padding: 3px 7px; }
+.intake-actions { gap: 6px; }
+.intake-actions .status { justify-self: end; }
+.intake-pagination { margin-block: 8px; }
+
+@container intake-queue-panel (max-width: 520px) {
+  .intake-search-tools { grid-template-columns: minmax(0, 1fr); }
+  .intake-search-tools > [data-intake-sort] { grid-column: 1; grid-row: auto; }
+  .intake-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .intake-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .intake-actions small { flex-basis: 100%; }
+}
+
+.intake-workspace > .panel > .panel-header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.intake-queue-heading .pill {
+  height: auto;
+  padding: 4px 8px;
+  gap: 4px;
+}
+
+@container intake-queue-panel (max-width: 520px) {
+  .intake-queue-heading {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .intake-queue-heading h2 {
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .intake-queue-heading .pill {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    padding: 4px 6px;
+    white-space: nowrap;
+  }
+
+  .intake-queue-heading [data-intake-refresh] {
+    padding: 7px 8px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+}
