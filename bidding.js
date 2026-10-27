@@ -10385,6 +10385,7 @@ document.addEventListener("scroll", scheduleRdoStickyHeaderUpdate, true);
 window.addEventListener("resize", () => {
   activeRdoStickyHeaderSignature = "";
   scheduleRdoStickyHeaderUpdate();
+  syncIntakeScheduleEditorPlacement();
 });
 
 function publicRdoFilteredLines(area) {
@@ -15491,7 +15492,21 @@ function moveSchedulePeriod(direction) {
   renderIntakeSchedule();
 }
 
+function syncIntakeScheduleEditorPlacement() {
+  const editor = document.querySelector("[data-admin-schedule-card]");
+  const mobileSlot = document.querySelector("[data-mobile-schedule-editor-slot]");
+  const desktopAnchor = document.querySelector("[data-desktop-schedule-editor-anchor]");
+  if (!editor || !mobileSlot || !desktopAnchor) return;
+
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    if (editor.parentElement !== mobileSlot) mobileSlot.append(editor);
+  } else if (editor.previousElementSibling !== desktopAnchor) {
+    desktopAnchor.after(editor);
+  }
+}
+
 function renderIntakeSchedule() {
+  syncIntakeScheduleEditorPlacement();
   const calendar = document.getElementById("intake-schedule-calendar");
   const list = document.querySelector("[data-intake-schedule-list]");
   syncScheduleFormDefaults();
