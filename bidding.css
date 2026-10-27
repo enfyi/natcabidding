@@ -6538,6 +6538,10 @@ tr.occupied-row .rdo-tag {
   display: none;
 }
 
+.schedule-editor-slot {
+  display: contents;
+}
+
 .intake-schedule-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -13390,5 +13394,9 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 
   #intake-schedule-page .intake-schedule-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  #intake-schedule-page .schedule-editor-slot > .panel {
+    margin-top: 16px;
   }
 }
