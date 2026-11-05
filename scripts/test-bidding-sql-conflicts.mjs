@@ -589,3 +589,15 @@ try {
   throw new Error('Non-admin unexpectedly changed the policy');
 } catch (error) {if (!error.message.includes('Only system admins')) throw error;}
 console.log('PASS configurable over-accrual policy, all thresholds, submissions, disabled policy, non-admin denial, and idempotent install');
+// Admin writes persist the selected round and the disabled state in the reader.
+await db.query('update public.bidders set role=\'admin\' where id=$1', [policyBidder]);
+for (const startingRound of [5,null,4]) {
+  await db.query('select public.set_leave_over_accrual(2027,$1)', [startingRound]);
+  const settings=(await db.query('select public.read_leave_allowance_settings(2027) settings')).rows[0].settings;
+  if(settings.leave_over_accrual_from_round!==startingRound) throw new Error('Saved policy did not round-trip');
+}
+try {
+  await db.query('select public.set_leave_over_accrual(2027,7)');
+  throw new Error('Invalid starting round accepted');
+} catch(error) {if(!error.message.includes('between 1 and 6')) throw error;}
+console.log('PASS admin policy save/read and invalid-round rejection');

@@ -56,3 +56,7 @@ admin=true;
 context.syncLeaveOverAccrualControls();
 assert.equal(inputs['[data-save-leave-over-accrual]'].disabled,true,'Missing database support disables editing');
 console.log('PASS allowance policy loading, threshold, save, disable, failed save, admin access, and missing support');
+
+assert.equal(fs.readFileSync(new URL('../database/round_four_over_accrual.sql',import.meta.url),'utf8'),
+  fs.readFileSync(new URL('../supabase/migrations/20261105155512_configurable_leave_over_accrual.sql',import.meta.url),'utf8'),
+  'Standalone installer and migration must match');

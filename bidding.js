@@ -19231,6 +19231,7 @@ function renderApp() {
 function renderAppWithCache() {
   syncCalendarDisplayControls();
   syncLeaveOverAccrualControls();
+  if (!leaveOverAccrualSettingsAvailable) setText("[data-leave-over-accrual-status]", "Install the latest database update to enable this setting.");
   if (!calendarDisplaySettingsAvailable) setText("[data-calendar-display-status]", "Install database/tmu_calendar_display.sql to enable this setting.");
   syncBidYearControls();
   syncPilotControls();
