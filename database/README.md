@@ -395,3 +395,13 @@ Run `node scripts/preview-leave-edit-history.mjs` for a sample rendered queue.
 ### TMU calendar display
 
 Install `tmu_calendar_display.sql` after `bid_window_testing_admin.sql` to enable Admin → Bidding Setup → Calendar display. The switch controls only the dashed outline on TMU dates with one slot remaining, defaults to on, and is shared per bid year. Only system admins may save it.
+
+### Personal leave allowance policy
+
+Apply `round_four_over_accrual.sql` after `tmu_calendar_display.sql` and the bidding
+installers. In **Bidding Setup → Leave allowance**, system admins can enable bids
+above personal accrued/saved leave from a selected round onward, or disable the
+exception. The policy is saved per bid year and applies to submissions, date
+changes, and intake approval. Existing settings default to Round 4 and later.
+Per-round day limits, bid windows, area capacity, and date availability still apply.
+Apply this installer again if older bidding installers replace its functions.

@@ -48,8 +48,8 @@ const context = vm.createContext({
   persistIntakeDecision: async () => { saves++; return true; },
   updateConfirmedIntakeDecision() {}, queueBidVerifiedEmail() {}, scheduleIntakeDecisionRefresh() {}, setPage() {},
 });
-vm.runInContext('let leaveReadCache = null;\n' + [
-  'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
+vm.runInContext('let leaveReadCache = null; let leaveOverAccrualFromRound = null;\n' + [
+  'leaveOverAccrualAllowed', 'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
   'renderIntakeLeaveBalance', 'renderIntakeQueueWithCache', 'renderIntakeQueue', 'approveIntakeItem',
   'intakeLeaveApprovalAttributes', 'paginateIntakeItems',
 ].map(fn).join('\n'), context);
@@ -114,6 +114,25 @@ context.intakeReviewItemById = () => request;
 hours = 8;
 await context.approveIntakeItem(request.id);
 assert.equal(saves, 1, 'Valid approval saves without an extra read');
+delete request.reviewNote;
+
+// The configured starting round applies to approvals and their disabled state.
+allowance = 0;
+for (const startingRound of [1, 2, 3, 4, 5, 6, null]) {
+  vm.runInContext(`leaveOverAccrualFromRound = ${startingRound};`, context);
+  for (let round = 1; round <= 6; round++) {
+    request.round = round;
+    const allowed = startingRound !== null && round >= startingRound;
+    assert.equal(context.leaveOverAccrualAllowed(round), allowed);
+    assert.equal(context.intakeLeaveApprovalAttributes(request).includes('disabled'), !allowed);
+    const before = saves;
+    await context.approveIntakeItem(request.id);
+    assert.equal(saves - before, Number(allowed), `Approval: start ${startingRound}, round ${round}`);
+  }
+}
+vm.runInContext('leaveOverAccrualFromRound = null;', context);
+request.round = 2;
+allowance = 200;
 delete request.reviewNote;
 
 // Index work must stay linear, even when the queue contains many cards per bidder.

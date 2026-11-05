@@ -2421,7 +2421,50 @@ async function saveActiveBidYear() {
 let tmuOneSlotOutlineEnabled = true;
 let calendarDisplaySettingsAvailable = false;
 
+let leaveOverAccrualFromRound = null;
+let leaveOverAccrualSettingsAvailable = false;
+
+function leaveOverAccrualAllowed(round) {
+  return leaveOverAccrualFromRound !== null && Number(round) >= leaveOverAccrualFromRound;
+}
+
+function syncLeaveOverAccrualControls() {
+  const enabled = document.querySelector("[data-leave-over-accrual-enabled]");
+  const round = document.querySelector("[data-leave-over-accrual-round]");
+  const save = document.querySelector("[data-save-leave-over-accrual]");
+  if (!enabled || !round || !save) return;
+  enabled.checked = leaveOverAccrualFromRound !== null;
+  round.value = String(leaveOverAccrualFromRound || 4);
+  enabled.disabled = round.disabled = save.disabled = !hasSystemAdminAccess()
+    || !leaveOverAccrualSettingsAvailable || !supabaseState.connected;
+}
+
+async function saveLeaveOverAccrualSettings() {
+  if (!hasSystemAdminAccess() || !leaveOverAccrualSettingsAvailable) return;
+  const enabled = document.querySelector("[data-leave-over-accrual-enabled]").checked;
+  const startRound = Number(document.querySelector("[data-leave-over-accrual-round]").value);
+  const button = document.querySelector("[data-save-leave-over-accrual]");
+  button.disabled = true;
+  try {
+    const { error } = await supabaseClient().rpc("set_leave_over_accrual", {
+      requested_bid_year: BID_YEAR, starting_round: enabled ? startRound : null,
+    });
+    if (error) throw error;
+    leaveOverAccrualFromRound = enabled ? startRound : null;
+    renderApp();
+    setText("[data-leave-over-accrual-status]", enabled
+      ? `Saved for ${BID_YEAR}: bids may exceed personal leave allowance in Round ${startRound} and later.`
+      : `Saved for ${BID_YEAR}: personal leave allowance is enforced in every round.`);
+  } catch (error) {
+    setText("[data-leave-over-accrual-status]", error.message || "Could not save leave allowance policy.");
+  } finally {
+    syncLeaveOverAccrualControls();
+  }
+}
+
 async function readCalendarYearSettings(client) {
+  const policy = await client.rpc("read_leave_allowance_settings", { requested_bid_year: BID_YEAR });
+  if (!isMissingSupabaseRoutine(policy.error)) return policy;
   const result = await client.rpc("read_calendar_year_settings", { requested_bid_year: BID_YEAR });
   if (!isMissingSupabaseRoutine(result.error)) return result;
   return client.rpc("read_bid_year_settings", { requested_bid_year: BID_YEAR });
@@ -2455,6 +2498,9 @@ async function saveTmuOneSlotOutline(input) {
 
 function applyBidYearSettings(settings) {
   if (!settings || typeof settings !== "object") return;
+  leaveOverAccrualSettingsAvailable = Object.prototype.hasOwnProperty.call(settings, "leave_over_accrual_from_round");
+  const startRound = Number(settings.leave_over_accrual_from_round);
+  leaveOverAccrualFromRound = leaveOverAccrualSettingsAvailable && Number.isInteger(startRound) && startRound >= 1 && startRound <= 6 ? startRound : null;
   calendarDisplaySettingsAvailable = typeof settings.tmu_one_slot_outline === "boolean";
   const outlineEnabled = settings.tmu_one_slot_outline !== false;
   if (tmuOneSlotOutlineEnabled !== outlineEnabled) calendarRenderRevision += 1;
@@ -4815,7 +4861,7 @@ function addOrUpdateLeaveSubmission() {
 
   const projectedChargedDays = leaveProjectedChargedDays([{ dateKeys, range: selectionDisplay, days: chargedDays, round, weekUnits, weekKeys }]);
   const allowanceLimit = leaveAllowanceLimitForRound(round);
-  if (projectedChargedDays > allowanceLimit) {
+  if (!leaveOverAccrualAllowed(round) && projectedChargedDays > allowanceLimit) {
     const credits = leaveHolidayCreditsForRound(round);
     const creditText = credits ? ` including ${credits} holiday ${credits === 1 ? "credit" : "credits"}` : "";
     setLeaveBuilderStatus(`This would exceed the ${formatLeaveDaysLabel(allowanceLimit)} leave allowance${creditText} for Round ${round}.`, "error");
@@ -5797,7 +5843,7 @@ async function approveIntakeItem(id) {
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
   if (item.type === "Leave") {
     const balance = withLeaveReadCache(() => intakeLeaveBalance(item));
-    if (!balance || balance.remainingHours < 0) {
+    if (!leaveOverAccrualAllowed(leaveRoundForItem(item)) && (!balance || balance.remainingHours < 0)) {
       const reviewNote = balance
         ? `Cannot approve: over leave allowance by ${formatEstimatedLeaveDays(-balance.remaining)} days. Edit or deny pending dates first.`
         : "Cannot approve: bidder leave balance is unavailable. Verify the bidder's allowance and reload the queue.";
@@ -12348,7 +12394,7 @@ function bidChangeValidationMessage(replacementRows, affectedRequestIds) {
   const affectedChargedDays = affectedItems.reduce((total, item) => total + leaveItemChargedDays(item), 0);
   const replacementChargedDays = chargeableLeaveDateKeys(newKeys, currentUser.initials, bidChangeRound).length;
   const projectedChargedDays = leaveCommittedChargedDays() - affectedChargedDays + replacementChargedDays;
-  if (projectedChargedDays > leaveAllowanceLimitForRound(bidChangeRound)) {
+  if (!leaveOverAccrualAllowed(bidChangeRound) && projectedChargedDays > leaveAllowanceLimitForRound(bidChangeRound)) {
     return `These changes would exceed your Round ${bidChangeRound} leave allowance.`;
   }
   return "";
@@ -12439,7 +12485,7 @@ function renderSubmittedLeaveManager() {
   const roundWeeks = round === 1 ? roundOneWeekKeySetForItems(items).size : 0;
   const windowError = leaveBidWindowErrorMessage(now);
   const roundLimitReached = round !== 1 && roundDays >= leaveDayLimitForRound(round);
-  const constraintError = remainingHours <= 0
+  const constraintError = !leaveOverAccrualAllowed(round) && remainingHours <= 0
     ? `You have used your ${formatEstimatedLeaveDays(maximumHours)} allotted leave hours.`
     : roundLimitReached
       ? `You have reached the Round ${round} limit.`
@@ -12603,7 +12649,7 @@ async function replaceSubmittedLeaveRequest() {
     }
   }
   const projectedDays = leaveProjectedChargedDays() - leaveItemChargedDays(item) + chargedDays;
-  if (projectedDays > leaveAllowanceLimitForRound(round)) {
+  if (!leaveOverAccrualAllowed(round) && projectedDays > leaveAllowanceLimitForRound(round)) {
     setLeaveBuilderStatus(`This replacement would exceed the Round ${round} leave allowance.`, "error");
     return;
   }
@@ -12717,7 +12763,7 @@ function renderLeaveAllowanceSummary() {
   setText("[data-leave-total-allowance]", formatLeaveDaysLabel(totalAllowance));
   setText("[data-leave-left-days]", formatRoundedUpLeaveDaysLabel(leftDays));
   setText("[data-leave-bid-days]", formatLeaveDaysLabel(bidDays));
-  setText("[data-leave-balance-summary]", `${formatEstimatedLeaveDays(allowanceHours)} base hours · ${credits * hoursPerDay} returned hours · ${scheduleText}`);
+  setText("[data-leave-balance-summary]", `${formatEstimatedLeaveDays(allowanceHours)} base hours · ${credits * hoursPerDay} returned hours · ${scheduleText}${leaveOverAccrualAllowed(round) ? " · This round may exceed this balance" : ""}`);
   setText("[data-leave-balance-holidays]", holidayText);
   setText("[data-leave-holidays-bid]", credits && round >= 4 ? `${holidayCount} (${credits} credit)` : String(holidayCount));
 }
@@ -17735,12 +17781,13 @@ function renderIntakeLeaveBalance(item) {
       <div><dt>This request${item.status === "Pending" ? "" : ` (${escapeHtml(item.status.toLowerCase())})`}</dt><dd>${days(balance.requestDays)}</dd></div>
       <div><dt>Left after all pending</dt><dd>${days(balance.remaining)}</dd></div>
     </dl>
-    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · approval blocked` : `Enough days · ${days(balance.remaining)} remaining`} (${balance.exactRemainingHours.toLocaleString("en-US", { maximumFractionDigits: 3 })} accrued hours remaining)</p>
+    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · ${leaveOverAccrualAllowed(leaveRoundForItem(item)) ? "allowed by bid policy" : "approval blocked"}` : `Enough days · ${days(balance.remaining)} remaining`} (${balance.exactRemainingHours.toLocaleString("en-US", { maximumFractionDigits: 3 })} accrued hours remaining)</p>
   </section></details>`;
 }
 
 function intakeLeaveApprovalAttributes(item) {
   const balance = intakeLeaveBalance(item);
+  if (leaveOverAccrualAllowed(leaveRoundForItem(item))) return '';
   return !balance ? 'disabled title="Bidder leave balance unavailable"'
     : balance.remainingHours < 0 ? 'disabled title="Pending bids exceed the bidder’s leave allowance"' : '';
 }
@@ -19183,6 +19230,7 @@ function renderApp() {
 
 function renderAppWithCache() {
   syncCalendarDisplayControls();
+  syncLeaveOverAccrualControls();
   if (!calendarDisplaySettingsAvailable) setText("[data-calendar-display-status]", "Install database/tmu_calendar_display.sql to enable this setting.");
   syncBidYearControls();
   syncPilotControls();
@@ -19418,6 +19466,11 @@ document.addEventListener("click", async (event) => {
   const roundRuleSave = event.target.closest("[data-save-round-rule]");
   if (roundRuleSave) {
     await runUiAction("round-rule-save", roundRuleSave, "Saving round…", () => saveRoundRule(Number(roundRuleSave.dataset.saveRoundRule)));
+    return;
+  }
+
+  if (event.target.closest("[data-save-leave-over-accrual]")) {
+    await saveLeaveOverAccrualSettings();
     return;
   }
 

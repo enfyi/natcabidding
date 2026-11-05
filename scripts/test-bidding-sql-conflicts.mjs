@@ -554,3 +554,38 @@ try {
   if(!error.message.includes('leave balance is exhausted')) throw error;
 }
 console.log('PASS two GL bidders share one occupied RDO line, stay visible, and consume no line or leave slots');
+
+// Configurable over-accrual policy preserves the installed bidding functions.
+for (const file of ['rls_area_policies.sql', 'bid_window_testing_admin.sql', 'tmu_calendar_display.sql', 'round_four_over_accrual.sql']) {
+  await db.exec(fs.readFileSync(root + file, 'utf8'));
+}
+await db.exec(fs.readFileSync(root + 'round_four_over_accrual.sql', 'utf8')); // idempotent
+for (const startingRound of [null, 1, 2, 3, 4, 5, 6]) {
+  await db.query('update public.bid_year_settings set leave_over_accrual_from_round=$2 where bid_year_id=$1', [year, startingRound]);
+  for (let round = 1; round <= 6; round++) {
+    const allowed = (await db.query('select private.leave_over_accrual_allowed($1,$2) allowed', [year, round])).rows[0].allowed;
+    if (allowed !== (startingRound !== null && round >= startingRound)) throw new Error(`Policy mismatch: ${startingRound}/${round}`);
+  }
+}
+// F2 has an effective RDO line and open November dates from the round-four fixture.
+const policyBidder='00000000-0000-0000-0000-000000000281';
+await db.exec(`delete from public.leave_requests where bidder_id='${policyBidder}';
+  update public.bidders set leave_slot_allowance=0 where id='${policyBidder}';
+  set test.uid='00000000-0000-0000-0000-000000000282'; set test.email='f2@example.test';`);
+const policySubmit = async (round) => {
+  await db.query('update public.bid_year_settings set test_bid_round=$2 where bid_year_id=$1', [year, round]);
+  return db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:'2027-11-02',end_date:'2027-11-02',round,rdo_line_code:'ROUND4-F2'}])]);
+};
+for (const [start, round, expected] of [[null,4,false],[5,4,false],[4,3,false],[4,4,true],[4,5,true],[4,6,true],[2,2,true]]) {
+  await db.query('update public.bid_year_settings set leave_over_accrual_from_round=$2 where bid_year_id=$1', [year,start]);
+  let passed=false;
+  try {await policySubmit(round); passed=true;} catch (error) {if (!error.message.includes('allowance')) throw error;}
+  if (passed!==expected) throw new Error(`Submission policy mismatch: start ${start}, round ${round}`);
+  await db.query('delete from public.leave_requests where bidder_id=$1', [policyBidder]);
+}
+try {
+  await db.query('select public.set_leave_over_accrual(2027,4)');
+  throw new Error('Non-admin unexpectedly changed the policy');
+} catch (error) {if (!error.message.includes('Only system admins')) throw error;}
+console.log('PASS configurable over-accrual policy, all thresholds, submissions, disabled policy, non-admin denial, and idempotent install');
