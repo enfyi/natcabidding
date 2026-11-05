@@ -142,8 +142,37 @@ await db.exec(`select save_slot_closure_rule(2027,'Area A','dev',3,1);
  update slot_closure_rules set applied_at=now() where area_id=(select id from areas where name='Area A') and slot_group='dev';`);
 await db.exec(await read('edit_slot_closure_rules.sql'));
 assert.equal((await db.query(`select applied_at is null as ready from read_slot_closure_rules(2027) where area_name='Area A' and slot_group='dev'`)).rows[0].ready,true,'Legacy fully reopened rules are reusable after upgrade');
+// Date-scoped closing can target additional dates without reducing overlapping dates twice.
+await db.exec(await read('close_slot_date_range.sql'));
+await db.exec(await read('close_slot_date_range.sql'));
+await db.exec(`insert into areas(code,name) values('range','Range Test');
+ insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+ select y.id,a.id,d::date,g,g||n from bid_years y cross join areas a
+ cross join (values('2027-09-01'),('2027-09-02'),('2027-09-03'),('2027-09-04')) dates(d)
+ cross join (values('cpc'),('dev')) groups(g) cross join generate_series(1,4) n
+ where a.name='Range Test' and (n<=3 or d='2027-09-04');
+ select save_slot_closure_rule(2027,'Range Test','cpc',3,1);`);
+const rangeClose = async (start,end,group='cpc') => (await db.query(`select apply_slot_closure_range(2027,'Range Test',$1,$2::date,$3::date) as result`,[group,start,end])).rows[0].result.closed_slots;
+const rangeBefore=await bidSnapshot();
+const devInventory=(await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows;
+await assert.rejects(()=>rangeClose('2027-09-01',null),/Choose both closing dates/);
+await assert.rejects(()=>rangeClose('2027-09-02','2027-09-01'),/Choose both closing dates/);
+await assert.rejects(()=>rangeClose('2027-01-09','2027-09-01'),/Choose both closing dates/);
+await assert.rejects(()=>rangeClose('2027-09-01','2027-09-02','dev'),/only to CPC/);
+assert.equal(await rangeClose('2027-09-02','2027-09-02'),1,'Single-date close');
+assert.equal((await db.query(`select count(*)::int as n from leave_slots s join areas a on a.id=s.area_id where a.name='Range Test' and s.slot_group='cpc' and s.slot_date='2027-09-01' and s.status='open'`)).rows[0].n,3,'Dates outside the range stay open');
+assert.equal(await rangeClose('2027-09-02','2027-09-02'),0,'Repeated range cannot reduce capacity twice');
+assert.equal(await rangeClose('2027-09-01','2027-09-04'),2,'Overlap skips closed dates and four-slot dates');
+assert.deepEqual((await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows,devInventory);
+assert.deepEqual(await bidSnapshot(),rangeBefore,'Range closing preserves occupied slots and all bids');
+await db.exec(`select reopen_slot_closure_rule(2027,'Range Test','cpc','2027-09-02','2027-09-02')`);
+assert.equal(await rangeClose('2027-09-02','2027-09-02'),1,'A reopened date can be closed again independently');
+await db.exec(`update bid_rounds set status='open',ends_at=null where round_number=3;`);
+await assert.rejects(()=>rangeClose('2027-09-03','2027-09-03'),/must end/);
+console.log('PASS date-range closing: bounds, single date, overlap, repeat protection, reopening, four-slot exemption, DEV isolation and cutoff');
 await db.exec(`create or replace function public.is_current_admin() returns boolean language sql as $$select false$$;`);
 await assert.rejects(()=>reopen(),/Only system admins/);
+await assert.rejects(()=>rangeClose('2027-09-01','2027-09-01'),/Only system admins/);
 await db.close();
 console.log('PASS reopening: selected dates, restored capacity, no double restoration, workforce isolation, authorization, and unchanged bid snapshots');
 console.log('PASS closure SQL executes: cutoff, pending protection, occupied protection, holiday exception, CPC/DEV isolation, and repeat guard');

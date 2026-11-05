@@ -1,3 +1,9 @@
+## Closing a date range
+
+Install `close_slot_date_range.sql` after the existing closure routines. In Unused Slot Closures, set **Close from** and **Close through**, then select **Close unused slots**. Both dates are inclusive; matching dates target one day. Leave both blank for the existing all-date action.
+
+Date-range closing uses the saved round and per-date slot count. It permits additional ranges after a rule has run, skips dates that still have rule-closed slots, and never reduces four-slot CPC dates or DEV inventory. Reopen a date before closing it again with a different count. Occupied slots, pending bids, round cutoffs, and admin authorization remain protected. Installing the routine does not change inventory.
+
 ## Four-slot date protection
 
 Install `preserve_four_slot_days.sql` to upgrade an existing closure routine without replacing later fixes. Closures apply only to CPC; the database rejects DEV closure calls. DEV remains selectable only to reopen earlier rule closures. All CPC dates with four slots are skipped, regardless of holiday records or week boundaries. The upgrade does not reopen previously closed slots; use the existing date-range reopening control for those dates.
