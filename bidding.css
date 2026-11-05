@@ -13536,3 +13536,10 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
     text-align: right;
   }
 }
+
+/* Use the app warning red for exhausted area-wide leave buckets. */
+.app-main [data-cpc-leave-remaining][data-exhausted="true"],
+.app-main [data-dev-leave-remaining][data-exhausted="true"],
+#intake-page .intake-balance-value[data-exhausted="true"] strong {
+  color: #991b1b;
+}
