@@ -5118,6 +5118,16 @@ function leaveDraftPreSubmissionMessageWithCache(drafts = leaveDraftQueue) {
   return "";
 }
 
+function leaveDraftAccrualWarning() {
+  const round = currentRoundNumber();
+  if (round !== 4 || !leaveDraftQueue.length) return "";
+  const hoursPerDay = leaveHoursPerDayForInitials();
+  const availableHours = currentUserLeaveAllowanceHours() + leaveHolidayCreditsForRound(round) * hoursPerDay;
+  const projectedHours = leaveProjectedChargedDays() * hoursPerDay;
+  if (projectedHours <= availableHours) return "";
+  return `Your bid dates will exceed your accrued leave and holiday buyback hours by ${formatEstimatedLeaveDays(projectedHours - availableHours)} hours. Make sure you will have enough leave accumulated to cover these days.\n\nSubmit these bids anyway?`;
+}
+
 async function submitLeaveDraftBatch() {
   if (!canSubmitBueBid()) {
     warnUnconfirmedBidder("submit leave bids");
@@ -5169,6 +5179,9 @@ async function submitLeaveDraftBatch() {
     setLeaveBuilderStatus(capacityMessage, "error");
     return;
   }
+
+  const accrualWarning = leaveDraftAccrualWarning();
+  if (accrualWarning && !window.confirm(accrualWarning)) return;
 
   const batchId = `leave-batch-${currentUser.initials.toLowerCase()}-${Date.now()}`;
   const submittedAt = formatDateTime(new Date());
