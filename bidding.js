@@ -3567,11 +3567,12 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
   });
   if (validationMessage) throw new Error(validationMessage);
 
-  const capacityMessage = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{
+  const capacityMessage = leaveAreaCapacityMessage(area, person.bidAs, [{
     area,
     bidAs: person.bidAs,
     initials: person.initials,
-  }]);
+    dateKeys: allDateKeys,
+  }], person.ghostBidder);
   if (capacityMessage) throw new Error(capacityMessage);
 
   const availabilityMessage = person.ghostBidder ? bidderLeaveAvailabilityMessage(person, area, allDateKeys) : "";
@@ -3686,7 +3687,7 @@ function manualLeavePreflight(panel) {
       const limitError = manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges });
       if (limitError) errors.push(limitError);
       if (!days) errors.push("Select at least one chargeable leave day.");
-      const balanceError = person.ghostBidder ? "" : leaveAreaCapacityMessage(area, person.bidAs, [{ area, bidAs: person.bidAs, initials: person.initials, days, dateKeys: keys, round }]);
+      const balanceError = leaveAreaCapacityMessage(area, person.bidAs, [{ area, bidAs: person.bidAs, initials: person.initials, days, dateKeys: keys, round }], person.ghostBidder);
       if (balanceError) errors.push(balanceError);
     }
     const used = leaveRoundUsageForInitials(person.initials, round).reduce((total, item) => total + leaveItemChargedDays(item), 0);
@@ -4587,17 +4588,18 @@ function areaLeaveBucketTotals(area = currentViewArea(), extraItems = []) {
   };
 }
 
-function leaveAreaCapacityMessage(area, bidAs, extraItems = []) {
-  return withLeaveReadCache(() => leaveAreaCapacityMessageWithCache(area, bidAs, extraItems));
+function leaveAreaCapacityMessage(area, bidAs, extraItems = [], ghostBidder = false) {
+  return withLeaveReadCache(() => leaveAreaCapacityMessageWithCache(area, bidAs, extraItems, ghostBidder));
 }
 
-function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = []) {
+function leaveAreaCapacityMessageWithCache(area, bidAs, extraItems = [], ghostBidder = false) {
   const bucket = leaveSlotBucketForBidAs(bidAs, extraItems[0]?.initials || currentUser?.initials, area);
   if (!bucket) return "";
   const total = areaLeaveSlotBudget(area, bucket);
   const used = areaLeaveSlotUsedDays(area, bucket);
-  const projectedUsed = bidAs === "GL" ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
-  if (bidAs === "GL" ? used < total : projectedUsed <= total) return "";
+  const nonConsumingBid = bidAs === "GL" || ghostBidder;
+  const projectedUsed = nonConsumingBid ? used : areaLeaveSlotUsedDays(area, bucket, extraItems);
+  if (nonConsumingBid ? used < total : projectedUsed <= total) return "";
 
   const label = bucket === "dev" ? "DEV" : "CPC";
   return `${area} ${label} leave balance is exhausted (${formatRoundedUpLeaveDays(used)} used of ${formatRoundedUpLeaveDays(total)} estimated days). No additional leave bids can be submitted in that bucket.`;
@@ -4911,10 +4913,10 @@ function addOrUpdateLeaveSubmission() {
     return;
   }
 
-  const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
+  const capacityMessage = leaveAreaCapacityMessage(currentUser.area, currentUserBidAs(), [
     ...leaveDraftQueue,
-    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays },
-  ]);
+    { area: currentUser.area, bidAs: currentUserBidAs(), initials: currentUser.initials, days: chargedDays, dateKeys },
+  ], currentUser.ghostBidder);
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
     return;
@@ -5165,7 +5167,7 @@ async function submitLeaveDraftBatch() {
     return;
   }
 
-  const capacityMessage = currentUser.ghostBidder ? "" : leaveAreaCapacityMessage(
+  const capacityMessage = leaveAreaCapacityMessage(
     currentUser.area,
     currentUserBidAs(),
     leaveDraftQueue.map((draft) => ({
@@ -5173,7 +5175,8 @@ async function submitLeaveDraftBatch() {
       area: currentUser.area,
       bidAs: currentUserBidAs(),
       initials: currentUser.initials,
-    }))
+    })),
+    currentUser.ghostBidder
   );
   if (capacityMessage) {
     setLeaveBuilderStatus(capacityMessage, "error");
