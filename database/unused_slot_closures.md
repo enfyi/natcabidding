@@ -1,8 +1,10 @@
-## Closing a date range
+## Independent specific-date closures
 
-Install `close_slot_date_range.sql` after the existing closure routines. In Unused Slot Closures, set **Close from** and **Close through**, then select **Close unused slots**. Both dates are inclusive; matching dates target one day. Leave both blank for the existing all-date action.
+Install the updated `close_slot_date_range.sql` after the existing closure and public-reader routines. **Close specific dates — CPC only** has its own round, per-date slot count, inclusive dates, close button, and reopen button. Both dates are required; matching dates target one day.
 
-Date-range closing uses the saved round and per-date slot count. It permits additional ranges after a rule has run, skips dates that still have rule-closed slots, and never reduces four-slot CPC dates or DEV inventory. Reopen a date before closing it again with a different count. Occupied slots, pending bids, round cutoffs, and admin authorization remain protected. Installing the routine does not change inventory.
+Specific-date operations do not read, create, update, or rearm saved area rules. They work with no saved rule, or while an area rule is already applied. Separate `CAPACITY-DATE-CLOSED-` markers keep their inventory and reopening isolated from area-rule slots; the calendar includes both kinds in its closed-slot display. Existing area-rule settings, applied timestamps, and closed-slot counts are unchanged. Existing closures from the older shared range action retain their original area-rule classification; installation does not relabel inventory.
+
+Repeating a range skips dates still closed by the specific-date action. Reopen those dates with **Reopen specific-date closures** before applying a different count. CPC-only, four-slot, occupied-slot, pending-bid, round-cutoff, and admin protections remain. Older shared range RPC calls receive a refresh message instead of changing saved rules. Installation changes routines only.
 
 ## Four-slot date protection
 
