@@ -1,3 +1,7 @@
+## Four-slot date protection
+
+Install `preserve_four_slot_days.sql` to upgrade an existing closure routine without replacing later fixes. Closures apply only to CPC; the database rejects DEV closure calls. DEV remains selectable only to reopen earlier rule closures. All CPC dates with four slots are skipped, regardless of holiday records or week boundaries. The upgrade does not reopen previously closed slots; use the existing date-range reopening control for those dates.
+
 # Unused-slot closure deployment notes
 
 ## All-area enforcement after Round 3 (October 25, 2026)
@@ -45,7 +49,7 @@ database enforces the restriction independently of the browser version.
 The application changes and `unused_slot_closures.sql` belong together. This is
 an opt-in admin action per bid year, area, and workforce. Fully reopen the rule before applying it again. Saving a rule
 does not automatically run it. Choose TMU / CPC / Round 2 / 1 and save; other
-areas default to Round 3 / 1. DEV requires a separate rule.
+areas default to Round 3 / 1. DEV cannot be closed by these rules.
 
 Before deployment, verify the target database has the current capacity table,
 `read_public_leave_slots(integer)`, submission preflight, member single/batch
@@ -61,9 +65,7 @@ A missing closure API disables the panel and displays an installation message.
 Closures preserve occupied inventory and unrepresented pending/approved requests.
 They use submission's area/workforce/date advisory locks, change only the chosen
 workforce, record per-date audit entries, and cannot run again while rule-closed slots remain. Capacity markers are excluded from the public reader's full-day
-manual-unavailability flag. Holiday exemptions use four slots in the chosen
-group and a holiday in the same Sunday–Saturday week, from `holidays` for that
-year. Verify that those configured holiday weeks match the intended exceptions.
+manual-unavailability flag. All four-slot dates in the chosen group are exempt, regardless of configured holidays.
 The round must be marked closed or have an elapsed `ends_at` before applying.
 
 Capacity changes affect calendar fullness, bidder selection and submission,
