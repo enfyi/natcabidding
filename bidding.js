@@ -20826,9 +20826,9 @@ function syncSlotClosureForm() {
   const rule = slotClosureRules.find((row) => row.area_name === area && row.slot_group === group);
   document.querySelector("[data-slot-closure-round]").value = String(rule?.after_round ?? 3);
   document.querySelector("[data-slot-closure-count]").value = String(rule?.close_count ?? 1);
-  document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady;
+  document.querySelector("[data-save-slot-closure]").disabled = !slotClosureRulesReady || group !== "cpc";
   document.querySelector("[data-save-slot-closure]").textContent = rule ? "Save changes" : "Save rule";
-  document.querySelector("[data-apply-slot-closure]").disabled = !slotClosureRulesReady || !rule || Boolean(rule.applied_at);
+  document.querySelector("[data-apply-slot-closure]").disabled = !slotClosureRulesReady || group !== "cpc" || !rule || Boolean(rule.applied_at);
   document.querySelector("[data-reopen-slot-closure]").disabled = !slotClosureRulesReady || !rule?.applied_at || !(Number(rule.closed_slots) > 0);
   document.querySelectorAll("[data-slot-closure-reopen-start], [data-slot-closure-reopen-end]").forEach((input) => {
     input.min = BID_LEAVE_YEAR_START_KEY;
@@ -20862,6 +20862,9 @@ async function loadSlotClosureRules() {
 async function saveOrApplySlotClosure(apply) {
   if (!hasSystemAdminAccess() || !slotClosureRulesReady) return;
   const { area, group } = slotClosureSelection();
+  if (group !== "cpc") {
+    setText("[data-slot-closure-status]", "Unused slot closures apply only to CPC. DEV slots remain unchanged."); return;
+  }
   const round = Number(document.querySelector("[data-slot-closure-round]").value);
   const count = Number(document.querySelector("[data-slot-closure-count]").value);
   if (!ZLA_AREAS.includes(area) || !["cpc", "dev"].includes(group) || !Number.isInteger(round) || round < 1 || round > 6 || !Number.isInteger(count) || count < 1 || count > 99) {

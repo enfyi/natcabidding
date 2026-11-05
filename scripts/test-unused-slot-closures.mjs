@@ -17,9 +17,9 @@ insert into bidders(area_id,first_name,last_name,initials,bid_role) select id,'P
 insert into bid_rounds(bid_year_id,round_number,label,status) select id,3,'Round 3','open' from bid_years;
 insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
 select y.id,a.id,d::date,g,upper(left(g,1))||n from bid_years y cross join areas a
-cross join (values('2027-06-10'),('2027-06-11'),('2027-06-12'),('2027-12-22')) dates(d)
+cross join (values('2027-06-10'),('2027-06-11'),('2027-06-12'),('2027-12-22'),('2027-12-26'),('2027-07-05')) dates(d)
 cross join (values('cpc'),('dev')) groups(g) cross join generate_series(1,4) n
-where g='dev' or n<=3 or d='2027-12-22';
+where g='dev' or n<=3 or d in ('2027-12-22','2027-12-26','2027-07-05');
 insert into holidays(bid_year_id,holiday_date,name) select id,'2027-12-25','Christmas' from bid_years;
 update leave_slots set bidder_id=(select id from public.bidders where initials='AD'),slot_initials='AD',status='approved' where slot_group='cpc' and slot_code='C1';
 insert into leave_requests(bid_year_id,bidder_id,round_number,priority,status,requested_start_date,requested_end_date)
@@ -32,7 +32,9 @@ await db.exec(`insert into leave_requests(bid_year_id,bidder_id,round_number,pri
  update leave_slots set source_leave_request_id=(select id from leave_requests where status='approved') where slot_date='2027-06-10' and slot_group='cpc' and slot_code='C1';
  insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code,status)
  select y.id,a.id,'2027-06-12','cpc','MANUAL-CLOSED','unavailable' from bid_years y cross join areas a;`);
-await db.exec(await read('unused_slot_closures.sql'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261020162311_show_round_based_slot_removal.sql', import.meta.url),'utf8'));
+await db.exec(await read('preserve_four_slot_days.sql'));
+await db.exec(await read('preserve_four_slot_days.sql'));
 await db.exec(await read('reopen_unused_slots.sql'));
 await db.exec(await read('edit_slot_closure_rules.sql'));
 // Preserve full records, not only counts, to catch changed dates, status,
@@ -57,6 +59,12 @@ const caps = (await db.query(`select slot_date::text as day,cpc_capacity from le
 assert.deepEqual(caps,[{day:'2027-06-10',cpc_capacity:1},{day:'2027-06-11',cpc_capacity:2}]);
 assert.equal((await db.query(`select count(*)::int as n from leave_slots where slot_date='2027-06-11' and slot_group='cpc' and status='open'`)).rows[0].n,1,'Pending bid retains an available slot');
 assert.equal((await db.query(`select count(*)::int as n from leave_slots where slot_date='2027-12-22' and slot_group='cpc' and status<>'unavailable'`)).rows[0].n,4);
+for (const date of ['2027-12-22','2027-12-26','2027-07-05']) {
+ assert.equal((await db.query(`select count(*)::int as n from leave_slots where slot_date=$1 and slot_group='cpc' and not starts_with(slot_code,'CAPACITY-')`,[date])).rows[0].n,4,'Four-slot dates stay at four even outside the configured holiday week');
+}
+await db.exec(`select save_slot_closure_rule(2027,'Area A','dev',3,2)`);
+await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','dev')`), /only to CPC/);
+assert.deepEqual((await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows,devBefore);
 await assert.rejects(db.query(`select apply_slot_closure_rule(2027,'Area A','cpc')`),/already been applied/);
 await db.exec(await read('public_leave_slots_read.sql'));
 const schedule = (await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule;
@@ -104,12 +112,19 @@ assert.equal((await db.query(`select status from leave_slots where slot_code='MA
 // reopened -> full after the new slot is taken.
 await db.exec(`insert into areas(code,name) values('area-b','Area B'),('tmu','TMU');
  insert into bid_rounds(bid_year_id,round_number,label,status) select id,2,'Round 2','closed' from bid_years;`);
-for (const [area,group,capacity] of [['Area B','cpc',3],['Area B','dev',4],['TMU','cpc',2],['TMU','dev',2]]) {
+for (const [area,group,capacity] of [['Area B','cpc',3],['Area B','dev',3],['TMU','cpc',2],['TMU','dev',2]]) {
  await db.query(`insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code,status,slot_initials)
    select y.id,a.id,'2027-08-10',$2,'TEST-'||n,case when n<$3 then 'approved' else 'open' end,
      case when n<$3 then 'OCC-'||n else null end
      from bid_years y cross join areas a cross join generate_series(1,$3::int) n where a.name=$1`,[area,group,capacity]);
  const before = await bidSnapshot();
+ if (group === 'dev') {
+   await db.query(`select save_slot_closure_rule(2027,$1,$2,3,1)`,[area,group]);
+   const inventory = (await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows;
+   await assert.rejects(db.query(`select apply_slot_closure_rule(2027,$1,$2)`,[area,group]), /only to CPC/);
+   assert.deepEqual((await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows, inventory, 'DEV inventory stays unchanged at every capacity');
+   continue;
+ }
  await db.query(`select save_slot_closure_rule(2027,$1,$2,$3,1)`,[area,group,area==='TMU'?2:3]);
  await db.query(`select apply_slot_closure_rule(2027,$1,$2)`,[area,group]);
  let d=(await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule.find(d=>d.area_name===area&&d.slot_date==='2027-08-10');

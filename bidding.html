@@ -1693,13 +1693,13 @@
               <section class="panel admin-section-target" id="admin-slot-closures-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact"><div>
                   <h3>Unused Slot Closures</h3>
-                  <p>Save separate rules for each area and slot group. Edit the round or slot count and select Save changes to update a saved rule. Saving does not change existing slots. Fully reopen a rule before applying it again.</p>
+                  <p>Slot closures apply only to CPC. DEV slots remain unchanged. Save separate rules for each area. Edit the round or slot count and select Save changes to update a saved rule. Saving does not change existing slots. Fully reopen a rule before applying it again.</p>
                 </div></div>
                 <label class="testing-select-row">Area<select data-slot-closure-area></select></label>
-                <label class="testing-select-row">Slot group<select data-slot-closure-group><option value="cpc">CPC</option><option value="dev">DEV</option></select></label>
+                <label class="testing-select-row">Slot group<select data-slot-closure-group><option value="cpc">CPC</option><option value="dev">DEV (reopen only)</option></select></label>
                 <label class="testing-select-row">After round<select data-slot-closure-round><option value="1">Round 1</option><option value="2">Round 2</option><option value="3" selected>Round 3</option><option value="4">Round 4</option><option value="5">Round 5</option><option value="6">Round 6</option></select></label>
                 <label class="testing-select-row">Unused slots to close per date<input type="number" min="1" max="99" step="1" value="1" data-slot-closure-count></label>
-                <p>Occupied and pending slots are always protected. Four-slot holiday-week dates are exempt. A CPC rule does not change DEV availability. No closures happen until a saved rule is applied.</p>
+                <p>Occupied and pending slots are always protected. All four-slot dates are exempt. A CPC rule does not change DEV availability. No closures happen until a saved rule is applied.</p>
                 <p data-slot-closure-summary></p>
                 <div class="button-row"><button class="secondary-action" type="button" data-save-slot-closure disabled>Save rule</button><button class="secondary-action" type="button" data-apply-slot-closure disabled>Close unused slots</button></div>
                 <h4>Reopen rule-closed slots</h4>

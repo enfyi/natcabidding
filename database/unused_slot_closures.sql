@@ -63,6 +63,9 @@ begin
   if auth.uid() is null or not public.is_current_admin() then
     raise exception 'Only system admins can close unused slots.';
   end if;
+  if requested_slot_group is distinct from 'cpc' then
+    raise exception 'Unused slot closures apply only to CPC. DEV slots must remain unchanged.';
+  end if;
   select r.* into strict rule from public.slot_closure_rules r
     join public.bid_years y on y.id = r.bid_year_id
     join public.areas a on a.id = r.area_id
@@ -95,11 +98,9 @@ begin
     from public.leave_slots s where s.bid_year_id = rule.bid_year_id and s.area_id = rule.area_id
     group by s.slot_date order by s.slot_date
   loop
-    -- Holiday weeks use Sunday-Saturday, matching the bidding calendar.
+    -- Four-slot dates retain all four slots, regardless of holiday metadata.
     if (case when rule.slot_group = 'cpc' then day.cpc else day.dev end) = 4
-      and exists (select 1 from public.holidays h where h.bid_year_id = rule.bid_year_id
-        and h.holiday_date between day.slot_date - extract(dow from day.slot_date)::integer
-        and day.slot_date - extract(dow from day.slot_date)::integer + 6) then continue; end if;
+      then continue; end if;
     -- Pending requests normally do not own inventory rows yet. Keep enough
     -- open slots for them and for any approved request awaiting slot sync.
     select count(distinct lr.id)::integer into pending_count
