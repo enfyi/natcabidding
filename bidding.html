@@ -513,7 +513,7 @@
 
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
-                <h3 class="round-rule-subheader">Rounds 1-3 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
+                <h3 class="round-rule-subheader">Personal leave allowance applies unless Bidding Setup permits exceeding it for this round.</h3>
                 <dl>
                   <div><dt>Round 1 Maximum</dt><dd>1 or 2 weeks</dd></div>
                   <div><dt>Round 2 Maximum</dt><dd>10 days</dd></div>
@@ -843,7 +843,7 @@
               </section>
               <section class="panel allowance-card">
                 <h2>Round Rules</h2>
-                <h3 class="round-rule-subheader">Rounds 1-3 may not exceed 2027 accrued leave. Rounds 5-6 may not exceed accrued leave plus saved leave.</h3>
+                <h3 class="round-rule-subheader">Personal leave allowance applies unless Bidding Setup permits exceeding it for this round.</h3>
                 <div class="current-round-rule">
                   <span data-round-rule-heading>Round 1 Rules</span>
                   <strong data-round-rule-limit>1 or 2 weeks</strong>
@@ -1633,6 +1633,7 @@
           <nav class="admin-section-nav" aria-label="Bidding setup sections">
             <button type="button" data-admin-section-target="admin-bid-year-section">Bid year</button>
             <button type="button" data-admin-section-target="admin-policy-section">Bid policy</button>
+            <button type="button" data-admin-section-target="admin-leave-allowance-section">Leave allowance</button>
             <button type="button" data-admin-section-target="admin-calendar-display-section">Calendar display</button>
             <button type="button" data-admin-section-target="admin-slot-closures-section">Slot closures</button>
             <button type="button" data-admin-section-target="admin-pilot-section">Pilot rounds</button>
@@ -1677,6 +1678,22 @@
                     <option value="4">Round 4</option>
                   </select>
                 </label>
+              </section>
+              <section class="panel admin-section-target" id="admin-leave-allowance-section" tabindex="-1" data-system-admin-only hidden>
+                <div class="panel-header compact"><div>
+                  <h3>Personal Leave Allowance</h3>
+                  <p>Allow bidders to exceed their accrued and saved personal leave allowance starting in the selected round and continuing in later rounds. Applies to this bid year. Per-round day limits, bid windows, and date availability still apply.</p>
+                </div></div>
+                <label class="toggle-row"><input type="checkbox" role="switch" data-leave-over-accrual-enabled disabled /><span>Allow bids above personal leave allowance</span></label>
+                <label class="testing-select-row">Starting round<select data-leave-over-accrual-round disabled>
+                  <option value="1">Round 1</option><option value="2">Round 2</option><option value="3">Round 3</option><option value="4" selected>Round 4</option><option value="5">Round 5</option><option value="6">Round 6</option>
+                </select></label>
+                <button class="primary-action" type="button" data-save-leave-over-accrual disabled>Save Leave Allowance Policy</button>
+                <p class="form-status" role="status" aria-live="polite" data-leave-over-accrual-status></p>
+                <h4>Approval Override · Rounds 4–6</h4>
+                <label class="toggle-row"><input type="checkbox" role="switch" data-leave-approval-over-accrual-enabled checked disabled /><span>Allow intake and admins to approve bids above personal leave allowance</span></label>
+                <p>Enabled by default for rounds 4–6, independently of the submission setting. Intake staff and admins can approve across all areas. Date availability and per-round day limits still apply. Changes to this toggle save automatically.</p>
+                <p class="form-status" role="status" aria-live="polite" data-leave-approval-policy-status></p>
               </section>
               <section class="panel admin-section-target" id="admin-calendar-display-section" tabindex="-1" data-system-admin-only hidden>
                 <div class="panel-header compact"><div>

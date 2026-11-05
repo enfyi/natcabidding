@@ -554,3 +554,98 @@ try {
   if(!error.message.includes('leave balance is exhausted')) throw error;
 }
 console.log('PASS two GL bidders share one occupied RDO line, stay visible, and consume no line or leave slots');
+
+// Configurable over-accrual policy preserves the installed bidding functions.
+for (const file of ['rls_area_policies.sql', 'bid_window_testing_admin.sql', 'tmu_calendar_display.sql', 'round_four_over_accrual.sql']) {
+  await db.exec(fs.readFileSync(root + file, 'utf8'));
+}
+await db.exec(fs.readFileSync(root + 'round_four_over_accrual.sql', 'utf8')); // idempotent
+for (const startingRound of [null, 1, 2, 3, 4, 5, 6]) {
+  await db.query('update public.bid_year_settings set leave_over_accrual_from_round=$2 where bid_year_id=$1', [year, startingRound]);
+  for (let round = 1; round <= 6; round++) {
+    const allowed = (await db.query('select private.leave_over_accrual_allowed($1,$2) allowed', [year, round])).rows[0].allowed;
+    if (allowed !== (startingRound !== null && round >= startingRound)) throw new Error(`Policy mismatch: ${startingRound}/${round}`);
+  }
+}
+// F2 has an effective RDO line and open November dates from the round-four fixture.
+const policyBidder='00000000-0000-0000-0000-000000000281';
+await db.exec(`delete from public.leave_requests where bidder_id='${policyBidder}';
+  update public.bidders set leave_slot_allowance=0 where id='${policyBidder}';
+  set test.uid='00000000-0000-0000-0000-000000000282'; set test.email='f2@example.test';`);
+const policySubmit = async (round) => {
+  await db.query('update public.bid_year_settings set test_bid_round=$2 where bid_year_id=$1', [year, round]);
+  return db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',
+    [JSON.stringify([{start_date:'2027-11-02',end_date:'2027-11-02',round,rdo_line_code:'ROUND4-F2'}])]);
+};
+for (const [start, round, expected] of [[null,4,false],[5,4,false],[4,3,false],[4,4,true],[4,5,true],[4,6,true],[2,2,true]]) {
+  await db.query('update public.bid_year_settings set leave_over_accrual_from_round=$2 where bid_year_id=$1', [year,start]);
+  let passed=false;
+  try {await policySubmit(round); passed=true;} catch (error) {if (!error.message.includes('allowance')) throw error;}
+  if (passed!==expected) throw new Error(`Submission policy mismatch: start ${start}, round ${round}`);
+  await db.query('delete from public.leave_requests where bidder_id=$1', [policyBidder]);
+}
+try {
+  await db.query('select public.set_leave_over_accrual(2027,4)');
+  throw new Error('Non-admin unexpectedly changed the policy');
+} catch (error) {if (!error.message.includes('Only system admins')) throw error;}
+console.log('PASS configurable over-accrual policy, all thresholds, submissions, disabled policy, non-admin denial, and idempotent install');
+// Admin writes persist the selected round and the disabled state in the reader.
+await db.query('update public.bidders set role=\'admin\' where id=$1', [policyBidder]);
+for (const startingRound of [5,null,4]) {
+  await db.query('select public.set_leave_over_accrual(2027,$1)', [startingRound]);
+  const settings=(await db.query('select public.read_leave_allowance_settings(2027) settings')).rows[0].settings;
+  if(settings.leave_over_accrual_from_round!==startingRound) throw new Error('Saved policy did not round-trip');
+}
+try {
+  await db.query('select public.set_leave_over_accrual(2027,7)');
+  throw new Error('Invalid starting round accepted');
+} catch(error) {if(!error.message.includes('between 1 and 6')) throw error;}
+console.log('PASS admin policy save/read and invalid-round rejection');
+
+await db.exec(fs.readFileSync(fileURLToPath(new URL('../supabase/migrations/20260930063416_grouped_leave_intake_reviews.sql',import.meta.url)),'utf8'));
+await db.exec(fs.readFileSync(root+'leave_approval_over_accrual.sql','utf8'));
+await db.exec(fs.readFileSync(root+'leave_approval_over_accrual.sql','utf8'));
+const reviewArea=(await db.query('select id from public.areas where id<>$1 limit 1',[bidder.area_id])).rows[0].id;
+const reviewer='00000000-0000-0000-0000-000000000901';
+const reviewAuth='00000000-0000-0000-0000-000000000902';
+await db.query(`insert into public.bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,role,bid_role)
+values($1,$2,$3,'Cross','Reviewer','XR','xr@example.test','intake','CPC')`,[reviewer,reviewAuth,reviewArea]);
+const asTarget=()=>db.exec(`set test.uid='00000000-0000-0000-0000-000000000282'; set test.email='f2@example.test';`);
+const asReviewer=()=>db.exec(`set test.uid='${reviewAuth}'; set test.email='xr@example.test';`);
+const resetApprovalFixture=async()=>{
+  await db.query('delete from public.leave_requests where bidder_id=$1',[policyBidder]);
+  await db.query(`update public.leave_slots set status='open',bidder_id=null,slot_initials=null,source_leave_request_id=null where bidder_id=$1`,[policyBidder]);
+};
+if((await db.query('select leave_approval_over_accrual from public.bid_year_settings where bid_year_id=$1',[year])).rows[0].leave_approval_over_accrual!==true)
+  throw new Error('Approval override must default to enabled');
+await db.query(`update public.bidders set role='controller' where id=$1`,[policyBidder]);
+await db.query('update public.bid_year_settings set leave_over_accrual_from_round=1 where bid_year_id=$1',[year]);
+for(const enabled of [false,true]) for(const round of [1,2,3,4,5,6]) {
+  await resetApprovalFixture(); await asTarget();
+  await db.query('update public.bid_year_settings set leave_approval_over_accrual=$2 where bid_year_id=$1',[year,enabled]);
+  await policySubmit(round);
+  const id=(await db.query(`select id from public.intake_submissions where bidder_id=$1 and submission_type='leave' and status='pending' order by created_at desc limit 1`,[policyBidder])).rows[0].id;
+  await asReviewer();
+  let approved=false;
+  try {await db.query(`select public.review_bidding_submission($1,'approved')`,[id]);approved=true;}
+  catch(error){if(!error.message.includes('personal leave allowance')) throw error;}
+  if(approved!==(enabled&&round>=4)) throw new Error(`Cross-area approval mismatch: enabled ${enabled}, round ${round}`);
+}
+for(const role of ['intake','admin','controller']) {
+  await resetApprovalFixture(); await asTarget();
+  await db.query(`update public.bidders set role=$2 where id=$1`,[reviewer,role]);
+  await db.query(`delete from public.intake_schedules where intake_user_id=$1`,[reviewer]);
+  if(role==='controller') await db.query(`insert into public.intake_schedules(bid_year_id,area_id,intake_user_id,starts_at,ends_at)
+    values($1,$2,$3,now()-interval '10 minutes',now()+interval '1 hour')`,[year,reviewArea,reviewer]);
+  await db.query('update public.bid_year_settings set leave_approval_over_accrual=true,test_bid_round=4 where bid_year_id=$1',[year]);
+  await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb)',[JSON.stringify([
+    {start_date:'2027-11-02',end_date:'2027-11-02',round:4,rdo_line_code:'ROUND4-F2'},
+    {start_date:'2027-11-03',end_date:'2027-11-03',round:4,rdo_line_code:'ROUND4-F2'},
+  ])]);
+  const ids=(await db.query(`select id from public.intake_submissions where bidder_id=$1 and submission_type='leave' and status='pending' order by id`,[policyBidder])).rows.map(row=>row.id);
+  await asReviewer();
+  await db.query(`select public.review_leave_submission_group($1::uuid[],'approved')`,[ids]);
+  if((await db.query(`select count(*)::int n from public.leave_requests where bidder_id=$1 and status='approved'`,[policyBidder])).rows[0].n!==2)
+    throw new Error(`Cross-area group approval failed for ${role}`);
+}
+console.log('PASS approval default on, toggle off, Rounds 1–3 blocked, Rounds 4–6 allowed, cross-area intake/admin/scheduled group approvals and idempotent install');

@@ -48,8 +48,8 @@ const context = vm.createContext({
   persistIntakeDecision: async () => { saves++; return true; },
   updateConfirmedIntakeDecision() {}, queueBidVerifiedEmail() {}, scheduleIntakeDecisionRefresh() {}, setPage() {},
 });
-vm.runInContext('let leaveReadCache = null;\n' + [
-  'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
+vm.runInContext('let leaveReadCache = null; let leaveOverAccrualFromRound = null; let leaveApprovalOverAccrualEnabled = false;\n' + [
+  'leaveOverAccrualAllowed', 'leaveApprovalOverAccrualAllowed', 'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
   'renderIntakeLeaveBalance', 'renderIntakeQueueWithCache', 'renderIntakeQueue', 'approveIntakeItem',
   'intakeLeaveApprovalAttributes', 'paginateIntakeItems',
 ].map(fn).join('\n'), context);
@@ -114,6 +114,25 @@ context.intakeReviewItemById = () => request;
 hours = 8;
 await context.approveIntakeItem(request.id);
 assert.equal(saves, 1, 'Valid approval saves without an extra read');
+delete request.reviewNote;
+
+// Approval overrides are independent of submission thresholds and limited to R4–6.
+allowance = 0;
+for (const enabled of [false, true]) {
+  vm.runInContext(`leaveApprovalOverAccrualEnabled = ${enabled}; leaveOverAccrualFromRound = 1;`, context);
+  for (let round = 1; round <= 6; round++) {
+    request.round = round;
+    const allowed = enabled && round >= 4;
+    assert.equal(context.leaveApprovalOverAccrualAllowed(round), allowed);
+    assert.equal(context.intakeLeaveApprovalAttributes(request).includes('disabled'), !allowed);
+    const before = saves;
+    await context.approveIntakeItem(request.id);
+    assert.equal(saves - before, Number(allowed), `Approval: enabled ${enabled}, round ${round}`);
+  }
+}
+vm.runInContext('leaveApprovalOverAccrualEnabled = false; leaveOverAccrualFromRound = null;', context);
+request.round = 2;
+allowance = 200;
 delete request.reviewNote;
 
 // Index work must stay linear, even when the queue contains many cards per bidder.
