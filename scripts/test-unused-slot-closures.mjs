@@ -151,8 +151,10 @@ await db.exec(`insert into areas(code,name) values('range','Range Test');
  cross join (values('2027-09-01'),('2027-09-02'),('2027-09-03'),('2027-09-04')) dates(d)
  cross join (values('cpc'),('dev')) groups(g) cross join generate_series(1,4) n
  where a.name='Range Test' and (n<=3 or d='2027-09-04');
- select save_slot_closure_rule(2027,'Range Test','cpc',3,1);`);
-const rangeClose = async (start,end,group='cpc') => (await db.query(`select apply_slot_closure_range(2027,'Range Test',$1,$2::date,$3::date) as result`,[group,start,end])).rows[0].result.closed_slots;
+`);
+const rangeClose = async (start,end,group='cpc') => (await db.query(`select close_specific_date_slots(2027,'Range Test',$1,$2::date,$3::date,3,1) as result`,[group,start,end])).rows[0].result.closed_slots;
+const ruleSnapshot=async()=> (await db.query(`select coalesce(jsonb_agg(to_jsonb(r) order by r.area_id,r.slot_group),'[]') as rules from slot_closure_rules r`)).rows[0].rules;
+const rulesBeforeRange=await ruleSnapshot();
 const rangeBefore=await bidSnapshot();
 const devInventory=(await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows;
 await assert.rejects(()=>rangeClose('2027-09-01',null),/Choose both closing dates/);
@@ -165,8 +167,24 @@ assert.equal(await rangeClose('2027-09-02','2027-09-02'),0,'Repeated range canno
 assert.equal(await rangeClose('2027-09-01','2027-09-04'),2,'Overlap skips closed dates and four-slot dates');
 assert.deepEqual((await db.query(`select * from leave_slots where slot_group='dev' order by id`)).rows,devInventory);
 assert.deepEqual(await bidSnapshot(),rangeBefore,'Range closing preserves occupied slots and all bids');
-await db.exec(`select reopen_slot_closure_rule(2027,'Range Test','cpc','2027-09-02','2027-09-02')`);
+await db.exec(`select reopen_specific_date_slots(2027,'Range Test','cpc','2027-09-02','2027-09-02')`);
 assert.equal(await rangeClose('2027-09-02','2027-09-02'),1,'A reopened date can be closed again independently');
+assert.deepEqual(await ruleSnapshot(),rulesBeforeRange,'Independent close/reopen never creates or changes saved area rules');
+await db.exec(`select save_slot_closure_rule(2027,'Range Test','cpc',4,2);
+ update slot_closure_rules set applied_at=now() where area_id=(select id from areas where name='Range Test');`);
+const appliedRules=await ruleSnapshot();
+await db.exec(`select reopen_specific_date_slots(2027,'Range Test','cpc','2027-09-01','2027-09-03')`);
+assert.equal(await rangeClose('2027-09-02','2027-09-02'),1);
+assert.deepEqual(await ruleSnapshot(),appliedRules,'Applied timestamps, round and counts are unchanged by specific-date operations');
+const specificSchedule=(await db.query('select read_public_leave_slots(2027) as schedule')).rows[0].schedule.find(d=>d.area_name==='Range Test'&&d.slot_date==='2027-09-02');
+assert.equal(specificSchedule.cpc_closed,1,'Calendar displays independent closures');
+assert.equal(specificSchedule.cpc_capacity,2);
+// Add an area-rule closure on the same date and verify independent reopening preserves it.
+await db.exec(`update leave_slots set status='unavailable',slot_code='CAPACITY-CLOSED-'||id::text where id=(select s.id from leave_slots s join areas a on a.id=s.area_id where a.name='Range Test' and slot_date='2027-09-02' and slot_group='cpc' and status='open' limit 1);
+ update leave_slot_capacities set cpc_capacity=1 where area_id=(select id from areas where name='Range Test') and slot_date='2027-09-02';
+ select reopen_specific_date_slots(2027,'Range Test','cpc','2027-09-02','2027-09-02');`);
+assert.equal((await db.query(`select count(*)::int as n from leave_slots s join areas a on a.id=s.area_id where a.name='Range Test' and slot_code='CAPACITY-CLOSED-'||s.id::text`)).rows[0].n,1,'Specific reopening retains the area-rule slot');
+assert.deepEqual(await ruleSnapshot(),appliedRules);
 await db.exec(`update bid_rounds set status='open',ends_at=null where round_number=3;`);
 await assert.rejects(()=>rangeClose('2027-09-03','2027-09-03'),/must end/);
 console.log('PASS date-range closing: bounds, single date, overlap, repeat protection, reopening, four-slot exemption, DEV isolation and cutoff');
