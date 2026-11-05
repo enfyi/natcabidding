@@ -13231,7 +13231,7 @@ function renderIntakeAreaBalances() {
     const cells = [...totals].map(([area, groups]) => {
       const { total, used } = groups[bucket];
       const left = Math.max(0, total - used);
-      return `<td aria-label="${escapeHtml(area)} ${bucket.toUpperCase()}: ${formatRoundedUpLeaveDaysLabel(left)} left of ${formatRoundedUpLeaveDays(total)} total"><span class="intake-balance-value"><strong>${formatRoundedUpLeaveDays(left)}</strong><small>of ${formatRoundedUpLeaveDays(total)}</small></span></td>`;
+      return `<td aria-label="${escapeHtml(area)} ${bucket.toUpperCase()}: ${formatRoundedUpLeaveDaysLabel(left)} left of ${formatRoundedUpLeaveDays(total)} total"><span class="intake-balance-value" data-exhausted="${left === 0}"><strong>${formatRoundedUpLeaveDays(left)}</strong><small>of ${formatRoundedUpLeaveDays(total)}</small></span></td>`;
     }).join("");
     return `<tr><th scope="row">${bucket.toUpperCase()}</th>${cells}</tr>`;
   }).join("");
@@ -13247,6 +13247,11 @@ function renderLeaveBucketCards() {
 
   setText("[data-cpc-leave-remaining]", formatRoundedUpLeaveDaysLabel(cpcLeft));
   setText("[data-dev-leave-remaining]", formatRoundedUpLeaveDaysLabel(devLeft));
+  for (const [bucket, remaining] of [["cpc", cpcLeft], ["dev", devLeft]]) {
+    document.querySelectorAll(`[data-${bucket}-leave-remaining]`).forEach((element) => {
+      element.dataset.exhausted = String(remaining === 0);
+    });
+  }
   setText("[data-cpc-leave-detail]", `${formatRoundedUpLeaveDays(cpcUsedDays)} of ${formatRoundedUpLeaveDays(cpcTotalDays)} used`);
   setText("[data-dev-leave-detail]", `${formatRoundedUpLeaveDays(devUsedDays)} of ${formatRoundedUpLeaveDays(devTotalDays)} used`);
 }
