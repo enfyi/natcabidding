@@ -401,7 +401,14 @@ Install `tmu_calendar_display.sql` after `bid_window_testing_admin.sql` to enabl
 Apply `round_four_over_accrual.sql` after `tmu_calendar_display.sql` and the bidding
 installers. In **Bidding Setup → Leave allowance**, system admins can enable bids
 above personal accrued/saved leave from a selected round onward, or disable the
-exception. The policy is saved per bid year and applies to submissions, date
-changes, and intake approval. Existing settings default to Round 4 and later.
+exception. The policy is saved per bid year and applies to submissions and date
+changes. Existing settings default to Round 4 and later.
 Per-round day limits, bid windows, area capacity, and date availability still apply.
 Apply this installer again if older bidding installers replace its functions.
+
+Apply `leave_approval_over_accrual.sql` after `round_four_over_accrual.sql` for the
+separate **Approval Override** toggle in the same section. It defaults to enabled
+for Rounds 4–6, independently of the submission threshold. When disabled, approvals
+check personal allowance. Permanent and scheduled intake staff and admins can
+review individual dates and groups across all areas. Rounds 1–3 always check the
+personal allowance. The database enforces the approval policy as well as the UI.

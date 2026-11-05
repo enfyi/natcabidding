@@ -21,10 +21,10 @@ const context=vm.createContext({
   supabaseClient:()=>({rpc:async(name,params)=>{call={name,params};return {error:fail?new Error('Save failed'):null};}}),
   renderApp(){}, setText:(_,text)=>{message=text;},
 });
-vm.runInContext(`let leaveOverAccrualFromRound=null, leaveOverAccrualSettingsAvailable=false;
+vm.runInContext(`let leaveOverAccrualFromRound=null, leaveOverAccrualSettingsAvailable=false; let leaveApprovalOverAccrualEnabled=false, leaveApprovalPolicyAvailable=false;
 let calendarDisplaySettingsAvailable=false, tmuOneSlotOutlineEnabled=true, enforceBidWindows=true,
 bidWindowTestRound=null, bidWindowSettingsFallbackMessage='';\n`+
-  ['leaveOverAccrualAllowed','applyBidYearSettings','syncLeaveOverAccrualControls','saveLeaveOverAccrualSettings'].map(fn).join('\n'),context);
+  ['leaveApprovalOverAccrualAllowed','saveLeaveApprovalPolicy','leaveOverAccrualAllowed','applyBidYearSettings','syncLeaveOverAccrualControls','saveLeaveOverAccrualSettings'].map(fn).join('\n'),context);
 context.applyBidYearSettings({leave_over_accrual_from_round:4});
 context.syncLeaveOverAccrualControls();
 assert.equal(inputs['[data-leave-over-accrual-enabled]'].checked,true);
@@ -57,6 +57,28 @@ context.syncLeaveOverAccrualControls();
 assert.equal(inputs['[data-save-leave-over-accrual]'].disabled,true,'Missing database support disables editing');
 console.log('PASS allowance policy loading, threshold, save, disable, failed save, admin access, and missing support');
 
+const initial=fs.readFileSync(new URL('../supabase/migrations/20261105155512_configurable_leave_over_accrual.sql',import.meta.url),'utf8');
+const hardening=fs.readFileSync(new URL('../supabase/migrations/20261105155809_harden_leave_allowance_policy_api.sql',import.meta.url),'utf8');
 assert.equal(fs.readFileSync(new URL('../database/round_four_over_accrual.sql',import.meta.url),'utf8'),
-  fs.readFileSync(new URL('../supabase/migrations/20261105155512_configurable_leave_over_accrual.sql',import.meta.url),'utf8'),
-  'Standalone installer and migration must match');
+  initial.replace('commit;\n','')+'\n'+hardening.replace('begin;\n',''),
+  'Standalone installer and migrations must match');
+
+// The approval switch saves independently and cannot bypass Rounds 1–3.
+admin=true; fail=false;
+context.applyBidYearSettings({leave_over_accrual_from_round:null,leave_approval_over_accrual:true});
+for(let round=1;round<=6;round++) assert.equal(context.leaveApprovalOverAccrualAllowed(round),round>=4);
+assert.equal(context.leaveOverAccrualAllowed(4),false);
+const approvalInput={checked:false};
+await context.saveLeaveApprovalPolicy(approvalInput);
+assert.equal(call.name,'set_leave_approval_over_accrual');
+assert.equal(call.params.enabled,false);
+assert.equal(context.leaveApprovalOverAccrualAllowed(4),false);
+approvalInput.checked=true;
+await context.saveLeaveApprovalPolicy(approvalInput);
+assert.equal(context.leaveApprovalOverAccrualAllowed(4),true);
+fail=true; approvalInput.checked=false;
+await context.saveLeaveApprovalPolicy(approvalInput);
+assert.equal(approvalInput.checked,true,'Failed saves restore the enabled approval policy');
+assert.equal(fs.readFileSync(new URL('../database/leave_approval_over_accrual.sql',import.meta.url),'utf8'),
+fs.readFileSync(new URL('../supabase/migrations/20261105160001_leave_approval_over_accrual_policy.sql',import.meta.url),'utf8'));
+console.log('PASS independent approval toggle, R4–6 restriction, persistence and failure recovery');

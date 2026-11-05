@@ -2423,12 +2423,45 @@ let calendarDisplaySettingsAvailable = false;
 
 let leaveOverAccrualFromRound = null;
 let leaveOverAccrualSettingsAvailable = false;
+let leaveApprovalOverAccrualEnabled = false;
+let leaveApprovalPolicyAvailable = false;
 
 function leaveOverAccrualAllowed(round) {
   return leaveOverAccrualFromRound !== null && Number(round) >= leaveOverAccrualFromRound;
 }
 
+function leaveApprovalOverAccrualAllowed(round) {
+  return leaveApprovalOverAccrualEnabled && Number(round) >= 4 && Number(round) <= 6;
+}
+
+async function saveLeaveApprovalPolicy(input) {
+  if (!hasSystemAdminAccess() || !leaveApprovalPolicyAvailable) return;
+  const enabled = input.checked;
+  input.disabled = true;
+  try {
+    const { error } = await supabaseClient().rpc("set_leave_approval_over_accrual", {
+      requested_bid_year: BID_YEAR, enabled,
+    });
+    if (error) throw error;
+    leaveApprovalOverAccrualEnabled = enabled;
+    renderApp();
+    setText("[data-leave-approval-policy-status]", enabled
+      ? `Saved for ${BID_YEAR}: intake and admins may approve above personal allowance in Rounds 4–6 for every area.`
+      : `Saved for ${BID_YEAR}: approvals must stay within personal leave allowance.`);
+  } catch (error) {
+    setText("[data-leave-approval-policy-status]", error.message || "Could not save approval policy.");
+  } finally {
+    input.checked = leaveApprovalOverAccrualEnabled;
+    input.disabled = !hasSystemAdminAccess() || !leaveApprovalPolicyAvailable || !supabaseState.connected;
+  }
+}
+
 function syncLeaveOverAccrualControls() {
+  const approval = document.querySelector("[data-leave-approval-over-accrual-enabled]");
+  if (approval) {
+    approval.checked = leaveApprovalOverAccrualEnabled;
+    approval.disabled = !hasSystemAdminAccess() || !leaveApprovalPolicyAvailable || !supabaseState.connected;
+  }
   const enabled = document.querySelector("[data-leave-over-accrual-enabled]");
   const round = document.querySelector("[data-leave-over-accrual-round]");
   const save = document.querySelector("[data-save-leave-over-accrual]");
@@ -2501,6 +2534,8 @@ function applyBidYearSettings(settings) {
   leaveOverAccrualSettingsAvailable = Object.prototype.hasOwnProperty.call(settings, "leave_over_accrual_from_round");
   const startRound = Number(settings.leave_over_accrual_from_round);
   leaveOverAccrualFromRound = leaveOverAccrualSettingsAvailable && Number.isInteger(startRound) && startRound >= 1 && startRound <= 6 ? startRound : null;
+  leaveApprovalPolicyAvailable = typeof settings.leave_approval_over_accrual === "boolean";
+  leaveApprovalOverAccrualEnabled = settings.leave_approval_over_accrual === true;
   calendarDisplaySettingsAvailable = typeof settings.tmu_one_slot_outline === "boolean";
   const outlineEnabled = settings.tmu_one_slot_outline !== false;
   if (tmuOneSlotOutlineEnabled !== outlineEnabled) calendarRenderRevision += 1;
@@ -5843,7 +5878,7 @@ async function approveIntakeItem(id) {
   if (activeOverrideId === id) captureIntakeOverrideFields(item);
   if (item.type === "Leave") {
     const balance = withLeaveReadCache(() => intakeLeaveBalance(item));
-    if (!leaveOverAccrualAllowed(leaveRoundForItem(item)) && (!balance || balance.remainingHours < 0)) {
+    if (!leaveApprovalOverAccrualAllowed(leaveRoundForItem(item)) && (!balance || balance.remainingHours < 0)) {
       const reviewNote = balance
         ? `Cannot approve: over leave allowance by ${formatEstimatedLeaveDays(-balance.remaining)} days. Edit or deny pending dates first.`
         : "Cannot approve: bidder leave balance is unavailable. Verify the bidder's allowance and reload the queue.";
@@ -17781,13 +17816,13 @@ function renderIntakeLeaveBalance(item) {
       <div><dt>This request${item.status === "Pending" ? "" : ` (${escapeHtml(item.status.toLowerCase())})`}</dt><dd>${days(balance.requestDays)}</dd></div>
       <div><dt>Left after all pending</dt><dd>${days(balance.remaining)}</dd></div>
     </dl>
-    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · ${leaveOverAccrualAllowed(leaveRoundForItem(item)) ? "allowed by bid policy" : "approval blocked"}` : `Enough days · ${days(balance.remaining)} remaining`} (${balance.exactRemainingHours.toLocaleString("en-US", { maximumFractionDigits: 3 })} accrued hours remaining)</p>
+    <p class="intake-balance-result">${over ? `Over allowance by ${days(-balance.remaining)} · ${leaveApprovalOverAccrualAllowed(leaveRoundForItem(item)) ? "allowed by bid policy" : "approval blocked"}` : `Enough days · ${days(balance.remaining)} remaining`} (${balance.exactRemainingHours.toLocaleString("en-US", { maximumFractionDigits: 3 })} accrued hours remaining)</p>
   </section></details>`;
 }
 
 function intakeLeaveApprovalAttributes(item) {
   const balance = intakeLeaveBalance(item);
-  if (leaveOverAccrualAllowed(leaveRoundForItem(item))) return '';
+  if (leaveApprovalOverAccrualAllowed(leaveRoundForItem(item))) return '';
   return !balance ? 'disabled title="Bidder leave balance unavailable"'
     : balance.remainingHours < 0 ? 'disabled title="Pending bids exceed the bidder’s leave allowance"' : '';
 }
@@ -19470,6 +19505,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const approvalPolicyToggle = event.target.closest("[data-leave-approval-over-accrual-enabled]");
+  if (approvalPolicyToggle) {
+    await saveLeaveApprovalPolicy(approvalPolicyToggle);
+    return;
+  }
   if (event.target.closest("[data-save-leave-over-accrual]")) {
     await saveLeaveOverAccrualSettings();
     return;

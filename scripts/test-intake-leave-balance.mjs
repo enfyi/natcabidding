@@ -48,8 +48,8 @@ const context = vm.createContext({
   persistIntakeDecision: async () => { saves++; return true; },
   updateConfirmedIntakeDecision() {}, queueBidVerifiedEmail() {}, scheduleIntakeDecisionRefresh() {}, setPage() {},
 });
-vm.runInContext('let leaveReadCache = null; let leaveOverAccrualFromRound = null;\n' + [
-  'leaveOverAccrualAllowed', 'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
+vm.runInContext('let leaveReadCache = null; let leaveOverAccrualFromRound = null; let leaveApprovalOverAccrualEnabled = false;\n' + [
+  'leaveOverAccrualAllowed', 'leaveApprovalOverAccrualAllowed', 'withLeaveReadCache', 'cachedLeaveRead', 'intakeLeaveBalanceIndex', 'intakeLeaveBalance',
   'renderIntakeLeaveBalance', 'renderIntakeQueueWithCache', 'renderIntakeQueue', 'approveIntakeItem',
   'intakeLeaveApprovalAttributes', 'paginateIntakeItems',
 ].map(fn).join('\n'), context);
@@ -116,21 +116,21 @@ await context.approveIntakeItem(request.id);
 assert.equal(saves, 1, 'Valid approval saves without an extra read');
 delete request.reviewNote;
 
-// The configured starting round applies to approvals and their disabled state.
+// Approval overrides are independent of submission thresholds and limited to R4–6.
 allowance = 0;
-for (const startingRound of [1, 2, 3, 4, 5, 6, null]) {
-  vm.runInContext(`leaveOverAccrualFromRound = ${startingRound};`, context);
+for (const enabled of [false, true]) {
+  vm.runInContext(`leaveApprovalOverAccrualEnabled = ${enabled}; leaveOverAccrualFromRound = 1;`, context);
   for (let round = 1; round <= 6; round++) {
     request.round = round;
-    const allowed = startingRound !== null && round >= startingRound;
-    assert.equal(context.leaveOverAccrualAllowed(round), allowed);
+    const allowed = enabled && round >= 4;
+    assert.equal(context.leaveApprovalOverAccrualAllowed(round), allowed);
     assert.equal(context.intakeLeaveApprovalAttributes(request).includes('disabled'), !allowed);
     const before = saves;
     await context.approveIntakeItem(request.id);
-    assert.equal(saves - before, Number(allowed), `Approval: start ${startingRound}, round ${round}`);
+    assert.equal(saves - before, Number(allowed), `Approval: enabled ${enabled}, round ${round}`);
   }
 }
-vm.runInContext('leaveOverAccrualFromRound = null;', context);
+vm.runInContext('leaveApprovalOverAccrualEnabled = false; leaveOverAccrualFromRound = null;', context);
 request.round = 2;
 allowance = 200;
 delete request.reviewNote;
