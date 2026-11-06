@@ -118,7 +118,7 @@ assert.doesNotMatch(render({ showPersonalLeave: false }), /disabled aria-disable
 console.log('PASS calendar disables ghost selection by actual workforce, permits removal, and preserves read-only date inspection');
 
 // The input field opens a separate month picker; full dates must be disabled there too.
-const picker = { innerHTML: '' };
+const picker = { dataset: {}, innerHTML: '' };
 Object.assign(c, {
   document: { querySelector: () => picker }, leavePickerOpen: true, leavePickerYear: 2027, leavePickerMonthIndex: 5,
   dayNames: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],

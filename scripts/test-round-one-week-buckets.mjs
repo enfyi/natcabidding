@@ -40,7 +40,7 @@ assert.deepEqual(
   ['2027-06-13'],
 );
 assert.match(source, /const selectedLeaveDates = new Set\(\)/);
-assert.match(source, /round >= 1 && round <= 4 && !leaveReplacementRequestId/);
+assert.match(source, /round >= 1 && round <= 6 && !leaveReplacementRequestId/);
 assert.match(source, /nextDates\.has\(key\)[\s\S]*nextDates\.delete\(key\)/);
 assert.match(source, /dateKeys\.map\(\(key, index\) => \(\{/);
 assert.match(source, /That date would create a third Round 1 bid week/);

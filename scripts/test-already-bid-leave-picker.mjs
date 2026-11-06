@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const source=readFileSync(new URL('../bidding.js',import.meta.url),'utf8');
-const picker={hidden:false,innerHTML:''};let message='';
+const picker={dataset:{},hidden:false,innerHTML:''};let message='';
 const context={currentUser:{initials:'ME'},leaveReplacementRequestId:'',leavePickerOpen:true,leavePickerYear:2027,leavePickerMonthIndex:5,
+ withLeaveReadCache:read=>read(), cachedLeaveRead:(_key,read)=>read(), manualLeaveDateChecks:()=>null, currentUserBidAs:()=> 'CPC',
  document:{querySelector:()=>picker},dayNames:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],monthNames:['Jan','Feb','Mar','Apr','May','Jun'],
  activeLeaveItemsForInitials:()=>[{id:'pending',dateKeys:['2027-06-07']},{id:'approved',dateKeys:['2027-06-14']}],
  submittedLeaveItemKey:i=>i.id,leaveDateKeysForItem:i=>i.dateKeys,leaveBuilderDateKeys:()=>[],
@@ -11,7 +12,7 @@ const context={currentUser:{initials:'ME'},leaveReplacementRequestId:'',leavePic
  dateKey:(y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`,
  formatCalendarDate:k=>k,setLeaveBuilderStatus:m=>message=m};
 vm.createContext(context);
-for(const name of ['previouslyBidLeaveDateKeys','renderLeaveDatePicker']){
+for(const name of ['bidderActiveLeaveItems','previouslyBidLeaveDateKeys','renderLeaveDatePicker']){
  const start=source.indexOf(`function ${name}(`);vm.runInContext(source.slice(start,source.indexOf('\n}',start)+2),context);
 }
 context.renderLeaveDatePicker();

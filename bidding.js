@@ -4034,7 +4034,7 @@ function isLeavePreviewRangeDate(key) {
 
 function previouslyBidLeaveDateKeys() {
   const dates = new Set();
-  activeLeaveItemsForInitials(currentUser.initials).forEach((item) => {
+  bidderActiveLeaveItems(currentUser.initials).forEach((item) => {
     if (leaveReplacementRequestId && submittedLeaveItemKey(item) === leaveReplacementRequestId) return;
     leaveDateKeysForItem(item).forEach((key) => dates.add(key));
   });
@@ -4153,6 +4153,22 @@ function selectLeaveBuilderDate(key) {
   return true;
 }
 
+function syncLeaveDatePickerSelection() {
+  const picker = document.querySelector("[data-leave-date-picker]");
+  if (!picker || !leavePickerOpen) return;
+  const monthKey = `${leavePickerYear}-${leavePickerMonthIndex}`;
+  if (picker.dataset.selectionMonth !== monthKey) {
+    renderLeaveDatePicker();
+    return;
+  }
+  const selectedKeys = new Set(leaveBuilderDateKeys());
+  picker.querySelectorAll("[data-leave-picker-date]").forEach((button) => {
+    const key = button.dataset.leavePickerDate;
+    button.classList.toggle("in-range", selectedKeys.has(key));
+    button.classList.toggle("range-edge", isLeaveBuilderRangeEdge(key));
+  });
+}
+
 function renderLeaveDatePicker() {
   const picker = document.querySelector("[data-leave-date-picker]");
   if (!picker) return;
@@ -4202,6 +4218,7 @@ function renderLeaveDatePicker() {
     `);
   }
 
+  picker.dataset.selectionMonth = `${leavePickerYear}-${leavePickerMonthIndex}`;
   picker.innerHTML = `
     <div class="leave-picker-head">
       <button type="button" aria-label="Previous month" data-leave-picker-month="previous">‹</button>
@@ -4410,8 +4427,13 @@ function activeLeaveItemsForInitials(initials, extraItems = []) {
   return [...byRequest.values()];
 }
 
+function bidderActiveLeaveItems(initials) {
+  return cachedLeaveRead(JSON.stringify(["bidderActiveLeaveItems", initials]),
+    () => activeLeaveItemsForInitials(initials));
+}
+
 function leaveRoundUsageForInitials(initials, round, extraItems = []) {
-  return activeLeaveItemsForInitials(initials, extraItems)
+  return (extraItems.length ? activeLeaveItemsForInitials(initials, extraItems) : bidderActiveLeaveItems(initials))
     .filter((item) => leaveRoundForItem(item) === round);
 }
 
@@ -7534,12 +7556,27 @@ function syncMemberCalendarSelection(previousPreviewKeys = []) {
   const builderDates = usesIndividualLeaveDateSelection() && !leaveRangePreviewActive
     ? new Set(leaveBuilderDateKeys())
     : new Set();
-  document.querySelectorAll(".app-shell [data-calendar-date]").forEach((button) => {
-    const key = button.dataset.calendarDate;
-    button.classList.toggle("selected-date", key === selectedLeaveDateKey && !button.classList.contains("rdo-day"));
-    button.classList.toggle("draft-leave-day", draftDates.has(key) || previewDates.has(key));
-    button.classList.toggle("builder-range-day", builderDates.has(key));
-    button.classList.toggle("builder-range-edge", builderDates.has(key));
+  document.querySelectorAll(".app-shell .year-calendar[id]").forEach((calendar) => {
+    const page = calendar.closest(".page");
+    if (page && !page.classList.contains("active")) {
+      // Render current selections when this page is next opened.
+      calendar.removeAttribute("data-calendar-revision");
+      const state = progressiveCalendars.get(calendar);
+      if (state) state.revision = -1;
+      return;
+    }
+    const affected = new Set([selectedLeaveDateKey, ...draftDates, ...previewDates, ...builderDates]);
+    calendar.querySelectorAll(".selected-date, .draft-leave-day, .builder-range-day, .builder-range-edge")
+      .forEach((button) => affected.add(button.dataset.calendarDate));
+    affected.forEach((key) => {
+      if (!key) return;
+      const button = calendar.querySelector(`[data-calendar-date="${key}"]`);
+      if (!button) return;
+      button.classList.toggle("selected-date", key === selectedLeaveDateKey && !button.classList.contains("rdo-day"));
+      button.classList.toggle("draft-leave-day", draftDates.has(key) || previewDates.has(key));
+      button.classList.toggle("builder-range-day", builderDates.has(key));
+      button.classList.toggle("builder-range-edge", builderDates.has(key));
+    });
   });
 }
 
@@ -19634,10 +19671,12 @@ document.addEventListener("click", async (event) => {
       setLeaveBuilderStatus(windowError, "error");
       return;
     }
-    const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
-    selectLeaveBuilderDate(leavePickerDateButton.dataset.leavePickerDate);
-    syncMemberCalendarSelection(previousPreviewKeys);
-    renderLeaveDatePicker();
+    withLeaveReadCache(() => {
+      const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
+      selectLeaveBuilderDate(leavePickerDateButton.dataset.leavePickerDate);
+      syncMemberCalendarSelection(previousPreviewKeys);
+      syncLeaveDatePickerSelection();
+    });
     return;
   }
 
@@ -20239,20 +20278,22 @@ document.addEventListener("click", async (event) => {
 
   const leaveDateButton = event.target.closest("[data-leave-date]");
   if (leaveDateButton) {
-    const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
-    const isAppCalendar = Boolean(event.target.closest(".app-shell"));
-    const individualDates = isAppCalendar && usesIndividualLeaveDateSelection();
-    if (isAppCalendar) {
-      selectLeaveBuilderDate(leaveDateButton.dataset.leaveDate);
-    } else {
-      selectedLeaveDateKey = leaveDateButton.dataset.leaveDate;
-    }
-    syncMemberCalendarSelection(previousPreviewKeys);
-    if (!isAppCalendar) return;
-    syncLeaveBuilderInputs();
-    renderLeaveDatePicker();
-    if (individualDates) return;
-    openLeaveSlotModal();
+    // Validation, charged days and picker rendering share one fresh read cache.
+    withLeaveReadCache(() => {
+      const previousPreviewKeys = leaveRangePreviewActive ? leaveBuilderDateKeys() : [];
+      const isAppCalendar = Boolean(event.target.closest(".app-shell"));
+      const individualDates = isAppCalendar && usesIndividualLeaveDateSelection();
+      if (isAppCalendar) {
+        selectLeaveBuilderDate(leaveDateButton.dataset.leaveDate);
+      } else {
+        selectedLeaveDateKey = leaveDateButton.dataset.leaveDate;
+      }
+      syncMemberCalendarSelection(previousPreviewKeys);
+      if (!isAppCalendar) return;
+      syncLeaveDatePickerSelection();
+      if (individualDates) return;
+      openLeaveSlotModal();
+    });
     return;
   }
 
