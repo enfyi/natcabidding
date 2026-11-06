@@ -1894,7 +1894,9 @@ function buildSeniority(area = currentViewArea()) {
   });
 }
 
-let seniority = buildSeniority();
+// Database data is loaded after handlers are registered. Do not calculate the
+// prototype roster and bid schedule while the public page is starting up.
+let seniority = [];
 
 const history = [
   { area: "Area A", time: "May 7, 2026 14:32", actor: "OC", title: "Draft saved", detail: "Selected Line 15 OC and updated Flex preference." },
@@ -10865,11 +10867,16 @@ function publicRosterArea(area = publicState.area) {
 }
 
 function renderPublicPage(area = publicState.area, section = publicState.section, { persistNavigation = false, reuseCalendar = false } = {}) {
+  return withLeaveReadCache(() => renderPublicPageWithCache(area, section, { persistNavigation, reuseCalendar }));
+}
+
+function renderPublicPageWithCache(area, section, { persistNavigation = false, reuseCalendar = false } = {}) {
   renderRoundAnnouncements();
   if (persistNavigation) syncPublicPageUrl(area, section);
   syncPilotControls();
   syncPublicLoginIndicator();
-  seniority = buildSeniority(publicRosterArea(area));
+  // FAQ and archives do not display the roster or bidding windows.
+  if (ZLA_AREAS.includes(area)) seniority = buildSeniority(publicRosterArea(area));
   updatePublicView(area, section);
   if (publicState.section === "Calendar" && ZLA_AREAS.includes(publicState.area)) {
     renderCalendars({ includeMember: false, reuseCurrent: reuseCalendar });
