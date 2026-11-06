@@ -17,6 +17,7 @@ try {
     await page.addScriptTag({ content: `
       var currentUser = {initials: 'IM', area: 'Area A'}, selectedLeaveDates = new Set();
       var leaveRangeStartKey, leaveRangeEndKey, leaveRangeSelectionComplete, leaveRangePreviewActive = false, selectedLeaveDateKey;
+      function withLeaveReadCache(read) { return read(); }
       function previouslyBidLeaveDateKeys() { return new Set(); }
       function isRdoDateForInitials() { return false; }
       function bidderLeaveAvailabilityMessage() { return ''; }
@@ -30,6 +31,7 @@ try {
       function setLeaveBuilderStatus() {}
       function syncMemberCalendarSelection() {}
       function renderLeaveDatePicker() {}
+      function syncLeaveDatePickerSelection() {}
       ${selection}
       document.addEventListener('click', (event) => { ${branch} });
     ` });

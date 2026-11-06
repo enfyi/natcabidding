@@ -50,3 +50,48 @@ context.withLeaveReadCache(() => assert.equal(context.bueByInitials('B1').rank,9
 assert.throws(() => context.withLeaveReadCache(() => { throw new Error('test'); }));
 assert.equal(vm.runInContext('leaveReadCache',context),null,'Cache is cleared on failure');
 console.log(`PASS one week of holiday rendering: ${baselineMs.toFixed(0)}ms → ${optimizedMs.toFixed(0)}ms; roster entries rebuilt ${baselineBuilds} → 400; edits remain fresh`);
+
+// Exercise the actual click branches: validation, input counts and picker reads
+// must share the same cache before the browser can paint the selected date.
+context.leaveRangePreviewActive = false;
+context.usesIndividualLeaveDateSelection = () => true;
+context.selectLeaveBuilderDate = () => { render(); return true; };
+context.syncMemberCalendarSelection = () => { render(); };
+context.syncLeaveBuilderInputs = () => { throw new Error('Duplicate input calculation'); };
+context.renderLeaveDatePicker = () => { render(); };
+context.syncLeaveDatePickerSelection = () => { render(); };
+context.leaveBidWindowErrorMessage = () => '';
+context.event = { target: { closest: selector => selector === '.app-shell'
+  ? {} : { dataset: { leaveDate: dates[0], leavePickerDate: dates[0] } } } };
+for (const [marker, endMarker] of [
+  ['  const leaveDateButton = event.target.closest("[data-leave-date]");', '  const calendarModeButton'],
+  ['  const leavePickerDateButton = event.target.closest("[data-leave-picker-date]");', '  if (leavePickerOpen &&'],
+]) {
+  const start = source.indexOf(marker);
+  assert.ok(start >= 0);
+  const branch = source.slice(start, source.indexOf(endMarker, start));
+  const click = vm.runInContext(`(function () { ${branch} })`, context);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    rosterBuilds = 0;
+    click();
+    assert.equal(rosterBuilds, 400, 'Each click builds the roster once across validation and rendering');
+    assert.equal(vm.runInContext('leaveReadCache', context), null, 'Click cache never survives into the next action');
+  }
+}
+console.log('PASS calendar and popup clicks share derived reads across validation and highlighting, without duplicate input updates');
+
+let historyReads = 0;
+context.activeLeaveItemsForInitials = () => { historyReads++; return [{ round: 4, days: historyReads }]; };
+context.leaveRoundForItem = item => item.round;
+for (const name of ['bidderActiveLeaveItems', 'leaveRoundUsageForInitials']) {
+  const start = source.indexOf(`function ${name}(`);
+  vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);
+}
+context.withLeaveReadCache(() => {
+  context.bidderActiveLeaveItems('ME');
+  context.leaveRoundUsageForInitials('ME', 4);
+  assert.equal(historyReads, 1, 'Submitted-date and round checks share a history scan');
+});
+context.withLeaveReadCache(() => context.leaveRoundUsageForInitials('ME', 4));
+assert.equal(historyReads, 2, 'Next action reads fresh bidder history');
+console.log('PASS bidder history scans are shared within each click and refreshed on the next action');
