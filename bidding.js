@@ -4501,24 +4501,26 @@ function areaLeaveSlotBudget(area = currentViewArea(), bucket = "cpc") {
 }
 
 function areaCommittedLeaveItems() {
-  const byRequest = new Map();
-  const addItem = (item, saved = false) => {
-    const round = leaveRoundForItem(item);
-    const initials = String(item.initials || currentUser.initials).trim().toUpperCase();
-    const dateKey = JSON.stringify([leaveItemArea(item), initials, round, leaveDateKeysForItem(item)]);
-    // Local drafts may not have a saved request ID. Replace that fallback copy
-    // with intake's saved status, including cancellations.
-    if (saved) byRequest.delete(dateKey);
-    // Separate requests can share dates (for example, a denied bid followed by
-    // an approved resubmission). Their decisions must never overwrite each other.
-    const key = item.supabaseRequestId
-      ? JSON.stringify(["request", item.supabaseRequestId])
-      : saved && item.id ? JSON.stringify(["intake", item.id]) : dateKey;
-    byRequest.set(key, { ...item, initials, round });
-  };
-  leaveBids.forEach((item) => addItem(item));
-  intakeQueue.filter((item) => item.type === "Leave").forEach((item) => addItem(item, true));
-  return [...byRequest.values()].filter((item) => ["Approved", "Pending"].includes(item.status));
+  return cachedLeaveRead("areaCommittedLeaveItems", () => {
+    const byRequest = new Map();
+    const addItem = (item, saved = false) => {
+      const round = leaveRoundForItem(item);
+      const initials = String(item.initials || currentUser.initials).trim().toUpperCase();
+      const dateKey = JSON.stringify([leaveItemArea(item), initials, round, leaveDateKeysForItem(item)]);
+      // Local drafts may not have a saved request ID. Replace that fallback copy
+      // with intake's saved status, including cancellations.
+      if (saved) byRequest.delete(dateKey);
+      // Separate requests can share dates (for example, a denied bid followed by
+      // an approved resubmission). Their decisions must never overwrite each other.
+      const key = item.supabaseRequestId
+        ? JSON.stringify(["request", item.supabaseRequestId])
+        : saved && item.id ? JSON.stringify(["intake", item.id]) : dateKey;
+      byRequest.set(key, { ...item, initials, round });
+    };
+    leaveBids.forEach((item) => addItem(item));
+    intakeQueue.filter((item) => item.type === "Leave").forEach((item) => addItem(item, true));
+    return [...byRequest.values()].filter((item) => ["Approved", "Pending"].includes(item.status));
+  });
 }
 
 function areaLeaveSlotUsed(area = currentViewArea(), bucket = "cpc", extraItems = []) {
@@ -6516,9 +6518,13 @@ function rdoLineForInitials(initials = currentUser.initials) {
 }
 
 function isRdoDateForInitials(key, initials = currentUser.initials) {
-  const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
-  if (!line) return false;
-  return rdoWeekdaysForLine(line).has(dateFromKey(key).getDay());
+  // A render may check thousands of leave dates for the same bidder. Resolve
+  // their line once; withLeaveReadCache discards it before the next operation.
+  const weekdays = cachedLeaveRead(JSON.stringify(["leaveRdoWeekdays", initials]), () => {
+    const line = submittedRdoLineForInitials(initials) || rdoLineForInitials(initials);
+    return rdoWeekdaysForLine(line);
+  });
+  return weekdays.has(dateFromKey(key).getDay());
 }
 
 function isBidLeaveYearDate(key) {
