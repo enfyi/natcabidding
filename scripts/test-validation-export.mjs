@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../bidding.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../public/bidding-exports.js', import.meta.url), 'utf8');
 const format = JSON.parse(fs.readFileSync(new URL('../public/templates/zla-validation-format.json', import.meta.url), 'utf8'));
 const context = { document: { addEventListener() {} }, Blob, TextEncoder, Date, URL, window: { location: { href: 'https://example.test/dashboard' } }, fetch: async () => ({ok:true,json:async()=>format}) };
 vm.createContext(context);

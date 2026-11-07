@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
-const source = readFileSync(new URL('../bidding.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../public/bidding-exports.js', import.meta.url), 'utf8')
 const route = readFileSync(new URL('../app/api/admin/bid-times/export/route.ts', import.meta.url), 'utf8')
 const areas = ['Area A', 'Area B', 'Area C', 'Area D', 'Area E', 'Area F', 'TMU']
 let selected = areas

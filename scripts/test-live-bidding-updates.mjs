@@ -12,7 +12,7 @@ let row = 'first', fail = false, wait = false;
 const timers = new Map();
 const state = { connected: true, bidYearId: 'year-id', authUserId: 'bidder', loading: false };
 const ctx = vm.createContext({
-  console: { warn() {} }, URL, supabaseState: state, BID_YEAR: 2027,
+  console: { warn() {} }, URL, supabaseState: state, BID_YEAR: 2027, publicAreaDataDeferred: false,
   document: { visibilityState: 'visible' }, window: { scrollX: 0, scrollY: 120, scrollTo(x, y) { assert.equal(y, 120); } },
   setTimeout: action => { const id = {}; timers.set(id, action); return id; }, clearTimeout: id => timers.delete(id),
   supabaseClient: () => ({ from: () => ({ select: () => Promise.resolve({ data: [{ id: 'area', name: 'Area A' }] }) }) }),
@@ -148,6 +148,7 @@ let connectedCallback, alertRefreshes = 0, dataRefreshes = [];
 const tableStart = source.indexOf('const liveDataTables = {');
 const tableEnd = source.indexOf('\n};', tableStart) + 3;
 const listener = vm.createContext({
+  BID_YEAR: 2027, referenceDataFreshness: new Map(), liveDataLastReadAt: new Map(),
   supabaseState: { authUserId: 'one' }, alertRealtimeUserId: '', alertRealtimeChannel: null,
   supabaseClient: () => ({ channel: () => ({
     on(_event, filter, callback) { handlers.set(filter.table, callback); return this; },
@@ -158,7 +159,7 @@ const listener = vm.createContext({
   scheduleLiveDataRefresh: groups => dataRefreshes.push(groups),
   refreshActiveBidYear() {},
 });
-vm.runInContext(source.slice(tableStart, tableEnd) + '\n' + fn('startLiveAlertUpdates'), listener);
+vm.runInContext(source.slice(tableStart, tableEnd) + '\n' + fn('liveDataFallbackGroups') + '\n' + fn('startLiveAlertUpdates'), listener);
 listener.startLiveAlertUpdates();
 for (const table of ['bidders', 'rdo_lines', 'rdo_line_days', 'bid_windows', 'leave_slots', 'intake_schedules', 'bid_rounds', 'faq_entries']) {
   assert.ok(handlers.has(table), `${table} is subscribed`);
@@ -169,7 +170,7 @@ handlers.get('bidders')();
 assert.ok(dataRefreshes.at(-1).includes('windows'), 'Roster changes also refresh related bid windows');
 connectedCallback('SUBSCRIBED');
 assert.equal(alertRefreshes, 0, "Reconnect uses a single refresh queue");
-assert.equal(dataRefreshes.at(-1), undefined, 'Reconnect reconciles all groups');
+assert.equal(dataRefreshes.at(-1).length, 8, 'Reconnect reconciles all stale groups');
 
 ctx.window.NATCA_SUPABASE_CONFIG = { environment: 'pilot' };
 ctx.document.visibilityState = 'visible';
