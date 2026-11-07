@@ -48,6 +48,7 @@
     "test:ghost-leave-capacity": "node scripts/test-ghost-leave-capacity.mjs && node scripts/test-ghost-leave-availability.mjs && node scripts/test-dashboard-ghost-popup.mjs",
     "test:leave-hours-usage": "node scripts/test-leave-hours-usage.mjs",
     "test:reference-loading": "node scripts/test-reference-loading.mjs && node scripts/test-rdo-loading-messages.mjs",
+    "test:public-loading": "node scripts/test-public-demand-loading.mjs && node scripts/test-public-startup-performance.mjs && node scripts/test-public-dashboard-navigation.mjs && node scripts/test-auth-startup-failures.mjs && node scripts/test-reference-loading.mjs && node scripts/test-live-bidding-updates.mjs && node scripts/test-validation-export.mjs && node scripts/test-bid-time-export-selection.mjs",
     "test:dashboard-loading": "node scripts/test-reload-week-buckets.mjs && node scripts/test-dashboard-startup-render.mjs && node scripts/test-mutation-render-scope.mjs && node scripts/test-live-bidding-updates.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build",
