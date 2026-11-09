@@ -6309,6 +6309,11 @@ tr.occupied-row .rdo-tag {
   box-shadow: inset 0 0 0 1px #df9292;
 }
 
+.schedule-calendar .schedule-day.is-today {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
 .schedule-calendar .intake-day-mark-label {
   align-self: flex-start;
   min-height: auto;
