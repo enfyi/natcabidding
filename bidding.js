@@ -15445,6 +15445,7 @@ function renderScheduleDayAssignments(schedules) {
 
 function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const key = dateKeyFromDate(date);
+  const isToday = key === dateKeyFromDate(new Date());
   const schedules = schedulesForDateKey(key);
   const markKind = intakeCalendarMarks.get(key);
   const markLabel = INTAKE_CALENDAR_MARK_LABELS[markKind] || "";
@@ -15452,7 +15453,7 @@ function renderScheduleDayButton(date, includeMonth = false, options = {}) {
   const label = includeMonth ? `${monthNames[date.getMonth()].slice(0, 3)} ${date.getDate()}` : date.getDate();
   const showAssignments = Boolean(options.showAssignments);
   return `
-    <div class="schedule-day ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
+    <div class="schedule-day ${isToday ? "is-today" : ""} ${showAssignments ? "show-assignments" : ""} ${schedules.length ? "has-schedule" : ""} ${hasUserSchedule ? "my-schedule-day" : ""} ${markKind ? `intake-mark-${markKind}` : ""}" ${isToday ? 'aria-current="date"' : ""} aria-label="${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}: ${isToday ? "Today; " : ""}${markLabel ? `${markLabel}; ` : ""}${schedules.length ? "intake scheduled" : "no intake scheduled"}">
       <button type="button" class="date-number" data-intake-calendar-date="${key}" aria-label="View shifts for ${escapeHtml(formatCalendarDate(key))}">${label}</button>
       ${markLabel && showAssignments ? `<span class="intake-day-mark-label">${markLabel}</span>` : ""}
       ${showAssignments ? renderScheduleDayAssignments(schedules) : ""}
