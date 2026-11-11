@@ -3549,7 +3549,7 @@ function prepareManualLeaveEntries(panel, person, area, entries) {
     if (invalidLeaveYearDateKeys(dateKeys).length) throw new Error(`Leave bids must stay between Jan 10, ${BID_YEAR} and Jan 8, ${BID_YEAR + 1}.`);
     const requestedDates = leaveSlotDateKeys(dateKeys, person.initials);
     const days = chargeableLeaveDatesForInitials(entry.range, person.initials, round).length;
-    if (!days) throw new Error("A selection must include a chargeable leave day after RDOs are removed.");
+    if (!requestedDates.length) throw new Error("A selection must include a scheduled workday after RDOs are removed.");
     return { ...entry, dateKeys, requestedDates, days };
   });
   const rawDateKeys = selected.flatMap((entry) => entry.dateKeys);
@@ -3688,7 +3688,7 @@ function manualLeavePreflight(panel) {
     if (keys.length) {
       const limitError = manualLeaveValidationMessage({ person, round, days, weekKeys, requestedRanges });
       if (limitError) errors.push(limitError);
-      if (!days) errors.push("Select at least one chargeable leave day.");
+      if (!requestedRanges.some((dates) => dates.length)) errors.push("Select at least one scheduled workday.");
       const balanceError = leaveAreaCapacityMessage(area, person.bidAs, [{ area, bidAs: person.bidAs, initials: person.initials, days, dateKeys: keys, round }], person.ghostBidder);
       if (balanceError) errors.push(balanceError);
     }
@@ -4351,7 +4351,7 @@ function isRoundOneLeaveItem(item) {
 
 function chargeableLeaveDateKeys(keys, initials = currentUser.initials, round = currentRoundNumber()) {
   return keys.filter((key) =>
-    !isRdoDateForInitials(key, initials) && (round <= 3 || !isHolidayDate(key, initials))
+    !isRdoDateForInitials(key, initials) && (round <= 4 || !isHolidayDate(key, initials))
   );
 }
 
@@ -4891,8 +4891,8 @@ function addOrUpdateLeaveSubmission() {
   }
   const chargedDays = chargeableDates.length;
   setLeaveDaysInput(chargedDays);
-  if (chargedDays <= 0) {
-    setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
+  if (!leaveSlotDateKeys(dateKeys, currentUser.initials).length) {
+    setLeaveBuilderStatus("That selection does not include any scheduled workdays after RDOs are removed.", "error");
     return;
   }
   const weekKeys = isRoundOne ? roundOneWeekKeysForDateKeys(dateKeys) : [];
@@ -5051,8 +5051,8 @@ function previewLeaveSubmission() {
     return;
   }
   setLeaveDaysInput(chargeableDates.length);
-  if (chargeableDates.length <= 0) {
-    setLeaveBuilderStatus("That selection does not include any chargeable leave days after RDOs are removed.", "error");
+  if (!leaveSlotDateKeys(dateKeys, currentUser.initials).length) {
+    setLeaveBuilderStatus("That selection does not include any scheduled workdays after RDOs are removed.", "error");
     return;
   }
   const weekUnits = round === 1 ? roundOneProjectedWeekCount(dateKeys) : 0;
@@ -12826,8 +12826,8 @@ async function replaceSubmittedLeaveRequest() {
     return;
   }
   const chargedDays = chargeableLeaveDatesForInitials(range, currentUser.initials, round).length;
-  if (!chargedDays) {
-    setLeaveBuilderStatus("The replacement must include at least one chargeable leave day.", "error");
+  if (!leaveSlotDateKeys(dateKeys, currentUser.initials).length) {
+    setLeaveBuilderStatus("The replacement must include at least one scheduled workday.", "error");
     return;
   }
   const otherRoundItems = leaveRoundUsageForInitials(currentUser.initials, round)

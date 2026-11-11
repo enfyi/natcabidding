@@ -6,6 +6,30 @@ returns integer language sql stable set search_path = '' as $function$
   select case private.rdo_count_for_line(line_id) when 3 then 4 else 5 end
 $function$;
 
+-- Round 4 holidays remain charged; their credit starts in Round 5.
+-- Keep earlier Round 1-3 credits available from Round 4 as before.
+create or replace function private.holiday_credit_days_for_round(
+  year_id uuid, target_bidder_id uuid, target_round integer
+)
+returns integer language sql stable set search_path = '' as $function$
+  select case when target_round < 4 then 0 else (
+    select count(distinct day.leave_date)::integer
+    from public.leave_request_dates day
+    join public.leave_requests request on request.id = day.leave_request_id
+    where request.bid_year_id = year_id and request.bidder_id = target_bidder_id
+      and request.round_number between 1 and least(target_round - 1, 4)
+      and request.status in ('pending', 'approved')
+      and day.charged and (day.is_holiday or day.is_holiday_in_lieu)
+  ) + (
+    select coalesce(sum(event.credit_days), 0)::integer
+    from public.leave_credit_events event
+    where event.bid_year_id = year_id and event.bidder_id = target_bidder_id
+      and event.round_number <= target_round and event.source = 'manual_adjustment'
+  ) end
+$function$;
+revoke all on function private.holiday_credit_days_for_round(uuid, uuid, integer)
+from public, anon, authenticated;
+
 create or replace function private.round_four_credit_days(year_id uuid, target_bidder_id uuid)
 returns integer language sql stable set search_path = '' as $function$
   select (
@@ -260,7 +284,7 @@ begin
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       if round_no > 1 and is_rdo then raise exception 'Leave cannot include the bidder''s RDO after Round 1 (%).', leave_date; end if;
       if not (round_no = 1 and is_rdo)
-         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+         and (round_no <= 4 or (not is_holiday and not is_in_lieu)) then
         item_charged := item_charged + 1;
       end if;
     end loop;
@@ -326,7 +350,7 @@ begin
       select exists (select 1 from public.holidays h where h.bid_year_id = year_row.id and h.holiday_date = leave_date) into is_holiday;
       select exists (select 1 from public.holiday_in_lieu_days h where h.bid_year_id = year_row.id and h.bidder_id = target.id and h.in_lieu_date = leave_date) into is_in_lieu;
       if not (round_no = 1 and is_rdo)
-         and (round_no <= 3 or (not is_holiday and not is_in_lieu)) then
+         and (round_no <= 4 or (not is_holiday and not is_in_lieu)) then
         item_charged := item_charged + 1;
       end if;
     end loop;
@@ -359,7 +383,7 @@ begin
       insert into public.leave_request_dates (leave_request_id, leave_date, charged, is_rdo, is_holiday, is_holiday_in_lieu)
       values (request_id, leave_date,
         not (round_no = 1 and is_rdo)
-          and (round_no <= 3 or (not is_holiday and not is_in_lieu)),
+          and (round_no <= 4 or (not is_holiday and not is_in_lieu)),
         is_rdo, is_holiday, is_in_lieu);
     end loop;
 
@@ -868,7 +892,7 @@ begin
     (requested.item ->> 'end_date')::date::timestamp,
     interval '1 day'
   ) generated_date
-  where (batch_round <= 3 or (not exists (
+  where (batch_round <= 4 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = year_row.id
@@ -921,9 +945,7 @@ begin
   end if;
 
   if batch_round >= 4 then
-    select allowance.returned_days into available_credit_days
-    from private.round_four_allowances allowance
-    where allowance.bid_year_id = year_row.id and allowance.bidder_id = target.id;
+    available_credit_days := private.holiday_credit_days_for_round(year_row.id, target.id, batch_round);
     available_credit_days := coalesce(available_credit_days, 0);
   end if;
 
@@ -1141,7 +1163,7 @@ begin
     requested_end_date::timestamp,
     interval '1 day'
   ) generated_date
-  where (request_row.round_number <= 3 or (not exists (
+  where (request_row.round_number <= 4 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = request_row.bid_year_id
@@ -1295,7 +1317,7 @@ begin
     bucket.id,
     generated_date::date,
     not (request_row.round_number = 1 and rdo.is_rdo)
-      and (request_row.round_number <= 3
+      and (request_row.round_number <= 4
         or (not holiday.is_holiday and not in_lieu.is_holiday_in_lieu)),
     rdo.is_rdo,
     holiday.is_holiday,
@@ -1451,7 +1473,7 @@ begin
       and request.round_number <= check_round;
     credit_days := 0;
     if check_round >= 4 then
-      credit_days := private.round_four_credit_days(request_row.bid_year_id, target.id);
+      credit_days := private.holiday_credit_days_for_round(request_row.bid_year_id, target.id, check_round);
     end if;
     if used_hours > target.leave_slot_allowance + credit_days * leave_hours_per_day then
       raise exception 'Round % would use % leave hours, above the % hour allowance.',
@@ -1668,7 +1690,7 @@ begin
     requested_edit_end_date::timestamp,
     interval '1 day'
   ) generated_date
-  where (request_row.round_number <= 3 or (not exists (
+  where (request_row.round_number <= 4 or (not exists (
       select 1
       from public.holidays holiday
       where holiday.bid_year_id = request_row.bid_year_id
@@ -1822,7 +1844,7 @@ begin
     bucket.id,
     generated_date::date,
     not (request_row.round_number = 1 and rdo.is_rdo)
-      and (request_row.round_number <= 3
+      and (request_row.round_number <= 4
         or (not holiday.is_holiday and not in_lieu.is_holiday_in_lieu)),
     rdo.is_rdo,
     holiday.is_holiday,
@@ -2156,7 +2178,7 @@ begin
       where bid_year_id=year_id and bidder_id=target.id and status in ('pending','approved') and round_number<=round_no;
     credit_days := 0;
     if round_no >= 4 then
-      credit_days := private.round_four_credit_days(year_id, target.id);
+      credit_days := private.holiday_credit_days_for_round(year_id, target.id, round_no);
     end if;
     if used_hours > target.leave_slot_allowance+credit_days*day_hours then
       raise exception 'Round % would use % leave hours, above the % hour allowance.',round_no,used_hours,target.leave_slot_allowance+credit_days*day_hours;
@@ -2170,3 +2192,46 @@ end $$;
 $definition$;
   end if;
 end $upgrade$;
+
+-- Reapplying this installer also upgrades RDO-driven recalculation routines.
+do $round_four_holiday_charges$
+declare
+  routine regprocedure;
+  definition text;
+begin
+  foreach routine in array array[
+    'public.refresh_bidder_holiday_in_lieu(uuid,uuid)'::regprocedure,
+    'private.recalculate_pending_leave_after_rdo_assignment()'::regprocedure
+  ] loop
+    definition := pg_get_functiondef(routine);
+    definition := replace(definition, 'request.round_number <= 3', 'request.round_number <= 4');
+    definition := replace(definition, 'lr.round_number <= 3', 'lr.round_number <= 4');
+    execute definition;
+  end loop;
+end
+$round_four_holiday_charges$;
+
+-- Repair previously uncharged Round 4 holiday bids without releasing slots.
+update public.leave_request_dates day
+set charged = true
+from public.leave_requests request
+where request.id = day.leave_request_id and request.round_number = 4
+  and not day.is_rdo and (day.is_holiday or day.is_holiday_in_lieu)
+  and not day.charged;
+
+update public.leave_requests request
+set charged_days = (select count(*)::integer from public.leave_request_dates day
+                    where day.leave_request_id = request.id and day.charged),
+    updated_at = now()
+where request.round_number = 4
+  and request.charged_days is distinct from
+    (select count(*)::integer from public.leave_request_dates day
+     where day.leave_request_id = request.id and day.charged);
+
+update public.intake_submissions submission
+set payload = jsonb_set(coalesce(submission.payload, '{}'::jsonb), '{days}', to_jsonb(request.charged_days)),
+    updated_at = now()
+from public.leave_requests request
+where submission.leave_request_id = request.id and request.round_number = 4
+  and submission.submission_type = 'leave'
+  and submission.payload->>'days' is distinct from request.charged_days::text;
