@@ -98,3 +98,57 @@ for (const area of ['Area A','Area B','Area C','Area D','Area E','Area F','TMU']
   }
 }
 console.log(`PASS selected-bidder RDOs, CPC/DEV capacity, ghost availability, duplicates, cumulative round limit, range entry and missing-data warnings; 500 sample-data preflights p95 ${p95.toFixed(2)}ms (excludes browser paint and live data)`);
+
+// A Round 4 holiday reserves a slot and charges leave until its Round 5 credit.
+person.initials = 'PF'; person.bidAs = 'DEV';
+fields['[data-manual-bid-controller]'].value = 'PF';
+fields['[data-manual-bid-area]'].value = 'Area B';
+fields['[data-manual-leave-round]'].value = '4';
+c.isHolidayDate = key => key === '2027-07-04';
+let rdo = false;
+c.isRdoDateForInitials = (_key, initials) => { assert.equal(initials, 'PF'); return rdo; };
+slots['2027-07-04'] = { cpc: [], dev: [], cpcCapacity: 2, devCapacity: 2, cpcOpen: 2, devOpen: 2 };
+const holidayState = c.manualDatePickerState(panel);
+holidayState.mode = 'multiple'; holidayState.dates.add('2027-07-04');
+assert.equal(c.manualLeavePreflight(panel).errors.length, 0, 'PF can select July 4 with two DEV slots');
+Object.assign(c, {
+  currentRoundNumber: () => 4, openAreaBidRound: () => 4,
+  formatDateTime: () => 'now', controllerName: p => p.initials,
+  submissionRoleLabel: () => 'Intake', formatLeaveRangeFromKeys: keys => keys.join(', '),
+  addDaysToDateKey: () => '',
+});
+vm.runInContext(['prepareManualLeaveEntries', 'chargeableLeaveDatesForInitials', 'contiguousLeaveDateRanges'].map(fn).join('\n'), c);
+const prepareHoliday = () => c.prepareManualLeaveEntries(panel, person, 'Area B', [{ range: 'Jul 4, 2027' }]);
+const holiday = prepareHoliday();
+assert.equal(holiday.requests.length, 1);
+assert.equal(holiday.chargedDays, 1);
+assert.equal(holiday.requests[0].dateKeys[0], '2027-07-04', 'Charged holiday remains in the saved request');
+fields['[data-manual-leave-round]'].value = '3'; c.openAreaBidRound = () => 3;
+assert.equal(prepareHoliday().chargedDays, 1, 'Earlier rounds still charge the holiday');
+fields['[data-manual-leave-round]'].value = '4'; c.openAreaBidRound = () => 4;
+slots['2027-07-04'].devOpen = 0;
+assert.ok(c.manualLeavePreflight(panel).errors.some(message => message.includes('Full dates')), 'Holiday still requires DEV capacity');
+rdo = true;
+assert.throws(prepareHoliday, /scheduled workday/, 'An RDO-only selection is still rejected');
+assert.ok(c.manualLeavePreflight(panel).errors.some(message => message.includes('scheduled workday')));
+console.log('PASS PF July 4 holiday-only selection, one charged day, retained slot date, earlier-round charging, full DEV capacity and RDO rejection');
+
+// The personal credit arrives in Round 5; it never refunds area usage.
+c.isHolidayDate = key => ['2027-07-04', '2027-07-05'].includes(key);
+rdo = false;
+c.leaveCommittedItems = () => [{ initials: 'PF', round: 4, dateKeys: ['2027-07-04', '2027-07-05'] }];
+c.leaveDateKeysForItem = item => item.dateKeys;
+c.currentUser = { initials: 'PF' };
+vm.runInContext(['leaveRoundForItem', 'leaveHolidayDateSet', 'leaveHolidayCreditsForRound', 'leaveItemAreaUsedDays', 'areaLeaveSlotUsedDays'].map(fn).join('\n'), c);
+assert.equal(c.leaveHolidayCreditsForRound(4), 0);
+assert.equal(c.leaveHolidayCreditsForRound(5), 2);
+for (const role of ['CPC', 'DEV']) {
+  c.areaCommittedLeaveItems = () => [{ initials: 'PF', bidAs: role, area: 'Area B', round: 4, dateKeys: ['2027-07-04', '2027-07-05'] }];
+  c.isAreaLeaveBalanceExemptItem = () => false;
+  c.leaveItemArea = item => item.area;
+  c.leaveItemBidAs = item => item.bidAs;
+  assert.equal(c.areaLeaveSlotUsedDays('Area B', role.toLowerCase()), 2);
+  assert.equal(c.areaLeaveSlotUsedDays('Area B', role === 'CPC' ? 'dev' : 'cpc'), 0);
+  assert.equal(c.chargeableLeaveDateKeys(['2027-07-04', '2027-07-05'], 'PF', 4).length, 2);
+}
+console.log('PASS holiday/in-lieu Round 4 charges, Round 5 personal credits, and separate CPC/DEV area usage');

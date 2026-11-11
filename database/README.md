@@ -412,3 +412,19 @@ for Rounds 4–6, independently of the submission threshold. When disabled, appr
 check personal allowance. Permanent and scheduled intake staff and admins can
 review individual dates and groups across all areas. Rounds 1–3 always check the
 personal allowance. The database enforces the approval policy as well as the UI.
+
+Round 4 holiday accounting: `database/round_four_holiday_allowances.sql`
+charges both holidays and holiday-in-lieu dates in Round 4. Each date counts
+against the bidder's round limit and personal allowance, and against the
+area's CPC or DEV total according to the bidder's bidding role. Round 4
+holiday credits become available for the personal allowance in Round 5;
+they never refund area usage or release calendar slots. Existing Round 1–3
+holiday credits remain available from Round 4. The installer also repairs
+previously uncharged Round 4 holiday dates, request totals, and intake
+payloads, and updates RDO-driven recalculation. This requires the database
+installer as well as the frontend update; a frontend-only release is insufficient.
+
+For an existing production installation, apply
+`supabase/migrations/20261111014616_round4_bid_date_validation_fix.sql` instead of reinstalling the older
+canonical routines. This preserves subsequent authorization, rounding,
+capacity and over-accrual policy upgrades.

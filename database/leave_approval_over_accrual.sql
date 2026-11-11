@@ -75,7 +75,7 @@ begin
   select coalesce(sum(request.charged_days),0)*day_hours into used_hours
   from public.leave_requests request where request.bid_year_id=year_id
     and request.bidder_id=bidder_to_review and request.status in ('pending','approved');
-  if round_no >= 4 then credit_days := private.round_four_credit_days(year_id,bidder_to_review); end if;
+  if round_no >= 4 then credit_days := private.holiday_credit_days_for_round(year_id,bidder_to_review,round_no); end if;
   if used_hours > ceil(base_hours::numeric/day_hours)::integer*day_hours + credit_days*day_hours then
     raise exception 'Cannot approve: pending bids exceed the bidder''s personal leave allowance. Approval override is only available in Rounds 4–6 when enabled.';
   end if;

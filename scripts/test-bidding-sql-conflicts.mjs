@@ -649,3 +649,99 @@ for(const role of ['intake','admin','controller']) {
     throw new Error(`Cross-area group approval failed for ${role}`);
 }
 console.log('PASS approval default on, toggle off, Rounds 1–3 blocked, Rounds 4–6 allowed, cross-area intake/admin/scheduled group approvals and idempotent install');
+
+// Exercise the incremental production upgrade after all later policy installers.
+const holidayMigration=fs.readFileSync(new URL('../supabase/migrations/20261111014616_round4_bid_date_validation_fix.sql',import.meta.url),'utf8');
+await db.exec(`do $$ declare routine regprocedure; definition text; begin
+  foreach routine in array array[
+    'private.submit_leave_bid_batch_unchecked(integer,jsonb,text,text,boolean)'::regprocedure,
+    'public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)'::regprocedure,
+    'private.replace_approved_leave_request_dates_unchecked(uuid,date,date,boolean)'::regprocedure,
+    'private.replace_bidder_editor_leave_dates(uuid,date,date,boolean,uuid)'::regprocedure,
+    'public.refresh_bidder_holiday_in_lieu(uuid,uuid)'::regprocedure,
+    'private.recalculate_pending_leave_after_rdo_assignment()'::regprocedure
+  ] loop
+    definition := pg_get_functiondef(routine);
+    definition := replace(replace(replace(replace(replace(definition,
+      'round_no <= 4','round_no <= 3'),'batch_round <= 4','batch_round <= 3'),
+      'request_row.round_number <= 4','request_row.round_number <= 3'),
+      'request.round_number <= 4','request.round_number <= 3'),'lr.round_number <= 4','lr.round_number <= 3');
+    execute definition;
+  end loop;
+end $$;`);
+const capacityBeforeUpgrade=(await db.query("select pg_get_functiondef('private.area_leave_balance_days(uuid,uuid,text)'::regprocedure) definition")).rows[0].definition;
+await db.exec(holidayMigration);
+await db.exec(holidayMigration);
+if((await db.query("select pg_get_functiondef('private.area_leave_balance_days(uuid,uuid,text)'::regprocedure) definition")).rows[0].definition!==capacityBeforeUpgrade)
+  throw new Error('Holiday upgrade changed area capacity rules');
+const submissionDefinition=(await db.query("select pg_get_functiondef('public.submit_leave_bid_batch(integer,jsonb,text,text,boolean)'::regprocedure) definition")).rows[0].definition;
+if(!submissionDefinition.includes('leave_over_accrual_allowed')) throw new Error('Holiday upgrade lost over-accrual policy');
+console.log('PASS incremental holiday migration preserves capacity and later over-accrual policy');
+
+// Round 4 holidays charge personal leave and the matching area workforce;
+// only the personal allowance receives the credit starting in Round 5.
+for (const [index, role] of ['CPC', 'DEV'].entries()) {
+  const targetId = `00000000-0000-0000-0000-0000000008${index}1`;
+  const authId = `00000000-0000-0000-0000-0000000008${index}2`;
+  const lineId = `00000000-0000-0000-0000-0000000008${index}3`;
+  const bucket = role.toLowerCase();
+  await db.exec(`insert into bidders(id,auth_user_id,area_id,first_name,last_name,initials,email,bid_role,leave_slot_allowance)
+    values('${targetId}','${authId}','${bidder.area_id}','Round4','Holiday','H${index}','round4-${index}@example.test','${role === 'DEV' ? 'D-DEV' : role}',16);
+    insert into rdo_lines(id,bid_year_id,area_id,line_code,line_type,pattern,status)
+    values('${lineId}','${year}','${bidder.area_id}','R4-HOLIDAY-${index}','${role}','${role === 'DEV' ? 'D-DEV' : 'TEST'}','open');
+    insert into rdo_line_days(rdo_line_id,weekday,shift_code)
+    select '${lineId}',day,'0700' from generate_series(0,6) day;
+    insert into intake_submissions(bid_year_id,area_id,bidder_id,round_number,rdo_line_id,submission_type,status,payload,submitted_at)
+    values('${year}','${bidder.area_id}','${targetId}',1,'${lineId}','rdo','pending','{"line":"R4-HOLIDAY-${index}"}',now());
+    insert into holiday_in_lieu_days(bid_year_id,bidder_id,holiday_id,in_lieu_date)
+    select '${year}','${targetId}',id,'2027-07-05' from holidays
+    where bid_year_id='${year}' and holiday_date='2027-07-04' limit 1;
+    insert into leave_slots(bid_year_id,area_id,slot_date,slot_group,slot_code)
+    select '${year}','${bidder.area_id}',day,'${bucket}','R4-HOLIDAY-${index}-'||day::text
+    from unnest(array['2027-07-04','2027-07-05','2027-07-06']::date[]) day;
+    update bid_year_settings set test_bid_round=4,leave_over_accrual_from_round=null where bid_year_id='${year}';
+    set test.uid='${authId}'; set test.email='round4-${index}@example.test';`);
+  const areaUsage = async () => (await db.query(`select
+    (select used_days from private.area_leave_balance_days($1,$2,'cpc')) cpc,
+    (select used_days from private.area_leave_balance_days($1,$2,'dev')) dev`, [year,bidder.area_id])).rows[0];
+  const before = await areaUsage();
+  const submit = async (start,end,round) => (await db.query('select public.submit_leave_bid_batch(2027,$1::jsonb) result',
+    [JSON.stringify([{start_date:start,end_date:end,round,rdo_line_code:`R4-HOLIDAY-${index}`}])])).rows[0].result;
+  const result = await submit('2027-07-04','2027-07-05',4);
+  if(result.charged_days!==2) throw new Error(`${role}: Round 4 holiday/in-lieu must charge two days`);
+  const dates = (await db.query(`select d.charged,d.is_holiday,d.is_holiday_in_lieu from leave_request_dates d
+    join leave_requests r on r.id=d.leave_request_id where r.bidder_id=$1 order by d.leave_date`,[targetId])).rows;
+  if(dates.length!==2 || !dates.every(day=>day.charged) || !dates[0].is_holiday || !dates[1].is_holiday_in_lieu)
+    throw new Error(`${role}: holiday/in-lieu charge flags missing`);
+  const credits = (await db.query(`select private.holiday_credit_days_for_round($1,$2,4) r4,
+    private.holiday_credit_days_for_round($1,$2,5) r5`,[year,targetId])).rows[0];
+  if(credits.r4!==0 || credits.r5!==2) throw new Error(`${role}: credit must begin in Round 5`);
+  const after = await areaUsage();
+  if(after[bucket]!==before[bucket]+2 || after[bucket==='cpc'?'dev':'cpc']!==before[bucket==='cpc'?'dev':'cpc'])
+    throw new Error(`${role}: holiday usage charged to wrong area workforce`);
+  try { await submit('2027-07-06','2027-07-06',4); throw new Error('Round 4 prematurely used holiday credit'); }
+  catch(error) { if(!error.message.includes('allowance')) throw error; }
+  await db.exec(`update bid_year_settings set test_bid_round=5 where bid_year_id='${year}';`);
+  if((await submit('2027-07-06','2027-07-06',5)).charged_days!==1) throw new Error(`${role}: Round 5 credit unusable`);
+  if((await areaUsage())[bucket]!==before[bucket]+3) throw new Error(`${role}: personal credit released area days`);
+  console.log(`PASS ${role}: Round 4 holiday/in-lieu charges, matching area bucket, Round 5-only personal credit and retained area usage`);
+}
+
+// Repair legacy zero-charge Round 4 records, including their intake summaries.
+await db.exec(`update leave_request_dates d set charged=false from leave_requests r
+  where r.id=d.leave_request_id and r.bidder_id in
+    ('00000000-0000-0000-0000-000000000801','00000000-0000-0000-0000-000000000811')
+    and r.round_number=4;
+  update leave_requests set charged_days=0 where bidder_id in
+    ('00000000-0000-0000-0000-000000000801','00000000-0000-0000-0000-000000000811') and round_number=4;`);
+const roundFourInstaller=holidayMigration;
+await db.exec(roundFourInstaller);
+await db.exec(roundFourInstaller);
+const repaired=(await db.query(`select r.charged_days,s.payload->>'days' payload_days
+  from leave_requests r join intake_submissions s on s.leave_request_id=r.id
+  where r.bidder_id in ('00000000-0000-0000-0000-000000000801','00000000-0000-0000-0000-000000000811')
+    and r.round_number=4`)).rows;
+if(repaired.length!==2 || !repaired.every(row=>row.charged_days===2 && row.payload_days==='2'))
+  throw new Error('Legacy Round 4 charge repair or intake summary synchronization failed');
+console.log('PASS idempotent installer repairs legacy Round 4 holiday charges and intake summaries');
+await db.close();
