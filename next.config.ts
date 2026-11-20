@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
       './bidding.css',
       './bidding.js',
       './round-announcements.mjs',
+      './bidding-schedule.mjs',
       './supabase-config.js',
       './assets/logo-5v2a.png',
       './node_modules/@supabase/supabase-js/dist/umd/supabase.js',

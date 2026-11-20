@@ -20407,6 +20407,76 @@ void refreshRoundAnnouncements();
 setInterval(() => { if (!document.hidden) void refreshRoundAnnouncements(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshRoundAnnouncements(); });
 
+// The annual overview is informational; it never changes individual bid windows.
+let annualScheduleBusy = false;
+let annualScheduleSignature = '';
+async function refreshAnnualBiddingSchedule() {
+  if (annualScheduleBusy) return;
+  const client = supabaseClient();
+  const container = document.querySelector('[data-annual-bidding-schedule]');
+  if (!client || !container) return;
+  annualScheduleBusy = true;
+  try {
+    const [helpers, result] = await Promise.all([import('./bidding-schedule.mjs'), client.rpc('read_public_bidding_schedule')]);
+    if (result.error) throw result.error;
+    const schedule = result.data;
+    if (!schedule || helpers.validateSchedule(schedule.events).length) {
+      container.hidden = true; container.replaceChildren(); annualScheduleSignature = ''; return;
+    }
+    const signature = JSON.stringify([schedule, helpers.todayInLA()]);
+    if (signature === annualScheduleSignature) return;
+    const wasOpen = container.querySelector('details')?.open || false;
+    const element = (tag, text, className) => {
+      const node = document.createElement(tag);
+      if (text) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    };
+    const summary = element('div', '', 'annual-schedule-summary');
+    summary.append(element('p', `${schedule.bid_year} Bidding Schedule`, 'eyebrow'));
+    const status = helpers.scheduleStatus(schedule.events);
+    summary.append(element('h2', status.current?.label || (status.complete ? 'Bidding schedule complete' : 'Bidding schedule upcoming')));
+    if (status.current) summary.append(element('p', helpers.rangeLabel(status.current)));
+    if (status.next) summary.append(element('p', `Up next: ${status.next.label} · ${helpers.rangeLabel(status.next)}`, 'annual-schedule-next'));
+    const details = element('details'); details.open = wasOpen;
+    details.append(element('summary', 'View full bidding schedule'));
+    const scroll = element('div', '', 'annual-schedule-calendar-scroll');
+    const table = element('table', '', 'annual-schedule-calendar');
+    table.append(element('caption', `${schedule.bid_year} bidding season · All dates inclusive`));
+    const head = element('thead'); const header = element('tr');
+    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => { const cell = element('th', day); cell.scope = 'col'; header.append(cell); });
+    head.append(header); table.append(head);
+    const body = element('tbody');
+    helpers.calendarWeeks(schedule.events).forEach(week => {
+      const row = element('tr');
+      week.forEach(day => {
+        const cell = element('td', '', `annual-schedule-day ${helpers.phaseClass(day.event)}`);
+        const time = element('time', `${day.month}/${day.day}`); time.dateTime = day.date;
+        cell.append(time, element('span', day.event?.label || ''));
+        if (day.date === helpers.todayInLA()) { cell.classList.add('schedule-today'); time.setAttribute('aria-current', 'date'); }
+        row.append(cell);
+      });
+      body.append(row);
+    });
+    table.append(body); scroll.append(table); details.append(scroll);
+    const list = element('ol', '', 'schedule-mobile-list');
+    helpers.sortSchedule(schedule.events).forEach(event => {
+      const item = element('li', '', helpers.phaseClass(event));
+      item.append(element('strong', event.label), element('span', helpers.rangeLabel(event))); list.append(item);
+    });
+    details.append(list);
+    details.append(element('p', 'Individual bid times are listed under your area’s Bid Time tab.', 'annual-schedule-note'));
+    container.replaceChildren(summary, details); container.hidden = false;
+    annualScheduleSignature = signature;
+  } catch (error) {
+    container.hidden = true; annualScheduleSignature = '';
+    console.warn('Annual bidding schedule could not be loaded.', error.message);
+  } finally { annualScheduleBusy = false; }
+}
+void refreshAnnualBiddingSchedule();
+setInterval(() => { if (!document.hidden) void refreshAnnualBiddingSchedule(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshAnnualBiddingSchedule(); });
+
 // Rules are persisted per bid year, area, and workforce; never shared across CPC/DEV.
 let slotClosureRules = [];
 let slotClosureRulesLoading = false;
