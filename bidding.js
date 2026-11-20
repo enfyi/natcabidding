@@ -10954,6 +10954,8 @@ function renderPublicBidTimeTable(area) {
 function updatePublicView(area = publicState.area, section = publicState.section) {
   publicState.area = area;
   publicState.section = section || "Calendar";
+  const faqSchedule = document.querySelector("[data-faq-bidding-schedule]");
+  if (faqSchedule) faqSchedule.hidden = area !== "FAQ";
   const areaSelect = document.querySelector("[data-mobile-public-area]");
   if (areaSelect) areaSelect.value = ZLA_AREAS.includes(area) ? area : "";
   document.querySelectorAll(".public-nav .public-area").forEach((group) => {
