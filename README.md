@@ -220,6 +220,23 @@ permission failures, section independence, and 100 simulated concurrent readers.
 The simulated concurrency check does not measure production server capacity;
 a separate approved staging load test is needed for that.
 
+## Annual bidding schedule
+
+Apply `supabase/migrations/20261120090000_annual_bidding_schedule.sql` before deploying
+the schedule editor. Open **Admin Console → Bidding Schedule**, choose the bid year,
+and import the Excel **Schedule Print** worksheet. The importer reads dated merged
+calendar bands, including holidays and validation days, rather than side notes.
+Recalculate and save the workbook in Excel before importing so formula dates are current.
+
+Review or edit phase labels and inclusive start/end dates, then **Save draft** or
+**Publish schedule**. Draft changes leave the published snapshot intact. Only the active
+bid year's published schedule appears on the public front page, refreshed every 30 seconds.
+**Unpublish** hides the schedule while retaining its saved draft. **Copy and shift dates**
+reuses another bid year; review weekdays and holiday dates after copying. This overview
+does not change individual bid windows, round rules, or intake staffing schedules.
+
+Run `pnpm test:bidding-schedule` for schedule validation and Excel import checks.
+
 ## Bid windows and manual entry
 
 Apply `database/bidder_windows_with_manual_override.sql`, then `database/restrict_manual_bids_to_open_round.sql` after bidding installers. The second upgrade supersedes the earlier unrestricted manual-entry exception while preserving installed business rules and the explicit intake/admin role check. Bidders require their own scheduled window. Intake/admin may submit outside that personal window only while the requested round is open across ZLA. Future and closed rounds cannot accept new manual submissions. Corrections to other rounds must use **Edit Bidder Info**; that editor retains its own authorization and validation rules.
