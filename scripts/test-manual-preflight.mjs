@@ -117,7 +117,7 @@ Object.assign(c, {
   submissionRoleLabel: () => 'Intake', formatLeaveRangeFromKeys: keys => keys.join(', '),
   addDaysToDateKey: () => '',
 });
-vm.runInContext(['prepareManualLeaveEntries', 'chargeableLeaveDatesForInitials', 'contiguousLeaveDateRanges'].map(fn).join('\n'), c);
+vm.runInContext(['manualLeaveRoundAllowed', 'prepareManualLeaveEntries', 'chargeableLeaveDatesForInitials', 'contiguousLeaveDateRanges'].map(fn).join('\n'), c);
 const prepareHoliday = () => c.prepareManualLeaveEntries(panel, person, 'Area B', [{ range: 'Jul 4, 2027' }]);
 const holiday = prepareHoliday();
 assert.equal(holiday.requests.length, 1);

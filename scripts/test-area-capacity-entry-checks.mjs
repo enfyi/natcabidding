@@ -48,7 +48,7 @@ vm.runInContext([
   'leaveDateKeysForItem', 'chargeableLeaveDateKeys', 'chargeableLeaveDatesForInitials',
   'leaveSlotDateKeys', 'leaveItemAreaUsedDays', 'areaLeaveSlotUsedDays',
   'formatRoundedUpLeaveDays', 'leaveAreaCapacityMessage', 'leaveAreaCapacityMessageWithCache',
-  'prepareManualLeaveEntries', 'addOrUpdateLeaveSubmission',
+  'manualLeaveRoundAllowed', 'prepareManualLeaveEntries', 'addOrUpdateLeaveSubmission',
 ].map(extract).join('\n'), c);
 const panel = { querySelector: () => ({ value: '4' }) };
 const manual = () => c.prepareManualLeaveEntries(panel, c.currentUser, 'Area A',

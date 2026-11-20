@@ -121,7 +121,7 @@ const batchContext = vm.createContext({
 })
 const submissionRoleSource = source.match(/function submissionRoleLabel\([^]*?\n\}/)?.[0]
 assert.ok(submissionRoleSource)
-vm.runInContext(`${submissionRoleSource}\n${validationSource}\n${prepareSource}`, batchContext)
+vm.runInContext(`${source.match(/function manualLeaveRoundAllowed\([^]*?\n\}/)[0]}\n${submissionRoleSource}\n${validationSource}\n${prepareSource}`, batchContext)
 const batchPanel = { querySelector: () => ({ value: String(batchContext.activeRound) }) }
 const batchPerson = { initials: 'TB', bidAs: 'CPC', rank: 1 }
 batchContext.activeRound = 2
