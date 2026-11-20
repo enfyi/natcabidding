@@ -923,7 +923,7 @@ button.seniority-pill {
   white-space: nowrap;
 }
 
-.public-calendar-panel {
+:is(.public-calendar-panel, .annual-bidding-schedule) {
   width: min(1180px, calc(100% - 72px));
   margin: 18px auto 0;
 }
@@ -9789,7 +9789,7 @@ body {
     grid-column: 1 / -1;
   }
 
-  .public-calendar-panel {
+  :is(.public-calendar-panel, .annual-bidding-schedule) {
     width: calc(100% - 32px);
     margin-top: 14px;
   }
@@ -9928,7 +9928,7 @@ body {
     align-items: stretch;
   }
 
-  .public-calendar-panel {
+  :is(.public-calendar-panel, .annual-bidding-schedule) {
     width: calc(100% - 24px);
   }
 
@@ -10204,7 +10204,7 @@ video {
     min-width: 118px;
   }
 
-  .public-calendar-panel {
+  :is(.public-calendar-panel, .annual-bidding-schedule) {
     width: calc(100% - 24px) !important;
     margin-top: 12px;
   }
@@ -10473,7 +10473,7 @@ video {
     min-height: 42px;
   }
 
-  .public-calendar-panel {
+  :is(.public-calendar-panel, .annual-bidding-schedule) {
     width: calc(100% - 20px) !important;
   }
 
@@ -12795,7 +12795,7 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 
 /* Keep mobile FAQ content directly inside the references panel. */
 @media screen and (max-width: 720px) {
-  .public-main .public-calendar-panel.faq-view {
+  .public-main :is(.public-calendar-panel.faq-view, .annual-bidding-schedule) {
     width: calc(100% - 16px) !important;
     padding: 12px;
   }
@@ -13569,7 +13569,7 @@ button[aria-busy="true"] { cursor: progress; opacity: .75; }
 .schedule-kind-none { background: #f7f9fc; }
 .annual-schedule-calendar .schedule-today { outline: 2px solid #174780; outline-offset: -2px; }
 .schedule-mobile-list { display: none; }
-.annual-bidding-schedule { margin-bottom: 24px; padding: 24px; border-left: 4px solid #174780; }
+.annual-bidding-schedule { margin-bottom: 24px; padding: 24px; }
 .annual-schedule-summary h2 { margin: 8px 0; font-size: 1.5rem; }
 .annual-schedule-summary p { margin: 8px 0; }
 .annual-schedule-next, .annual-schedule-note { color: #526079; font-size: .875rem; }
