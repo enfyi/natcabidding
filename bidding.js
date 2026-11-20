@@ -2423,6 +2423,53 @@ async function saveActiveBidYear() {
 let tmuOneSlotOutlineEnabled = true;
 let calendarDisplaySettingsAvailable = false;
 
+let lateRoundEntryEnabled = false;
+let lateRoundIntakeEnabled = false;
+let lateRoundSettingsAvailable = false;
+
+function canEnterLateRoundLeave() {
+  return lateRoundEntryEnabled && (hasSystemAdminAccess() || currentUser?.role === "admin"
+    || (lateRoundIntakeEnabled && currentUser?.role === "intake"));
+}
+
+function manualLeaveRoundAllowed(round, area) {
+  if (Number(round) >= 5) return Number(round) <= 6 && canEnterLateRoundLeave();
+  return Number(round) === openAreaBidRound(new Date(), area);
+}
+
+function syncLateRoundControls() {
+  for (const [selector, checked] of [["[data-late-round-entry]", lateRoundEntryEnabled], ["[data-late-round-intake]", lateRoundIntakeEnabled]]) {
+    const input = document.querySelector(selector);
+    if (input) {
+      input.checked = checked;
+      input.disabled = !hasSystemAdminAccess() || !lateRoundSettingsAvailable || !supabaseState.connected;
+    }
+  }
+}
+
+async function saveLateRoundControls(input) {
+  if (!hasSystemAdminAccess() || !lateRoundSettingsAvailable) return;
+  const enabled = document.querySelector("[data-late-round-entry]").checked;
+  const intakeEnabled = document.querySelector("[data-late-round-intake]").checked;
+  document.querySelectorAll("[data-late-round-entry], [data-late-round-intake]").forEach(control => { control.disabled = true; });
+  try {
+    const { error } = await supabaseClient().rpc("set_late_round_entry", {
+      requested_bid_year: BID_YEAR, enabled, intake_enabled: intakeEnabled,
+    });
+    if (error) throw error;
+    lateRoundEntryEnabled = enabled;
+    lateRoundIntakeEnabled = intakeEnabled;
+    renderApp();
+    setText("[data-late-round-status]", enabled
+      ? `Saved for ${BID_YEAR}: Round 5 and 6 entry is open to ${intakeEnabled ? "admins and intakers" : "admins only"}.`
+      : `Saved for ${BID_YEAR}: Round 5 and 6 entry is off.`);
+  } catch (error) {
+    setText("[data-late-round-status]", error.message || "Could not save round entry settings.");
+  } finally {
+    syncLateRoundControls();
+  }
+}
+
 let leaveOverAccrualFromRound = null;
 let leaveOverAccrualSettingsAvailable = false;
 let leaveApprovalOverAccrualEnabled = false;
@@ -2533,6 +2580,9 @@ async function saveTmuOneSlotOutline(input) {
 
 function applyBidYearSettings(settings) {
   if (!settings || typeof settings !== "object") return;
+  lateRoundSettingsAvailable = typeof settings.late_round_entry_enabled === "boolean";
+  lateRoundEntryEnabled = settings.late_round_entry_enabled === true;
+  lateRoundIntakeEnabled = settings.late_round_intake_enabled === true;
   leaveOverAccrualSettingsAvailable = Object.prototype.hasOwnProperty.call(settings, "leave_over_accrual_from_round");
   const startRound = Number(settings.leave_over_accrual_from_round);
   leaveOverAccrualFromRound = leaveOverAccrualSettingsAvailable && Number.isInteger(startRound) && startRound >= 1 && startRound <= 6 ? startRound : null;
@@ -3210,8 +3260,8 @@ function renderManualBidPanelWithCache(panel) {
   const openRound = openAreaBidRound(new Date(), lockedArea);
   const submitButton = panel.querySelector("[data-manual-bid-submit]");
   if (submitButton) {
-    submitButton.disabled = !openRound;
-    submitButton.title = openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open across ZLA.";
+    submitButton.disabled = leavePanel ? !(openRound && openRound <= 4) && !canEnterLateRoundLeave() : !openRound;
+    submitButton.title = leavePanel && canEnterLateRoundLeave() ? "Enter leave in Round 5 or 6, or the scheduled open round." : openRound ? `Enter a Round ${openRound} bid.` : "No bidding round is currently open across ZLA.";
   }
 
   const controllerSearch = panel.querySelector("[data-manual-controller-search]");
@@ -3338,11 +3388,13 @@ function renderManualBidPanelWithCache(panel) {
   const roundSelect = panel.querySelector("[data-manual-leave-round]");
   if (roundSelect) {
     Array.from(roundSelect.options).forEach((option) => {
-      option.disabled = !openRound || Number(option.value) !== openRound;
+      option.disabled = !manualLeaveRoundAllowed(Number(option.value), lockedArea);
     });
-    roundSelect.value = openRound ? String(openRound) : "";
-    roundSelect.disabled = !openRound;
-    roundSelect.title = openRound ? `Only Round ${openRound} is currently open.` : "No bidding round is currently open across ZLA.";
+    const selectedRound = Number(values.round);
+    roundSelect.value = manualLeaveRoundAllowed(selectedRound, lockedArea) ? String(selectedRound)
+      : canEnterLateRoundLeave() ? "5" : openRound && openRound <= 4 ? String(openRound) : "";
+    roundSelect.disabled = !Array.from(roundSelect.options).some(option => !option.disabled);
+    roundSelect.title = canEnterLateRoundLeave() ? "Round 5 and 6 manual leave entry is enabled." : "Choose an authorized open round.";
   }
   if (daysInput) {
     const resolvedRound = Number(roundSelect?.value || values.round || currentRoundNumber());
@@ -3538,10 +3590,7 @@ function renderManualLeaveBatch(panel) {
 
 function prepareManualLeaveEntries(panel, person, area, entries) {
   const round = Number(panel.querySelector("[data-manual-leave-round]")?.value || currentRoundNumber());
-  const openRound = openAreaBidRound(new Date(), area);
-  if (!openRound) throw new Error("No bidding round is currently open across ZLA.");
-  if (round !== openRound) throw new Error(`Round ${round} is closed. Only Round ${openRound} is open across ZLA.`);
-  if (round > 4) throw new Error("Leave bids are only available in Rounds 1 through 4.");
+  if (!manualLeaveRoundAllowed(round, area)) throw new Error(`Round ${round} leave entry is closed or requires admin authorization.`);
   if (!entries.length) throw new Error("Select at least one date before submitting.");
   const selected = entries.map((entry) => {
     const dateKeys = datesInLeaveRange(entry.range);
@@ -18763,6 +18812,8 @@ function renderApp() {
 function renderAppWithCache() {
   syncCalendarDisplayControls();
   syncLeaveOverAccrualControls();
+  syncLateRoundControls();
+  if (!lateRoundSettingsAvailable) setText("[data-late-round-status]", "Install database/round_five_six_manual_intake.sql to enable these controls.");
   if (!leaveOverAccrualSettingsAvailable) setText("[data-leave-over-accrual-status]", "Install the latest database update to enable this setting.");
   if (!calendarDisplaySettingsAvailable) setText("[data-calendar-display-status]", "Install database/tmu_calendar_display.sql to enable this setting.");
   syncBidYearControls();
@@ -19002,6 +19053,11 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const lateRoundToggle = event.target.closest("[data-late-round-entry], [data-late-round-intake]");
+  if (lateRoundToggle) {
+    await saveLateRoundControls(lateRoundToggle);
+    return;
+  }
   const approvalPolicyToggle = event.target.closest("[data-leave-approval-over-accrual-enabled]");
   if (approvalPolicyToggle) {
     await saveLeaveApprovalPolicy(approvalPolicyToggle);

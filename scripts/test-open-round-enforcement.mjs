@@ -98,7 +98,7 @@ assert.match(preflightSql, /manual_entry := coalesce\(manual_entry, false\)/, "N
 assert.match(preflightSql, /if manual_entry and actor\.role not in \('admin', 'intake'\)/, "Only intake and admin can claim manual access, including self-targeted requests");
 const manualLeaveStart = source.indexOf("function prepareManualLeaveEntries(");
 const manualLeaveEnd = source.indexOf("\nasync function", manualLeaveStart);
-assert.match(source.slice(manualLeaveStart, manualLeaveEnd), /if \(round !== openRound\) throw new Error/, "Manual leave must target the open facility round");
+assert.match(source.slice(manualLeaveStart, manualLeaveEnd), /if \(!manualLeaveRoundAllowed\(round, area\)\) throw new Error/, "Manual leave must require an open round or authorized late-round entry");
 assert.match(source, /round: openRound/, "Manual RDO entry must target the open round");
 
 const globalRoundSql = await readFile(new URL("../supabase/migrations/20261002180000_global_bid_round_windows.sql", import.meta.url), "utf8");
